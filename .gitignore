@@ -1,0 +1,13 @@
+.DS_Store
+node_modules/
+.venv/
+.env
+.env.*
+__pycache__/
+*.pyc
+/workbench/console/.demo/
+/workbench/console/.demo-staging-*/
+/workbench/console/data/
+/workbench/console/release/
+/workbench/console/test-data/
+*.log

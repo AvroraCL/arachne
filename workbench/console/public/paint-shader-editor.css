@@ -1,0 +1,122 @@
+/* Node editing shares the application's type, icons, menus and numeric fields. */
+.work-area:has(>:is(#shader-editor,.shader-editor)){position:relative}
+:is(#shader-editor,.shader-editor){
+  box-sizing:border-box;display:none;position:relative;isolation:isolate;container-type:inline-size;
+  flex:none;height:clamp(310px,38vh,480px);min-height:160px;border-top:1px solid #101010;
+  color:#d6d6d6;background:#252525;font-size:var(--paint-font-ui,13px);
+}
+#workspace[data-work-area=modeling] :is(#shader-editor,.shader-editor){display:flex;flex-direction:column}
+:is(#shader-editor,.shader-editor).shader-empty{height:180px;min-height:160px}
+:is(#shader-editor,.shader-editor).shader-collapsed{height:auto!important;min-height:0}
+#workspace[data-work-area=modeling] :is(#shader-editor,.shader-editor)[data-maximized]{position:absolute;inset:0;height:auto!important;z-index:30}
+.shader-toolbar{
+  display:flex;align-items:center;flex:none;gap:6px;min-width:0;min-height:38px;padding:3px 8px;
+  background:#292929;border-bottom:1px solid #171717;
+}
+.shader-editor-title{font-size:13px;font-weight:600;white-space:nowrap;margin-right:8px}
+.shader-toolbar button{min-height:28px;padding:3px 7px;font-size:13px;border-radius:4px}
+.shader-toolbar .shader-collapse{flex:none;width:22px;min-width:22px;padding:0;background:transparent;color:#a3a3a3;border:0}
+.shader-toolbar .shader-icon-button{display:grid;place-items:center;flex:none;width:28px;min-width:28px;padding:5px;background:transparent;border:0;color:#bbb}
+.shader-icon-button .chrome-icon{display:block;width:17px;height:17px}
+.shader-toolbar .shader-icon-button:is(:hover,[aria-pressed=true]):not(:disabled){background:#414141;color:#eee}
+.shader-toolbar .shader-icon-button:disabled{opacity:.3}
+.shader-toolbar .custom-select{--select-height:28px;--select-arrow-padding:22px;--select-arrow-inset:7px;--select-start-padding:8px;flex:none;width:auto;min-width:66px;max-width:100px}
+.shader-toolbar .custom-select:has(select[aria-label="添加材质节点"]){min-width:76px}
+.shader-toolbar .custom-select-button{min-height:28px;padding:3px 22px 3px 8px;background-color:transparent;border-color:transparent;font-size:13px}
+.shader-toolbar .custom-select-button:hover:not(:disabled){background-color:#383838}
+.shader-material{display:block;flex:1;min-width:0;max-width:360px;margin-left:auto;margin-right:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;color:#a5a5a5;font-size:12px}
+.shader-stage{
+  position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none;outline:none;
+  background-color:#202020;background-image:radial-gradient(#393939 .75px,transparent .85px);background-size:20px 20px;
+}
+.shader-stage:focus-visible{box-shadow:inset 0 0 0 1px #505050}
+.shader-stage[data-panning],.shader-stage[data-panning] *{cursor:grabbing!important}
+.shader-world{position:absolute;inset:0;transform-origin:0 0;overflow:visible}
+.shader-wires{position:absolute;left:-10000px;top:-10000px;width:20000px;height:20000px;overflow:visible;pointer-events:none}
+.shader-wires path{fill:none;stroke:#c1b778;stroke-width:1.6;opacity:.76;vector-effect:non-scaling-stroke;transform:translate(10000px,10000px)}
+.shader-wires path[data-type=scalar]{stroke:#aeb4bc}.shader-wires path[data-type=surface]{stroke:#91b59a}.shader-wires path[data-type=vector]{stroke:#a799bf}
+.shader-wires path.selected{stroke-width:2;opacity:1}
+.shader-wires path.pending{stroke:#eee;stroke-width:2;opacity:1;stroke-dasharray:5 4}
+.shader-wires path.cut{stroke:#eee;opacity:1;stroke-dasharray:3 3}
+.shader-wires path.cut-stroke{stroke:#ddd;stroke-width:1.2;stroke-dasharray:4 3;opacity:1}
+.shader-stage[data-cutting]{cursor:crosshair}
+.shader-port[data-link-target]::after{border-color:#eee;outline:1px solid #999;outline-offset:1px}
+.shader-port[data-link-invalid]::after{border-style:dashed;border-color:#aaa}
+.shader-node{
+  position:absolute;box-sizing:border-box;width:224px;background:#303030;border:1px solid #121212;border-radius:5px;
+  box-shadow:0 2px 5px #0005;overflow:visible;user-select:none;
+}
+.shader-node.selected{border-color:#999;box-shadow:0 2px 5px #0005}
+.shader-node-title{
+  display:flex;align-items:center;gap:7px;box-sizing:border-box;min-height:32px;padding:5px 10px;
+  font-size:13px;font-weight:600;color:#e3e3e3;background:#3d3d3d;border-bottom:1px solid #252525;
+  border-radius:4px 4px 0 0;cursor:grab;
+}
+.shader-node-title:active{cursor:grabbing}
+.shader-node-icon{display:grid;place-items:center;flex:none;width:15px;color:#b2b2b2}
+.shader-node-icon .chrome-icon{width:15px;height:15px}
+.shader-node-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shader-node-grip{width:8px;height:12px;opacity:.5;background:radial-gradient(#b7b7b7 1px,transparent 1px) 0 0/4px 4px}
+.shader-outputs{padding:3px 0}
+.shader-port-row.out{position:relative;display:flex;justify-content:flex-end;align-items:center;min-height:26px;padding:0 12px;font-size:13px;color:#c6c6c6}
+.shader-params{padding:3px 10px 7px;display:flex;flex-direction:column;gap:2px}
+.shader-outputs+.shader-params{border-top:1px solid #ffffff06}
+.shader-input-row,.shader-parameter-row{position:relative;display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:7px;min-height:30px;font-size:13px}
+.shader-param-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#cdcdcd;font-size:13px}
+.shader-input-row{min-height:27px}
+.shader-link-source{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;text-align:right;color:#949494}
+.shader-link-source::before{content:'↳';margin-right:5px;color:#737373}
+.shader-unlinked{color:#777;text-align:right;font-size:12px}
+.shader-port{
+  --socket:#c1b778;position:absolute;box-sizing:border-box;display:grid;place-items:center;z-index:1;
+  width:20px;height:26px;min-width:20px!important;min-height:26px!important;margin:0;
+  top:50%;transform:translateY(-50%);padding:0!important;background:transparent!important;border:0!important;border-radius:0;box-shadow:none!important;cursor:crosshair;
+}
+.shader-port[data-type=scalar]{--socket:#abb2bb}.shader-port[data-type=surface]{--socket:#91b59a}.shader-port[data-type=vector]{--socket:#a799bf}
+.shader-port::after{content:'';box-sizing:border-box;width:9px;height:9px;border:1.5px solid var(--socket);border-radius:50%;background:#303030;box-shadow:0 0 0 1px #1d1d1d}
+.shader-port[data-linked]::after{background:var(--socket)}
+.shader-port:hover::after,.shader-port:focus-visible::after{box-shadow:none;border-color:#ddd}
+.shader-port:focus-visible::after{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:1px}
+.shader-port:focus-visible{outline:none}
+.shader-stage[data-connecting] .shader-port{opacity:.35}
+.shader-stage[data-connecting] .shader-port[data-compatible]{opacity:1}
+.shader-stage[data-connecting] .shader-port[data-compatible]::after{box-shadow:none;border-color:#ccc}
+.shader-port[data-direction=in]{left:-21px}.shader-port[data-direction=out]{right:-21px}
+.shader-outputs .shader-port[data-direction=out]{right:-11px}
+.shader-params :is(input,.custom-select){box-sizing:border-box;width:100%;min-width:0;min-height:28px;height:28px;font-size:13px}
+.shader-params .custom-select{--select-height:28px}
+.shader-params .custom-select-button{min-height:28px;padding:3px 7px;font-size:12px;border-color:#444;background-color:#373737}
+.shader-params .workspace-range-field{height:28px;min-height:28px;--paint-control-height:28px;--range-ink:#4b4b4b;--range-track:#3c3c3c;border-color:#ffffff08;border-radius:3px}
+.shader-params input[type=color]{height:27px;min-height:27px;padding:0;border:1px solid #555;border-radius:3px;cursor:pointer}
+.shader-params input[type=color]::-webkit-color-swatch-wrapper{padding:0}.shader-params input[type=color]::-webkit-color-swatch{border:0;border-radius:2px}.shader-params input[type=color]::-moz-color-swatch{border:0;border-radius:2px}
+.shader-status{display:flex;align-items:center;gap:16px;flex:none;min-height:27px;padding:0 9px;border-top:1px solid #151515;background:#282828;color:#999;font-size:12px}
+.shader-summary{white-space:nowrap}.shader-hint{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#858585}
+.shader-zoom{display:flex;align-items:center;margin-left:auto;gap:1px}
+.shader-zoom button{min-width:24px;min-height:24px;padding:0 5px;font-size:12px;background:transparent;border:0;color:#aaa;border-radius:3px}
+.shader-zoom button:nth-child(2){min-width:46px;font-variant-numeric:tabular-nums}
+.shader-zoom button:hover{color:#eee;background:#414141}
+.shader-error{display:block;flex:none;font-size:12px;color:#bbb;padding:4px 12px;background:#303030;border-top:1px solid #151515}
+.shader-error[data-tone=error]{color:#edbc98}
+.shader-error:empty{display:none}
+.shader-splitter{position:absolute;z-index:9;left:0;right:0;top:-4px;height:8px;cursor:ns-resize}
+.shader-splitter:hover::after{content:'';position:absolute;inset:3px 0;background:#a8a8a8}
+.shader-collapsed .shader-splitter,:is(#shader-editor,.shader-editor)[data-maximized] .shader-splitter{display:none}
+.shader-marquee{position:absolute;pointer-events:none;border:1px solid #c0c0c0;background:#ffffff0d;z-index:5}.shader-marquee[hidden]{display:none}
+.shader-image-preview{display:grid;grid-template-columns:1fr auto;gap:3px 6px;margin:5px 0 2px;padding:5px!important;background:#292929!important;border:1px solid #444;text-align:left;min-width:0;border-radius:3px}
+.shader-image-preview img{grid-column:1/-1;width:100%;height:88px;object-fit:contain;background:#383838;background-image:conic-gradient(#454545 25%,transparent 0 50%,#454545 0 75%,transparent 0);background-size:12px 12px}
+.shader-image-preview span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.shader-image-preview small{color:#999;font-size:12px}
+.shader-image-open{width:100%;min-height:28px!important;text-align:center;padding:3px 6px!important;font-size:12px;background:#3a3a3a;border:1px solid #494949;border-radius:3px}
+.shader-welcome{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#888;font-size:13px}.shader-welcome strong{font-size:14px;font-weight:400;color:#ccc}
+.shader-welcome[hidden],.shader-stage[hidden],.shader-status[hidden]{display:none}
+@container(max-width:700px){.shader-toolbar .shader-editor-title{display:none}.shader-material{max-width:230px}.shader-toolbar{gap:4px}.shader-hint{display:none}}
+@container(max-width:470px){.shader-material{font-size:12px;margin-right:2px}.shader-toolbar{padding-inline:5px}.shader-toolbar .custom-select{min-width:58px}.shader-toolbar .custom-select:has(select[aria-label="添加材质节点"]){min-width:66px}}
+@media(prefers-reduced-motion:no-preference){.shader-node{transition:border-color 100ms,box-shadow 100ms}.shader-icon-button{transition:background 100ms,color 100ms}}
+@media(forced-colors:active){.shader-node{border-color:CanvasText}.shader-node.selected{outline:2px solid Highlight}.shader-port::after{border-color:CanvasText}.shader-port[data-linked]::after{background:CanvasText}}
+.shader-wires path.inserting{stroke:#fff;stroke-width:3;opacity:1}
+.shader-node.shader-reroute{width:20px;height:20px;min-height:0;border:0;border-radius:50%;background:none;box-shadow:none;cursor:move}
+.shader-reroute::before{content:"";position:absolute;inset:4px;border:1px solid #aaa;border-radius:50%;background:#515151;pointer-events:none}
+.shader-reroute.selected::before{border-color:#eee;background:#777}
+.shader-reroute .shader-port{position:absolute;top:4px;left:-4px;width:10px;height:12px;min-width:10px!important;min-height:12px!important;transform:none}
+.shader-reroute .shader-port[data-direction=out]{left:auto;right:-4px}
+.shader-reroute .shader-port::after{display:none}
+.shader-reroute:has(.shader-port:is(:hover,:focus-visible,[data-link-target]))::before{border-color:#eee}

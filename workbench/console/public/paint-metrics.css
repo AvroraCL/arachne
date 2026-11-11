@@ -1,0 +1,149 @@
+/* Shared readable sizing for modeling, material and drawing workspaces.
+   Density changes spacing, keeping labels and values readable in both modes. */
+:root{
+  --paint-font-body:14px;--paint-font-ui:13px;--paint-font-caption:12px;
+  --paint-control-height:32px;--paint-compact-height:28px;--paint-header-height:44px;
+  --paint-layer-height:40px;--paint-object-height:32px;--paint-tool-height:38px;
+  --paint-panel-padding:12px;--paint-field-gap:8px;--paint-section-gap:16px;
+  --paint-number-width:84px;--paint-title-height:36px;
+}
+:root[data-ui-density=comfortable]{
+  --paint-control-height:36px;--paint-compact-height:32px;--paint-header-height:48px;
+  --paint-layer-height:44px;--paint-object-height:36px;--paint-tool-height:42px;
+  --paint-panel-padding:14px;--paint-field-gap:10px;--paint-section-gap:20px;
+  --paint-number-width:92px;--paint-title-height:38px;
+}
+body{font-size:var(--paint-font-body);line-height:1.5}
+body :is(button,input,select,textarea,label){font-size:var(--paint-font-ui)}
+body :is(button,input,select){line-height:1.4}
+body button{min-height:var(--paint-control-height);padding:5px 10px}
+body label{color:#c6c6c6}
+body :is(input[type=number],output,.workspace-range-value){font-variant-numeric:tabular-nums}
+.paint-menubar{min-height:var(--paint-header-height);padding-inline:10px}
+.paint-menubar button,.paint-menu summary{font-size:var(--paint-font-ui);min-height:var(--paint-compact-height)}
+.paint-menu summary{display:flex;align-items:center;padding:4px 10px}
+.paint-menu-content{min-width:200px;padding:6px;gap:2px}
+.paint-menu-content :is(button,a,label){min-height:var(--paint-control-height);padding:5px 10px;font-size:var(--paint-font-ui);gap:20px}
+.paint-menu-content kbd{font-size:var(--paint-font-caption)}
+#project-name{font-size:var(--paint-font-ui)}
+#project-save-state{color:#aaa}
+.area-switch button{padding-inline:16px}
+.view-tools{gap:6px;padding:7px 10px}
+.view-tools button,.view-tools select{min-height:var(--paint-compact-height);font-size:var(--paint-font-ui);padding:3px 9px}
+.model-view-tools{gap:6px}
+.model-tools-group{gap:3px;padding-inline-end:8px}
+#workspace[data-work-area=drawing] .view-tools{min-height:38px;flex-wrap:wrap;gap:6px;padding:3px 8px}
+#workspace[data-work-area=drawing] .view-tools :is(.custom-select-button,#focus-views){min-height:var(--paint-compact-height)}
+#canvas-document-tab{min-height:var(--paint-control-height);max-width:50%;padding-inline:10px}
+#canvas-document-name,#canvas-active-tool{font-size:var(--paint-font-ui)}
+#canvas-document-channel,#canvas-navigation-hint{font-size:var(--paint-font-caption)}
+#canvas-document-channel{color:#b0b0b0}
+#surface-tools,#workspace[data-work-area=drawing] #surface-tools{
+  min-height:46px;padding:7px 10px;gap:8px;row-gap:8px;align-items:center;
+}
+#surface-tools>:is(span,label){max-width:100%;min-width:0;flex-wrap:wrap;gap:8px;padding:4px 8px}
+#surface-tools input[type=number],#uv-transform-options input{min-height:var(--paint-control-height);width:84px;padding:4px 7px;font-size:var(--paint-font-ui)}
+#surface-tools :is(span,label){font-size:var(--paint-font-ui)}
+#surface-tools :is(#surface-hint,#uv-selection-hint){font-size:var(--paint-font-caption);line-height:1.5}
+#surface-tools .workspace-range-field{flex:none;min-width:0}
+#surface-tools .workspace-range-field>:is(output,.workspace-range-value){font-size:var(--paint-font-ui)}
+#surface-tools .custom-select,#drawing-layer-settings .custom-select,.view-tools .custom-select,.dock-title .custom-select,.shelf-actions .custom-select{
+  --select-height:var(--paint-control-height);
+}
+.view-tools .custom-select,.dock-title .custom-select{--select-height:var(--paint-compact-height)}
+.custom-select>.custom-select-button{font-size:var(--paint-font-ui)}
+.custom-select-menu{padding:6px;gap:3px}
+.custom-select-menu>.custom-select-option{min-height:var(--paint-control-height);font-size:var(--paint-font-ui);padding-inline:12px}
+.dock-title{min-height:var(--paint-title-height);padding:3px 8px;gap:6px}
+.dock-title h2,.dock-title .dock-handle{font-size:var(--paint-font-body)}
+.dock-title :is(button,select){min-height:var(--paint-compact-height);font-size:var(--paint-font-ui)}
+.dock-content{padding:var(--paint-panel-padding)}
+#bottom-dock{flex-basis:clamp(90px,var(--bottom-height,216px),42dvh)}
+.tool-rail button{min-height:var(--paint-tool-height)}
+:root[data-ui-density=comfortable] #workspace:not([data-work-area=modeling],[data-focus-views]){--tool-width:56px}
+#workspace:has(#left-dock:not([hidden])){--left-track:clamp(var(--side-min),var(--left-width,280px),var(--side-max))}
+#workspace:has(#paint-inspector:not([hidden])){--right-track:clamp(var(--side-min),var(--inspector-width,min(27vw,340px)),var(--side-max))}
+#layers{display:grid;gap:4px;margin-block:10px 6px}
+#layers .layer-row{min-height:var(--paint-layer-height);align-items:center;grid-template-columns:30px minmax(0,1fr) 26px 38px;gap:4px}
+#layers .layer-row[data-channel]{grid-template-columns:30px minmax(0,1fr) 26px 38px 48px}
+#layers button,#base{font-size:var(--paint-font-ui);min-height:var(--paint-control-height);padding:5px 8px}
+#layers .layer-select{gap:8px;min-height:var(--paint-layer-height);line-height:1.5}
+#layers .layer-thumb{width:28px;height:28px}
+#layers :is(.layer-mask,.layer-visibility,.layer-lock,.layer-disclosure){padding:2px;min-height:var(--paint-layer-height)}
+#layers .layer-mask canvas,#layers .layer-mask img{width:30px;height:30px}
+#base{min-height:var(--paint-layer-height);padding-inline:10px}
+#drawing-layer-settings{gap:8px;padding:10px 0 8px;align-items:center}
+#drawing-layer-settings>.custom-select{flex:1 1 110px;min-width:100px}
+#drawing-layer-settings label{flex:0 0 auto;white-space:nowrap;font-size:var(--paint-font-ui);gap:6px}
+#drawing-layer-settings .workspace-range-field{flex:none;width:58px;min-width:58px}
+#drawing-layer-opacity{width:58px;min-height:var(--paint-control-height);font-size:var(--paint-font-ui)}
+#drawing-layer-actions{min-height:38px;padding:4px 8px;gap:6px}
+#drawing-layer-actions button{min-height:var(--paint-compact-height);min-width:30px}
+.layer-heading{margin:10px 0 8px;gap:8px}
+:is(#properties,.editor-properties){container-type:inline-size}
+:is(#properties,.editor-properties)>strong{font-size:var(--paint-font-body);padding:4px 0 10px;line-height:1.5}
+:is(#properties,.editor-properties) label{gap:var(--paint-field-gap);margin:6px 0;min-height:var(--paint-control-height);font-size:var(--paint-font-ui)}
+:is(#properties,.editor-properties) :is(input:not([type=checkbox]),select,.custom-select-button){min-height:var(--paint-control-height);font-size:var(--paint-font-ui);padding:5px 8px}
+:is(#properties,.editor-properties) input[type=color]{height:var(--paint-control-height);padding:0}
+:is(#properties,.editor-properties) input[type=checkbox]{width:15px;height:15px;flex:none}
+:is(#properties,.editor-properties) .bar{gap:8px;margin-top:12px}
+.property-material{margin:var(--paint-section-gap) 0;padding:4px 9px 8px}
+.property-material legend{font-size:var(--paint-font-ui);padding:0 6px}
+.property-channel+.property-channel{margin-top:8px;padding-top:7px}
+#workspace[data-work-area=modeling]:has(#model-outliner:not([hidden])){--right-track:clamp(240px,25vw,340px)}
+#model-outliner{container-type:inline-size}
+#model-outliner header{min-height:var(--paint-title-height);padding:5px 10px;font-size:var(--paint-font-body)}
+#model-outliner input[type=search]{min-height:var(--paint-control-height);margin:8px 10px;width:calc(100% - 20px);padding:5px 8px}
+#model-outliner ul{padding:4px 6px 10px}
+#model-outliner li{min-height:var(--paint-object-height);gap:4px}
+#model-outliner .model-object-name{min-height:var(--paint-object-height);font-size:var(--paint-font-ui);gap:8px;line-height:1.5}
+#model-outliner .model-object-eye{min-height:var(--paint-object-height);min-width:28px}
+#model-numeric{padding:12px}
+#model-numeric legend{font-size:var(--paint-font-ui);padding-bottom:4px}
+.model-numeric-heading{flex-wrap:wrap;row-gap:4px}
+.model-numeric-heading small{font-size:var(--paint-font-caption)}
+.model-numeric-axes{gap:8px;margin:6px 0 10px}
+.model-numeric-axes label{gap:5px;font-size:var(--paint-font-ui)}
+#model-numeric .model-numeric-axes input{min-height:var(--paint-control-height);font-size:var(--paint-font-ui);padding:4px 6px}
+.model-numeric-footer button{min-height:var(--paint-control-height);padding:5px 12px}
+#viewport{--display-sidebar-width:min(290px,60%)}
+.display-section summary{font-size:var(--paint-font-ui);padding-block:7px}
+.display-fields{gap:8px;padding:9px}
+.display-fields>label{grid-template-columns:64px minmax(0,1fr);gap:8px;font-size:var(--paint-font-ui)}
+:is(#display-options,.viewport-display-options) .custom-select{--select-height:var(--paint-control-height)}
+:is(#reset-display,.viewport-reset-display){min-height:var(--paint-compact-height);font-size:var(--paint-font-ui)}
+.material{padding:10px 12px;line-height:1.6}
+.material small{font-size:var(--paint-font-caption)}
+#asset-search{width:160px;min-height:var(--paint-control-height)}
+.shelf-header,.shelf-actions{gap:8px;row-gap:8px}
+#assets{gap:10px;margin-top:10px}
+#assets button{width:min(152px,100%);padding:6px;gap:6px}
+#assets button>span:last-child{font-size:var(--paint-font-caption);line-height:1.5}
+.view-status{gap:8px;flex-wrap:wrap;align-items:center;min-height:30px;row-gap:0}
+#workspace[data-work-area=drawing] #viewport-status{font-size:var(--paint-font-caption);color:#aaa}
+#workspace[data-work-area=modeling] #model-status{font-size:var(--paint-font-caption);padding-block:4px}
+#preview-state,#live-resolution,#canvas-status{font-size:var(--paint-font-caption);line-height:1.5}
+#canvas-status{gap:12px;min-height:30px}
+#canvas-zoom-percent{width:68px;min-height:var(--paint-compact-height);font-size:var(--paint-font-ui)}
+#canvas-pointer{color:#aaa}
+#live-resolution{color:#c0c0c0}
+#preview-state{color:#c0c0c0}
+#settings-form section>label{gap:18px;row-gap:8px;margin-bottom:18px;font-size:var(--paint-font-ui)}
+#settings-form :is(input:not([type=checkbox]),.custom-select-button){min-height:var(--paint-control-height)}
+#settings-form output{font-size:var(--paint-font-ui)}
+.settings-body>nav>button{min-height:var(--paint-control-height);font-size:var(--paint-font-ui)}
+#settings-dialog>footer button{min-height:var(--paint-control-height);font-size:var(--paint-font-ui)}
+#settings-dialog>footer output,.settings-hint{font-size:var(--paint-font-caption)}
+@container (max-width:200px){
+  :is(#properties,.editor-properties) label:not(:has(input[type=checkbox])){grid-template-columns:minmax(0,1fr);gap:5px;margin-block:10px}
+}
+@container (max-width:290px){
+  .model-numeric-axes{grid-template-columns:minmax(0,1fr)}
+  .model-numeric-axes label{display:grid;grid-template-columns:16px minmax(0,1fr)}
+}
+@media(max-width:1280px){#surface-hint,#canvas-navigation-hint,#canvas-pointer{display:none}}
+@media(max-width:900px){
+  #canvas-document-tab{max-width:100%}#canvas-document-channel{display:none}
+  .paint-menubar{row-gap:5px;padding-block:4px}
+  .project-tools{margin-left:auto;gap:8px;padding-inline-start:8px}
+}

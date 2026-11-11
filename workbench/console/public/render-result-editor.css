@@ -1,0 +1,42 @@
+.render-result-editor{display:flex;flex-direction:column;min-width:0;min-height:0;background:#232323}
+.render-result-stage{
+  position:relative;flex:1;min-width:0;min-height:0;overflow:hidden;display:grid;place-items:center;
+  outline:none;background:#1e1e1e;touch-action:none
+}
+.render-result-stage:focus-visible{outline:1px solid var(--paint-focus);outline-offset:-1px}
+.render-result-stage[data-pannable]{cursor:grab}
+.render-result-stage[data-dragging]{cursor:grabbing}
+.render-result-image{
+  position:absolute;left:50%;top:50%;max-width:none;max-height:none;pointer-events:none;user-select:none;
+  background:repeating-conic-gradient(#343434 0% 25%,#292929 0% 50%) 0 0/14px 14px
+}
+.render-result-wipe{
+  position:absolute;z-index:2;width:20px;transform:translateX(-50%);cursor:ew-resize;touch-action:none;outline:0;
+}
+.render-result-wipe::before{
+  content:'';position:absolute;inset:0 auto 0 50%;width:1px;background:#dedede;box-shadow:0 0 2px #000;
+}
+.render-result-wipe::after{
+  content:'‹ ›';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  padding:0 4px 2px;border-radius:3px;background:#222;border:1px solid #686868;color:#e0e0e0;font:600 12px/15px var(--ui-font);
+  white-space:nowrap;
+}
+.render-result-wipe:focus-visible::after,.render-result-wipe:hover::after{border-color:#ddd}
+.render-result-compare-labels{
+  position:absolute;inset:8px 8px auto;z-index:3;display:flex;justify-content:space-between;pointer-events:none;
+}
+.render-result-compare-labels span{padding:3px 6px;border-radius:3px;background:#202020cc;color:#ccc;font-size:11px}
+.render-result-compare-labels[hidden]{display:none}
+.render-result-empty{margin:0;color:#aaa;font-size:13px}
+.render-result-status{
+  display:flex;align-items:center;gap:10px;min-height:24px;padding:3px 8px;
+  border-top:1px solid var(--area-line);background:#292929;color:#b8b8b8;font-size:12px
+}
+.render-result-status>output:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.render-result-status>span,.render-result-zoom{white-space:nowrap;font-variant-numeric:tabular-nums}
+.area-header-tools .render-result-download{
+  display:inline-flex;align-items:center;min-height:var(--chrome-control);padding:2px 6px;
+  border-radius:var(--chrome-radius);color:var(--chrome-text);text-decoration:none;white-space:nowrap
+}
+.area-header-tools .render-result-download:hover{background:var(--chrome-hover)}
+.area-header-tools .render-result-download[hidden]{display:none}

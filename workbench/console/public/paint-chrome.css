@@ -1,0 +1,300 @@
+/* Shared editor chrome. Workspace presets change layout, not control styling.
+   Keep content previews, node sockets, masks and transform handles independent. */
+:root{
+  --chrome-header:#303030;--chrome-panel-title:#2d2d2d;--chrome-line:#1b1b1b;
+  --chrome-button:#383838;--chrome-field:#222222;--chrome-hover:#414141;
+  --chrome-selected:#4a4a4a;--chrome-text:#d8d8d8;--chrome-radius:3px;
+  --chrome-item-hover:#2f2f2f;--chrome-item-selected:#383838;
+  --chrome-control:28px;--chrome-header-height:34px;--chrome-section-height:30px;
+}
+:root[data-ui-density=comfortable]{
+  --chrome-control:32px;--chrome-header-height:38px;--chrome-section-height:34px;
+}
+#workspace.modular-workspace{
+  --area-bar:var(--chrome-header);--area-active:var(--chrome-header);
+  --area-line:var(--chrome-line);--area-hover:var(--chrome-hover);
+  --area-control:var(--chrome-control);
+}
+.area-header{
+  height:var(--chrome-header-height);min-height:var(--chrome-header-height);
+  gap:6px;padding:2px 6px;border:0;border-bottom:1px solid var(--chrome-line);
+  background:var(--chrome-header);box-shadow:none;
+}
+.area-header :is(.area-header-tools,.area-header-controls){height:var(--chrome-control)}
+.area-header .area-caption{font-size:13px;font-weight:500;letter-spacing:0}
+.area-header .library-bar{padding:0;border:0;flex-wrap:nowrap;background:transparent}
+#workspace :is(.editor-toolbar,#surface-tools){
+  background:var(--chrome-panel-title);border:0;border-bottom:1px solid var(--chrome-line);
+}
+
+/* Actions are filled; contextual toolbar/menu commands sit directly on the bar. */
+#workspace :is(.editor-toolbar,.property-section-body,.viewport-display-options,.personal-shelf-actions) button:not(.custom-select-button){
+  min-height:var(--chrome-control);padding:3px 8px;border:1px solid transparent;
+  border-radius:var(--chrome-radius);background:var(--chrome-button);box-shadow:none;
+  color:var(--chrome-text);font-size:13px;font-weight:400;
+}
+#workspace :is(.editor-toolbar,.property-section-body,.viewport-display-options,.personal-shelf-actions) button:not(.custom-select-button):hover:not(:disabled){background:var(--chrome-hover);border-color:transparent}
+#workspace :is(.area-header,.editor-toolbar,#surface-tools,#drawing-layer-actions,.editor-preview-status,.view-status) button:not(.custom-select-button){
+  border-color:transparent;border-radius:var(--chrome-radius);background:transparent;box-shadow:none;
+}
+#workspace :is(.area-header,.editor-toolbar,#surface-tools,#drawing-layer-actions,.editor-preview-status,.view-status) button:not(.custom-select-button):hover:not(:disabled){background:var(--chrome-hover)}
+#workspace :is(.area-header,.editor-toolbar,#surface-tools) button:is([aria-pressed=true],[aria-selected=true]){background:var(--chrome-selected);color:#eee}
+#workspace .area-header :is(button,.custom-select-button){min-height:var(--chrome-control);font-size:13px;font-weight:400}
+#workspace .area-header .library-tabs button[aria-selected=true]{border-color:transparent;background:var(--chrome-selected)}
+#workspace .editor-list button[aria-pressed=true]{border-color:transparent;background:var(--chrome-selected)}
+
+/* One dropdown treatment for model modes, image tools, library and inspector. */
+#workspace .custom-select{
+  --select-height:var(--chrome-control);--select-start-padding:7px;
+  --select-arrow-padding:23px;--select-arrow-inset:6px;
+}
+#workspace .custom-select>.custom-select-button{
+  min-height:var(--select-height);padding:2px var(--select-arrow-padding) 2px var(--select-start-padding);border-color:transparent;
+  border-radius:var(--chrome-radius);background-color:#373737;
+  color:var(--chrome-text);font-size:13px;font-weight:400;box-shadow:none;
+}
+#workspace :where(.area-header,.editor-toolbar,#surface-tools) .custom-select>.custom-select-button{background-color:#393939}
+#workspace .custom-select>.custom-select-button:hover:not(:disabled),
+#workspace .custom-select.open>.custom-select-button{background-color:var(--chrome-hover);border-color:transparent;box-shadow:none}
+/* Use the full height of the header as the hit target for the editor icon. */
+#workspace .area-header .area-editor-picker{flex:none;width:30px;margin-inline:-3px -2px}
+#workspace .area-header .area-editor-picker>.custom-select-button{
+  display:flex;align-items:center;justify-content:center;gap:4px;
+  width:100%;height:var(--chrome-control);padding:0 1px 0 0;border:0;border-radius:var(--chrome-radius);
+  background:none;color:#c5c5c5;cursor:pointer;
+}
+#workspace .area-header .area-editor-picker>.custom-select-button::after{
+  content:'';width:4px;height:4px;flex:none;margin-top:-2px;
+  border:solid currentColor;border-width:0 1px 1px 0;transform:rotate(45deg);opacity:.65;
+}
+#workspace .area-editor-picker .chrome-icon{width:15px;height:15px;flex:none}
+#workspace .area-header .area-editor-picker>.custom-select-button:hover:not(:disabled){background:none;color:#fff}
+#workspace .area-header .area-editor-picker.open>.custom-select-button{background:#222;color:#eee}
+#workspace .property-channel .custom-select{--select-height:26px}
+#workspace .property-inspector .property-channel .custom-select-button{min-height:var(--select-height);padding-block:2px}
+#workspace .area-header input[type=search]{border-color:transparent;border-radius:var(--chrome-radius);background:var(--chrome-field)}
+/* The inspector search belongs to its area header, alongside the editor picker. */
+#workspace [data-editor=renderSettings]>.area-header .area-header-tools{justify-content:flex-end;overflow:visible}
+#workspace .area-header .property-editor-search{flex:0 1 190px;width:100%;height:24px;min-width:48px;padding:0 5px;border:1px solid #1e1e1e;background:#242424;border-radius:3px}
+#workspace .area-header .property-editor-search:focus-within{border-color:#777}
+#workspace .area-header .property-editor-search input{width:100%;max-width:none;min-height:22px;height:22px;padding:1px 3px;border:0;background:transparent;outline:0;font-size:12px}
+#workspace .area-header .property-editor-search-icon .chrome-icon{width:14px;height:14px}
+#workspace .area-header .editor-material-layer-tools{flex:1 1 100%;min-width:0}
+#workspace .area-header .editor-material-layer-tools input[type=search]{flex:1 1 80px;min-width:24px;width:100%;max-width:150px}
+#workspace .area-header .editor-material-layer-tools .custom-select{flex:none;width:42px;--select-arrow-padding:18px;--select-arrow-inset:4px}
+
+/* A single edge identifies a popup; items have no nested outlines. */
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content,.custom-select-menu){
+  padding:5px;gap:2px;border:1px solid var(--chrome-line);border-radius:4px;
+  background:#2b2b2b;box-shadow:0 4px 12px #0006;
+}
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button,a,label),
+.custom-select-menu .custom-select-option{
+  min-height:var(--chrome-control);padding:3px 9px;border:1px solid transparent;
+  border-radius:var(--chrome-radius);font-size:13px;font-weight:400;
+}
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button:enabled,a,label):hover,
+.custom-select-menu .custom-select-option:is(:hover,.active):not(:disabled){background:var(--chrome-hover);border-color:transparent;color:#eee}
+.custom-select-menu .custom-select-search{border-color:transparent;border-radius:var(--chrome-radius);background:var(--chrome-field)}
+
+/* Panel sections use a flat title strip; spacing separates individual fields. */
+#workspace .property-inspector .property-target{border-bottom:0}
+#workspace .property-inspector .property-target-scope{padding:0;border:0}
+#workspace .property-inspector .property-section{border-bottom:0}
+#workspace .property-inspector .property-section-title{
+  min-height:var(--chrome-section-height);padding:3px 10px;border:0;
+  background:var(--chrome-panel-title);font-size:13px;font-weight:500;box-shadow:none;
+}
+#workspace .property-inspector .property-section-title:hover{background:var(--chrome-header)}
+#workspace .property-inspector :is(.property-channel,.property-material-source,.property-channel-switches){border-bottom:0}
+#workspace .property-inspector .property-channel-switch>span{border-color:transparent;border-radius:var(--chrome-radius);background:#323232;font-weight:400}
+#workspace .property-inspector .property-channel-switch:has(input:checked)>span{border-color:transparent;background:var(--chrome-selected);color:#eee}
+#workspace .property-inspector .property-channel-switch:hover>span{border-color:transparent;background:var(--chrome-hover)}
+#workspace .property-inspector :is(.property-image-slot,.property-linked-material){border-color:transparent;border-radius:var(--chrome-radius)}
+#workspace .property-inspector .property-image-slot:hover:not(:disabled){border-color:transparent;background:var(--chrome-hover)}
+#workspace #base{border-color:transparent;border-radius:var(--chrome-radius)}
+.paint-menubar .app-menus .paint-menu>summary{border:0;border-radius:var(--chrome-radius)}
+/* Preserve focus even on controls with their own contextual CSS. */
+#workspace :is(button,summary,input[type=search]):focus-visible{
+  outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-2px;
+}
+
+/* Lists have one state surface per row, never a second button inside it. */
+#workspace :is(#layers .layer-row,.editor-list:not(.editor-scene-list) .editor-layer-row){
+  background:transparent;border-radius:2px;
+}
+#workspace :is(#layers .layer-row,.editor-list:not(.editor-scene-list) .editor-layer-row):hover{background:var(--chrome-item-hover)}
+#workspace :is(#layers .layer-row:has(.layer-select[aria-pressed=true]),.editor-list:not(.editor-scene-list) .editor-layer-row:has(.editor-layer-name[aria-pressed=true])){
+  background:var(--chrome-item-selected);
+}
+#workspace :is(#layers .layer-row,.editor-list .editor-layer-row)>button{
+  background:transparent;border-color:transparent;border-radius:2px;font-weight:400;
+}
+#workspace :is(#layers .layer-select[aria-pressed=true],.editor-layer-name[aria-pressed=true]){color:#eee}
+#workspace :is(#layers .layer-row,.editor-list .editor-layer-row)>button:hover:not(:disabled){background:transparent;color:#eee}
+#workspace .editor-material-tree{padding:6px}
+#workspace .editor-material-tree .editor-layer-row{gap:2px;min-height:28px;padding-right:3px}
+#workspace .editor-material-tree .editor-visibility{width:23px;min-width:23px;min-height:28px;padding:2px}
+#workspace .editor-material-tree .editor-layer-name{gap:5px;min-height:28px;padding:2px 3px}
+#workspace .editor-material-tree :is(.material-tree-fold,.material-tree-fold-space){
+  display:grid;place-items:center;flex:none;width:15px;height:27px;min-height:27px;padding:0;color:#a9a9a9
+}
+#workspace .editor-material-tree .material-tree-fold:hover{background:#ffffff12}
+#workspace .material-tree-fold[aria-expanded=true] svg,#workspace .material-tree-fold-space[data-open] svg{transform:rotate(90deg)}
+#workspace .material-tree-indent{
+  width:min(calc(var(--material-depth)*12px),24%);align-self:stretch;flex:none;
+  background:repeating-linear-gradient(90deg,transparent 0 5px,#ffffff13 5px 6px,transparent 6px 12px)
+}
+#workspace .material-tree-icon,#workspace .material-tree-lock{display:flex;flex:none;color:#a8a8a8}
+#workspace .material-tree-lock{width:17px}
+#workspace .material-tree-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#workspace .editor-material-tree .editor-layer-row[data-active-layer]{box-shadow:inset 2px 0 #929292}
+#workspace .editor-material-tree .editor-layer-row[data-folded-selection] .material-tree-icon{color:#eee}
+#workspace .editor-material-tree .editor-layer-row[data-inherited-hidden] .material-tree-name{color:#999}
+#workspace .editor-material-tree .layer-inline-name{flex:1;min-height:26px;padding:2px 4px}
+#workspace .editor-material-tree .editor-layer-base{min-height:28px;padding-inline:8px;text-align:left;justify-content:flex-start}
+#workspace :is(#layers,.editor-material-tree) [data-dragging]{opacity:.55}
+#workspace .editor-material-tree .editor-layer-row[data-layer-drop=above]{box-shadow:0 -2px #bdbdbd}
+#workspace .editor-material-tree .editor-layer-row[data-layer-drop=below]{box-shadow:0 2px #bdbdbd}
+#workspace .editor-material-tree .editor-layer-row[data-layer-drop=inside]{outline:1px solid #aaa;outline-offset:-1px}
+#workspace .editor-material-tree .editor-layer-row[data-isolated-away]{opacity:.42}
+#workspace .editor-material-tree .editor-layer-row[data-isolated-layer]>.editor-visibility{box-shadow:inset 0 -1px #b8b8b8}
+#workspace .area-header .editor-scene-tools{flex:1 1 100%;min-width:0;gap:2px}
+#workspace .area-header .editor-scene-search{display:flex;align-items:center;flex:1 1 120px;min-width:32px;min-height:24px;gap:2px;padding-inline:5px 0;border-radius:3px;background:var(--chrome-field);color:#a8a8a8}
+#workspace .area-header .editor-scene-search:focus-within{box-shadow:inset 0 0 0 1px #777}
+#workspace .area-header .editor-scene-search .chrome-icon{width:15px;height:15px;flex:none}
+#workspace .area-header .editor-scene-search input{flex:1;width:100%;min-width:0;max-width:none;min-height:24px;padding:1px 4px;border:0;background:transparent;outline:0;font-size:12px}
+#workspace .area-header .editor-scene-search input::-webkit-search-cancel-button{appearance:none}
+#workspace .area-header .editor-scene-search .outline-search-clear{width:22px;min-width:22px;min-height:22px;padding:0;margin-inline-end:1px;color:#aaa}
+#workspace .area-header .editor-scene-tools>.area-icon-button{width:24px;min-width:24px;margin-left:auto}
+#workspace .area-header .editor-scene-tools>.area-icon-button+.area-icon-button{margin-left:0}
+#workspace .area-header .outline-filter{width:25px}
+#workspace .area-header .outline-filter>.custom-select-button{
+  display:grid;place-items:center;padding:0;background:none;color:#aaa;
+}
+#workspace .area-header .outline-filter .chrome-icon{width:15px;height:15px}
+#workspace .area-header .outline-filter>.custom-select-button:hover,
+#workspace .area-header .outline-filter:is(.open,[data-filter-active])>.custom-select-button{
+  background:var(--chrome-hover);color:#eee;
+}
+.custom-select-menu.outline-filter-menu{--select-menu-width:132px;--select-menu-align:right}
+.outline-filter-menu .custom-select-option{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.outline-filter-menu .custom-select-option[aria-selected=false] .select-option-check{visibility:hidden}
+#workspace .editor-scene-list{
+  --outline-row:25px;--outline-eye:29px;--outline-step:17px;--outline-start:5px;--outline-line:#ffffff24;
+  --outline-actions:calc(var(--outline-eye)*2);
+  --outline-column:#212121;
+  padding:0;gap:0;background:linear-gradient(to left,var(--outline-column) var(--outline-actions),#252525 var(--outline-actions));
+}
+#workspace .editor-scene-list:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
+#workspace .editor-scene-list :is(.editor-outline-root,.editor-layer-row){
+  background:linear-gradient(to left,var(--outline-column) var(--outline-actions),var(--outline-background,transparent) var(--outline-actions));
+}
+#workspace .editor-scene-list .editor-outline-root{top:0;min-height:var(--outline-row);width:100%;justify-content:flex-start;padding:0 var(--outline-actions) 0 var(--outline-start);gap:4px;border:0;--outline-background:#303030;font-weight:500;font-size:13px}
+#workspace .editor-scene-list button.editor-outline-root:hover{--outline-background:#383838}
+#workspace .editor-scene-list .editor-outline-root>.outline-disclosure{background:transparent}
+#workspace .editor-scene-list .editor-layer-row{min-height:var(--outline-row);border-radius:0;padding:0 0 0 var(--outline-start)}
+#workspace .editor-list.editor-scene-list .editor-layer-row:nth-child(even){--outline-background:#292929}
+#workspace .editor-list.editor-scene-list .editor-layer-row:hover{--outline-background:#333}
+#workspace .editor-scene-list .editor-layer-name{min-height:var(--outline-row);padding:1px 5px 1px 0;gap:6px}
+#workspace .editor-list.editor-scene-list .editor-layer-name:is(:hover,[aria-pressed=true]){background:none}
+#workspace .editor-scene-list :is(.outline-disclosure,.outline-disclosure-space){width:var(--outline-step);min-width:var(--outline-step);height:var(--outline-row);min-height:var(--outline-row)}
+#workspace .editor-scene-list .editor-object-icon{opacity:.8}
+#workspace .editor-scene-list .editor-object-icon svg{width:15px;height:15px}
+#workspace .editor-scene-list .outline-indent{
+  display:flex;align-self:stretch;flex:none;width:min(calc(var(--outline-depth)*var(--outline-step)),35%);
+}
+#workspace .editor-scene-list .outline-guide{position:relative;flex:1}
+#workspace .editor-scene-list .outline-guide:is(.branch,.continues)::before{
+  content:'';position:absolute;inset:0 auto 50% 50%;border-left:1px solid var(--outline-line);
+}
+#workspace .editor-scene-list .outline-guide.continues::before{bottom:0}
+#workspace .editor-scene-list .outline-guide.branch::after{
+  content:'';position:absolute;inset:50% 0 auto 50%;border-top:1px solid var(--outline-line);
+}
+#workspace .editor-list.editor-scene-list .editor-layer-row[data-selected-object]{--outline-background:#3d3d3d}
+#workspace .editor-list.editor-scene-list .editor-layer-row[data-selected-object]:hover{--outline-background:#464646}
+#workspace .editor-list.editor-scene-list .editor-layer-row[data-active-object]{--outline-background:#565656;box-shadow:inset 2px 0 #c0c0c0}
+#workspace .editor-list.editor-scene-list .editor-layer-row[data-active-object]:hover{--outline-background:#606060}
+#workspace .editor-scene-list [data-selected-object] .editor-object-icon{color:#c7c7c7;opacity:1}
+#workspace .editor-scene-list [data-active-object] .editor-object-icon{color:#fff;opacity:1}
+#workspace .editor-scene-list [data-active-object] .mesh-face{fill:#ffffff1c;stroke-width:1.7}
+#workspace .editor-scene-list [data-active-object] .editor-object-label{color:#fff;font-weight:600}
+#workspace .editor-scene-list [data-selected-object]:not([data-active-object]) .editor-object-label{color:#cecece}
+#workspace .editor-scene-list .editor-layer-row>.editor-layer-name:focus-visible{outline:1px solid #aaa;outline-offset:-2px}
+#workspace .editor-scene-list .editor-layer-row>.editor-visibility{
+  min-height:var(--outline-row);width:var(--outline-eye);min-width:var(--outline-eye);align-self:stretch;
+  padding:3px 6px;border-radius:0;background:none;color:#969696;
+}
+#workspace .editor-scene-list .editor-layer-row>.editor-visibility .chrome-icon{width:14px;height:14px}
+#workspace .editor-scene-list .editor-layer-row:is(:hover,[data-active-object],[data-object-hidden])>.editor-visibility{color:#b5b5b5}
+#workspace .editor-scene-list .editor-layer-row>.editor-visibility:hover:not(:disabled){background:#ffffff15;color:#eee}
+#workspace .editor-scene-list .editor-layer-row[data-render-excluded]>.editor-render-visibility{color:#d0a885}
+#workspace .editor-scene-status{min-height:23px;padding:3px 9px;font-size:11px;background:#292929}
+.scene-context-menu{position:fixed;inset:auto;margin:0;min-width:220px;max-width:min(340px,calc(100vw - 12px));max-height:calc(100vh - 12px);overflow:auto;padding:5px;border:1px solid #1b1b1b;border-radius:4px;background:#2b2b2b;color:#ddd;box-shadow:0 4px 12px #0006;font-size:13px}
+.scene-context-menu:not(:popover-open){display:none}
+.scene-context-title{padding:5px 8px;color:#999;font-size:12px}
+.scene-context-menu button[role=menuitem]{display:flex;align-items:center;gap:8px;width:100%;min-height:28px;padding:3px 8px;border:0;border-radius:3px;background:none;text-align:left;color:#ddd;font:inherit}
+.scene-context-menu button[role=menuitem]:is(:hover,:focus-visible):not(:disabled){background:#414141;outline:0}
+.scene-menu-icon{display:grid;place-items:center;width:16px;color:#aaa}.scene-menu-icon svg{width:16px;height:16px}
+.scene-menu-label{flex:1}.scene-context-menu kbd{color:#999;font:inherit;font-size:12px}
+.scene-context-menu hr{margin:4px 3px;border:0;border-top:1px solid #ffffff0c}
+.scene-rename-form{display:flex;flex-direction:column;gap:8px;min-width:260px;padding:5px}
+.scene-rename-form strong{font-size:13px;font-weight:500}.scene-rename-form label{display:flex;flex-direction:column;gap:5px;color:#bbb}
+.scene-rename-form input{width:100%;min-height:28px;padding:3px 7px;border:1px solid #555;border-radius:3px;background:#202020;color:#eee;font:inherit}
+.scene-rename-form p,.scene-rename-preview{margin:0;max-width:300px;font-size:12px;color:#999;overflow-wrap:anywhere}
+.scene-rename-actions{display:flex;justify-content:flex-end;gap:5px}.scene-rename-actions button{min-height:27px;padding:3px 9px;border:0;border-radius:3px;background:#3b3b3b;color:#ddd;font:inherit}.scene-rename-actions button:hover{background:#4a4a4a}
+#workspace :is(#base,.editor-layer-base){background:transparent;border-color:transparent;border-radius:2px;font-weight:400}
+#workspace :is(#base,.editor-layer-base):hover{background:var(--chrome-item-hover)}
+#workspace :is(#base,.editor-layer-base)[aria-pressed=true]{background:var(--chrome-item-selected);color:#eee}
+/* The material/mask target is independent of whole-layer selection. */
+#workspace #layers .layer-mask[aria-pressed=true]{box-shadow:none;background:transparent}
+#workspace #layers .layer-mask[aria-pressed=true] :is(canvas,img){outline:1px solid #aaa;outline-offset:1px}
+
+/* Resource previews keep their artwork; only the caption carries UI state. */
+#workspace :is(.library-tile,#assets button){background:transparent;border-color:transparent;border-radius:3px;box-shadow:none}
+#workspace :is(.library-tile,#assets button):is(:hover,[aria-pressed=true]){background:transparent;border-color:transparent;box-shadow:none}
+#workspace .library-preview{background:transparent}
+#workspace :is(.library-name,#assets button>span){
+  display:block;align-self:stretch;width:100%;min-width:0;padding:0 6px;
+  line-height:28px;border-radius:2px;background:transparent;color:#c5c5c5;font-weight:400;
+}
+#workspace :is(.library-tile:hover>.library-name,#assets button:hover>span){background:var(--chrome-item-hover)}
+#workspace :is(.library-tile[aria-pressed=true]>.library-name,#assets button[aria-pressed=true]>span){background:var(--chrome-item-selected);color:#eee}
+@media(prefers-reduced-motion:no-preference){
+  #workspace :is(.library-name,#assets button>span){transition:background-color 100ms,color 100ms}
+}
+
+/* Compact command rows: icon, label, then a plain right-aligned shortcut. */
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content){padding:4px;gap:1px}
+.paint-menu-content>hr{width:auto;margin:3px 5px;border:0;border-top:1px solid #ffffff14}
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button,a,label),
+.custom-select-menu:has(.menu-shortcut-option)>.custom-select-option{
+  display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;
+  column-gap:8px;min-height:26px;padding:3px 7px;border:0;border-radius:2px;
+  font-size:13px;line-height:20px;text-align:left;text-decoration:none;
+}
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button,a,label):not(:has(>.chrome-icon,>input))::before,
+.custom-select-menu:has(.menu-shortcut-option)>.custom-select-option::before{content:'';grid-column:1;width:18px}
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) .chrome-icon{width:16px;height:16px;grid-column:1;color:#b9b9b9}
+.menu-item-label{min-width:0;overflow:hidden;text-overflow:ellipsis}
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) input[type=checkbox]{width:14px;height:14px;margin:0;grid-column:1}
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content,.custom-select-menu) kbd{
+  grid-column:3;margin:0 0 0 12px;padding:0;border:0;background:none;box-shadow:none;
+  color:#a5a5a5;font:12px/20px var(--ui-font);text-align:right;white-space:nowrap;
+}
+.area-menu-content{min-width:260px;max-width:calc(100vw - 12px);max-height:calc(100dvh - 12px)}
+.area-neighbor-options{border-top:1px solid #ffffff0f;padding:2px 0;margin:2px 0}
+:is(.area-menu-content,.area-toolbar-menu-content) button:enabled:focus-visible{background:var(--chrome-hover);outline:0;color:#eee}
+.paint-tooltip{
+  position:fixed;inset:auto;margin:0;max-width:min(330px,calc(100vw - 12px));
+  max-height:calc(100dvh - 12px);overflow:hidden;padding:6px 9px;border:1px solid #171717;border-radius:3px;background:#252525;
+  color:#d4d4d4;box-shadow:0 3px 9px #0005;font:12px/1.5 var(--ui-font);
+  white-space:normal;overflow-wrap:anywhere;pointer-events:none;user-select:none;
+}
+.paint-tooltip:not(:popover-open){display:none}
+.paint-tooltip:popover-open{display:block}
+@media(prefers-reduced-motion:no-preference){
+  .paint-tooltip:popover-open,.area-menu-content:popover-open,.area-toolbar-menu-content:popover-open,.custom-select-menu{animation:paint-tip-enter 80ms ease-out}
+}
+@keyframes paint-tip-enter{from{opacity:0}to{opacity:1}}

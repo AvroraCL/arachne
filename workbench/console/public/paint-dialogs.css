@@ -1,0 +1,130 @@
+/* Project, history, settings and export dialogs share the editor controls. */
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog){
+  --paint-control-height:var(--chrome-control);--select-height:var(--chrome-control);
+  padding:0;border:1px solid var(--chrome-line);border-radius:4px;
+  background:#282828;color:var(--chrome-text);box-shadow:0 6px 20px #0007;
+  max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);
+}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog)::backdrop{background:#0007}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog)>header,#new-paint-dialog>form>header{
+  flex:none;min-height:38px;gap:8px;padding:4px 10px;
+  border:0;border-bottom:1px solid var(--chrome-line);background:var(--chrome-header);
+}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) header :is(strong,h2){margin:0;font-size:13px;font-weight:600}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) button:not(.custom-select-button){
+  min-height:var(--chrome-control);padding:3px 10px;border:1px solid transparent;
+  border-radius:var(--chrome-radius);background:var(--chrome-button);color:var(--chrome-text);
+  box-shadow:none;font-size:13px;font-weight:400;
+}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) button:not(.custom-select-button):hover:not(:disabled){background:var(--chrome-hover);border-color:transparent}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) button.primary{background:var(--chrome-selected);border-color:transparent;color:#eee}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) button.primary:hover:not(:disabled){background:#525252}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) header button{min-height:var(--chrome-control);height:auto;padding:2px 7px;background:transparent;font-size:13px}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) .custom-select{
+  --select-height:var(--chrome-control);--select-start-padding:7px;
+  --select-arrow-padding:23px;--select-arrow-inset:6px;min-width:0;
+}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) .custom-select>.custom-select-button,
+:is(#settings-form,#new-paint-form) input:not([type=checkbox],[type=range],[type=color]){
+  min-height:var(--chrome-control);padding-block:2px;border-color:transparent;
+  border-radius:var(--chrome-radius);background-color:var(--chrome-field);font-size:13px;
+}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) .custom-select>.custom-select-button:hover:not(:disabled),
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) .custom-select.open>.custom-select-button{background-color:var(--chrome-hover);border-color:transparent}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) :is(button,input):focus-visible{outline:1px solid var(--paint-focus);outline-offset:-2px}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-dialog,#history-dialog) input[type=checkbox]{width:14px;height:14px;margin:0;flex:none}
+#settings-dialog>footer,#delivery-dialog>.delivery-footer,#new-paint-dialog .paint-form-footer{
+  flex:none;min-height:44px;gap:8px;padding:7px 10px;
+  border:0;border-top:1px solid var(--chrome-line);background:transparent;
+}
+
+#settings-dialog{width:min(720px,calc(100vw - 24px));height:min(520px,calc(100dvh - 24px))}
+#settings-dialog>header>div{gap:10px;min-width:0}
+.settings-body{grid-template-columns:124px minmax(0,1fr)}
+.settings-body>nav{gap:2px;padding:8px 6px;border-right:1px solid var(--chrome-line);background:transparent}
+#settings-dialog .settings-body>nav>button{min-height:var(--chrome-control);padding:3px 10px;background:transparent;font-weight:400}
+#settings-dialog .settings-body>nav>button:hover{background:var(--chrome-item-hover)}
+#settings-dialog .settings-body>nav>button[aria-selected=true]{background:var(--chrome-item-selected);color:#eee}
+.settings-transfer{gap:2px;padding-top:12px}
+#settings-dialog .settings-transfer button{min-height:26px;padding:3px 6px;background:transparent;font-size:12px;white-space:nowrap}
+#settings-dialog .settings-transfer button:hover{background:var(--chrome-item-hover)}
+#settings-form{padding:12px 16px 16px}
+#settings-form h2{margin:0 0 4px;font-size:14px;font-weight:600}
+#settings-form .settings-hint{margin:0 0 12px;line-height:1.6}
+#settings-form section>label{min-height:var(--chrome-control);gap:10px;margin:0 0 8px;grid-template-columns:minmax(110px,1fr) minmax(150px,1.4fr)}
+#settings-form section>label>span{gap:6px}
+#settings-form section>label.settings-check{gap:7px;margin:0 0 8px}
+#settings-form .workspace-range-field{border-color:transparent;border-radius:var(--chrome-radius)}
+#settings-form input[type=color]{width:56px;height:26px;min-height:26px;padding:0;border-color:transparent;border-radius:var(--chrome-radius);background:transparent}
+.settings-shortcuts{grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;font-size:13px;line-height:22px}
+#settings-dialog>footer output{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#settings-error{padding:0 12px 8px}
+
+#delivery-dialog{width:min(640px,calc(100vw - 24px))}
+#delivery-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+#delivery-dialog .delivery-content{min-height:0;overflow:auto;padding:10px 12px 12px;overscroll-behavior:contain}
+#delivery-dialog h2{margin:0 0 5px;font-size:13px;font-weight:600}
+#delivery-dialog .delivery-content p{margin:4px 0;font-size:12px;line-height:1.6}
+#delivery-dialog .delivery-overview{gap:8px;align-items:center}
+#delivery-dialog .delivery-channels{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:8px 0 10px}
+#delivery-dialog .delivery-channels :is(a,span){min-width:0}
+#delivery-dialog .delivery-channels>:is(a,span){gap:2px;padding:4px;background:transparent;border:0;border-radius:2px;font-size:12px}
+#delivery-dialog .delivery-channels>a:hover{background:var(--chrome-item-hover)}
+#delivery-dialog .delivery-channels img{height:48px;background:transparent;border-radius:2px}
+#delivery-dialog .delivery-channels small{font-size:12px;color:#999}
+#delivery-dialog .delivery-render-options{gap:8px;margin:12px 0;padding:0;border:0;border-radius:0;background:transparent}
+#delivery-dialog .delivery-render-options legend{padding:0;margin-bottom:6px;font-size:13px;font-weight:600}
+#delivery-dialog .delivery-render-options label{gap:4px;font-size:12px}
+#delivery-dialog .delivery-task{margin-top:10px;padding-top:8px;border-top:1px solid var(--chrome-line)}
+#delivery-dialog :is(#delivery-reference,#downloads){display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+#delivery-dialog :is(#delivery-reference,#downloads) a{padding:3px 7px;border:0;border-radius:2px;font-size:12px;background:transparent}
+#delivery-dialog :is(#delivery-reference,#downloads) a:hover{background:var(--chrome-item-hover);text-decoration:none}
+#delivery-dialog .delivery-footer label{display:flex;align-items:flex-start;gap:7px;min-width:0;font-size:12px;line-height:1.6}
+#delivery-dialog .delivery-footer input{margin-top:3px}
+#delivery-dialog .delivery-footer button{margin-left:auto;flex:none}
+
+/* Project creation and switching: a plain form with one aligned value column. */
+#new-paint-dialog{width:min(480px,calc(100vw - 24px))}
+#project-dialog{width:min(520px,calc(100vw - 24px))}
+:is(#new-paint-dialog,#project-dialog,#history-dialog)[open]{display:flex;flex-direction:column;overflow:hidden}
+#new-paint-dialog>form{display:flex;flex-direction:column;min-height:0;max-height:calc(100dvh - 26px)}
+#new-paint-dialog .paint-form-content{min-height:0;overflow:auto;gap:8px;padding:12px}
+#new-paint-dialog .paint-form-content label{grid-template-columns:100px minmax(0,1fr);align-items:center;gap:8px;min-height:var(--chrome-control);font-size:13px}
+#new-paint-name{width:100%;min-width:0;padding:3px 7px}
+#new-paint-dialog .paint-form-content small{font-size:12px;color:#999}
+#new-paint-dialog .paint-form-footer [role=alert]{flex:1;overflow-wrap:anywhere;font-size:12px;line-height:1.5}
+#new-paint-dialog .paint-form-footer button{flex:none;margin-left:auto}
+#project-dialog .project-dialog-content{min-height:0;overflow:auto;gap:12px;padding:12px}
+#project-dialog .project-dialog-content>label{grid-template-columns:80px minmax(0,1fr);align-items:center;gap:8px;font-size:13px}
+#project-dialog .project-dialog-content fieldset{min-width:0;margin:0;padding:0;border:0;border-radius:0;background:transparent}
+#project-dialog legend{padding:0;margin-bottom:6px;font-size:13px;font-weight:600;color:#ccc}
+#project-dialog .project-dialog-content dl{grid-template-columns:70px minmax(0,1fr);gap:6px 10px;margin:0;font-size:13px;line-height:1.6}
+#project-dialog .project-dialog-content dd{min-width:0;overflow-wrap:anywhere}
+#project-dialog .project-dialog-content p{font-size:12px;line-height:1.6}
+
+/* History is a list, not a stack of individually bordered cards. */
+#history-dialog{width:min(640px,calc(100vw - 24px));max-height:min(620px,calc(100dvh - 24px))}
+#history-dialog .history-info{flex:none;margin:10px 12px 4px;font-size:13px}
+#history-dialog .history-help{flex:none;margin:0 12px 10px;font-size:12px;color:#999;line-height:1.6}
+#history-dialog .history-columns{min-height:0;overflow:auto;gap:12px;padding:0 12px 12px;overscroll-behavior:contain}
+#history-dialog .history-columns h3{margin:0 0 5px;font-size:13px;color:#bbb}
+#history-dialog .history-columns ol{gap:1px}
+#history-dialog .history-columns button{min-height:46px;padding:3px 7px;gap:0 8px;border-color:transparent;border-radius:2px;background:transparent}
+#history-dialog .history-columns button:hover:not(:disabled){background:var(--chrome-item-hover);border-color:transparent}
+#history-dialog .history-columns strong{font-size:13px;font-weight:400;line-height:20px}
+#history-dialog .history-columns :is(span,small){font-size:12px;line-height:18px;color:#999}
+#history-dialog .history-empty{padding:7px 4px;border:0;border-radius:0;background:transparent;font-size:12px;color:#999}
+#history-error{flex:none;margin:0 12px 10px;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+@media(max-width:620px){
+  #settings-dialog{height:calc(100dvh - 24px);min-height:0;resize:none}
+  .settings-body{grid-template-columns:92px minmax(0,1fr)}
+  #settings-form{padding:10px 12px}
+  #settings-form section>label{grid-template-columns:1fr;gap:4px}
+  .settings-shortcuts{grid-template-columns:1fr;gap:2px}.settings-shortcuts dd{margin-bottom:6px;text-align:left}
+}
+@media(max-width:480px){
+  #delivery-dialog .delivery-channels{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #delivery-dialog .delivery-render-options{grid-template-columns:1fr}
+  #delivery-dialog .delivery-footer label{flex-basis:100%}
+  #new-paint-dialog .paint-form-content label,#project-dialog .project-dialog-content>label{grid-template-columns:1fr;gap:4px}
+}

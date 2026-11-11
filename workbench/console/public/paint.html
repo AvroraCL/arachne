@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>阿拉克涅 · PBR 涂装</title>
+<link rel="stylesheet" href="/workspace-theme.css">
+<link rel="stylesheet" href="/paint.css">
+<link rel="stylesheet" href="/paint-select.css">
+<link rel="stylesheet" href="/paint-settings.css">
+<link rel="stylesheet" href="/workspace-range.css"><script type="module" src="/workspace-range.mjs"></script>
+<link rel="stylesheet" href="/image-viewer.css">
+<link rel="stylesheet" href="/paint-metrics.css">
+<link rel="stylesheet" href="/paint-shader-editor.css">
+<link rel="stylesheet" href="/paint-history.css">
+<link rel="stylesheet" href="/area-workspace.css">
+<link rel="stylesheet" href="/paint-library.css">
+<link rel="stylesheet" href="/paint-properties.css">
+<link rel="stylesheet" href="/paint-chrome.css">
+<link rel="stylesheet" href="/paint-dialogs.css">
+<link rel="stylesheet" href="/paint-render-results.css">
+<link rel="stylesheet" href="/render-result-editor.css">
+<link rel="stylesheet" href="/image-documents.css">
+<link rel="icon" href="/arachne-mark.svg" type="image/svg+xml">
+<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
+</head>
+<body>
+<header class="paint-menubar">
+  <img class="paint-menubar-logo" src="/arachne-mark.svg" alt="阿拉克涅" width="32" height="32" draggable="false">
+  <nav class="app-menus" aria-label="应用菜单">
+    <details class="paint-menu" name="paint-menubar-menu"><summary>文件</summary><div class="paint-menu-content">
+      <button id="new" type="button">新建工程</button>
+      <button id="open-projects" type="button" aria-haspopup="dialog">打开工程…</button>
+      <button id="open-paint-import" type="button" aria-haspopup="dialog">打开涂装 ZIP…</button>
+      <button id="open-project-details" type="button" aria-haspopup="dialog">工程详情…</button>
+      <hr>
+      <button id="open-delivery" type="button" aria-haspopup="dialog" disabled><svg class="chrome-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13V3m-3 3 3-3 3 3M4 11v5h12v-5"/></svg><span>导出…</span></button>
+      <button id="create-paint-backup" type="button" disabled>生成工程副本</button>
+      <a id="download-paint-backup" hidden>下载工程副本</a>
+      <a id="paint-backup-log" target="_blank" hidden>查看副本日志</a>
+      <hr>
+    </div></details>
+    <details class="paint-menu" name="paint-menubar-menu"><summary>编辑</summary><div class="paint-menu-content">
+      <button id="undo" type="button">撤销 <kbd aria-hidden="true">⌘Z</kbd></button>
+      <button id="redo" type="button">重做 <kbd aria-hidden="true">⇧⌘Z</kbd></button>
+      <button id="open-history" type="button">历史记录…</button>
+    </div></details>
+    <details class="paint-menu" name="paint-menubar-menu"><summary>渲染</summary><div class="paint-menu-content">
+      <button id="open-paint-render" type="button" aria-haspopup="dialog" disabled>Cycles 出图…</button>
+      <button id="open-render-results" type="button" disabled>渲染结果</button>
+      <button id="preview" type="button">生成 4K 预览</button>
+      <button id="open-render-settings" type="button">渲染设置</button>
+      <label><input id="auto-preview" type="checkbox">自动预览</label>
+    </div></details>
+    <details id="window-menu" class="paint-menu" name="paint-menubar-menu"><summary>窗口</summary><div class="paint-menu-content">
+      <label><input type="checkbox" data-show-panel="layers">图层</label>
+      <label><input type="checkbox" data-show-panel="properties">属性</label>
+      <label><input type="checkbox" data-show-panel="assets">素材库</label>
+      <button id="reset-docks" type="button" title="恢复当前区域的默认停靠位置与大小">重置布局</button>
+    </div></details>
+    <button id="open-settings" type="button" aria-haspopup="dialog" title="设置 · ⌘ / Ctrl + ,">设置</button>
+  </nav>
+  <nav class="area-switch" aria-label="制作区域">
+    <button type="button" data-area-mode="modeling" aria-pressed="false" disabled>建模</button>
+    <button type="button" data-area-mode="material" aria-pressed="false" disabled>材质</button>
+    <button type="button" data-area-mode="drawing" aria-pressed="true" disabled>绘制</button>
+  </nav>
+  <div class="project-tools" role="group" aria-label="当前工程">
+    <button id="render-background-status" type="button" aria-haspopup="dialog" hidden>
+      <svg viewBox="0 0 20 20" class="chrome-icon" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="15" height="11" rx="1.5"/><path d="M6 5 7 3.5h6L14 5"/><circle cx="10" cy="10.5" r="3"/></svg>
+      <span></span>
+    </button>
+    <strong id="project-name">未打开工程</strong>
+    <output id="project-save-state" aria-label="工程保存状态"></output>
+  </div>
+</header>
+<main id="workspace" data-work-area="drawing" hidden>
+  <aside class="tool-rail" aria-label="制作工具">
+    <button id="uv-select-tool" data-drawing-only type="button" title="矩形选区 · M · Shift 框选正方形" aria-label="矩形选区" aria-pressed="false">⬚</button>
+    <button id="uv-lasso-tool" data-drawing-only type="button" title="套索 · L" aria-label="套索" aria-pressed="false">◌</button>
+    <button id="uv-transform-tool" data-drawing-only type="button" title="自由变换 · V / ⌘T · Shift 限制拖动方向" aria-label="自由变换" aria-pressed="false" disabled>✥</button>
+    <button id="uv-text-tool" data-drawing-only type="button" title="文字工具 · T" aria-label="文字工具" aria-pressed="false">T</button>
+    <button id="uv-zoom-tool" data-drawing-only type="button" title="缩放工具 · Z · Option 单击缩小 · 双击工具以实际尺寸显示" aria-label="缩放工具" aria-pressed="false">⌕</button>
+    <div id="paint-color-controls" data-drawing-only role="group" aria-label="前景色和背景色" title="前景色与背景色 · X 交换 · D 恢复黑白">
+      <label class="foreground-swatch" title="前景色"><input id="foreground-color" type="color" aria-label="前景色" value="#000000"></label>
+      <label class="background-swatch" title="背景色"><input id="background-color" type="color" aria-label="背景色" value="#ffffff"></label>
+      <button id="swap-paint-colors" type="button" aria-label="交换前景色和背景色" title="交换前景色和背景色 · X"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h9l-3-3m3 3L9 8M13 11H4l3 3m-3-3 3-3"/></svg></button>
+      <button id="reset-paint-colors" type="button" aria-label="恢复黑白" title="前景黑色、背景白色 · D"><span></span></button>
+    </div>
+    <div id="surface-tool-buttons">
+        <button id="surface-orbit" type="button" aria-pressed="true" title="抓手 · H" aria-label="抓手">抓手</button>
+        <button id="surface-paint" type="button" aria-pressed="false" title="画笔 · B · Shift 拖动直线" aria-label="画笔">画笔</button>
+        <button id="surface-sample" type="button" aria-pressed="false" aria-label="取样" title="从实时材质取样 · I" hidden>取样</button>
+        <button id="surface-mask" aria-label="蒙版笔刷" title="蒙版笔刷 · Shift 拖动直线" type="button" aria-pressed="false">蒙版</button>
+        <button id="surface-fill" type="button" data-material-only aria-pressed="false" title="按面填蒙版 · 4">蒙版填充</button>
+      <button id="uv-eraser-tool" data-drawing-only type="button" title="橡皮擦 · E · Shift 拖动直线" aria-label="橡皮擦" aria-pressed="false">◇</button>
+    </div>
+    <button id="fill" title="新建填充层" aria-label="新建填充层">▧</button>
+    <button id="paint-layer" title="新建材质绘制层" aria-label="新建材质绘制层">＋</button>
+    <button id="decal" data-material-only title="在机体上放置贴花" aria-label="新建贴花层">▣</button>
+    <button id="projection" data-material-only title="编辑历史顶视贴花" aria-label="编辑历史顶视贴花" aria-pressed="false">✥</button>
+  </aside>
+  <div id="left-dock" class="dock-zone" data-area="left" aria-label="左侧停靠区" hidden></div>
+  <div id="left-splitter" class="dock-splitter" role="separator" aria-label="左侧停靠区宽度" aria-orientation="vertical" aria-controls="left-dock" tabindex="0" hidden></div>
+  <div class="work-area">
+  <section class="center">
+    <div class="bar view-tools">
+      <div id="canvas-document-tab" data-drawing-only role="group" aria-label="当前贴图文档"><span class="canvas-document-icon" aria-hidden="true"></span><strong id="canvas-document-name"></strong><span id="canvas-document-channel"></span></div>
+      <nav class="workspace-switch" data-outside-drawing aria-label="视图布局">
+        <button id="three" type="button" title="三维视图 · 1" aria-pressed="false" disabled>三维</button>
+        <button id="uv" type="button" title="UV 视图 · 2" aria-pressed="true" disabled>UV 检查</button>
+        <button id="split" type="button" title="三维与 UV · 3" aria-pressed="false" disabled>三维＋UV</button>
+      </nav>
+      <button id="fit">适应</button>
+      <div class="bar model-view-tools" role="group" aria-label="建模工具">
+        <select id="model-mode" aria-label="建模模式" title="切换物体与编辑模式 · Tab">
+          <option value="object">物体模式</option><option value="edit">编辑模式</option>
+        </select>
+        <div id="model-elements" class="bar model-tools-group" role="group" aria-label="选择类型" hidden>
+          <button type="button" data-model-element="vertex" aria-pressed="true" title="选择顶点 · 1">点</button>
+          <button type="button" data-model-element="edge" aria-pressed="false" title="选择边 · 2">边</button>
+          <button type="button" data-model-element="face" aria-pressed="false" title="选择面 · 3">面</button>
+        </div>
+        <button id="model-box-select" type="button" aria-label="框选物体或元素" aria-pressed="false"
+          title="框选穿透 · B · Shift 添加 · Alt 移除">框选</button>
+        <div class="bar model-tools-group" role="group" aria-label="变换">
+          <button type="button" data-model-tool="translate" aria-pressed="true" title="移动 · G">移动</button>
+          <button type="button" data-model-tool="rotate" aria-pressed="false" title="旋转 · R">旋转</button>
+          <button type="button" data-model-tool="scale" aria-pressed="false" title="缩放 · S">缩放</button>
+        </div>
+        <button id="model-wireframe" type="button" aria-pressed="false">线框</button>
+        <button id="model-ortho" type="button" aria-pressed="false">正交</button>
+        <button id="model-frame-selection" type="button" title="聚焦所选物体或元素 · ." disabled>聚焦所选</button>
+        <button id="model-local-view" type="button" aria-pressed="false" title="隔离所选物体 · /" disabled>局部视图</button>
+        <button id="model-outliner-toggle" type="button" aria-controls="model-outliner" aria-expanded="false">大纲</button>
+        <button id="model-export" type="button" title="导出当前模型及原始材质" disabled>导出 GLB</button>
+      </div>
+      <select id="source" aria-label="贴图对照"><option value="live">实时制作</option><option value="preview">烘焙预览</option><option value="base">全 UV 底层</option><option value="original">原贴图</option></select>
+      <select id="channel" aria-label="检查通道"><option value="color">颜色</option><option value="metallic">金属度</option><option value="roughness">粗糙度</option><option value="normal">法线</option><option value="height">高度</option><option value="emission">自发光</option><option value="alpha">不透明度</option><option value="ao">环境遮蔽</option><option value="coverage">写入诊断</option></select>
+      <select id="compare-preview" aria-label="贴图版本对照"><option value="">版本对照</option></select>
+      <button id="inspect-channel" data-outside-drawing aria-pressed="false" title="将所选通道显示在三维模型上">三维通道</button>
+      <button id="uv-locate" data-material-only type="button" aria-label="从模型定位 UV" aria-pressed="false" title="在模型上点选，定位对应的 UV">定位 UV</button>
+      <button id="focus-views" type="button" aria-label="视口专注模式" aria-pressed="false" title="视口专注模式 · Tab">⛶</button>
+    </div>
+      <div id="surface-tools" class="bar" role="group" aria-label="绘制工具">
+        <strong id="canvas-active-tool" data-drawing-only>抓手</strong>
+        <div id="canvas-navigation-options" class="bar" data-drawing-only>
+          <span id="canvas-zoom-directions" role="group" aria-label="缩放方向" hidden><button id="canvas-zoom-in-mode" type="button" aria-label="放大模式" aria-pressed="true">＋</button><button id="canvas-zoom-out-mode" type="button" aria-label="缩小模式" aria-pressed="false">−</button></span>
+          <button id="canvas-fit" type="button" title="适应画布 · ⌘0">适应画布</button><button id="canvas-actual" type="button" title="原 UV 比例 · ⌘1 · 停笔后自动提升至 4K">100%</button>
+          <span id="canvas-navigation-hint">空格拖动画布</span>
+        </div>
+        <form id="uv-transform-options" class="bar" data-drawing-only hidden>
+          <label>位移 X <input type="number" data-transform-field="x" min="-8192" max="8192" step="any"> px</label>
+          <label>位移 Y <input type="number" data-transform-field="y" min="-8192" max="8192" step="any"> px</label>
+          <label>宽度 <input type="number" data-transform-field="sx" min="5" max="800" step="any"> %</label>
+          <label>高度 <input type="number" data-transform-field="sy" min="5" max="800" step="any"> %</label>
+          <label>旋转 <input type="number" data-transform-field="angle" min="-360" max="360" step="any"> °</label>
+          <button id="uv-flip-x" type="button" aria-pressed="false">水平翻转</button>
+          <button id="uv-flip-y" type="button" aria-pressed="false">垂直翻转</button>
+          <label title="保留选区原位置的笔触"><input id="uv-transform-copy" type="checkbox">保留原件</label>
+          <button type="submit">应用</button><button id="uv-transform-cancel" type="button">取消</button>
+        </form>
+        <div id="uv-selection-options" class="bar" data-drawing-only hidden>
+          <output id="uv-selection-size"></output>
+          <button id="uv-transform-start" type="button" title="自由变换 · ⌘T">自由变换</button>
+          <button id="uv-selection-fill-material" type="button" title="用当前画笔材质填充选区 · Alt+Delete">填充材质</button>
+          <select id="uv-selection-mask-value" aria-label="选区蒙版值"><option value="0">遮盖</option><option value="1">恢复</option></select>
+          <button id="uv-selection-fill-mask" type="button" title="使用左侧蒙版值填充选区">填充蒙版</button>
+          <button id="uv-selection-erase" type="button" title="清除当前绘制层在选区内的内容 · Delete">清除内容</button>
+          <button id="uv-selection-clear" type="button" title="取消选区 · ⌘D">取消选区</button>
+        </div>
+        <span id="surface-brush" hidden>
+          <select id="brush-preset" aria-label="画笔预设"><option value="">画笔预设</option><option value="hard">硬边</option><option value="soft">软边</option><option value="scuff">轻磨痕</option></select>
+          <label data-material-only title="模型单位 · [ 缩小 · ] 放大">半径 <input id="brush-radius" type="range" min=".02" max=".65" step=".01" value=".22"></label>
+          <label data-drawing-only title="4K 贴图像素 · [ 缩小 · ] 放大">半径 <input id="brush-uv-radius" type="range" min="2" max="256" step="1" value="48"><output id="brush-uv-size">48 px</output></label>
+          <label>硬度 <input id="brush-hardness" type="range" min="0" max="1" step=".05" value=".75"></label>
+          <label>强度 <input id="brush-opacity" type="range" min="0" max="1" step=".05" value="1"></label>
+          <label title="数位笔压力影响画笔、橡皮和蒙版笔刷的强度"><input id="brush-uv-pressure" type="checkbox" checked>压感强度</label>
+          <button id="brush-mirror" type="button" data-material-only aria-pressed="false" title="沿 示例模型 中线镜像笔触 · L">左右镜像</button>
+        </span>
+        <span id="surface-material" hidden>
+          <input id="brush-ink-color" type="color" aria-label="画笔颜色" title="画笔颜色">
+          <label><input id="brush-color" type="checkbox" checked>颜色</label>
+          <label><input id="brush-metallic" type="checkbox">金属</label>
+          <label><input id="brush-roughness" type="checkbox" checked>粗糙</label>
+          <label><input id="brush-normal" type="checkbox" checked>法线</label>
+          <label><input id="brush-height" type="checkbox" checked>高度</label>
+          <label><input id="brush-emission" type="checkbox" checked>发光</label>
+          <label><input id="brush-alpha" type="checkbox" checked>透明</label>
+          <label><input id="brush-ao" type="checkbox" checked>AO</label>
+          <label data-material-only><input id="brush-erase" type="checkbox" title="橡皮擦 · E">擦除</label>
+        </span>
+        <label id="surface-mask-ink" hidden>蒙版 <select id="brush-ink"><option value="0">黑色 · 遮盖</option><option value="1">白色 · 恢复</option><option value="custom" hidden>当前灰度</option></select></label>
+        <label id="surface-fill-region" data-material-only hidden>范围 <select id="fill-region" aria-label="蒙版填充范围"><option value="polygon">多边形</option><option value="triangle">三角面</option><option value="mesh">连通网格</option><option value="island">UV 岛</option></select></label>
+        <span id="surface-hint" role="status"></span>
+      </div>
+    <div class="view-panes">
+    <div id="viewport" aria-label="真实 示例模型 三维视口" hidden>
+      <div class="vp-axis" data-axis-space="blender" aria-hidden="true"></div>
+      <aside id="display-sidebar" aria-label="三维视口显示">
+        <button id="display-toggle" type="button" aria-controls="display-options" aria-expanded="false" aria-label="展开视口显示侧栏" title="视口显示 · N">
+          <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="m7.5 2.5-3.5 3.5 3.5 3.5"/></svg>
+          <span aria-hidden="true">显示</span>
+        </button>
+        <section id="display-options" aria-label="视口显示" inert>
+          <details class="display-section" open>
+            <summary>灯光</summary>
+            <div class="display-fields">
+              <label>环境 <select data-scene="environment"><option value="studio">棚拍</option><option value="soft">柔光</option><option value="daylight">日光</option></select></label>
+              <label>旋转 <span><input type="range" data-scene="rotation" min="0" max="360" step="1"><output></output></span></label>
+              <label>曝光 <span><input type="range" data-scene="exposure" min="-4" max="4" step=".1"><output></output></span></label>
+              <label>环境反射 <span><input type="range" data-scene="environmentStrength" min="0" max="3" step=".05"><output></output></span></label>
+            </div>
+          </details>
+          <details class="display-section" open>
+            <summary>场景</summary>
+            <div class="display-fields">
+              <label>背景 <select data-scene="background"><option value="gradient">渐变</option><option value="solid">纯色</option><option value="transparent">棋盘格</option></select></label>
+              <div class="bar"><label><input type="checkbox" data-scene="grid">网格</label><label><input type="checkbox" data-scene="ground">地面阴影</label></div>
+            </div>
+          </details>
+          <button id="reset-display" type="button">重置显示</button>
+        </section>
+      </aside>
+      <span id="brush-cursor" class="brush-cursor" aria-hidden="true" hidden></span>
+      <span id="mirror-cursor" class="brush-cursor" aria-hidden="true" hidden></span>
+      <span id="model-marquee" aria-hidden="true" hidden></span>
+      <div id="projector-gizmo" role="group" aria-label="三维贴花变换" hidden>
+        <button data-project-tool="move" title="拖动贴花位置">移动</button>
+        <button data-project-tool="aim" title="拖动调整投影方向">方向</button>
+        <button data-project-tool="scale" title="拖动缩放">缩放</button>
+        <button data-project-tool="rotate" title="拖动旋转">旋转</button>
+      </div>
+    </div>
+    <div id="view-splitter" class="dock-splitter" role="separator" aria-label="三维视口宽度" aria-orientation="vertical" aria-controls="viewport" tabindex="0" hidden></div>
+    <div id="uv-view" aria-label="贴图画布" tabindex="-1">
+      <img id="texture" alt="UV 贴图" draggable="false">
+      <canvas id="live-uv" aria-label="实时 UV 贴图" width="256" height="256" hidden></canvas>
+      <canvas id="uv-guide" aria-hidden="true" width="256" height="256" hidden></canvas>
+      <svg id="uv-selection-overlay" aria-hidden="true" hidden><polygon id="uv-selection-border"></polygon><polygon id="uv-lasso-border"></polygon><g id="uv-selection-handles"></g></svg>
+      <span id="uv-brush-cursor" class="brush-cursor" aria-hidden="true" hidden></span>
+      <div id="uv-wipe-overlay" hidden><img id="uv-wipe-texture" alt="当前 UV 贴图" draggable="false"></div>
+      <span id="uv-pin" aria-hidden="true" hidden></span>
+      <label id="uv-wipe-control" hidden>版本分割 <input id="uv-wipe" type="range" min="0" max="100" value="50"></label><p id="uv-unavailable" hidden>此来源没有所选通道。</p>
+      <output id="uv-version"></output>
+      <div class="uv-controls" aria-label="UV 导航">
+        <button id="uv-pin-edit" type="button" title="在二维绘制区打开定位点" hidden>到绘制区</button>
+        <button id="uv-pin-clear" type="button" aria-label="清除 UV 定位" title="清除 UV 定位" hidden>清除定位</button>
+        <button id="uv-guide-toggle" type="button" aria-pressed="true" title="显示可绘制 UV 区域轮廓">轮廓</button>
+        <button id="uv-out" aria-label="缩小 UV">−</button>
+        <button id="uv-reset" title="适应 UV 视图">100%</button>
+        <button id="uv-in" aria-label="放大 UV">＋</button>
+      </div>
+    </div>
+    <div id="projection-view" hidden><div class="projection-tools" role="group" aria-label="投影变换">
+        <button data-transform="move" aria-pressed="true">移动</button>
+        <button data-transform="scale" aria-pressed="false">缩放</button>
+        <button data-transform="rotate" aria-pressed="false">旋转</button>
+        <select id="projection-guide" aria-label="投影参考"><option value="silhouette">机体轮廓</option><option value="receiver">接收范围</option><option value="protected">保护区</option><option value="">无参考</option></select>
+      </div><div id="projection-frame"><img id="projection-reference" alt="" draggable="false"><img id="projection-art" alt="当前贴花" draggable="false" hidden></div><p>拖入素材创建贴花 · 拖动贴花调整投影</p></div>
+    </div>
+    <div class="view-status"><div id="canvas-status" data-drawing-only><label title="按 4096px 原 UV 计算比例；绘制时快速预览，停笔后自动合成 4K"><input id="canvas-zoom-percent" type="number" aria-label="画布缩放比例" min="1" max="1600" step="any" value="100"> %</label><span title="工程贴图规格">文档 4096 × 4096 px</span><output id="canvas-pointer" aria-label="画布像素坐标"></output></div><p id="viewport-status"></p><output id="live-resolution" aria-label="实际预览分辨率" hidden></output><button id="retry-live-detail" type="button" hidden>重试 4K</button><output id="model-status" title="建模修改随工程自动保存，可在材质区继续涂装">点击模型选择物体</output><button id="exit-mask-inspection" type="button" hidden>退出蒙版检查</button><button id="exit-layer-isolation" type="button" hidden>退出独显</button><output id="preview-state"></output><output id="model-geometry-status" role="status" hidden></output><button id="model-geometry-retry" type="button" hidden>重试表面准备</button><a id="model-geometry-log" target="_blank" hidden>建模日志</a></div>
+  </section>
+  <div id="bottom-splitter" class="dock-splitter" role="separator" aria-label="底部停靠区高度" aria-orientation="horizontal" aria-controls="bottom-dock" tabindex="0"></div>
+  <div id="bottom-dock" class="dock-zone" data-area="bottom" aria-label="底部停靠区">
+  <section class="dock-panel asset-shelf" data-panel="assets" aria-label="素材库">
+    <div class="dock-title"></div>
+    <div class="dock-content">
+    <div id="paint-library"></div>
+    <div id="image-library">
+    <div class="shelf-header">
+      <input id="asset-search" type="search" placeholder="搜索素材" aria-label="搜索素材">
+      <div class="shelf-actions" id="shelf-actions">
+        <button id="asset-view" type="button" title="查看素材大图" aria-label="查看素材大图" disabled>查看</button>
+        <button id="uv-add-image" data-drawing-only type="button" disabled>置入图像文档</button>
+        <select id="asset-role" aria-label="素材用途"></select><button id="apply-asset" type="button">应用到层</button>
+        <label class="upload">＋ 导入 PNG<input id="upload" type="file" accept="image/png"></label>
+      </div>
+    </div>
+    <div id="assets"></div>
+    </div>
+    </div>
+  </section>
+  </div>
+  <section id="shader-editor" aria-label="着色器编辑器"></section>
+  </div>
+  <div id="inspector-splitter" class="dock-splitter" role="separator" aria-label="右侧停靠区宽度" aria-orientation="vertical" aria-controls="paint-inspector" tabindex="0"></div>
+  <div class="dock-zone" data-area="right" id="paint-inspector" aria-label="右侧停靠区">
+    <section class="dock-panel layer-stack" data-panel="layers" aria-label="图层栈">
+      <div class="dock-title"></div>
+      <div class="dock-content">
+      <div class="material"><div><small>材质集</small><strong>示例模型</strong></div><span>表面涂装</span></div>
+      <div class="layer-heading"><button id="add-folder" type="button" title="将图层收进新文件夹可按 ⌘G">＋ 文件夹</button>
+        <div class="layer-heading-actions">
+          <button id="toggle-layer-search" type="button" aria-label="搜索图层" aria-controls="layer-search" aria-expanded="false" title="按图层名称搜索">搜索图层</button>
+          <select id="layer-channel" aria-label="图层栈通道">
+            <option value="">全部通道</option><option value="color">颜色</option><option value="metallic">金属度</option><option value="roughness">粗糙度</option><option value="normal">法线</option><option value="height">高度</option><option value="emission">自发光</option><option value="alpha">不透明度</option><option value="ao">环境遮蔽</option>
+          </select>
+        </div>
+      </div>
+      <div id="drawing-layer-settings" data-drawing-only>
+        <select id="drawing-layer-blend" aria-label="图层混合模式"><option value="normal">正常</option><option value="multiply">正片叠底</option><option value="screen">滤色</option><option value="overlay">叠加</option></select>
+        <label><span id="drawing-opacity-label">不透明度</span> <input id="drawing-layer-opacity" type="number" aria-label="图层不透明度" min="0" max="100" step="1" value="100"> %</label>
+      </div>
+      <input id="layer-search" type="search" aria-label="图层名称" placeholder="图层名称" autocomplete="off" hidden>
+      <p id="layer-search-empty" role="status" hidden>没有匹配图层</p>
+      <div id="layers"></div><button id="base">全 UV 底层</button>
+      </div>
+      <div id="drawing-layer-actions" data-drawing-only role="group" aria-label="新建图层"><button id="add-layer-mask" type="button" aria-label="添加图层蒙版" title="添加白色蒙版并直接绘制" disabled>蒙版</button></div>
+    </section>
+    <section class="dock-panel" data-panel="properties" aria-label="属性">
+      <div class="dock-title"></div>
+      <div class="dock-content"><form id="properties"></form></div>
+    </section>
+  </div>
+  <aside id="model-outliner" aria-label="大纲视图" hidden>
+    <header><strong>大纲视图</strong><output aria-label="对象数量"></output><button id="model-show-all" type="button" aria-label="显示全部物体" title="显示全部物体 · Alt+H" disabled></button><button id="model-outliner-close" type="button" aria-label="收起大纲视图">×</button></header>
+    <input type="search" aria-label="搜索物体" placeholder="搜索物体">
+    <ul aria-label="物体列表"></ul>
+    <p>正在载入场景…</p>
+    <form id="model-numeric" aria-label="数值变换">
+      <div class="model-numeric-heading"><strong>数值变换</strong><small>世界坐标</small></div>
+      <fieldset disabled>
+        <legend>移动增量</legend>
+        <div class="model-numeric-axes">
+          <label>X <input type="number" step="any" value="0" required></label>
+          <label>Y <input type="number" step="any" value="0" required></label>
+          <label>Z <input type="number" step="any" value="0" required></label>
+        </div>
+        <div class="model-numeric-footer"><output aria-live="polite"></output><button type="submit">应用</button></div>
+      </fieldset>
+    </form>
+  </aside>
+  <div id="dock-guide" aria-hidden="true" hidden></div>
+</main>
+<p id="empty">新建一个 示例模型 涂装工程开始制作。</p>
+<dialog id="settings-dialog" aria-labelledby="settings-title">
+  <header><div><strong id="settings-title">设置</strong><small>阿拉克涅工作台 · <a href="/license" target="_blank" rel="noopener">GPL-3.0-only</a></small></div><button id="close-settings" type="button" aria-label="关闭设置">✕</button></header>
+  <div class="settings-body">
+    <nav role="tablist" aria-label="设置分类" aria-orientation="vertical">
+      <button id="settings-tab-interface" type="button" role="tab" data-settings-tab="interface" aria-controls="settings-interface" aria-selected="true">界面</button>
+      <button id="settings-tab-brush" type="button" role="tab" data-settings-tab="brush" aria-controls="settings-brush" aria-selected="false" tabindex="-1">绘制</button>
+      <button id="settings-tab-viewport" type="button" role="tab" data-settings-tab="viewport" aria-controls="settings-viewport" aria-selected="false" tabindex="-1">视口</button>
+      <button id="settings-tab-preview" type="button" role="tab" data-settings-tab="preview" aria-controls="settings-preview" aria-selected="false" tabindex="-1">预览</button>
+      <button id="settings-tab-shortcuts" type="button" role="tab" data-settings-tab="shortcuts" aria-controls="settings-shortcuts" aria-selected="false" tabindex="-1">快捷键</button>
+      <div class="settings-transfer"><button id="import-settings" type="button">导入设置…</button><button id="export-settings" type="button">导出设置</button><input id="settings-file" type="file" accept=".json,application/json" aria-label="导入设置文件" hidden></div>
+    </nav>
+    <form id="settings-form">
+      <section id="settings-interface" role="tabpanel" aria-labelledby="settings-tab-interface" data-settings-section="interface">
+        <h2>界面</h2><p class="settings-hint">调整工作台的间距、动态效果和启动区域。</p>
+        <label>界面密度<select data-group="preferences" data-setting="density" aria-label="界面密度"><option value="compact">紧凑</option><option value="comfortable">舒适</option></select></label>
+        <label>动态效果<select data-group="preferences" data-setting="motion" aria-label="动态效果"><option value="system">跟随系统</option><option value="full">开启</option><option value="reduced">关闭</option></select></label>
+        <label>启动区域<select data-group="preferences" data-setting="startupArea" aria-label="启动区域"><option value="last">上次使用的区域</option><option value="modeling">建模</option><option value="material">材质</option><option value="drawing">绘制</option></select></label>
+      </section>
+      <section id="settings-brush" role="tabpanel" aria-labelledby="settings-tab-brush" data-settings-section="brush" hidden>
+        <h2>绘制</h2><p class="settings-hint">与顶部工具栏使用同一套画笔参数。</p>
+        <label>二维笔刷半径<span><input data-group="brush" data-setting="uvRadius" aria-label="二维笔刷半径" type="range" min="2" max="256" step="1"><output></output></span></label>
+        <label>三维笔刷半径<span><input data-group="brush" data-setting="worldRadius" aria-label="三维笔刷半径" type="range" min=".02" max=".65" step=".01"><output></output></span></label>
+        <label>硬度<span><input data-group="brush" data-setting="hardness" aria-label="画笔硬度" type="range" min="0" max="1" step=".05"><output></output></span></label>
+        <label>强度<span><input data-group="brush" data-setting="opacity" aria-label="画笔强度" type="range" min=".05" max="1" step=".05"><output></output></span></label>
+        <label class="settings-check"><input data-group="brush" data-setting="pressure" type="checkbox">压感控制强度</label>
+        <label class="settings-check"><input data-group="brush" data-setting="mirror" type="checkbox">三维笔刷左右镜像</label>
+      </section>
+      <section id="settings-viewport" role="tabpanel" aria-labelledby="settings-tab-viewport" data-settings-section="viewport" hidden>
+        <h2>视口</h2><p class="settings-hint">与三维视口的显示侧栏同步。</p>
+        <label>环境光<select data-group="display" data-setting="environment" aria-label="环境光"><option value="studio">棚拍</option><option value="soft">柔光</option><option value="daylight">日光</option></select></label>
+        <label>环境旋转<span><input data-group="display" data-setting="rotation" aria-label="环境旋转" type="range" min="0" max="360" step="1"><output></output></span></label>
+        <label>环境反射<span><input data-group="display" data-setting="environmentStrength" aria-label="环境反射" type="range" min="0" max="3" step=".05"><output></output></span></label>
+        <label>灯光强度<span><input data-group="display" data-setting="lightStrength" aria-label="灯光强度" type="range" min="0" max="4" step=".05"><output></output></span></label>
+        <label>曝光<span><input data-group="display" data-setting="exposure" aria-label="视口曝光" type="range" min="-4" max="4" step=".1"><output></output></span></label>
+        <label>背景<select data-group="display" data-setting="background" aria-label="视口背景"><option value="gradient">渐变</option><option value="solid">纯色</option><option value="transparent">棋盘格</option></select></label>
+        <label>背景颜色<input data-group="display" data-setting="backgroundColor" aria-label="背景颜色" type="color"></label>
+        <label>渐变顶部<input data-group="display" data-setting="backgroundTop" aria-label="渐变顶部颜色" type="color"></label>
+        <label class="settings-check"><input data-group="display" data-setting="grid" type="checkbox">显示网格</label>
+        <label class="settings-check"><input data-group="display" data-setting="ground" type="checkbox">地面与阴影</label>
+        <label>地面颜色<input data-group="display" data-setting="groundColor" aria-label="地面颜色" type="color"></label>
+        <label>地面高度<span><input data-group="display" data-setting="groundHeight" aria-label="地面高度" type="range" min="-.5" max=".5" step=".01"><output></output></span></label>
+        <label>地面粗糙度<span><input data-group="display" data-setting="groundRoughness" aria-label="地面粗糙度" type="range" min="0" max="1" step=".05"><output></output></span></label>
+      </section>
+      <section id="settings-preview" role="tabpanel" aria-labelledby="settings-tab-preview" data-settings-section="preview" hidden>
+        <h2>实时预览</h2><p class="settings-hint">绘制期间使用 256 × 256 快速预览。</p>
+        <label class="settings-check"><input id="settings-auto-detail" data-group="preferences" data-setting="autoDetail" type="checkbox">停笔后自动提升到 4K</label>
+        <label>停笔等待<span><input id="settings-detail-delay" data-group="preferences" data-setting="detailDelay" aria-label="停笔等待时间" type="range" min="300" max="5000" step="100"><output></output></span></label>
+        <p class="settings-hint">4K 合成完成后，颜色、金属度与粗糙度一起更新。关闭自动提升可降低连续制作时的后台计算量。</p>
+      </section>
+      <section id="settings-shortcuts" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-settings-section="shortcuts" hidden>
+        <h2>快捷键参考</h2><p class="settings-hint">⌘ 对应 Mac；Windows 与 Linux 使用 Ctrl。</p>
+        <dl class="settings-shortcuts"><dt>打开设置</dt><dd>⌘ / Ctrl + ,</dd><dt>画笔／橡皮／抓手</dt><dd>B / E / H</dd><dt>矩形选区／套索</dt><dd>M / L</dd><dt>自由变换</dt><dd>⌘ / Ctrl + T</dd><dt>交换颜色／恢复黑白</dt><dd>X / D</dd><dt>取样／缩放</dt><dd>I / Z</dd><dt>调整笔刷大小</dt><dd>[ / ]</dd><dt>临时抓手</dt><dd>空格 + 拖动</dd><dt>适应画布／实际大小</dt><dd>⌘ / Ctrl + 0 / 1</dd><dt>撤销／重做</dt><dd>⌘Z / ⇧⌘Z</dd><dt>物体／编辑模式</dt><dd>Tab</dd><dt>点／边／面</dt><dd>1 / 2 / 3</dd><dt>移动／旋转／缩放</dt><dd>G / R / S</dd><dt>约束轴／切换坐标</dt><dd>X / Y / Z；重复按同一轴</dd><dt>平面约束</dt><dd>Shift + X / Y / Z</dd><dt>确认／取消变换</dt><dd>Enter / Esc；左键 / 右键</dd><dt>精调／增量吸附</dt><dd>Shift / Ctrl</dd><dt>输入下一数值分量</dt><dd>Tab</dd><dt>前／右／顶视</dt><dd>小键盘 1 / 3 / 7</dd><dt>视口显示侧栏</dt><dd>N</dd></dl>
+      </section>
+    </form>
+  </div>
+  <p id="settings-error" role="alert"></p>
+  <footer><button id="reset-settings" type="button">恢复默认</button><output id="settings-save-state">设置保存在此浏览器</output><button id="cancel-settings" type="button">取消</button><button id="save-settings" type="submit" form="settings-form" class="primary">保存设置</button></footer>
+</dialog>
+<dialog id="project-dialog" aria-labelledby="project-dialog-title">
+  <header><strong id="project-dialog-title">工程</strong><button id="close-project-dialog" type="button">关闭</button></header>
+  <section class="project-dialog-content">
+    <label>打开工程<select id="projects" aria-label="涂装工程"></select></label>
+    <fieldset><legend>当前工程详情</legend><dl>
+      <dt>名称</dt><dd id="project-detail-name">未打开工程</dd>
+      <dt>修订</dt><dd id="revision"></dd>
+      <dt>工程 ID</dt><dd id="project-detail-id"></dd>
+      <dt>保存时间</dt><dd id="project-detail-updated"></dd>
+    </dl></fieldset>
+    <p>工程修改自动保存在本机。模型、材质与绘制共用同一份工程。</p>
+  </section>
+</dialog>
+<dialog id="paint-render-dialog" aria-labelledby="paint-render-title">
+  <header><strong id="paint-render-title">Cycles 出图</strong><button id="close-paint-render" type="button" autofocus>关闭</button></header>
+  <div class="paint-render-body">
+    <section class="paint-render-image" aria-label="渲染结果">
+      <img id="paint-render-image" alt="Cycles 渲染结果" decoding="async" hidden>
+      <p id="paint-render-placeholder">还没有渲染结果</p>
+    </section>
+    <section class="paint-render-tasks" aria-label="渲染任务">
+      <div id="paint-render-info" role="status"></div>
+      <progress id="paint-render-samples" aria-label="Cycles 实际采样进度" hidden></progress>
+      <p id="paint-render-error" role="alert"></p>
+      <div class="paint-render-actions">
+        <button id="cancel-paint-render" type="button" hidden>取消渲染</button>
+        <button id="retry-paint-render" type="button" hidden>重试此修订</button>
+        <a id="paint-render-log" target="_blank" rel="noopener" hidden>查看日志</a>
+      </div>
+      <div id="paint-render-list" aria-label="最近的出图任务"></div>
+    </section>
+  </div>
+  <footer>
+    <div><small id="paint-render-summary"></small><small id="paint-render-devices" role="status"></small></div>
+    <div class="paint-render-actions">
+      <a id="paint-render-download" hidden>下载 PNG</a>
+      <a id="paint-render-passes" hidden>下载通道 EXR</a>
+      <a id="paint-render-report" target="_blank" rel="noopener" hidden>校验报告</a>
+      <button id="paint-render-settings" type="button">设置</button>
+      <button id="start-paint-render" class="primary" type="button">渲染当前修订</button>
+    </div>
+  </footer>
+</dialog>
+<dialog id="delivery-dialog" aria-labelledby="delivery-title">
+  <header><strong id="delivery-title">导出工程与贴图</strong><small id="delivery-revision"></small><button id="close-delivery" type="button" autofocus>关闭</button></header>
+  <section class="delivery-content">
+    <div class="delivery-overview">
+      <div><h2>审阅预览</h2><p id="delivery-preview"></p></div>
+      <button id="delivery-preview-button" type="button">生成 4K 预览</button>
+    </div>
+    <div id="delivery-channels" class="delivery-channels"></div>
+    <p id="diagnostics"></p>
+    <div id="delivery-reference" class="bar"></div>
+    <fieldset class="delivery-render-options">
+      <legend>成品预览</legend>
+      <label>构图<select id="delivery-framing" aria-label="交付构图"><option value="auto">完整模型</option><option value="viewport">当前三维视角</option><option value="saved" disabled>工程渲染相机</option></select></label>
+      <label>尺寸<select id="delivery-size" aria-label="交付尺寸"><option value="960x720">960 × 720</option><option value="1440x1080">1440 × 1080</option><option value="1920x1080">1920 × 1080</option><option value="1080x1440">1080 × 1440</option><option value="3840x2160">3840 × 2160 · 4K</option><option value="2160x3840">2160 × 3840 · 4K</option><option value="custom" hidden>自定义尺寸</option></select></label>
+      <label>质量<select id="delivery-quality" aria-label="交付质量"><option value="fast">快速</option><option value="standard" selected>标准</option><option value="high">精细</option><option value="custom" hidden>自定义采样</option></select></label>
+      <small id="delivery-render-hint">输出设置同时用于 Blender 副本和成品渲染，八通道贴图保持 4K。</small>
+    </fieldset>
+    <section class="delivery-task" aria-label="任务状态">
+      <p id="task" role="status"></p>
+      <div class="bar"><button id="retry-preview" type="button" hidden>重试预览</button><button id="retry-export" type="button" title="使用已确认的修订和输出设置" hidden>重试此导出</button><button id="cancel" type="button" hidden>取消任务</button><a id="log" hidden>查看日志</a></div>
+      <p id="delivery-error" role="alert"></p>
+    </section>
+    <h2>最近的导出</h2><div id="downloads"></div>
+  </section>
+  <div class="delivery-footer">
+    <label><input type="checkbox" id="approved" disabled>我已检查当前 4K 预览和三维结果</label>
+    <button id="export-textures" type="button" disabled>仅导出工程与贴图</button>
+    <button id="delivery" class="primary" type="button" disabled>导出此修订</button>
+  </div>
+</dialog>
+<dialog id="mask-editor" aria-labelledby="mask-title">
+  <header><strong id="mask-title">编辑蒙版</strong><small id="mask-space"></small><button id="mask-close" type="button">取消</button></header>
+  <div class="mask-toolbar">
+    <button id="mask-hide" type="button" aria-pressed="true">遮盖</button>
+    <button id="mask-reveal" type="button" aria-pressed="false">恢复</button>
+    <label>笔刷大小 <input id="mask-size" type="range" min="1" max="30" value="8"></label>
+    <label>硬度 <input id="mask-hardness" type="range" min="0" max="100" value="70"></label>
+    <button id="mask-undo" type="button" title="撤销笔触 · ⌘Z">撤销</button>
+    <button id="mask-redo" type="button" title="重做笔触 · ⇧⌘Z">重做</button>
+    <button id="mask-white" type="button">填白</button><button id="mask-black" type="button">填黑</button>
+  </div>
+  <div class="mask-area"><canvas id="mask-canvas" aria-label="灰度蒙版画布"></canvas></div>
+  <div class="mask-footer"><span id="mask-status" role="status"></span><button id="mask-save" class="primary" type="button">保存蒙版</button></div>
+</dialog>
+<dialog id="new-paint-dialog" class="paint-form-dialog" aria-labelledby="new-paint-title">
+  <form id="new-paint-form">
+    <header><h2 id="new-paint-title">新建涂装工程</h2><button id="new-paint-close" type="button">关闭</button></header>
+    <div class="paint-form-content">
+      <label>工程名称<input id="new-paint-name" type="text" maxlength="100" required autofocus></label>
+      <small>模型 · 示例模型</small>
+    </div>
+    <div class="paint-form-footer"><span id="new-paint-error" role="alert"></span><button id="new-paint-submit" type="submit" class="primary">创建</button></div>
+  </form>
+</dialog>
+<dialog id="paint-import-dialog" class="paint-form-dialog" aria-labelledby="paint-import-title">
+  <form>
+    <header><h2 id="paint-import-title">打开涂装 ZIP</h2><button type="button">关闭</button></header>
+    <div class="paint-form-content">
+      <label>涂装 ZIP<input type="file" accept=".zip,application/zip" required></label>
+      <small>支持工程副本和新版交付包。核对登记模型和素材后，恢复为独立工程。</small>
+    </div>
+    <div class="paint-form-footer"><span role="alert"></span><button type="submit" class="primary">打开</button></div>
+  </form>
+</dialog>
+<dialog id="paint-text-dialog" class="paint-form-dialog" aria-labelledby="paint-text-title">
+  <form>
+    <header><h2 id="paint-text-title">添加文字</h2><button type="button" data-close-text>关闭</button></header>
+    <fieldset class="paint-form-content">
+      <label>文字<textarea name="content" rows="4" maxlength="480" required placeholder="输入编号或标记"></textarea></label>
+      <div class="paint-text-fields">
+        <label>字号（px）<input name="fontSize" type="number" min="16" max="512" step="1" required></label>
+        <label>字重<select name="weight" aria-label="字重"><option value="400">常规</option><option value="700">粗体</option></select></label>
+        <label>对齐<select name="align" aria-label="对齐"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+        <label>颜色<input name="color" type="color"></label>
+      </div>
+      <div class="paint-text-sample" aria-hidden="true"></div>
+    </fieldset>
+    <div class="paint-form-footer"><span role="alert"></span><button type="submit" class="primary">应用</button></div>
+  </form>
+</dialog>
+<footer id="status" role="status"></footer>
+<script type="module" src="/paint-ui.mjs"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+#history-dialog{box-sizing:border-box;width:min(740px,calc(100vw - 32px));max-height:calc(100dvh - 40px);padding:0;background:#24262a;border:1px solid #505257;border-radius:8px;color:#ddd;overflow:auto;font:inherit}
+#history-dialog::backdrop{background:#0008}
+#history-dialog header{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #ffffff12}
+#history-dialog h2{margin:0;font-size:16px;font-weight:600}#history-dialog header button{min-width:32px;height:32px;font-size:20px;padding:0}
+.history-info{margin:16px 18px 6px;font-size:14px}.history-help{margin:0 18px 16px;font-size:12px;color:#a5a9b1;line-height:1.5}
+.history-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 18px 18px}.history-columns section{min-width:0}.history-columns h3{margin:0 0 8px;font-size:13px;font-weight:600;color:#bec1c8}
+.history-columns ol{margin:0;padding:0;list-style:none;display:grid;gap:5px}.history-columns li{min-width:0}.history-columns button{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 8px;box-sizing:border-box;width:100%;min-height:64px;padding:9px 10px;background:#2e3035;text-align:left;border:1px solid #ffffff0b;border-radius:5px}
+.history-columns button:hover:not(:disabled){background:#353535;border-color:#555}.history-columns button:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}.history-columns button:disabled{opacity:.4}
+.history-columns strong{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500}.history-columns span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#9ea3ad}.history-columns small{font-size:12px;color:#b9bdc5;white-space:nowrap}.history-empty{margin:0;padding:18px 10px;border:1px dashed #4c5057;border-radius:5px;font-size:13px;color:#9ea3ad}
+#history-error{display:block;margin:0 18px 18px;color:#e0b78d;font-size:13px}#history-error:empty{display:none}
+@media(max-width:620px){.history-columns{grid-template-columns:1fr}#history-dialog{max-height:calc(100dvh - 20px)}}

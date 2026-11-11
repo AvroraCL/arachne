@@ -1,0 +1,19 @@
+{
+  "family": "Sarasa UI SC",
+  "version": "1.0.43",
+  "project": "https://github.com/be5invis/Sarasa-Gothic",
+  "source": "https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.43/SarasaUiSC-TTF-1.0.43.7z",
+  "archiveSha256": "3dc0f534b2cfa5f98b58a574948d3e3f9eb140600bd738f259c3d077acb2de66",
+  "license": "SIL Open Font License 1.1",
+  "conversion": "fontTools 4.57.0 + Brotli 1.2.1; full TTF to WOFF2; no subsetting or glyph changes",
+  "files": {
+    "SarasaUiSC-SemiBold.woff2": {
+      "sha256": "fd9157a5e2dfa11177ebfce0f2f677390b285e8fbd2a15a8a84bc511575fdb01",
+      "bytes": 8479104
+    },
+    "SarasaUiSC-Regular.woff2": {
+      "sha256": "736a552dcbf7e537662f5913206dfcf2097e03def509623c619ae6987cc0e408",
+      "bytes": 8343264
+    }
+  }
+}

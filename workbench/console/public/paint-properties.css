@@ -1,0 +1,58 @@
+/* Contextual property inspector. The Area remains a replaceable editor. */
+:is(#properties,form.editor-properties).property-inspector{padding:0;background:#262626;color:#d0d0d0;font-size:13px;line-height:1.5}
+:is(#properties,form.editor-properties).property-inspector:focus{outline:none}
+:is(#properties,form.editor-properties).property-inspector .property-target{display:flex;align-items:center;gap:7px;padding:6px 10px;min-width:0;border-bottom:1px solid #191919;user-select:none}
+.property-target-icon{display:grid;place-items:center;flex:none;width:22px;height:22px;color:#bbb;background:none;border:0}
+.property-target-icon svg{width:18px;height:18px}
+.property-target-text{display:flex;flex:1;flex-direction:row;align-items:baseline;min-width:0;gap:8px}
+.property-target-type{order:2;flex:none;color:#999;font-size:11px}
+.property-target-name{flex:1;min-width:0;font-size:13px;font-weight:500;color:#e2e2e2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.property-target-scope{flex:none;font-size:11px;color:#aaa;border:1px solid #ffffff12;padding:1px 5px;border-radius:2px}
+:is(#properties,form.editor-properties).property-inspector .property-section{margin:0;padding:0;border:0;border-bottom:1px solid #191919;border-radius:0;background:transparent}
+:is(#properties,form.editor-properties).property-inspector .property-section-title{display:flex;align-items:center;gap:7px;min-height:28px;padding:3px 10px;list-style:none;background:#2d2d2d;color:#ddd;font-weight:500;cursor:pointer;user-select:none;box-shadow:none}
+.property-section-title::-webkit-details-marker{display:none}
+.property-section-title::before{content:'';width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid #aaa;transform-origin:2px 4px;transition:transform 100ms ease}
+.property-section[open]>.property-section-title::before{transform:rotate(90deg)}
+.property-section-title:hover{background:#343434}
+.property-section-title:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
+.property-section-hint{margin-left:auto;font-size:11px;font-weight:400;color:#999}
+:is(#properties,form.editor-properties).property-inspector .property-section-body{padding:6px 10px 8px;--property-label-width:clamp(64px,28%,110px)}
+:is(#properties,form.editor-properties).property-inspector .property-section-body>small{display:block;color:#999;line-height:1.6}
+:is(#properties,form.editor-properties).property-inspector .property-channel-switches{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;margin:0 0 6px;padding:0 0 6px;border-bottom:1px solid #ffffff0b}
+:is(#properties,form.editor-properties).property-inspector .property-channel-switch{position:relative;display:block;flex:1;min-width:0;min-height:25px;margin:0;cursor:pointer}
+:is(#properties,form.editor-properties).property-inspector .property-channel-switch>input{position:absolute;z-index:1;opacity:0;inset:0;margin:0;width:100%;height:100%;cursor:pointer}
+:is(#properties,form.editor-properties).property-inspector .property-channel-switch>span{display:grid;place-items:center;min-height:25px;padding:2px 4px;border:1px solid #3d3d3d;border-radius:3px;background:#2e2e2e;color:#a4a4a4;font-size:12px;font-weight:500;white-space:nowrap;user-select:none}
+:is(#properties,form.editor-properties).property-inspector .property-channel-switch:has(input:checked)>span{background:#454545;color:#eee;border-color:#565656;box-shadow:none}
+:is(#properties,form.editor-properties).property-inspector .property-channel-switch:hover>span{border-color:#555;background:#383838}
+:is(#properties,form.editor-properties).property-inspector .property-channel-switch:has(input:focus-visible)>span{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
+:is(#properties,form.editor-properties).property-inspector .property-channel-switch:has(input:disabled){opacity:.4;cursor:default}
+:is(#properties,form.editor-properties).property-inspector .property-channel{position:relative;min-width:0;margin:0;padding:3px 0;border:0;border-bottom:1px solid #ffffff0a;border-radius:0}
+:is(#properties,form.editor-properties).property-inspector .property-channel+.property-channel{margin:0;padding:3px 0}
+:is(#properties,form.editor-properties).property-inspector .property-channel:last-child{border-bottom:0}
+:is(#properties,form.editor-properties).property-inspector .property-channel>legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+:is(#properties,form.editor-properties).property-inspector .property-channel>label.property-channel-value{display:grid;grid-template-columns:var(--property-label-width) minmax(0,1fr);gap:6px;margin:0;min-height:26px;font-size:13px}
+:is(#properties,form.editor-properties).property-inspector .property-channel>label.property-channel-value>span:first-child:not(.workspace-range-field){padding-right:0}
+:is(#properties,form.editor-properties).property-inspector .property-channel>label.property-channel-map{grid-template-columns:minmax(62px,1fr) minmax(80px,1.6fr);gap:6px;margin:3px 0 0;min-height:26px;font-size:12px;color:#a2a2a2}
+:is(#properties,form.editor-properties).property-inspector .property-channel .workspace-range-field{height:26px;min-height:26px;border-color:#ffffff0d;border-radius:2px;--range-track:#202020;--range-ink:#494949}
+:is(#properties,form.editor-properties).property-inspector .property-channel>label.property-color-control.property-channel-value{grid-template-columns:var(--property-label-width) 26px minmax(0,1fr);gap:6px}
+.property-color-control .property-field-caption{grid-column:auto}
+:is(#properties,form.editor-properties).property-inspector .property-color-control input[type=color]{width:26px;height:26px;min-height:26px;border:1px solid #ffffff26;border-radius:2px}
+:is(#properties,form.editor-properties).property-inspector .property-color-value{display:flex;align-items:center;align-self:stretch;min-width:0;padding:0 7px;background:#202020;border:1px solid #ffffff08;border-radius:2px;font-size:13px;color:#c9c9c9;font-variant-numeric:tabular-nums;user-select:text}
+:is(#properties,form.editor-properties).property-inspector .property-material-source{padding-bottom:5px;margin-bottom:5px;border-bottom:1px solid #ffffff0a}
+:is(#properties,form.editor-properties).property-inspector .property-linked-material{display:flex;flex-direction:column;gap:4px;margin-top:5px;padding:7px;background:#222;border:1px solid #ffffff0a;border-radius:3px}
+.property-linked-material>strong{font-size:13px;font-weight:500}
+.property-linked-material>small{color:#969696;font-size:12px}
+:is(#properties,form.editor-properties).property-inspector .property-image-slot{display:flex;align-items:center;gap:7px;width:100%;min-width:0;margin-top:4px;padding:4px;border:1px solid #ffffff13;border-radius:3px;background:#222;text-align:left}
+.property-image-slot>img{display:block;flex:none;width:32px;height:32px;object-fit:contain;background:repeating-conic-gradient(#353535 0 25%,#2a2a2a 0 50%) 0/12px 12px;border-radius:2px}
+.property-image-slot>span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.property-image-slot strong{font-size:12px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.property-image-slot small{font-size:11px;color:#969696}
+:is(#properties,form.editor-properties).property-inspector .property-image-slot:hover:not(:disabled){background:#2c2c2c;border-color:#555}
+:is(#properties,form.editor-properties).property-inspector .property-section-body>button{margin:5px 5px 0 0}
+:is(#properties,form.editor-properties).property-inspector .property-section-body .bar{gap:5px}
+:is(#properties,form.editor-properties).property-inspector .mask-effects{margin:8px 0 0;padding:6px 0 0;border:0;border-top:1px solid #ffffff0c;border-radius:0}
+:is(#properties,form.editor-properties).property-inspector .property-lock-note{display:block;margin:0;padding:7px 12px;background:#303030;color:#bbb}
+@media(prefers-reduced-motion:reduce){.property-section-title::before{transition:none}}
+
+:is(#properties,form.editor-properties).property-inspector .property-channel :is(select,.custom-select-button){min-height:26px;font-size:13px}
+@container(max-width:280px){:is(#properties,form.editor-properties).property-inspector .property-channel-switches{grid-template-columns:repeat(3,minmax(0,1fr))}}

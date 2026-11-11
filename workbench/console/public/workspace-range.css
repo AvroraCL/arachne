@@ -1,0 +1,63 @@
+/* Compact numeric bars shared by tools, dialogs and viewport panels. */
+span.workspace-range-field{
+  --range-fill:0%;--range-ink:#3c3c3c;--range-track:#272727;
+  position:relative;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;
+  flex:1 1 0%;width:100%;min-width:0;height:var(--paint-control-height,28px);min-height:var(--paint-control-height,28px);overflow:hidden;
+  border:1px solid #ffffff0b;border-radius:4px;color:#d4d4d4;
+  background:linear-gradient(to right,var(--range-ink) 0 var(--range-fill),var(--range-track) var(--range-fill) 100%);
+  box-shadow:none;vertical-align:middle;cursor:ew-resize;
+}
+span.workspace-range-field:hover:not(:has(>input:disabled)){--range-ink:#414141;border-color:#4a4a4a;color:#e0e0e0}
+span.workspace-range-field:has(>input:active:not(:disabled)){--range-ink:#474747;border-color:#666;color:#eee}
+span.workspace-range-field:has(>input:focus-visible){outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
+span.workspace-range-field:has(>input:disabled){opacity:.35;cursor:default}
+span.workspace-range-field::after{
+  content:'';position:absolute;top:6px;bottom:6px;left:clamp(0px,var(--range-fill),calc(100% - 1px));
+  width:1px;background:#ffffff20;opacity:0;pointer-events:none;
+}
+span.workspace-range-field[data-dragging]::after{opacity:.55}
+span.workspace-range-field>input[type=range].workspace-range{
+  -webkit-appearance:none;appearance:none;position:absolute;inset:0;z-index:1;
+  box-sizing:border-box;width:100%!important;min-width:0;height:100%;min-height:24px;
+  margin:0;padding:0;border:0;border-radius:inherit;background:transparent;opacity:0;
+  cursor:inherit;touch-action:none;outline:none;
+}
+input[type=range].workspace-range::-webkit-slider-runnable-track{height:100%;border:0;background:transparent}
+input[type=range].workspace-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:1px;height:28px;border:0;background:transparent;box-shadow:none}
+input[type=range].workspace-range::-moz-range-track{height:100%;border:0;background:transparent}
+input[type=range].workspace-range::-moz-range-progress{background:transparent}
+input[type=range].workspace-range::-moz-range-thumb{width:1px;height:28px;border:0;background:transparent;box-shadow:none}
+span.workspace-range-field>:is(output,.workspace-range-value){
+  position:absolute;inset:0;display:block;min-width:0;width:100%;margin:0;padding:0 8px;
+  text-align:center;font-size:var(--paint-font-ui,12px);font-weight:400;font-variant-numeric:tabular-nums;
+  line-height:calc(var(--paint-control-height,28px) - 2px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:inherit;pointer-events:none;
+}
+#surface-tools .workspace-range-field{flex:none;width:var(--paint-number-width,72px);height:var(--paint-control-height,26px);min-height:var(--paint-control-height,26px)}
+#surface-tools .workspace-range-field>:is(output,.workspace-range-value){display:block;line-height:calc(var(--paint-control-height,26px) - 2px);padding:0 5px}
+#uv-wipe-control .workspace-range-field{flex:none;width:76px}
+#mask-editor .workspace-range-field{flex:none;width:90px}
+.vp-setting .workspace-range-field{width:110px}
+@media(prefers-reduced-motion:no-preference){span.workspace-range-field{transition:border-color 100ms,color 100ms}}
+@media(forced-colors:active){
+  span.workspace-range-field{--range-track:Canvas;--range-ink:ButtonFace;border-color:ButtonText;color:ButtonText;forced-color-adjust:none}
+  span.workspace-range-field:has(>input:focus-visible){outline-color:Highlight}
+}
+
+span.workspace-range-field[data-dragging]{--range-ink:#474747;border-color:#666;color:#eee}
+span.workspace-range-field[data-editing]{border-color:var(--paint-focus,#8a8a8a);background:#222;outline:none}
+span.workspace-range-field[data-editing]::after{display:none}
+span.workspace-range-field>input[type=number].workspace-range-editor{
+  position:absolute;inset:0;z-index:2;box-sizing:border-box;width:100%;min-width:0;max-width:100%;height:100%;min-height:0;
+  appearance:textfield;margin:0;padding:0 7px;border:0;border-radius:inherit;background:#242424;
+  color:#fff;font:inherit;font-size:var(--paint-font-ui,12px);font-variant-numeric:tabular-nums;text-align:center;outline:none;cursor:text;
+}
+.workspace-range-editor::-webkit-inner-spin-button,.workspace-range-editor::-webkit-outer-spin-button{appearance:none;margin:0}
+span.workspace-range-field>input.workspace-range-editor[aria-invalid=true]{box-shadow:inset 0 0 0 1px #bbb}
+span.workspace-range-field>input[type=range].workspace-range:disabled{cursor:default!important}
+
+span.workspace-range-field>input.workspace-number-input{position:absolute;inset:0;z-index:1;box-sizing:border-box;min-width:0!important;width:100%!important;height:100%;min-height:0!important;margin:0;padding:0 7px!important;border:0!important;border-radius:inherit;background:transparent!important;color:inherit;font:inherit;font-size:var(--paint-font-ui,13px)!important;font-variant-numeric:tabular-nums;text-align:center;appearance:textfield;outline:none;cursor:ew-resize;touch-action:none;opacity:0}
+span.workspace-range-field[data-kind=number]>.workspace-range-value{inset:50% 0 auto;transform:translateY(-50%);line-height:1.25;font-size:var(--paint-font-ui,13px)}
+span.workspace-range-field[data-number-typing]>.workspace-number-input{opacity:1;cursor:text}
+span.workspace-range-field[data-number-typing]>.workspace-range-value{visibility:hidden}
+.workspace-number-input::-webkit-inner-spin-button,.workspace-number-input::-webkit-outer-spin-button{appearance:none;margin:0}
+span.workspace-range-field[data-editing]>.workspace-number-input{visibility:hidden}
