@@ -93,10 +93,34 @@ try{
   browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   const page=await browser.newPage({viewport:{width:1400,height:900}});
   await page.goto(origin);
-  await page.getByText('文件',{exact:true}).filter({visible:true}).first().click();
-  await page.locator('#new').click();
-  await page.locator('#new-paint-model').setInputFiles(fixture);
-  await page.locator('#new-paint-submit').click();
+  const welcome=page.locator('.project-welcome');
+  await welcome.getByRole('button',{name:'新建工程',exact:true}).click();
+  const newDialog=page.locator('#new-paint-dialog');
+  const modelInput=newDialog.locator('#new-paint-model');
+  const modelName=newDialog.locator('#new-paint-name');
+  await modelInput.setInputFiles({name:'not-a-model.glb',mimeType:'model/gltf-binary',buffer:Buffer.from('invalid')});
+  await newDialog.getByText('请选择有效的 GLB 2.0 模型').waitFor();
+  assert.equal(await newDialog.locator('#new-paint-submit').isDisabled(),true);
+  await newDialog.getByRole('button',{name:'恢复示例'}).click();
+  assert.equal(await newDialog.locator('#new-paint-submit').isEnabled(),true);
+  await modelName.fill('手工输入的工程名');
+  await modelInput.setInputFiles(fixture);
+  await newDialog.getByText('uncached-model.glb',{exact:true}).waitFor();
+  assert.equal(await modelName.inputValue(),'手工输入的工程名');
+  await newDialog.getByRole('button',{name:'关闭',exact:true}).click();
+  const transfer=await page.evaluateHandle(bytes=>{
+    const data=new DataTransfer();
+    data.items.add(new File([new Uint8Array(bytes)],'uncached-model.glb',{type:'model/gltf-binary'}));
+    return data;
+  },[...model.bytes]);
+  await welcome.dispatchEvent('dragover',{dataTransfer:transfer});
+  assert.equal(await welcome.getAttribute('data-file-drop'),'');
+  await welcome.dispatchEvent('drop',{dataTransfer:transfer});
+  await transfer.dispose();
+  await newDialog.getByText('uncached-model.glb',{exact:true}).waitFor();
+  assert.equal(await modelName.inputValue(),'uncached-model');
+  assert.deepEqual(await api('/api/projects'),[]);
+  await newDialog.locator('#new-paint-submit').click();
   const id=await until(async()=>new URL(page.url()).searchParams.get('project'));
   const route='/api/projects/'+id,paint=route+'/paint';
   const registered=await api(route),manifest=await api(route+'/viewport');
@@ -219,16 +243,26 @@ try{
 
   const clean=path.join(data,'clean');await fs.mkdir(clean);
   const other=await start(clean);
-  const response=await fetch(other+'/api/projects/paint-import',{
-    method:'POST',headers:{'Content-Type':'application/zip'},body:await fs.readFile(zip)
-  });
-  const restored=await response.json();
-  assert.equal(response.status,201,JSON.stringify(restored));
+  const reopened=await browser.newPage();
+  await reopened.goto(other);
+  await reopened.locator('.project-welcome').getByRole('button',{name:'打开涂装 ZIP…'}).click();
+  const importDialog=reopened.locator('#paint-import-dialog');
+  const archiveInput=importDialog.locator('#paint-import-file');
+  const importSubmit=importDialog.locator('#paint-import-submit');
+  assert.equal(await importSubmit.isDisabled(),true);
+  await archiveInput.setInputFiles({name:'not-a-project.zip',mimeType:'application/zip',buffer:Buffer.from('invalid')});
+  await importDialog.getByText('请选择有效的涂装 ZIP').waitFor();
+  assert.equal(await importSubmit.isDisabled(),true);
+  await archiveInput.setInputFiles(zip);
+  await importDialog.getByText(path.basename(zip),{exact:true}).waitFor();
+  await importSubmit.click();
+  const restoredId=await until(async()=>new URL(reopened.url()).searchParams.get('project'));
+  const restored=await fetch(other+'/api/projects/'+restoredId).then(response=>response.json());
   assert.deepEqual(restored.paint,doc.paint);
   assert.deepEqual(restored.modeling,doc.modeling);
-  const reopened=await browser.newPage();
-  await reopened.goto(other+'/?project='+restored.id);
+  await reopened.reload();
   await reopened.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
+  console.log('PASS GLB drag and drop, invalid file validation, ZIP chooser and project reopen');
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
 }finally{

@@ -347,6 +347,7 @@
         <button id="welcome-open" type="button">打开工程…</button>
         <button id="welcome-import" type="button">打开涂装 ZIP…</button>
       </div>
+      <small>可拖入 GLB 或涂装 ZIP</small>
     </header>
     <p id="welcome-error" role="alert"></p>
     <div id="welcome-recent" hidden>
@@ -580,20 +581,27 @@
     <header><h2 id="new-paint-title">新建涂装工程</h2><button id="new-paint-close" type="button">关闭</button></header>
     <div class="paint-form-content">
       <label>工程名称<input id="new-paint-name" type="text" maxlength="100" required autofocus></label>
-      <label>模型<input id="new-paint-model" type="file" accept=".glb,model/gltf-binary"></label>
-      <small>选择自包含的 GLB，或留空使用示例模型。</small>
+      <div id="new-paint-model-drop" class="project-file-drop" role="group" aria-label="模型来源">
+        <div><strong id="new-paint-model-label">示例模型</strong><small id="new-paint-model-size">拖入 GLB，或选择文件</small></div>
+        <button id="choose-new-paint-model" type="button">选择 GLB…</button>
+        <button id="clear-new-paint-model" type="button" hidden>恢复示例</button>
+        <input id="new-paint-model" type="file" accept=".glb,model/gltf-binary" aria-label="选择 GLB 模型" hidden>
+      </div>
     </div>
     <div class="paint-form-footer"><span id="new-paint-error" role="alert"></span><button id="new-paint-submit" type="submit" class="primary">创建</button></div>
   </form>
 </dialog>
 <dialog id="paint-import-dialog" class="paint-form-dialog" aria-labelledby="paint-import-title">
   <form>
-    <header><h2 id="paint-import-title">打开涂装 ZIP</h2><button type="button">关闭</button></header>
+    <header><h2 id="paint-import-title">打开涂装 ZIP</h2><button id="paint-import-close" type="button">关闭</button></header>
     <div class="paint-form-content">
-      <label>涂装 ZIP<input type="file" accept=".zip,application/zip" required></label>
-      <small>支持工程副本和新版交付包。核对登记模型和素材后，恢复为独立工程。</small>
+      <div id="paint-import-drop" class="project-file-drop" role="group" aria-label="涂装 ZIP">
+        <div><strong id="paint-import-label">拖入涂装 ZIP</strong><small id="paint-import-size">工程副本或交付包</small></div>
+        <button id="choose-paint-import" type="button">选择 ZIP…</button>
+        <input id="paint-import-file" type="file" accept=".zip,application/zip" aria-label="选择涂装 ZIP" hidden>
+      </div>
     </div>
-    <div class="paint-form-footer"><span role="alert"></span><button type="submit" class="primary">打开</button></div>
+    <div class="paint-form-footer"><span id="paint-import-error" role="alert"></span><button id="paint-import-submit" type="submit" class="primary" disabled>打开</button></div>
   </form>
 </dialog>
 <dialog id="paint-text-dialog" class="paint-form-dialog" aria-labelledby="paint-text-title">

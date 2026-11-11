@@ -217,3 +217,13 @@
 #task-monitor .task-download{padding:4px 7px;color:inherit}
 
 .task-monitor-list time{font-variant-numeric:tabular-nums;color:#a9a9a9;font-size:12px}
+
+.project-file-drop{
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-height:54px;padding:7px;
+  border:1px dashed var(--chrome-line);border-radius:var(--chrome-radius);
+}
+.project-file-drop[data-file-drop]{border-color:var(--paint-focus);background:var(--chrome-field)}
+.project-file-drop>div{display:grid;gap:3px;flex:1 1 130px;min-width:0}
+.project-file-drop strong{font-size:13px;font-weight:500;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.project-file-drop button{flex:none}
+.project-welcome[data-file-drop]{box-shadow:inset 0 0 0 1px var(--paint-focus)}

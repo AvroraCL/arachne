@@ -98,15 +98,18 @@ try{
   assert.equal(manifest.status,'ready');
   assert.equal(manifest.metadata.uv_before,manifest.metadata.uv_after);
   assert.ok(manifest.metadata.mesh_count>=2);
-  browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
-  const page=await browser.newPage({viewport:{width:1440,height:900}});
-  const errors=[];
-  page.on('pageerror',error=>errors.push(error.message));
-  const blenderRequests=[];
-  page.on('request',request=>{
-    if(/\/(?:render-view|render-session|cycles-session|cycles-devices)(?:\/|$)/.test(new URL(request.url()).pathname))blenderRequests.push(request.url());
-  });
-  page.on('console',message=>{if(message.type()==='error'&&message.text().includes('Shader Error'))errors.push(message.text());});
+  const errors=[],blenderRequests=[];
+  async function browserPage(){
+    browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+    const page=await browser.newPage({viewport:{width:1440,height:900}});
+    page.on('pageerror',error=>errors.push(error.message));
+    page.on('request',request=>{
+      if(/\/(?:render-view|render-session|cycles-session|cycles-devices)(?:\/|$)/.test(new URL(request.url()).pathname))blenderRequests.push(request.url());
+    });
+    page.on('console',message=>{if(message.type()==='error'&&message.text().includes('Shader Error'))errors.push(message.text());});
+    return page;
+  }
+  let page=await browserPage();
   await page.goto(base+'/?project=broken-project');
   const welcome=page.locator('.project-welcome');
   await welcome.getByText('工程文件损坏，无法打开').waitFor();
@@ -426,6 +429,7 @@ try{
     personal=saved.state;
   }
   const libraryTarget=await api('/api/projects',{workflowType:'pbr_paint',name:'资源库导入工程'},201);
+  page=await browserPage();
   await page.goto(base+'/?project='+libraryTarget.id);
   await page.locator('.area-switch [data-area-mode=material]:enabled').click();
   const primary=page.locator('.editor-area[data-editor=library]').first();

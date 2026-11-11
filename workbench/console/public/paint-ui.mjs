@@ -1,3 +1,4 @@
+import {setupProjectFiles} from './paint-project-files.mjs';
 import {setupTaskMonitor} from './paint-task-monitor.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {setupProjectWelcome} from './paint-project-welcome.mjs';
@@ -1526,66 +1527,21 @@ migrationStart.onclick=async()=>{
 
 historyPanel=setupPaintHistory({trigger:$('open-history'),read:()=>doc,load:id=>api('/api/projects/'+id+'/paint/history'),canEdit:()=>!busy&&!modeler.isDragging()&&!surfaceTools.isEditing()&&!uvSelection.isDragging()&&!uvSelection.isTransforming(),
   restore:(direction,steps,origin)=>run(async()=>{if(doc.id!==origin.id)throw Error('当前工程已切换');await api('/api/projects/'+origin.id+'/paint/'+direction,{revision:origin.revision,steps});approvedPreviewId=null;},$('history-error'))});
-const newPaintDialog=$('new-paint-dialog'),newPaintName=$('new-paint-name'),newPaintSubmit=$('new-paint-submit'),newPaintModel=$('new-paint-model');
-$('new').onclick=()=>{
-  if(busy||uvSelection.isTransforming()||surfaceTools.isEditing())return;
-  newPaintName.value='示例模型 · PBR 涂装';
-  newPaintModel.value='';
-  $('new-paint-error').textContent='';
-  newPaintDialog.showModal();
-  newPaintName.select();
-};
-$('new-paint-close').onclick=()=>newPaintDialog.close();
-newPaintModel.onchange=()=>{
-  const file=newPaintModel.files[0];
-  if(file&&newPaintName.value==='示例模型 · PBR 涂装')newPaintName.value=file.name.replace(/\.glb$/i,'').slice(0,100);
-};
-newPaintDialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
-$('new-paint-form').onsubmit=async event=>{
-  event.preventDefault();
-  const name=newPaintName.value.trim(),error=$('new-paint-error'),close=$('new-paint-close');
-  if(!name){error.textContent='请输入工程名称';return;}
-  const model=newPaintModel.files[0];
-  if(model&&model.size>128*1024*1024){error.textContent='GLB 不能超过 128 MiB';return;}
-  close.disabled=newPaintName.disabled=newPaintModel.disabled=newPaintSubmit.disabled=true;
-  try{
-    if(await run(async()=>{
-      const project=model?await responseJson(await fetch('/api/projects/model-import?'+new URLSearchParams({name}),{
-        method:'POST',headers:{'Content-Type':'model/gltf-binary'},body:model
-      })):await api('/api/projects',{workflowType:'pbr_paint',name});
-      await load(project.id);
-    },error))newPaintDialog.close();
-  }finally{close.disabled=newPaintName.disabled=newPaintModel.disabled=newPaintSubmit.disabled=false;}
-};
-const importDialog=$('paint-import-dialog'),importForm=importDialog.querySelector('form');
-const importFile=importForm.querySelector('input[type=file]'),importClose=importForm.querySelector('button[type=button]');
-const importSubmit=importForm.querySelector('button[type=submit]'),importStatus=importForm.querySelector('[role=alert]');
-$('open-paint-import').onclick=()=>{
-  if(busy||uvSelection.isTransforming()||surfaceTools.isEditing())return;
-  importFile.value='';importStatus.textContent='';
-  importDialog.showModal();
-};
-importClose.onclick=()=>importDialog.close();
-importDialog.addEventListener('cancel',event=>{if(importSubmit.disabled)event.preventDefault();});
-importForm.onsubmit=async event=>{
-  event.preventDefault();
-  const file=importFile.files[0];
-  if(!file)return;
-  if(file.size>1024*1024*1024){importStatus.textContent='涂装交付包不能超过 1 GiB';return;}
-  importClose.disabled=importFile.disabled=importSubmit.disabled=true;
-  importSubmit.textContent='正在核对…';
-  try{
-    if(await run(async()=>{
-      const response=await fetch('/api/projects/paint-import',{method:'POST',
-        headers:{'Content-Type':'application/zip'},body:file});
-      const project=await responseJson(response);
-      await load(project.id);
-    },importStatus))importDialog.close();
-  }finally{
-    importClose.disabled=importFile.disabled=importSubmit.disabled=false;
-    importSubmit.textContent='打开';
-  }
-};
+const newPaintDialog=$('new-paint-dialog'),importDialog=$('paint-import-dialog');
+setupProjectFiles({canOpen:canOpenProjectDialog,
+  create:(name,model,error)=>run(async()=>{
+    const project=model?await responseJson(await fetch('/api/projects/model-import?'+new URLSearchParams({name}),{
+      method:'POST',headers:{'Content-Type':'model/gltf-binary'},body:model
+    })):await api('/api/projects',{workflowType:'pbr_paint',name});
+    await load(project.id);
+  },error),
+  restore:(archive,error)=>run(async()=>{
+    const response=await fetch('/api/projects/paint-import',{method:'POST',
+      headers:{'Content-Type':'application/zip'},body:archive});
+    const project=await responseJson(response);
+    await load(project.id);
+  },error)
+});
 $('create-paint-backup').onclick=()=>run(async()=>{
   const job=await post('backup',{requestId:crypto.randomUUID()});
   pendingBackupId=job.id;
