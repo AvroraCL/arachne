@@ -1,3 +1,5 @@
+import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mjs';
+import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
@@ -676,8 +678,13 @@ function createImageEditor(ctx,bridge,uv){
 function createLibraryEditor(ctx,bridge){
   const {host,project,state}=ctx,toolbar=el('div','editor-toolbar'),body=el('div','editor-scroll'),status=el('output','editor-message');host.append(toolbar,body,status);
   let key='',kind=state.kind||'materials',query=state.query||'',scope=state.scope==='personal'?'personal':'project',pickedAsset=null,personal,scopeSelect,createResource,savePersonal,selectionGeneration=0,viewGeneration=0,disposed=false;
+  enableResourceGridKeys(body);
   const search=el('input');search.type='search';search.placeholder='搜索';search.setAttribute('aria-label','搜索资源');search.value=query;search.oninput=()=>{query=search.value;key='';sync();ctx.onChange();};toolbar.append(search);
   function execute(ops,origin){return project.commands(ops,origin).catch(error=>{status.textContent=error.message;ctx.error(error);return false;});}
+  function matching(doc){
+    const terms=searchTerms(query);
+    return Object.entries(doc.paint[kind]||{}).filter(([,item])=>matchesSearch(item.name,terms));
+  }
   const personalHost=el('div','editor-scroll personal-editor-host');host.insertBefore(personalHost,status);
   personal=createPersonalShelf({
     host:personalHost,read:()=>project.document,canEdit:()=>!bridge.busy(),
@@ -705,23 +712,65 @@ function createLibraryEditor(ctx,bridge){
     else status.textContent='资源已新建，保留当前选择。';
   });toolbar.append(createResource);
   savePersonal=button('保存到个人库',()=>void personal.save(kind==='assets'?'images':kind,kind==='assets'?pickedAsset:project.resource?.library===kind?project.resource.id:null));toolbar.append(savePersonal);
+  const selectedMaterial=()=>project.resource?.library==='materials'?project.resource.id:null;
+  function applyMaterial(id){
+    const material=project.document?.paint.materials?.[id];
+    if(!material||bridge.busy())return;
+    void execute([{op:'add',kind:'fill',patch:{materialId:id,name:material.name,channels:Object.fromEntries(paintChannels.map(key=>[key,true]))}}]);
+  }
+  const fill=button('创建填充层',()=>applyMaterial(selectedMaterial()));
+  const preview=button('查看大图',()=>viewAsset(pickedAsset,preview));
+  toolbar.append(fill,preview);
+  function viewAsset(id,from){
+    if(id&&project.document?.paint.assets[id])bridge.viewAsset(id,from,matching(project.document).map(([asset])=>asset));
+  }
   const file=el('input');file.type='file';file.accept='image/png';file.hidden=true;file.onchange=()=>{if(file.files[0])void bridge.importAsset(file.files[0]);file.value='';};host.append(file);
   function sync(){
     const doc=project.document;if(!doc)return;
-    if(personal){personal.set({kind:kind==='assets'?'images':kind,query,active:scope==='personal'});body.hidden=scope==='personal';createResource.hidden=savePersonal.hidden=scope==='personal';savePersonal.disabled=bridge.busy()||!(kind==='assets'?pickedAsset:project.resource?.library===kind);}
-    const next=JSON.stringify([doc.id,doc.revision,project.resource,kind,query,scope,pickedAsset]);if(next===key)return;key=next;if(personal&&scope==='personal')return;
-    // Preserve unfinished text while another editor changes only selection/view.
-    if(body.contains(document.activeElement)&&document.activeElement.matches('input:not([type=color]):not([type=checkbox]),textarea'))return;
-    body.replaceChildren();
-    body.classList.add('library-grid');for(const [id,item] of Object.entries(doc.paint[kind]||{}).filter(([,a])=>a.name.includes(query))){
-      const card=button('',()=>{if(kind==='assets'){pickedAsset=id;key='';sync();bridge.viewAsset(id,card);}else project.selectResource({library:kind,id});},item.name);card.className='library-tile';card.append(el('span','library-name',item.name));card.setAttribute('aria-pressed',String(kind==='assets'?pickedAsset===id:project.resource?.library===kind&&project.resource.id===id));
-      const image=el('div','library-preview');if(kind==='assets'){
-        const img=el('img');img.src='/api/projects/'+doc.id+'/paint/assets/'+id;img.alt='';img.draggable=false;image.append(img);
-        card.draggable=true;card.dataset.assetId=id;card.ondragstart=event=>{const current=project.document;if(current?.id!==doc.id||current.revision!==doc.revision||!Object.hasOwn(current.paint.assets,id)){event.preventDefault();ctx.error(Error('素材已变化，请重新拖动'));return;}startAssetDrag(event.dataTransfer,{id,projectId:current.id,revision:current.revision});};card.ondragend=endAssetDrag;
-      }else image.append(el('span','',kind==='materials'?'●':'〜'));card.prepend(image);body.append(card);
-      if(kind==='materials'&&project.resource?.id===id)body.append(button('创建填充层',()=>execute([{op:'add',kind:'fill',patch:{materialId:id,name:item.name,channels:Object.fromEntries(paintChannels.map(k=>[k,true]))}}])));
-    }
+    if(pickedAsset&&!doc.paint.assets[pickedAsset])pickedAsset=null;
+    const projectScope=scope==='project',image=kind==='assets';
+    personal.set({kind:image?'images':kind,query,active:!projectScope});
+    body.hidden=!projectScope;
+    createResource.hidden=savePersonal.hidden=!projectScope;
+    savePersonal.disabled=bridge.busy()||!(image?pickedAsset:project.resource?.library===kind);
+    fill.hidden=!projectScope||kind!=='materials';fill.disabled=bridge.busy()||!selectedMaterial();
+    preview.hidden=!projectScope||!image;preview.disabled=!pickedAsset;
     ctx.title.textContent=doc.name;
+    if(!projectScope)return;
+
+    const entries=matching(doc);
+    const next=JSON.stringify([doc.id,kind,entries,searchTerms(query)]);
+    if(next!==key){
+      key=next;
+      const focused=body.contains(document.activeElement)?document.activeElement.dataset.resourceId:null;
+      body.classList.add('library-grid');
+      body.replaceChildren(...entries.map(([id,item])=>{
+        const card=button('',()=>{
+          if(image){pickedAsset=id;sync();}
+          else project.selectResource({library:kind,id});
+        },item.name);
+        card.className='library-tile';card.dataset.resourceId=id;card.setAttribute('aria-label',item.name);
+        card.append(resourcePreview(image?'images':kind,item,asset=>'/api/projects/'+doc.id+'/paint/assets/'+asset),el('span','library-name',item.name));
+        if(image){
+          card.ondblclick=()=>viewAsset(id,card);
+          card.draggable=true;
+          card.dataset.assetId=id;
+          card.ondragstart=event=>{
+            const current=project.document;
+            if(current?.id!==doc.id||!Object.hasOwn(current.paint.assets,id)){
+              event.preventDefault();ctx.error(Error('素材已变化，请重新拖动'));return;
+            }
+            startAssetDrag(event.dataTransfer,{id,projectId:current.id,revision:current.revision});
+          };
+          card.ondragend=endAssetDrag;
+        }else if(kind==='materials')card.ondblclick=()=>applyMaterial(id);
+        return card;
+      }));
+      if(!entries.length)body.append(el('p','library-empty',searchTerms(query).length?'没有匹配的资源':'当前项目还没有这类资源'));
+      if(focused)body.querySelector('[data-resource-id="'+CSS.escape(focused)+'"]')?.focus({preventScroll:true});
+    }
+    const selected=image?pickedAsset:project.resource?.library===kind?project.resource.id:null;
+    for(const tile of body.querySelectorAll('.library-tile'))tile.setAttribute('aria-pressed',String(tile.dataset.resourceId===selected));
   }
   const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,scroll:body.scrollTop}),dispose(){disposed=true;unsub();personal?.dispose();}};
 }

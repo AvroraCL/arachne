@@ -4,7 +4,7 @@ import {createNativeWorkbench,notifyNativeProject} from '../public/native-workbe
 
 function fixture(){
   const calls=[],controls=new Map();let modal=false,focused=null,state='ready';
-  for(const id of ['new','open-projects','open-paint-import','open-glb-migration','open-command-picker','open-delivery','undo','redo'])
+  for(const id of ['new','open-projects','open-paint-import','open-glb-migration','open-command-picker','open-workspace-layouts','open-delivery','undo','redo'])
     controls.set(id,{disabled:false,hidden:false,click(){calls.push(id);}});
   const document={get activeElement(){return focused;},querySelector:()=>modal?{}:null,getElementById:id=>controls.get(id),execCommand:name=>(calls.push('text-'+name),true)};
   const bridge=createNativeWorkbench({window:{},document,status:()=>({state})});
@@ -26,7 +26,8 @@ test('native command search and migration use the same UI availability',()=>{
   assert.equal(f.bridge.command('searchCommands'),true);
   f.controls.get('open-glb-migration').hidden=false;
   assert.equal(f.bridge.command('migrateModel'),true);
-  assert.deepEqual(f.calls,['open-command-picker','open-glb-migration']);
+  assert.equal(f.bridge.command('workspaceLayouts'),true);
+  assert.deepEqual(f.calls,['open-command-picker','open-glb-migration','open-workspace-layouts']);
 });
 test('undo targets focused text first, otherwise uses the shared project history',()=>{
   const f=fixture();assert.equal(f.bridge.command('undo'),true);assert.equal(f.bridge.command('redo'),true);

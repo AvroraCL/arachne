@@ -308,3 +308,29 @@
   .paint-tooltip:popover-open,.area-menu-content:popover-open,.area-toolbar-menu-content:popover-open,.custom-select-menu{animation:paint-tip-enter 80ms ease-out}
 }
 @keyframes paint-tip-enter{from{opacity:0}to{opacity:1}}
+
+.project-welcome{
+  display:grid;place-items:center;min-height:0;overflow:auto;
+  padding:clamp(14px,4vw,48px);background:var(--chrome-field,#242424);color:var(--chrome-text);
+}
+.project-welcome>section{width:min(100%,520px);align-self:safe center}
+.welcome-heading{display:grid;justify-items:start;gap:14px;padding:0;border:0}
+.welcome-heading h1{margin:0;font-size:clamp(24px,3vw,32px);font-weight:600}
+.welcome-actions{display:flex;flex-wrap:wrap;gap:7px}
+.project-welcome button{
+  min-height:var(--chrome-control);padding:5px 9px;border:0;border-radius:var(--chrome-radius);
+  background:var(--chrome-button);color:inherit;font:inherit;
+}
+.project-welcome button.primary{background:var(--chrome-selected)}
+.project-welcome button:hover:not(:disabled){background:var(--chrome-hover)}
+#welcome-error{margin:14px 0 0;color:#ffaaa0;font-size:13px}
+#welcome-error:empty{display:none}
+#welcome-recent{margin-top:22px}
+#welcome-recent h2{margin:0 0 5px;font-size:13px;font-weight:600;color:#bbb}
+#welcome-recent-items{list-style:none;margin:0;padding:0}
+#welcome-recent-items button{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;
+  min-height:31px;text-align:left;background:transparent;
+}
+#welcome-recent-items span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#welcome-recent-items small{flex:none;font-variant-numeric:tabular-nums}

@@ -1,3 +1,5 @@
+import {matchesSearch,searchTerms} from './search-picker.mjs';
+import {setupProjectWelcome} from './paint-project-welcome.mjs';
 import {setupWorkspaceLayouts} from './paint-workspace-layouts.mjs';
 import {setupCommandPicker} from './paint-command-picker.mjs';
 import {setupProjectPicker} from './paint-project-picker.mjs';
@@ -84,6 +86,7 @@ const materialLayerDrag=createMaterialLayerDrag({
 function syncBusyControls(){
   libraryUI?.sync();shaderEditor?.sync();historyPanel?.sync();areaSystem?.busyChanged();
   $('open-settings').disabled=busy;
+  for(const control of $('empty').querySelectorAll('button'))control.disabled=busy;
   for(const control of [...areaButtons,$('upload')])control.disabled=busy||!doc;
   for(const control of addLayerControls)control.disabled=busy||!canAddLayer();
   renderDrawingLayerSettings();
@@ -282,12 +285,12 @@ const assetViewer=createImageViewer({resolve:id=>{
   return {id,url:assetUrl(id),title:asset.name+size};
 }});
 function filteredAssets(assets){
-  const query=$('asset-search').value.trim().toLocaleLowerCase();
-  return assets.filter(asset=>asset.name.toLocaleLowerCase().includes(query));
+  const terms=searchTerms($('asset-search').value);
+  return assets.filter(asset=>matchesSearch(asset.name,terms));
 }
-function showAsset(id,from){
+function showAsset(id,from,visibleAssets){
   if(!doc?.paint.assets[id])return;
-  const galleryIds=filteredAssets(Object.values(doc.paint.assets)).map(asset=>asset.id);
+  const galleryIds=visibleAssets||filteredAssets(Object.values(doc.paint.assets)).map(asset=>asset.id);
   assetViewer.open(id,{from,galleryIds});
 }
 $('asset-view').onclick=()=>showAsset(selectedAsset,$('asset-view'));
@@ -1188,7 +1191,6 @@ function render(keepLayerRows=false){
   syncDeliveryPreferences();
   libraryUI?.sync();shaderEditor?.sync();historyPanel?.sync();
   $('workspace').hidden=!doc;$('empty').hidden=!!doc;
-  $('empty').textContent='新建一个示例模型涂装工程开始制作。';
   for(const id of ['preview','undo','redo','open-delivery','open-render-settings','open-paint-render','open-render-results','three','uv','split'])$(id).disabled=!doc;
   syncBusyControls();
   if(!doc)return;
@@ -1416,7 +1418,7 @@ async function run(action,errorOutput=null){
   try{await action();await refresh();return true;}
   catch(error){
     if(error.status===409)await refresh();
-    (errorOutput||$($('delivery-dialog').open?'delivery-error':'status')).textContent=error.message;
+    (errorOutput||$(!doc?'welcome-error':$('delivery-dialog').open?'delivery-error':'status')).textContent=error.message;
     return false;
   }
   finally{
@@ -1430,7 +1432,8 @@ async function projects(){
 }
 async function load(id){
   if(maskEditor.isOpen())throw Error('请先保存或取消当前蒙版');
-  const next=await api('/api/projects/'+id);
+  if(!/^[\w-]{1,100}$/.test(id))throw Object.assign(Error('工程 ID 无效'),{status:400});
+  const next=await api('/api/projects/'+encodeURIComponent(id));
   if(next.workflowType!=='pbr_paint')throw Error('请选择涂装工程');
   replaceProjection=null;
   modeler.close();
@@ -1470,8 +1473,15 @@ const projectPicker=setupProjectPicker({list:projects,current:()=>doc?.id,open:(
 $('open-projects').onclick=projectPicker;
 setupCommandPicker({canOpen:canOpenProjectDialog});
 document.addEventListener('keydown',event=>{
-  if(event.defaultPrevented||event.repeat||event.isComposing||event.altKey||event.shiftKey||
-     !(event.metaKey||event.ctrlKey)||event.key.toLowerCase()!=='o')return;
+  if(event.defaultPrevented||event.repeat||event.isComposing)return;
+  const picker=event.key==='Escape'&&document.querySelector('.workbench-picker[open]');
+  if(picker){
+    event.preventDefault();event.stopPropagation();
+    if(typeof picker.requestClose==='function')picker.requestClose();
+    else if(picker.dispatchEvent(new Event('cancel',{cancelable:true})))picker.close();
+    return;
+  }
+  if(event.altKey||event.shiftKey||!(event.metaKey||event.ctrlKey)||event.key.toLowerCase()!=='o')return;
   if(projectPicker()){event.preventDefault();event.stopPropagation();}
 },true);
 const glbMigration=$('glb-migration-dialog'),migrationStart=$('start-glb-migration'),migrationClose=$('close-glb-migration');
@@ -2685,7 +2695,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   colorKey:(key,target)=>changePaintColors(target=>key==='x'?paintColors.swap(target):paintColors.reset(target),target),
   workspaceChanged:(name,animate=true)=>workspaceMotion.sync(name,{animate}),
   contextChanged:renderAssetRoles,renderProperties,propertyKey:()=>[doc?.id,doc?.revision,selected,paintTarget,selection.size,workArea],propertyTarget:()=>({layerId:selected,target:paintTarget}),
-  viewAsset:(id,from)=>showAsset(id,from),error:message=>$('status').textContent=message,remember:rememberWorkbenchSession,
+  viewAsset:showAsset,error:message=>$('status').textContent=message,remember:rememberWorkbenchSession,
   activateImage:()=>!!doc&&selectWorkArea('drawing'),
   releaseImage:()=>{surfaceTools.cancel();uvSelection.stop();},
   imageEditing:()=>surfaceTools.isEditing()||uvSelection.isDragging()||uvSelection.isTransforming()||!!propertyDraft,
@@ -2734,14 +2744,23 @@ $('inspect-channel').onclick=()=>{
   else void renderTexture();
 };
 if(areaSystem)setupWorkspaceLayouts({areas:areaSystem.areas,canOpen:canOpenProjectDialog});
+const welcome=setupProjectWelcome({list:projects,open:(id,error)=>run(()=>load(id),error)});
 const rememberedWorkbench=restoreWorkbenchSession();
 await run(async()=>{
   const params=new URLSearchParams(location.search);
   const id=params.has('project')?params.get('project'):rememberedWorkbench.projectId;
-  const items=await projects();
-  if(id&&items.some(project=>project.id===id))await load(id);
-  else render();
+  let problem='';
+  if(id){
+    try{await load(id);return;}
+    catch(error){
+      if(![400,404,422].includes(error.status))throw error;
+      problem=error.message;
+    }
+  }
+  render();
+  void welcome.refresh(problem);
 });
+if(!doc)render();
 const requestedArea=preferences.startupArea==='last'?rememberedWorkbench.workArea:preferences.startupArea;
 if(!areaSystem&&doc&&Object.hasOwn(areaViews,requestedArea))selectWorkArea(requestedArea);
 areaSystem?.sync();

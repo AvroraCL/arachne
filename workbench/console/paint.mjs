@@ -741,7 +741,7 @@ export async function restorePaint(archive,scratch){
   for(const id of new Set([defaultSource,...list().map(project=>project.id)])){
     let candidate;
     try{candidate=read(id);}
-    catch(error){if(error.code==='ENOENT')continue;throw error;}
+    catch(error){if(['ENOENT','EINVALIDPROJECT'].includes(error.code))continue;throw error;}
     const s=candidate.source;
     if(s.material!==geometry.material||s.bindingVersion!==2||
        s.files[s.reviewSource]!==geometry.modelSha256||registrationFingerprint(s)!==geometry.registrationSha256)continue;

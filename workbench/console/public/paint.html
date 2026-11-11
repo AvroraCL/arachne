@@ -337,7 +337,23 @@
   </aside>
   <div id="dock-guide" aria-hidden="true" hidden></div>
 </main>
-<p id="empty">新建一个 示例模型 涂装工程开始制作。</p>
+<main id="empty" class="project-welcome" aria-labelledby="welcome-title" hidden>
+  <section>
+    <header class="welcome-heading">
+      <h1 id="welcome-title">阿拉克涅</h1>
+      <div class="welcome-actions">
+        <button id="welcome-new" class="primary" type="button">新建工程</button>
+        <button id="welcome-open" type="button">打开工程…</button>
+        <button id="welcome-import" type="button">打开涂装 ZIP…</button>
+      </div>
+    </header>
+    <p id="welcome-error" role="alert"></p>
+    <div id="welcome-recent" hidden>
+      <h2>最近修改</h2>
+      <ul id="welcome-recent-items"></ul>
+    </div>
+  </section>
+</main>
 <dialog id="settings-dialog" aria-labelledby="settings-title">
   <header><div><strong id="settings-title">设置</strong><small>阿拉克涅工作台 · <a href="/license" target="_blank" rel="noopener">GPL-3.0-only</a></small></div><button id="close-settings" type="button" aria-label="关闭设置">✕</button></header>
   <div class="settings-body">

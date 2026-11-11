@@ -10,6 +10,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from 'playwright-core';
 import {blenderExecutable} from '../blender-runtime.mjs';
 import {demoProjectId} from '../demo-source.mjs';
+import {defaultLibraryMaterial} from '../public/paint-library.mjs';
 import {nativeModelSteps} from '../model-binding.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
 import {captureRenderPreset,updateDeliveryOptions} from '../public/paint-delivery-options.mjs';
@@ -73,8 +74,15 @@ try{
   execFileSync(process.execPath,['scripts/seed-demo.mjs'],{cwd:root,env,stdio:'inherit',timeout:180_000});
   const noBlender=path.join(data,'blender-unavailable'),blenderMarker=path.join(data,'blender-invoked');
   if(!windows)await fs.writeFile(noBlender,'#!/bin/sh\ntouch "$(dirname "$0")/blender-invoked"\nexit 42\n',{mode:0o700});
+  const projectFolders=path.join(data,'projects');
+  for(const id of ['broken-project','incomplete-project','invalid name'])
+    await fs.mkdir(path.join(projectFolders,id));
+  await fs.writeFile(path.join(projectFolders,'broken-project','project.json'),'{broken');
   await start(noBlender);
   const demo=await api(project(demoProjectId));
+  assert.deepEqual((await api('/api/projects')).map(item=>item.id),[demo.id]);
+  assert.deepEqual(await api(project('broken-project'),undefined,422),{error:'工程文件损坏，无法打开'});
+  assert.deepEqual(await api(project('incomplete-project'),undefined,404),{error:'找不到该工程'});
   const manifest=await api(project(demo.id)+'/viewport');
   assert.equal(manifest.status,'ready');
   assert.equal(manifest.metadata.uv_before,manifest.metadata.uv_after);
@@ -88,7 +96,19 @@ try{
     if(/\/(?:render-view|render-session|cycles-session|cycles-devices)(?:\/|$)/.test(new URL(request.url()).pathname))blenderRequests.push(request.url());
   });
   page.on('console',message=>{if(message.type()==='error'&&message.text().includes('Shader Error'))errors.push(message.text());});
-  await page.goto(base+'/?project='+demo.id);
+  await page.goto(base+'/?project=broken-project');
+  const welcome=page.locator('.project-welcome');
+  await welcome.getByText('工程文件损坏，无法打开').waitFor();
+  const recent=welcome.getByRole('button',{name:new RegExp(demo.name)});
+  await recent.waitFor();
+  await page.screenshot({path:path.join(data,'project-welcome.png')});
+  await welcome.getByRole('button',{name:'打开工程…',exact:true}).click();
+  await page.locator('#open-project-dialog').waitFor();
+  await page.keyboard.press('Escape');
+  await recent.click();
+  await page.waitForURL(url=>url.searchParams.get('project')===demo.id);
+  await welcome.waitFor({state:'hidden'});
+  console.log('PASS startup recovery and recent projects with an incomplete folder and a damaged project');
   try{await page.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});}
   catch(error){throw Error(error.message+'\n'+errors.join('\n')+'\n'+(await page.locator('body').innerText()).slice(0,1800));}
   const viewport=page.locator('.editor-viewport[data-state=ready]').first();
@@ -182,11 +202,11 @@ try{
   const modeling=layoutFile.layouts.modeling;
   modeling.ratio=.67;
   modeling.second.first.editor='console';
-  const file=layouts.locator('#workspace-layout-file');
-  await file.setInputFiles({name:'invalid.json',mimeType:'application/json',buffer:Buffer.from('{}')});
+  const layoutInput=layouts.locator('#workspace-layout-file');
+  await layoutInput.setInputFiles({name:'invalid.json',mimeType:'application/json',buffer:Buffer.from('{}')});
   await layouts.getByText('请选择受支持的阿拉克涅工作区布局文件').waitFor();
   assert.equal(await layouts.locator('#apply-workspace-layouts').isVisible(),false);
-  await file.setInputFiles({name:'test-layout.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(layoutFile))});
+  await layoutInput.setInputFiles({name:'test-layout.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(layoutFile))});
   await layouts.getByText('预览 · test-layout.json').waitFor();
   assert.equal(await page.locator('.editor-area[data-editor=console]').count(),0);
   await page.screenshot({path:path.join(data,'workspace-layouts.png')});
@@ -383,5 +403,49 @@ try{
   ].join('\n'),deliveryPath],{stdio:'inherit'});
   await assert.rejects(fs.stat(blenderMarker),{code:'ENOENT'});
   console.log('PASS native delivery of edited legacy model with verified hashes and Blender unavailable');
+  const libraryOrigin=await api('/api/projects',{workflowType:'pbr_paint',name:'资源库原始工程'},201);
+  const resources=[['aluminum','Aluminum 7075','#627b90'],['primer','Matte Primer','#929171']];
+  const librarySource=await api(paint(libraryOrigin.id)+'/commands',{revision:libraryOrigin.revision,operations:resources.map(([id,name,color])=>({
+    op:'library',library:'materials',id,action:'create',patch:{name,graph:defaultLibraryMaterial({color,metallic:.7,roughness:.32})}
+  }))});
+  let personal=await api('/api/personal-library');
+  for(const [id] of resources){
+    const saved=await api('/api/personal-library/save',{revision:personal.revision,projectId:libraryOrigin.id,
+      projectRevision:librarySource.revision,kind:'materials',resourceId:id});
+    personal=saved.state;
+  }
+  const libraryTarget=await api('/api/projects',{workflowType:'pbr_paint',name:'资源库导入工程'},201);
+  await page.goto(base+'/?project='+libraryTarget.id);
+  await page.locator('.area-switch [data-area-mode=material]:enabled').click();
+  const primary=page.locator('.editor-area[data-editor=library]').first();
+  await primary.getByRole('button',{name:'资源库范围',exact:true}).click();
+  await page.getByRole('option',{name:'个人',exact:true}).click();
+  const shelf=primary.locator('.personal-shelf');
+  const aluminum=shelf.getByRole('button',{name:'Aluminum 7075',exact:true});
+  const primer=shelf.getByRole('button',{name:'Matte Primer',exact:true});
+  await aluminum.waitFor();
+  await aluminum.click();
+  assert.equal(await aluminum.getAttribute('aria-pressed'),'true');
+  await page.keyboard.press('End');
+  assert.equal(await primer.evaluate(node=>document.activeElement===node),true);
+  await primary.getByRole('searchbox',{name:'搜索资源'}).fill('ＡＬＵ  7075');
+  assert.equal(await shelf.locator('.library-tile').count(),1);
+  await aluminum.dblclick();
+  const imported=await waitFor(async()=>{
+    const value=await api(project(libraryTarget.id));
+    return Object.keys(value.paint.materials||{}).length===1&&value;
+  },'从个人库双击导入');
+  const [materialId]=Object.keys(imported.paint.materials);
+  assert.notEqual(materialId,'aluminum');
+  await shelf.waitFor({state:'hidden'});
+  await primary.locator('[data-resource-id='+JSON.stringify(materialId)+']').dblclick();
+  const applied=await waitFor(async()=>{
+    const value=await api(project(libraryTarget.id));
+    return value.paint.layers.some(layer=>layer.materialId===materialId)&&value;
+  },'从项目库双击创建填充层');
+  assert.equal(applied.paint.layers.length,1);
+  assert.deepEqual((await api(project(libraryOrigin.id))).paint.materials,librarySource.paint.materials);
+  assert.deepEqual(await api('/api/personal-library'),personal);
+  console.log('PASS resource grid keyboard focus, normalized search, double-click personal import and double-click material application');
 }catch(error){console.error(log);throw error;}
 finally{if(browser)await browser.close();await stop();console.log('Demo verification data:',data);}

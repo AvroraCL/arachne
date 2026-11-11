@@ -1,8 +1,17 @@
-import {createSearchPicker,searchTerms} from './search-picker.mjs';
+import {createSearchPicker,searchTerms,matchesSearch} from './search-picker.mjs';
 
-const dateFormat=new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'short'});
+const dateFormat=new Intl.DateTimeFormat('zh-CN',{dateStyle:'short',timeStyle:'short',hour12:false});
 function updatedAt(project){
   return Date.parse(project.updated)||Number(project.created)||0;
+}
+
+export function recentProjects(items){
+  return [...items].sort((a,b)=>updatedAt(b)-updatedAt(a)||a.name.localeCompare(b.name));
+}
+
+export function projectDate(project){
+  const time=updatedAt(project);
+  return time?dateFormat.format(time):'';
 }
 
 export function setupProjectPicker({list,current,open,canOpen}){
@@ -20,17 +29,13 @@ export function setupProjectPicker({list,current,open,canOpen}){
 
   function render(){
     const terms=searchTerms(search.value);
-    const items=projects.filter(project=>{
-      const text=searchTerms(project.name+' '+project.id).join(' ');
-      return terms.every(term=>text.includes(term));
-    }).map(project=>{
+    const items=projects.filter(project=>matchesSearch(project.name+' '+project.id,terms)).map(project=>{
       const name=document.createElement('span');
       name.className='picker-row-name';
       name.textContent=name.title=project.name;
       const detail=document.createElement('span');
       detail.className='picker-row-detail';
-      const time=updatedAt(project);
-      detail.textContent=[project.id===current()?'当前工程':'',time?dateFormat.format(time):''].filter(Boolean).join(' · ');
+      detail.textContent=[project.id===current()?'当前工程':'',projectDate(project)].filter(Boolean).join(' · ');
       return {value:project.id,content:[name,detail]};
     });
     picker.setItems(items,terms.length?'没有匹配的工程':'还没有涂装工程');
@@ -69,7 +74,7 @@ export function setupProjectPicker({list,current,open,canOpen}){
     dialog.showModal();
     void list().then(items=>{
       if(!dialog.open||token!==request)return;
-      projects=items.sort((a,b)=>updatedAt(b)-updatedAt(a)||a.name.localeCompare(b.name));
+      projects=recentProjects(items);
       render();
       search.disabled=false;
       if(document.activeElement===close||document.activeElement===dialog)search.focus();

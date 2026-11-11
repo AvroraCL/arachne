@@ -13,9 +13,43 @@ fs.mkdirSync(path.join(DATA,'projects'),{recursive:true});
 const writeProject=(file,doc)=>atomic(file,{...doc,source:portableSource(doc.source)});
 export const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 export function atomic(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.'+crypto.randomUUID()+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value,null,2)+'\n');fs.renameSync(tmp,file);}
-export function projectDir(id){if(!/^[\w-]{1,100}$/.test(id))throw Error('项目ID无效');return path.join(DATA,'projects',id);}
-export const read=id=>{const doc=JSON.parse(fs.readFileSync(path.join(projectDir(id),'project.json'),'utf8'));doc.source=resolveSource(doc.source);return doc;};
-export const list=()=>fs.readdirSync(path.join(DATA,'projects')).filter(id=>fs.existsSync(path.join(projectDir(id),'project.json'))).map(id=>{const p=read(id);return {id:p.id,name:p.name,workflowType:p.workflowType,revision:p.revision,updated:p.updated,created:fs.statSync(projectDir(id)).birthtimeMs};}).sort((a,b)=>a.created-b.created);
+const projectIdPattern=/^[\w-]{1,100}$/;
+export function projectDir(id){
+  if(!projectIdPattern.test(id))throw Error('工程 ID 无效');
+  return path.join(DATA,'projects',id);
+}
+function readProjectFile(id){
+  const file=path.join(projectDir(id),'project.json');
+  let doc;
+  try{doc=JSON.parse(fs.readFileSync(file,'utf8'));}
+  catch(error){
+    if(['ENOENT','ENOTDIR'].includes(error.code))
+      throw Object.assign(Error('找不到该工程'),{status:404,code:'ENOENT'});
+    if(!(error instanceof SyntaxError))throw error;
+  }
+  if(doc?.id!==id||typeof doc.name!=='string'||!doc.source||typeof doc.source!=='object'||Array.isArray(doc.source))
+    throw Object.assign(Error('工程文件损坏，无法打开'),{status:422,code:'EINVALIDPROJECT'});
+  return doc;
+}
+export function read(id){
+  const doc=readProjectFile(id);
+  doc.source=resolveSource(doc.source);
+  return doc;
+}
+export function list(){
+  const projects=[];
+  for(const entry of fs.readdirSync(path.join(DATA,'projects'),{withFileTypes:true})){
+    if(!projectIdPattern.test(entry.name)||!entry.isDirectory()&&!entry.isSymbolicLink())continue;
+    try{
+      const {id,name,workflowType,revision,updated}=readProjectFile(entry.name);
+      const created=fs.statSync(projectDir(id)).birthtimeMs;
+      projects.push({id,name,workflowType,revision,updated,created});
+    }catch(error){
+      if(!['ENOENT','EINVALIDPROJECT'].includes(error.code))throw error;
+    }
+  }
+  return projects.sort((a,b)=>a.created-b.created);
+}
 function history(id){const file=path.join(projectDir(id),'history.json');return fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{undo:[],redo:[]};}
 function content(p){const q=clone(p);delete q.revision;delete q.updated;return q;}
 export function commit(id,expected,mutator,summary){

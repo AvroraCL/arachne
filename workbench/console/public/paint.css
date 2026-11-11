@@ -6,7 +6,6 @@ body{margin:0;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) a
 header,.bar{display:flex;align-items:center;gap:6px}
 header{padding:8px 12px;border-bottom:1px solid #2b2b2b;flex-wrap:wrap}
 small,#revision{color:var(--ui-muted);font-size:var(--paint-font-caption,12px);font-weight:400}
-#projects{max-width:min(260px,32vw);min-width:0}
 #revision{white-space:nowrap;font-variant-numeric:tabular-nums}
 a{color:var(--ui-secondary);text-decoration:none}
 a:hover{color:#fff;text-decoration:underline}
@@ -36,7 +35,6 @@ button.primary:hover:not(:disabled){background:#4b4b4b;border-color:#5a5a5a}
 #glb-migration-error:empty{display:none}
 #glb-migration-dialog #glb-migration-error{color:#edaaa0}
 .project-dialog-content>label{display:grid;gap:8px}
-#project-dialog #projects,#project-dialog .custom-select:has(> #projects){width:100%;max-width:100%}
 .project-dialog-content fieldset{margin:0;border:1px solid #414141;border-radius:5px;padding:12px}
 .project-dialog-content dl{display:grid;grid-template-columns:70px minmax(0,1fr);gap:12px;margin:5px 0}
 .project-dialog-content dt{color:#999}
@@ -247,7 +245,7 @@ button[aria-pressed=true]{background:#393939;color:#eee;box-shadow:none}
 #viewport,#uv-view{position:relative;overflow:hidden;min-height:0;background:#252525}
 #uv-view{display:grid;place-items:center}
 #texture{max-width:100%;max-height:100%;object-fit:contain}
-#viewport-status,footer,#empty{margin:0;padding:5px 10px;color:var(--ui-muted);font-size:var(--paint-font-caption,12px)}
+#viewport-status,footer{margin:0;padding:5px 10px;color:var(--ui-muted);font-size:var(--paint-font-caption,12px)}
 footer:empty{display:none}
 footer{border-top:1px solid #2b2b2b;color:#eee}
 #layers{display:grid;gap:3px;margin:7px 0 3px}

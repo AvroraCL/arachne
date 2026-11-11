@@ -1,13 +1,15 @@
 import {defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph} from './paint-library.mjs';
 import {createPersonalShelf} from './personal-library-client.mjs';
 import {enhanceSelectMenu,setSelectValue} from './paint-select.mjs';
-import {drawBrushPreview} from './paint-library-preview.mjs';
+import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mjs';
+import {matchesSearch,searchTerms} from './search-picker.mjs';
 
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 export function createPaintLibrary({host,read,write,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,selectedImage=()=>null,importResource,onImportedImage}){
   let kind='materials',picked=null,project=null,brushKey='',gridKey='',nodesOpen=true,selectionGeneration=0;
   let scope='project';try{scope=localStorage.getItem('arachne-library-scope')==='personal'?'personal':'project';}catch{}
   const bar=el('div','library-bar'),tabs=el('div','library-tabs'),tools=el('div','library-actions'),grid=el('div','library-grid');
+  enableResourceGridKeys(grid);
   tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','资源库');
   const search=el('input');search.type='search';search.placeholder='搜索资源';search.setAttribute('aria-label','搜索资源');
   function button(text,action,label){const b=el('button','',text);b.type='button';b.onclick=action;if(label)b.setAttribute('aria-label',label);return b;}
@@ -57,7 +59,7 @@ export function createPaintLibrary({host,read,write,canEdit,selectedLayer,brushS
     if(!Object.hasOwn(read()?.paint[library]||{},id))return;
     selectionGeneration++;
     scope='project';setSelectValue(scopeSelect,scope);
-    kind=library;picked=id;nodesOpen=true;gridKey='';if(library==='brushes')brushKey='';remember();sync();changed({force:true});
+    kind=library;picked=id;nodesOpen=true;if(library==='brushes')brushKey='';remember();sync();changed({force:true});
   }
   function sync(){
     const doc=read();if(!doc)return;
@@ -80,23 +82,26 @@ export function createPaintLibrary({host,read,write,canEdit,selectedLayer,brushS
     savePersonal.disabled=!canEdit()||personal.working||!(images?selectedImage():item);
     search.hidden=images&&!isPersonal;
     if(isPersonal)return;
-    const entries=Object.entries(doc.paint[kind]||{}).filter(([,item])=>item.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()));
-    const key=JSON.stringify([project,kind,entries,picked]);if(key===gridKey)return;gridKey=key;
-    grid.replaceChildren(...entries.map(([id,item])=>{
-      const tile=button('',()=>{if(canEdit())select(kind,id);},item.name);tile.className='library-tile';tile.dataset.resourceId=id;tile.setAttribute('aria-pressed',String(picked===id));
-      const preview=el('div','library-preview');
-      if(kind==='brushes'){const canvas=el('canvas');drawBrushPreview(canvas,evaluateBrushGraph(item.graph));preview.append(canvas);}
-      else{
-        const pbr=item.graph.nodes.find(n=>n.type==='pbr'),rgb=item.graph.nodes.find(n=>n.type==='color'),image=item.graph.nodes.find(n=>n.type==='image'&&n.params.asset);
-        const sphere=el('span','library-sphere');sphere.style.setProperty('--material-color',rgb?.params.color||pbr?.params.color||'#808080');
-        if(image){const img=el('img');img.alt='';img.src='/api/projects/'+doc.id+'/paint/assets/'+image.params.asset;img.draggable=false;sphere.append(img);}
-        preview.append(sphere);
-      }
-      const caption=el('span','library-name',item.name);tile.title=item.name+(kind==='materials'?' · 选中编辑节点，创建填充层应用':' · 选中后应用于后续笔触');tile.append(preview,caption);return tile;
-    }));
-    if(!entries.length)grid.append(el('p','library-empty',search.value?'没有匹配的资源':images?'':`还没有${kind==='materials'?'材质':'笔刷'}。新建资源，或保存当前参数。`));
+    const terms=searchTerms(search.value);
+    const entries=Object.entries(doc.paint[kind]||{}).filter(([,item])=>matchesSearch(item.name,terms));
+    const key=JSON.stringify([project,kind,entries,terms]);
+    if(key!==gridKey){
+      gridKey=key;
+      const focused=grid.contains(document.activeElement)?document.activeElement.dataset.resourceId:null;
+      grid.replaceChildren(...entries.map(([id,item])=>{
+        const tile=button('',()=>{if(canEdit())select(kind,id);},item.name);
+        tile.className='library-tile';tile.dataset.resourceId=id;
+        if(kind==='materials')tile.ondblclick=()=>{if(canEdit())applyMaterial(id);};
+        tile.title=item.name+(kind==='materials'?' · 双击创建填充层':' · 应用于后续笔触');
+        tile.append(resourcePreview(kind,item,asset=>'/api/projects/'+doc.id+'/paint/assets/'+asset),el('span','library-name',item.name));
+        return tile;
+      }));
+      if(!entries.length)grid.append(el('p','library-empty',terms.length?'没有匹配的资源':`还没有${kind==='materials'?'材质':'笔刷'}`));
+      if(focused)grid.querySelector('[data-resource-id="'+CSS.escape(focused)+'"]')?.focus({preventScroll:true});
+    }
+    for(const tile of grid.querySelectorAll('.library-tile'))tile.setAttribute('aria-pressed',String(tile.dataset.resourceId===picked));
   }
-  search.oninput=()=>{gridKey='';sync();};
+  search.oninput=sync;
   function showImages(){selectionGeneration++;scope='project';setSelectValue(scopeSelect,scope);kind='images';picked=null;gridKey='';remember();sync();changed();}
   return {sync,select,target,showImages};
 }

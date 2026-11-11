@@ -95,12 +95,8 @@
 #new-paint-dialog .paint-form-footer [role=alert]{flex:1;overflow-wrap:anywhere;font-size:12px;line-height:1.5}
 #new-paint-dialog .paint-form-footer button{flex:none;margin-left:auto}
 #project-dialog .project-dialog-content{min-height:0;overflow:auto;gap:12px;padding:12px}
-#project-dialog .project-dialog-content>label{grid-template-columns:80px minmax(0,1fr);align-items:center;gap:8px;font-size:13px}
-#project-dialog .project-dialog-content fieldset{min-width:0;margin:0;padding:0;border:0;border-radius:0;background:transparent}
-#project-dialog legend{padding:0;margin-bottom:6px;font-size:13px;font-weight:600;color:#ccc}
 #project-dialog .project-dialog-content dl{grid-template-columns:70px minmax(0,1fr);gap:6px 10px;margin:0;font-size:13px;line-height:1.6}
 #project-dialog .project-dialog-content dd{min-width:0;overflow-wrap:anywhere}
-#project-dialog .project-dialog-content p{font-size:12px;line-height:1.6}
 
 /* History is a list, not a stack of individually bordered cards. */
 #history-dialog{width:min(640px,calc(100vw - 24px));max-height:min(620px,calc(100dvh - 24px))}

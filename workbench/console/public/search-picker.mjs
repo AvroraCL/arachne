@@ -2,6 +2,11 @@ export function searchTerms(value){
   return value.normalize('NFKC').toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
 }
 
+export function matchesSearch(value,terms){
+  const text=value.normalize('NFKC').toLocaleLowerCase();
+  return terms.every(term=>text.includes(term));
+}
+
 export function createSearchPicker({input,list,message,onSelect,onActive=()=>{}}){
   let rows=[],active=-1;
 
