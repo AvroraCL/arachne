@@ -68,6 +68,7 @@ let uvHandHeld=false,showUVGuide=true,placingText=false;
 let uvZoomTool=false,uvZoomDirection='in',uvPointerInside=false,uvZoomMode='fit';
 let doc=null,jobs=[],selected=null,busy=false,polling=false,view='uv',textureKey='',selectedAsset=null,drag=null,transform='move';
 const projectWrites=new Map(),projectSaveErrors=new Map();
+let snapshotTag=null,projectGeneration=0,refreshSequence=0,appliedRefresh=0;
 let selection=new Set(),selectionAnchor=null,layerRename=null;
 let assetGridKey='';
 const canvasAssetSizes=new Map();
@@ -1392,11 +1393,21 @@ function deliveryLink(text,url){
 }
 async function refresh(){
   if(!doc)return;
-  const id=doc.id,{document,jobs:next}=await api(route());
-  if(doc.id!==id||document.revision<doc.revision)return;
-  const changed=doc.revision!==document.revision;
+  const {revision}=doc,generation=projectGeneration,sequence=++refreshSequence;
+  const headers=snapshotTag?.revision===revision?{'If-None-Match':snapshotTag.value}:{};
+  const response=await fetch(route()+'?knownRevision='+revision,{headers,cache:'no-store'});
+  if(generation!==projectGeneration||sequence<appliedRefresh)return;
+  if(response.status===304){appliedRefresh=sequence;await refreshGeometry();return;}
+  const {document,jobs:next}=await responseJson(response);
+  const returnedRevision=document?.revision??revision;
+  if(generation!==projectGeneration||sequence<appliedRefresh||returnedRevision<doc.revision)return;
+  appliedRefresh=sequence;
+  const value=response.headers.get('etag');
+  snapshotTag=value?{revision:returnedRevision,value}:null;
+  const changed=doc.revision!==returnedRevision;
   if(changed)approvedPreviewId=null;
-  doc=document;jobs=next;
+  if(document)doc=document;
+  jobs=next;
   if(changed){
     const active=layer(),parent=active&&layerParent(active);
     const retained=doc.paint.layers.filter(item=>selection.has(item.id)&&(!active||layerParent(item)===parent)).map(item=>item.id);
@@ -1406,9 +1417,12 @@ async function refresh(){
     render();
   }else renderJobs();
   schedulePreview(changed);
+  await refreshGeometry();
+}
+async function refreshGeometry(){
   if(doc.modeling?.steps?.length||Object.keys(doc.paint.surfaceBindings||{}).some(key=>key!=='original')){
-    const revision=doc.revision,geometry=await api(route()+'/model-state');
-    if(doc?.id===id&&doc.revision===revision)showGeometryStatus(geometryStatusNodes,geometry);
+    const revision=doc.revision,generation=projectGeneration,geometry=await api(route()+'/model-state');
+    if(generation===projectGeneration&&doc.revision===revision)showGeometryStatus(geometryStatusNodes,geometry);
   }else showGeometryStatus(geometryStatusNodes,null);
 }
 async function run(action,errorOutput=null){
@@ -1446,7 +1460,7 @@ async function load(id){
   setTextPlacement(false);
   clearTimeout(autoTimer);
   liveView.clear();
-  doc=next;projectSaveErrors.delete(id);
+  doc=next;projectGeneration++;snapshotTag=null;projectSaveErrors.delete(id);
   setLayerSearch(false,false);
   pendingBackupId=null;
   collapsedFolders=new Set();
@@ -2778,5 +2792,13 @@ if(!doc)render();
 const requestedArea=preferences.startupArea==='last'?rememberedWorkbench.workArea:preferences.startupArea;
 if(!areaSystem&&doc&&Object.hasOwn(areaViews,requestedArea))selectWorkArea(requestedArea);
 areaSystem?.sync();
-setInterval(async()=>{if(busy||polling)return;polling=true;try{await refresh();}catch(error){$('status').textContent=error.message;}finally{polling=false;}},1500);
+async function pollProject(){
+  if(document.hidden||!doc||busy||polling)return;
+  polling=true;
+  try{await refresh();}
+  catch(error){$('status').textContent=error.message;}
+  finally{polling=false;}
+}
+setInterval(pollProject,1500);
+document.addEventListener('visibilitychange',()=>void pollProject());
 installPaintTooltips();

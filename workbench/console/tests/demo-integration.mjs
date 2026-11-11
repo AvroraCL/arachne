@@ -61,6 +61,9 @@ async function api(route,input,expected=200){
 }
 const project=id=>'/api/projects/'+id;
 const paint=id=>project(id)+'/paint';
+function snapshot(doc,tag){
+  return fetch(base+paint(doc.id)+'?knownRevision='+doc.revision,{headers:tag?{'If-None-Match':tag}:{}});
+}
 const result=(id,job)=>waitFor(async()=>{
   const value=await api(project(id)+'/jobs/'+job.id);
   if(['failed','cancelled','interrupted'].includes(value.status)){
@@ -80,6 +83,14 @@ try{
   await fs.writeFile(path.join(projectFolders,'broken-project','project.json'),'{broken');
   await start(noBlender);
   const demo=await api(project(demoProjectId));
+  const initialSnapshot=await snapshot(demo);
+  const initialTag=initialSnapshot.headers.get('etag');
+  assert.equal(initialSnapshot.status,200);
+  assert.deepEqual(await initialSnapshot.json(),{document:null,jobs:[]});
+  assert.ok(initialTag);
+  const idleSnapshot=await snapshot(demo,initialTag);
+  assert.equal(idleSnapshot.status,304);
+  assert.equal(await idleSnapshot.text(),'');
   assert.deepEqual((await api('/api/projects')).map(item=>item.id),[demo.id]);
   assert.deepEqual(await api(project('broken-project'),undefined,422),{error:'工程文件损坏，无法打开'});
   assert.deepEqual(await api(project('incomplete-project'),undefined,404),{error:'找不到该工程'});
@@ -454,9 +465,19 @@ try{
   const monitor=page.locator('#task-monitor');
   await monitor.waitFor();
   await monitor.getByRole('button',{name:'进行中',exact:true}).click();
+  const editedSnapshot=await snapshot(libraryTarget);
+  assert.equal((await editedSnapshot.json()).document.revision,applied.revision);
+  const beforeJob=await snapshot(applied);
+  const jobsTag=beforeJob.headers.get('etag');
+  assert.deepEqual(await beforeJob.json(),{document:null,jobs:[]});
   const running=await api(paint(libraryTarget.id)+'/render',{revision:applied.revision,requestId:randomUUID(),
     settings:{width:320,height:256,samples:128,device:'cpu'}},202);
   const taskPath=project(libraryTarget.id)+'/jobs/';
+  const jobSnapshot=await snapshot(applied,jobsTag);
+  assert.equal(jobSnapshot.status,200);
+  const update=await jobSnapshot.json();
+  assert.equal(update.document,null);
+  assert.equal(update.jobs[0].id,running.id);
   const taskRow=monitor.locator('[data-job-id='+JSON.stringify(running.id)+']');
   await taskRow.waitFor();
   await monitor.getByRole('button',{name:'取消任务',exact:true}).click();

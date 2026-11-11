@@ -37,7 +37,16 @@ if(fs.existsSync(lock)){
 }
 fs.writeFileSync(lock,JSON.stringify({pid:process.pid,url:local}));
 process.on('exit',()=>{try{if(JSON.parse(fs.readFileSync(lock,'utf8')).pid===process.pid)fs.unlinkSync(lock);}catch{}});
-const send=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
+const send=(res,status,data,headers={})=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(data));};
+function sendPaintSnapshot(req,res,doc,url){
+  const jobs=listJobs(doc.id),known=url.searchParams.get('knownRevision');
+  if(known===null){send(res,200,{document:doc,jobs});return;}
+  const tag='"'+crypto.createHash('sha256').update(JSON.stringify([doc.id,doc.revision,jobs])).digest('hex')+'"';
+  const headers={'ETag':tag,'Cache-Control':'no-store'};
+  const unchanged=known===String(doc.revision);
+  if(unchanged&&req.headers['if-none-match']===tag){res.writeHead(304,headers);res.end();return;}
+  send(res,200,{document:unchanged?null:doc,jobs},headers);
+}
 async function body(req){
   const decoder=new StringDecoder('utf8');
   let text='',bytes=0;
@@ -206,7 +215,7 @@ const server=http.createServer(async(req,res)=>{
       if(req.method==='GET'&&operation==='render-objects'){send(res,200,renderSceneObjects(doc));return;}
       if(req.method==='GET'&&operation==='model-state'){send(res,200,modelGeometryStatus(doc));return;}
       if(req.method==='GET'&&operation==='model-log'){file(res,modelGeometryLog(doc,url.searchParams.get('binding')));return;}
-      if(req.method==='GET'&&parts.length===4){send(res,200,{document:doc,jobs:listJobs(id)});return;}
+      if(req.method==='GET'&&parts.length===4){sendPaintSnapshot(req,res,doc,url);return;}
       if(req.method!=='POST'){send(res,405,{error:'方法不支持'});return;}
       const b=await body(req);
       doc=read(id);
