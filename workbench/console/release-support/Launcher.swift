@@ -66,7 +66,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
             edit.addItem(withTitle:title,action:Selector(selector),keyEquivalent:key)
         }
         edit.addItem(.separator());command(edit,"历史记录…","history");command(edit,"搜索命令…","searchCommands","k")
-        let render=group("渲染");command(render,"渲染设置","renderSettings")
+        let render=group("渲染");command(render,"渲染设置","renderSettings");command(render,"后台任务…","renderTasks")
         let window=group("窗口");command(window,"工作区布局…","workspaceLayouts");window.addItem(.separator())
         window.addItem(withTitle:"最小化",action:#selector(NSWindow.performMiniaturize(_:)),keyEquivalent:"m")
         window.addItem(withTitle:"关闭窗口",action:#selector(NSWindow.performClose(_:)),keyEquivalent:"w")

@@ -2,7 +2,7 @@
 // through the same buttons, keyboard handlers and revision checks as the Web UI.
 const commands={newProject:'new',openProject:'open-projects',projectDetails:'open-project-details',
   importArchive:'open-paint-import',migrateModel:'open-glb-migration',searchCommands:'open-command-picker',workspaceLayouts:'open-workspace-layouts',createBackup:'create-paint-backup',downloadBackup:'download-paint-backup',
-  export:'open-delivery',history:'open-history',renderSettings:'open-render-settings',settings:'open-settings'};
+  export:'open-delivery',history:'open-history',renderTasks:'open-task-monitor',renderSettings:'open-render-settings',settings:'open-settings'};
 
 export function createNativeWorkbench({window,document,status}){
   function command(name){

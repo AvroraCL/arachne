@@ -1,3 +1,4 @@
+import {setupTaskMonitor} from './paint-task-monitor.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {setupProjectWelcome} from './paint-project-welcome.mjs';
 import {setupWorkspaceLayouts} from './paint-workspace-layouts.mjs';
@@ -55,7 +56,7 @@ applyAppearance(preferences);
 const names={...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),x:'横向中心',y:'纵向中心',scale:'缩放',rotation:'旋转角度'};
 const geometryStatusNodes={status:$('model-geometry-status'),retry:$('model-geometry-retry'),log:$('model-geometry-log')};
 geometryStatusNodes.retry.onclick=()=>run(async()=>{await post('model-prepare');liveView.refresh();});
-let shaderEditor=null,historyPanel=null,libraryUI=null,areaSystem=null;
+let shaderEditor=null,historyPanel=null,libraryUI=null,areaSystem=null,taskMonitor=null;
 let autoTimer=null,inspectChannel=false,inspectMask=false,isolatedLayerId=null;
 let paintTarget='material';
 const colorPreferenceKey='arachne-paint-colors-v1';
@@ -84,7 +85,7 @@ const materialLayerDrag=createMaterialLayerDrag({
   commit:(operation,{id,revision})=>run(()=>api('/api/projects/'+id+'/paint/commands',{revision,operations:[operation]}))
 });
 function syncBusyControls(){
-  libraryUI?.sync();shaderEditor?.sync();historyPanel?.sync();areaSystem?.busyChanged();
+  libraryUI?.sync();shaderEditor?.sync();historyPanel?.sync();areaSystem?.busyChanged();taskMonitor?.sync();
   $('open-settings').disabled=busy;
   for(const control of $('empty').querySelectorAll('button'))control.disabled=busy;
   for(const control of [...areaButtons,$('upload')])control.disabled=busy||!doc;
@@ -1284,6 +1285,7 @@ function renderJobs(){
   renderDelivery(j,active,active||production[0]);
   renderPaintBackups();
   paintRenderResults.sync();
+  taskMonitor?.sync();
   for(const listener of renderResultsListeners)listener();
   void renderTexture();
 }
@@ -2745,6 +2747,18 @@ $('inspect-channel').onclick=()=>{
 };
 if(areaSystem)setupWorkspaceLayouts({areas:areaSystem.areas,canOpen:canOpenProjectDialog});
 const welcome=setupProjectWelcome({list:projects,open:(id,error)=>run(()=>load(id),error)});
+taskMonitor=setupTaskMonitor({project:()=>doc,jobs:()=>jobs,busy:()=>busy,canOpen:canOpenProjectDialog,
+  loadLog:(id,job)=>api('/api/projects/'+id+'/jobs/'+job+'/log'),
+  cancel:(job,error)=>run(()=>post('cancel',{jobId:job.id}),error),
+  retry:async(job,error)=>{
+    const operations={'paint-preview':'preview','paint-draft':'draft','paint-backup':'backup','paint-render':'render-retry'};
+    const operation=isPaintExport(job)?'export-retry':operations[job.type];
+    if(!operation)return null;
+    let next;
+    const ok=await run(async()=>{next=await post(operation,{jobId:job.id,requestId:crypto.randomUUID()});},error);
+    return ok?next:null;
+  }
+});
 const rememberedWorkbench=restoreWorkbenchSession();
 await run(async()=>{
   const params=new URLSearchParams(location.search);

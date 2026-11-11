@@ -18,7 +18,7 @@ import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 const compressLive=promisify(gzip);
 import {ROOT,DATA,list,read,commit,travel,projectHistory,projectDir} from './store.mjs';
-import {setBaseUrl,getJob,listJobs,submit,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes} from './jobs.mjs';
+import {setBaseUrl,getJob,listJobs,submit,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes,readJobLog} from './jobs.mjs';
 import {workspaceRoot} from './workspace-paths.mjs';
 import {demoProjectId} from './demo-source.mjs';
 import {migrateBlendProject,stopBlendMigrations} from './blend-migration.mjs';
@@ -322,6 +322,7 @@ const server=http.createServer(async(req,res)=>{
       if(parts.length===4&&req.method==='GET'){send(res,200,listJobs(id));return;}
       const jid=parts[4];const j=getJob(id,jid);
       if(parts.length===5&&req.method==='GET'){send(res,200,j);return;}
+      if(parts.length===6&&parts[5]==='log'&&req.method==='GET'){send(res,200,readJobLog(id,jid));return;}
       if(parts[5]==='cancel'&&req.method==='POST'){await body(req);send(res,200,await cancel(id,jid));return;}
       if(parts[5]==='snapshot'&&req.method==='GET'){file(res,path.join(jobDir(id,jid),'snapshot.json'));return;}
       if(parts[5]==='files'&&req.method==='GET'){

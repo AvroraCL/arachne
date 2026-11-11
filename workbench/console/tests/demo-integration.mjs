@@ -447,5 +447,41 @@ try{
   assert.deepEqual((await api(project(libraryOrigin.id))).paint.materials,librarySource.paint.materials);
   assert.deepEqual(await api('/api/personal-library'),personal);
   console.log('PASS resource grid keyboard focus, normalized search, double-click personal import and double-click material application');
+  await page.locator('.area-switch [data-area-mode=material]:enabled').waitFor();
+  await page.keyboard.press('F3');
+  await page.locator('#command-search').fill('后台任务');
+  await page.keyboard.press('Enter');
+  const monitor=page.locator('#task-monitor');
+  await monitor.waitFor();
+  await monitor.getByRole('button',{name:'进行中',exact:true}).click();
+  const running=await api(paint(libraryTarget.id)+'/render',{revision:applied.revision,requestId:randomUUID(),
+    settings:{width:320,height:256,samples:128,device:'cpu'}},202);
+  const taskPath=project(libraryTarget.id)+'/jobs/';
+  const taskRow=monitor.locator('[data-job-id='+JSON.stringify(running.id)+']');
+  await taskRow.waitFor();
+  await monitor.getByRole('button',{name:'取消任务',exact:true}).click();
+  await waitFor(async()=>(await api(taskPath+running.id)).status==='cancelled','取消后台出图');
+  await monitor.getByRole('button',{name:'已中止',exact:true}).click();
+  await taskRow.getByText('已取消').waitFor();
+  const jobLog=path.join(data,'projects',libraryTarget.id,'jobs',running.id,'run.log');
+  await fs.appendFile(jobLog,'TEST OLDEST\n'+'过程\n'.repeat(7000)+'TEST END\n');
+  const tail=await api(taskPath+running.id+'/log');
+  assert.equal(tail.truncated,true);
+  assert.ok(Buffer.byteLength(tail.text)<=32768);
+  assert.doesNotMatch(tail.text,/TEST OLDEST/);
+  assert.match(tail.text,/TEST END/);
+  await monitor.getByText('运行日志',{exact:true}).click();
+  await monitor.getByText('显示日志末尾 32 KiB').waitFor();
+  assert.match(await monitor.locator('pre').textContent(),/TEST END/);
+  await page.screenshot({path:path.join(data,'task-monitor.png')});
+  await monitor.getByRole('button',{name:'重试任务',exact:true}).click();
+  const retried=await waitFor(async()=>(await api(project(libraryTarget.id)+'/jobs')).find(job=>job.retryOf===running.id),'重试后台出图');
+  await monitor.locator('[data-job-id='+JSON.stringify(retried.id)+'][aria-pressed=true]').waitFor();
+  await monitor.getByRole('button',{name:'取消任务',exact:true}).click();
+  await waitFor(async()=>(await api(taskPath+retried.id)).status==='cancelled','取消验收任务');
+  await page.keyboard.press('Escape');
+  await monitor.waitFor({state:'hidden'});
+  assert.deepEqual(errors,[]);
+  console.log('PASS background task filters, bounded inline logs, cancellation and retry selection');
 }catch(error){console.error(log);throw error;}
 finally{if(browser)await browser.close();await stop();console.log('Demo verification data:',data);}

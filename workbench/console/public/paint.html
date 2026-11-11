@@ -51,6 +51,7 @@
     <details class="paint-menu" name="paint-menubar-menu"><summary>渲染</summary><div class="paint-menu-content">
       <button id="open-paint-render" type="button" aria-haspopup="dialog" disabled>路径追踪出图…</button>
       <button id="open-render-results" type="button" disabled>渲染结果</button>
+      <button id="open-task-monitor" type="button" aria-haspopup="dialog" disabled>后台任务…</button>
       <button id="preview" type="button">生成 4K 预览</button>
       <button id="open-render-settings" type="button">渲染设置</button>
       <label><input id="auto-preview" type="checkbox">自动预览</label>
@@ -411,6 +412,32 @@
   </div>
   <p id="settings-error" role="alert"></p>
   <footer><button id="reset-settings" type="button">恢复默认</button><output id="settings-save-state">设置保存在此浏览器</output><button id="cancel-settings" type="button">取消</button><button id="save-settings" type="submit" form="settings-form" class="primary">保存设置</button></footer>
+</dialog>
+<dialog id="task-monitor" class="workbench-picker" aria-labelledby="task-monitor-title">
+  <header><strong id="task-monitor-title">后台任务</strong><button id="close-task-monitor" type="button">关闭</button></header>
+  <div class="task-monitor-filters" role="group" aria-label="筛选任务">
+    <button type="button" data-task-filter="all" aria-pressed="true">全部</button>
+    <button type="button" data-task-filter="active" aria-pressed="false">进行中</button>
+    <button type="button" data-task-filter="completed" aria-pressed="false">已完成</button>
+    <button type="button" data-task-filter="stopped" aria-pressed="false">已中止</button>
+  </div>
+  <ul id="task-monitor-list" class="task-monitor-list" aria-label="任务列表"></ul>
+  <p id="task-monitor-empty" class="picker-message" role="status"></p>
+  <section id="task-monitor-detail" class="task-monitor-detail" aria-label="所选任务详情" hidden>
+    <p id="task-monitor-stage" role="status"></p>
+    <progress id="task-monitor-progress" aria-label="采样进度" hidden></progress>
+    <details id="task-monitor-log">
+      <summary>运行日志</summary>
+      <div><button id="task-monitor-refresh-log" type="button">刷新日志</button><output id="task-monitor-log-status"></output></div>
+      <pre id="task-monitor-log-text"></pre>
+    </details>
+  </section>
+  <footer>
+    <p id="task-monitor-error" role="alert"></p>
+    <a id="task-monitor-download" class="task-download" hidden>下载产物</a>
+    <button id="task-monitor-cancel" type="button" hidden>取消任务</button>
+    <button id="task-monitor-retry" type="button" hidden>重试任务</button>
+  </footer>
 </dialog>
 <dialog id="workspace-layouts" class="workbench-picker" aria-labelledby="workspace-layouts-title">
   <header><strong id="workspace-layouts-title">工作区布局</strong><button id="close-workspace-layouts" type="button">关闭</button></header>

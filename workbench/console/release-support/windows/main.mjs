@@ -50,7 +50,7 @@ function buildMenus(){
       {label:'剪切',role:'cut'},{label:'复制',role:'copy'},{label:'粘贴',role:'paste'},{label:'全选',role:'selectAll'},
       separator,command('历史记录…','history'),command('搜索命令…','searchCommands','CmdOrCtrl+K'),command('设置…','settings')
     ]},
-    {label:'渲染',submenu:[command('渲染设置…','renderSettings')]},
+    {label:'渲染',submenu:[command('渲染设置…','renderSettings'),command('后台任务…','renderTasks')]},
     {label:'窗口',submenu:[command('工作区布局…','workspaceLayouts'),separator,{label:'最小化',role:'minimize'},{label:'切换全屏',role:'togglefullscreen'},{label:'关闭窗口',role:'close'}]}
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menu));

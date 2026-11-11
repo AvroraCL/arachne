@@ -18,6 +18,20 @@ const safe=id=>{if(!/^[\w-]+$/.test(id))throw Error('任务ID无效');return id;
 export const jobDir=(pid,jid)=>path.join(projectDir(pid),'jobs',safe(jid));
 export const getJob=(pid,jid)=>JSON.parse(fs.readFileSync(path.join(jobDir(pid,jid),'job.json'),'utf8'));
 export function listJobs(pid){const dir=path.join(projectDir(pid),'jobs');return fs.existsSync(dir)?fs.readdirSync(dir).filter(j=>fs.existsSync(path.join(dir,j,'job.json'))).map(j=>getJob(pid,j)).sort((a,b)=>b.created.localeCompare(a.created)):[];}
+export function readJobLog(pid,jid){
+  const file=path.join(jobDir(pid,jid),'run.log');
+  let fd;
+  try{fd=fs.openSync(file,'r');}
+  catch(error){if(error.code==='ENOENT')return {jobId:jid,text:'',truncated:false};throw error;}
+  try{
+    const size=fs.fstatSync(fd).size,offset=Math.max(0,size-32768),buffer=Buffer.alloc(size-offset);
+    const bytes=fs.readSync(fd,buffer,0,buffer.length,offset);
+    let text=buffer.toString('utf8',0,bytes);
+    const line=text.indexOf('\n');
+    if(offset&&line>=0)text=text.slice(line+1);
+    return {jobId:jid,text,truncated:offset>0};
+  }finally{fs.closeSync(fd);}
+}
 function update(j,patch){Object.assign(j,patch,{updated:new Date().toISOString()});atomic(path.join(jobDir(j.projectId,j.id),'job.json'),j);}
 const fileUrl=(j,name)=>`/api/projects/${j.projectId}/jobs/${j.id}/files/${name}`;
 function cancelled(j){if(j.cancelRequested){const e=Error('任务已取消');e.cancelled=true;throw e;}}
