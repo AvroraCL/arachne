@@ -6,6 +6,7 @@ const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
 const ink=s=>typeof s==='string'&&/^#[a-f\d]{6}$/i.test(s);
 const layerFields=['name','visible','locked','opacity','blend','maskEnabled','maskBase','asset','x','y','scale','rotation','stretch'];
 export const imageLayerDefaults={visible:true,locked:false,opacity:1,blend:'normal',maskEnabled:false,maskBase:1};
+export const hasImageLayerMask=layer=>!!layer&&(layer.maskEnabled||Array.isArray(layer.maskStrokes));
 export function imageStrokeToMaterial(s,mask=false){
   if(s.transformUV||s.clearUV)return structuredClone(s);
   const {color,...stroke}=s;return mask?stroke:{...stroke,channels:{color:true,metallic:false,roughness:false},values:{color,metallic:0,roughness:.5}};
@@ -85,6 +86,8 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
   if(o.action==='updateLayer'){
     if(!exact(o.patch,layerFields))throw Error('图像图层参数无效');
     if(Object.hasOwn(o.patch,'asset')&&o.patch.asset!==layer.asset)delete layer.text;
+    // An empty mask still exists after it is disabled.
+    if(layer.maskEnabled&&o.patch.maskEnabled===false)layer.maskStrokes??=[];
     Object.assign(layer,o.patch);
   }
   else if(o.action==='removeLayer')doc.layers.splice(index,1);

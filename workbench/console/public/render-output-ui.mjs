@@ -6,7 +6,7 @@ export function showRenderDownload(anchor,job,projectName){
   const {label,extension}=job.outputUrl?cyclesFormats.OPEN_EXR:cyclesFormats.PNG;
   anchor.textContent='下载 '+label;
   anchor.href=job.outputUrl||job.renderUrl;
-  anchor.download=projectName.replace(/[\\/:*?"<>|]+/g,'-')+'-r'+job.revision+'-Cycles.'+extension;
+  anchor.download=projectName.replace(/[\\/:*?"<>|]+/g,'-')+'-r'+job.revision+(job.render?'-PathTracing.':'-Cycles.')+extension;
 }
 
 export function showRenderPassDownload(anchor,job){

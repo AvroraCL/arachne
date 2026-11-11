@@ -1,0 +1,4 @@
+# Windows x64, CPython 3.13, wheels from PyPI
+numpy==2.3.5 --hash=sha256:00dc4e846108a382c5869e77c6ed514394bdeb3403461d25a829711041217d5b
+Pillow==13.0.0 --hash=sha256:9dda0788a9932776a75d8bcc020076edc308ce2508b51f6739a45e3158b3fc42
+fonttools==4.57.0 --hash=sha256:f1d6bc9c23356908db712d282acb3eebd4ae5ec6d8b696aa40342b1d84f8e9e3

@@ -1,5 +1,6 @@
 // Area = layout leaf; editor state is local, project content never enters this tree.
 const clone=value=>structuredClone(value),epsilon=1e-8;
+export const workspaceNames=Object.freeze({modeling:'建模',material:'材质',drawing:'绘制'});
 export const editorNames={viewport:'三维视口',image:'二维图像编辑器',uv:'UV 编辑器',renderResult:'渲染结果',shader:'材质节点编辑器',scene:'大纲视图',properties:'材质属性',layers:'材质图层',imageProperties:'图像属性',imageLayers:'图像图层',library:'资源库',renderSettings:'属性编辑器',console:'AI 控制台'};
 export function area(editor='viewport',id=crypto.randomUUID(),state={}){return {kind:'area',id,editor,states:{[editor]:clone(state)}};}
 export function split(axis,first,second,ratio=.5,id=crypto.randomUUID()){return {kind:'split',id,axis,ratio,first,second};}
@@ -19,6 +20,24 @@ export function validateLayout(tree){
     visit(node.first,depth+1);visit(node.second,depth+1);
   }
   visit(tree,0);if(JSON.stringify(tree).length>1024*1024)throw Error('布局视图状态过大');return tree;
+}
+// Workspace files describe the layout without including project-specific editor state.
+export function workspaceLayoutFile(layouts){
+  function strip(node,depth=0){
+    if(!node||depth>16)throw Error('区域布局无效');
+    if(node.kind==='area')return {kind:node.kind,id:node.id,editor:node.editor,states:{}};
+    if(node.kind!=='split')throw Error('区域布局无效');
+    return {kind:node.kind,id:node.id,axis:node.axis,ratio:node.ratio,
+      first:strip(node.first,depth+1),second:strip(node.second,depth+1)};
+  }
+  return {format:'arachne-workspaces',version:1,layouts:Object.fromEntries(
+    Object.keys(workspaceNames).map(name=>[name,validateLayout(strip(layouts?.[name]))])
+  )};
+}
+
+export function parseWorkspaceLayoutFile(raw){
+  if(raw?.format!=='arachne-workspaces'||raw.version!==1)throw Error('请选择受支持的阿拉克涅工作区布局文件');
+  return workspaceLayoutFile(raw.layouts).layouts;
 }
 export function splitArea(tree,id,axis,ratio=.5,newId=crypto.randomUUID()){
   const current=findNode(tree,id);if(current?.kind!=='area'||!['x','y'].includes(axis))throw Error('请选择可分割区域');

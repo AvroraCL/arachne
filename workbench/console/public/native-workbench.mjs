@@ -1,7 +1,7 @@
-// A narrow, one-way interface for the Mac host. Project mutations still go
+// A narrow, one-way interface for desktop hosts. Project mutations still go
 // through the same buttons, keyboard handlers and revision checks as the Web UI.
 const commands={newProject:'new',openProject:'open-projects',projectDetails:'open-project-details',
-  importArchive:'open-paint-import',createBackup:'create-paint-backup',downloadBackup:'download-paint-backup',
+  importArchive:'open-paint-import',migrateModel:'open-glb-migration',searchCommands:'open-command-picker',workspaceLayouts:'open-workspace-layouts',createBackup:'create-paint-backup',downloadBackup:'download-paint-backup',
   export:'open-delivery',history:'open-history',renderSettings:'open-render-settings',settings:'open-settings'};
 
 export function createNativeWorkbench({window,document,status}){
@@ -39,5 +39,8 @@ export function createNativeWorkbench({window,document,status}){
 
 export function notifyNativeProject(window,project){
   if(!project?.id)return;
-  try{window.webkit?.messageHandlers?.arachne?.postMessage({type:'project',id:project.id,name:project.name||''});}catch{}
+  try{
+    if(window.arachneDesktop)window.arachneDesktop.notifyProject(project.id,project.name||'');
+    else window.webkit?.messageHandlers?.arachne?.postMessage({type:'project',id:project.id,name:project.name||''});
+  }catch{}
 }

@@ -77,7 +77,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
       if(mode===value)return;
       mode=value;update();onMode();
     });
-    if(value==='cycles')button.title='渲染预览 · Cycles';
+    if(value==='cycles')button.title='渲染预览 · 路径追踪';
     buttons.set(value,button);shading.append(button);
   }
   const shadingMenu=menu(shading,'着色设置');
@@ -95,7 +95,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     pressed(gizmoButton,gizmos);pressed(overlayButton,overlays);pressed(xrayButton,canXray&&xray);
     xrayButton.disabled=!canXray;
     for(const [value,button] of buttons)pressed(button,mode===value);
-    renderSettings.hidden=mode!=='cycles';fields.hidden=mode==='cycles';
+    renderSettings.hidden=mode!=='cycles';
     view.dataset.shading=mode;
     change({mode,xray:canXray&&xray,overlays,axis:gizmos&&axis,transform:gizmos&&transform});
   }

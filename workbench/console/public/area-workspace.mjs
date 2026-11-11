@@ -1,4 +1,4 @@
-import {editorNames,workspacePreset,validateLayout,leaves,findNode,replaceNode,area,split,splitArea,changeEditor,joinAreas,joinable,adjacentAreas,swapAreas,migrateLayerEditors} from './workspace-state.mjs';
+import {editorNames,workspacePreset,validateLayout,leaves,findNode,replaceNode,area,split,splitArea,changeEditor,joinAreas,joinable,adjacentAreas,swapAreas,migrateLayerEditors,workspaceNames,workspaceLayoutFile,parseWorkspaceLayoutFile} from './workspace-state.mjs';
 import {areaIcons,areaCaptions,chromeMenu,openChromeMenu} from './area-chrome.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
@@ -37,11 +37,36 @@ function enableHeaderScrolling(tools){
 }
 export function createAreaWorkspace({host,registry,project,initial='material',restoreActive=true,canChange=()=>true,onActivate=()=>{},onWorkspace=()=>{},onVisibleEditors=()=>{}}){
   const key='arachne-area-workspaces-v1',views=new Map(),layouts={};let name=initial,active=null,gesture=null,maximized=null,timer=null,disposed=false,hoverPoint=null;
-  try{const saved=JSON.parse(localStorage.getItem(key));if(restoreActive&&['modeling','material','drawing'].includes(saved?.activeWorkspace))name=saved.activeWorkspace;for(const mode of ['modeling','material','drawing'])if(saved?.[mode])layouts[mode]=saved.layerEditorVersion===2?validateLayout(saved[mode]):migrateLayerEditors(validateLayout(saved[mode]),mode);}catch{}
-  for(const mode of ['modeling','material','drawing'])layouts[mode]??=workspacePreset(mode);
+  try{const saved=JSON.parse(localStorage.getItem(key));if(restoreActive&&['modeling','material','drawing'].includes(saved?.activeWorkspace))name=saved.activeWorkspace;for(const mode of Object.keys(workspaceNames))if(saved?.[mode])layouts[mode]=saved.layerEditorVersion===2?validateLayout(saved[mode]):migrateLayerEditors(validateLayout(saved[mode]),mode);}catch{}
+  for(const mode of Object.keys(workspaceNames))layouts[mode]??=workspacePreset(mode);
   const root=el('div','area-layout'),notice=el('output','area-notice');notice.setAttribute('role','status');host.append(root,notice);host.classList.add('modular-workspace');
   function capture(){for(const [id,v] of views){const area=findNode(layouts[name],id);if(area?.kind==='area')area.states[area.editor]=v.instance.getState?.()||area.states[area.editor]||{};}}
-  function persist(){if(disposed)return;capture();try{localStorage.setItem(key,JSON.stringify({...layouts,activeWorkspace:name,layerEditorVersion:2}));notice.textContent='';}catch{notice.textContent='布局未保存：本机存储空间不足';}}
+  function writeLayouts(next){
+    try{localStorage.setItem(key,JSON.stringify({...next,activeWorkspace:name,layerEditorVersion:2}));}
+    catch{throw Error('布局未保存：本机存储空间不足');}
+  }
+  function persist(){
+    if(disposed)return;
+    capture();
+    try{writeLayouts(layouts);notice.textContent='';}catch(error){showError(error);}
+  }
+  function replaceLayouts(file){
+    if(!canAdjust())throw Error('请完成当前编辑或保存，再更换工作区布局');
+    const next=parseWorkspaceLayoutFile(file);
+    capture();
+    for(const [workspace,tree] of Object.entries(next)){
+      for(const node of leaves(tree)){
+        const previous=findNode(layouts[workspace],node.id);
+        if(previous?.kind==='area'&&previous.editor===node.editor)node.states=previous.states;
+      }
+      validateLayout(tree);
+    }
+    writeLayouts(next);
+    Object.assign(layouts,next);
+    maximized=null;
+    render();
+    save();
+  }
   function save(){clearTimeout(timer);timer=setTimeout(persist,160);}
   function stateChanged(){save();}
   function activate(id,event){
@@ -301,6 +326,7 @@ export function createAreaWorkspace({host,registry,project,initial='material',re
       if(changed)activate(id);
     },
     reset(){mutate(()=>workspacePreset(name));},
+    exportLayouts:()=>workspaceLayoutFile(layouts),replaceLayouts,
     save:persist,getState(){capture();return {workspace:name,tree:structuredClone(layouts[name]),active};},
     editors:()=>[...views.values()].map(v=>v.instance),
     get active(){return views.get(active)?.instance;},get name(){return name;},

@@ -1,0 +1,9 @@
+{
+  "name": "arachne-desktop",
+  "productName": "Arachne",
+  "version": "0.0.1-alpha.1",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "license": "GPL-3.0-only"
+}

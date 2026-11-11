@@ -5,9 +5,13 @@
   "license": "GPL-3.0-only",
   "scripts": {
     "start": "npm --prefix workbench/console run start --",
+    "setup:win": "node workbench/console/scripts/windows-workbench.mjs setup",
+    "start:win": "node workbench/console/scripts/windows-workbench.mjs start",
     "test": "npm --prefix workbench/console test",
     "seed:demo": "npm --prefix workbench/console run seed:demo",
     "package:mac": "npm --prefix workbench/console run package:mac",
+    "package:win": "npm --prefix workbench/console run package:win",
+    "package:win:installer": "npm --prefix workbench/console run package:win:installer",
     "verify:demo": "npm --prefix workbench/console run verify:demo"
   }
 }

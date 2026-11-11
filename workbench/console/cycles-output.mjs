@@ -7,8 +7,8 @@ const pngSignature=Buffer.from([137,80,78,71,13,10,26,10]);
 export const pngSizeIs=(bytes,width,height)=>bytes.length>=24&&bytes.subarray(0,8).equals(pngSignature)&&
   bytes.toString('ascii',12,16)==='IHDR'&&bytes.readUInt32BE(16)===width&&bytes.readUInt32BE(20)===height;
 
-// Inspect the single-part ZIP scanline files this renderer writes. See the OpenEXR file layout.
-function exrMatches(file,width,height,bitDepth,expected){
+// Inspect the single-part scanline files the renderers write. See the OpenEXR file layout.
+export function exrMatches(file,width,height,bitDepth,expected,{compressionType=3}={}){
   const handle=fs.openSync(file,'r');
   try{
     const size=fs.fstatSync(handle).size;
@@ -35,7 +35,7 @@ function exrMatches(file,width,height,bitDepth,expected){
       if(left!==0||bottom!==0||right!==width-1||top!==height-1)return false;
     }
     const channel=attrs.get('channels'),compression=attrs.get('compression');
-    if(channel?.type!=='chlist'||compression?.type!=='compression'||compression.end-compression.start!==1||header[compression.start]!==3)return false;
+    if(channel?.type!=='chlist'||compression?.type!=='compression'||compression.end-compression.start!==1||header[compression.start]!==compressionType)return false;
     const names=new Set(),pixelType=bitDepth===16?1:bitDepth===32?2:0;
     let pos=channel.start;
     while(pos<channel.end&&header[pos]!==0){
@@ -46,8 +46,8 @@ function exrMatches(file,width,height,bitDepth,expected){
     }
     if(!pixelType||pos!==channel.end-1||header[pos]!==0||names.size!==expected.length||
       !expected.every(name=>names.has(name)))return false;
-    // ZIP compression stores up to 16 rows in each chunk.
-    const chunks=Math.ceil(height/16),table=i+1,end=table+8*chunks;
+    const rowsPerChunk=compressionType===3?16:1;
+    const chunks=Math.ceil(height/rowsPerChunk),table=i+1,end=table+8*chunks;
     if(end>length||end>=size)return false;
     const rows=new Set(),chunkHeader=Buffer.alloc(8);
     for(let index=0;index<chunks;index++){
@@ -55,7 +55,8 @@ function exrMatches(file,width,height,bitDepth,expected){
       if(!Number.isSafeInteger(offset)||offset<end||offset+8>size||
         fs.readSync(handle,chunkHeader,0,8,offset)!==8)return false;
       const row=chunkHeader.readInt32LE(0),count=chunkHeader.readUInt32LE(4);
-      if(row<0||row>=height||row%16!==0||rows.has(row)||!count||offset+8+count>size)return false;
+      if(row<0||row>=height||row%rowsPerChunk!==0||rows.has(row)||!count||offset+8+count>size||
+        compressionType===0&&count!==width*expected.length*bitDepth/8)return false;
       rows.add(row);
     }
     return true;

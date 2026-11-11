@@ -6,10 +6,11 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {StringDecoder} from 'node:string_decoder';
 import {ROOT,projectDir,read,list,atomic} from './store.mjs';
-import {cyclesOptions} from './cycles-options.mjs';
+import {pathTraceOptions} from './path-trace-render.mjs';
 import {cyclesResource} from './cycles-resource.mjs';
 
 const PYTHON=process.env.ARACHNE_PYTHON||'python';
+export const paintExportTypes=['paint-export','paint-texture-export','paint-glb-export'];
 let baseUrl='',running=false;
 const queue=[],active=new Map();
 export const setBaseUrl=url=>{baseUrl=url;};
@@ -43,17 +44,18 @@ export function runProcess(j,exe,args,{onLine}={}){
       if(j.cancelRequested){const e=Error('任务已取消');e.cancelled=true;reject(e);}else if(code!==0)reject(Error('工具执行失败，请查看运行日志'));else resolve();});
   });
 }
-export function mime(name){return ({'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf','.otf':'font/otf','.ttc':'font/collection','.json':'application/json','.html':'text/html','.css':'text/css','.mjs':'text/javascript','.js':'text/javascript','.log':'text/plain'})[path.extname(name).toLowerCase()]||'application/octet-stream';}
+export function mime(name){return ({'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf','.otf':'font/otf','.ttc':'font/collection','.json':'application/json','.html':'text/html','.css':'text/css','.mjs':'text/javascript','.js':'text/javascript','.log':'text/plain','.glb':'model/gltf-binary'})[path.extname(name).toLowerCase()]||'application/octet-stream';}
 export function submit(pid,type,revision,requestId,task=null,retryOf=null,renderOptions=null){
   const previous=retryOf?getJob(pid,retryOf):null;
-  const paintSettings=['paint-render','paint-export'].includes(type)?cyclesOptions(previous?(previous.paintSettings??{}):(renderOptions?.settings??{})):null;
-  const exportPaint=['paint-export','paint-texture-export'].includes(type);
+  const options=['paint-render','paint-export'].includes(type)?pathTraceOptions:null;
+  const paintSettings=options?.(previous?.paintSettings??renderOptions?.settings??{})??null;
+  const exportPaint=paintExportTypes.includes(type);
   const paintPreviewId=exportPaint?(previous?.paintPreviewId??renderOptions?.previewId):null;
   if(exportPaint&&(!paintPreviewId||previous&&!previous.paintConfirmedAt))throw Error('缺少已确认的 4K 预览');
   if(paintSettings?.textureJobId)throw Error('工程渲染使用冻结修订的贴图');
-  if(!['paint-preview','paint-draft','paint-export','paint-backup','paint-render','paint-texture-export'].includes(type))throw Error('不支持的任务');
+  if(!exportPaint&&!['paint-preview','paint-draft','paint-backup','paint-render'].includes(type))throw Error('不支持的任务');
   const prior=requestId&&listJobs(pid).find(j=>j.requestId===requestId);
-  if(prior&&paintSettings&&JSON.stringify(cyclesOptions(prior.paintSettings??{}))!==JSON.stringify(paintSettings))throw Error('请求编号已用于其他渲染设置');
+  if(prior&&paintSettings&&JSON.stringify(options(prior.paintSettings??{}))!==JSON.stringify(paintSettings))throw Error('请求编号已用于其他渲染设置');
   if(prior&&exportPaint&&prior.paintPreviewId!==paintPreviewId)throw Error('请求编号已用于其他 4K 预览');
   if(prior){
     if(prior.revision!==revision||prior.type!==type||(prior.retryOf||null)!==retryOf)throw Error('请求编号已用于其他任务');
@@ -79,7 +81,8 @@ async function drain(){if(running||!baseUrl)return;running=true;
     try{const doc=JSON.parse(fs.readFileSync(path.join(jobDir(j.projectId,j.id),'snapshot.json'),'utf8'));
       const signal=active.get(j.id).controller.signal;
       const native=action=>cyclesResource.run('production',action,{signal,onQueued:()=>stage(j,'等待当前渲染任务释放设备')});
-      const action=()=>runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs,signal});
+      const registerBrowser=browser=>{active.get(j.id).browser=browser;};
+      const action=()=>runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs,signal,registerBrowser});
       await (['paint-preview','paint-render','paint-export'].includes(j.type)?native(action):action());
       cancelled(j);update(j,{status:'completed',stage:'已完成'});
     }catch(e){

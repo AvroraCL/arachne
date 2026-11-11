@@ -7,9 +7,9 @@ const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.cla
 const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
 const active=job=>job.status==='queued'||job.status==='running';
 const supported=job=>job.type==='paint-render'||job.type==='paint-export';
-const pixels=job=>job?.cycles?.resolution||[job?.paintSettings?.width||0,job?.paintSettings?.height||0];
+const pixels=job=>job?.render?.resolution||job?.cycles?.resolution||[job?.paintSettings?.width||0,job?.paintSettings?.height||0];
 const kind=job=>job.type==='paint-export'?'交付':'出图';
-const crop=job=>job?.cycles?.render_region?.crop?[job.cycles.render_region.frame,job.cycles.render_region.pixels]:null;
+const crop=job=>{const region=job?.render?.region||job?.cycles?.render_region;return region?.crop?[region.frame,region.pixels]:null;};
 const comparable=(a,b)=>!!a&&!!b&&a.id!==b.id&&JSON.stringify(pixels(a))===JSON.stringify(pixels(b))&&
   JSON.stringify(crop(a))===JSON.stringify(crop(b));
 const resultLabel=item=>`r${item.revision} · ${kind(item)} · ${new Date(item.created).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
@@ -21,7 +21,7 @@ export function createRenderResultEditor(ctx,source){
   select.setAttribute('aria-label','渲染结果版本');select.dataset.searchable='false';tools.append(select);
   const stage=el('div','render-result-stage'),image=el('img','render-result-image'),empty=el('p','render-result-empty');
   stage.tabIndex=0;stage.setAttribute('aria-label','渲染图像，滚轮缩放，拖动平移');
-  image.alt='Cycles 渲染结果';image.draggable=false;image.decoding='async';image.hidden=true;
+  image.alt='渲染结果';image.draggable=false;image.decoding='async';image.hidden=true;
   const reference=el('img','render-result-image render-result-reference'),wipeHandle=el('div','render-result-wipe');
   reference.draggable=false;reference.decoding='async';reference.hidden=wipeHandle.hidden=true;
   wipeHandle.tabIndex=0;wipeHandle.setAttribute('role','slider');wipeHandle.setAttribute('aria-label','渲染对照分隔线');
@@ -171,7 +171,7 @@ export function createRenderResultEditor(ctx,source){
     if(message.textContent!==status)message.textContent=status;
     if(current?.id!==job?.id||current&&image.getAttribute('src')!==current.renderUrl){
       if(job&&current&&job.id!==current.id&&!selected){zoom=null;pan=[0,0];}
-      if(current){image.src=current.renderUrl;image.alt=`工程修订 r${current.revision} 的 Cycles 渲染`;}
+      if(current){image.src=current.renderUrl;image.alt=`工程修订 r${current.revision} 的渲染`;}
       else image.removeAttribute('src');
       image.hidden=!current;empty.hidden=!!current;
     }
@@ -194,7 +194,7 @@ export function createRenderResultEditor(ctx,source){
     const compareMenu=compareSelect.closest('.custom-select');if(compareMenu)compareMenu.hidden=!referenceJob;
     if(referenceJob){
       if(reference.getAttribute('src')!==referenceJob.renderUrl)reference.src=referenceJob.renderUrl;
-      reference.alt=`对照参考 r${referenceJob.revision} 的 Cycles 渲染`;
+      reference.alt=`对照参考 r${referenceJob.revision} 的渲染`;
       left.textContent='参考 r'+referenceJob.revision;right.textContent='当前 r'+job.revision;
     }else reference.removeAttribute('src');
     syncReferenceImage();
@@ -204,9 +204,9 @@ export function createRenderResultEditor(ctx,source){
     if(job){
       const [width,height]=pixels(job);
       showRenderDownload(download,job,doc.name);
-      meta.textContent=[`r${job.revision}`,`${width} × ${height}`,cyclesFormatLabel(job.cycles?.render_effective?.fileFormat),job.cycles?.device||job.progress?.device].filter(Boolean).join(' · ');
+      meta.textContent=[`r${job.revision}`,`${width} × ${height}`,cyclesFormatLabel(job.render?.fileFormat||job.cycles?.render_effective?.fileFormat),job.render?'路径追踪':job.cycles?.device||job.progress?.device].filter(Boolean).join(' · ');
     }else meta.textContent='';
-    ctx.title.textContent=job?`r${job.revision} · Cycles`:'';
+    ctx.title.textContent=job?`r${job.revision} · ${job.render?'路径追踪':'Cycles'}`:'';
     setImagePose();
   }
   const observer=new ResizeObserver(setImagePose);observer.observe(stage);

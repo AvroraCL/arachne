@@ -22,7 +22,7 @@
 <link rel="stylesheet" href="/render-result-editor.css">
 <link rel="stylesheet" href="/image-documents.css">
 <link rel="icon" href="/arachne-mark.svg" type="image/svg+xml">
-<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
+<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/","three/examples/jsm/":"/vendor/three/examples/jsm/","three-gpu-pathtracer":"/vendor/three-gpu-pathtracer/build/index.module.js","three-mesh-bvh":"/vendor/three-mesh-bvh/build/index.module.js"}}</script>
 </head>
 <body>
 <header class="paint-menubar">
@@ -32,6 +32,7 @@
       <button id="new" type="button">新建工程</button>
       <button id="open-projects" type="button" aria-haspopup="dialog">打开工程…</button>
       <button id="open-paint-import" type="button" aria-haspopup="dialog">打开涂装 ZIP…</button>
+      <button id="open-glb-migration" type="button" aria-haspopup="dialog" hidden>迁移为 GLB 工程…</button>
       <button id="open-project-details" type="button" aria-haspopup="dialog">工程详情…</button>
       <hr>
       <button id="open-delivery" type="button" aria-haspopup="dialog" disabled><svg class="chrome-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13V3m-3 3 3-3 3 3M4 11v5h12v-5"/></svg><span>导出…</span></button>
@@ -44,9 +45,11 @@
       <button id="undo" type="button">撤销 <kbd aria-hidden="true">⌘Z</kbd></button>
       <button id="redo" type="button">重做 <kbd aria-hidden="true">⇧⌘Z</kbd></button>
       <button id="open-history" type="button">历史记录…</button>
+      <hr>
+      <button id="open-command-picker" type="button" aria-haspopup="dialog">搜索命令… <kbd aria-hidden="true">F3</kbd></button>
     </div></details>
     <details class="paint-menu" name="paint-menubar-menu"><summary>渲染</summary><div class="paint-menu-content">
-      <button id="open-paint-render" type="button" aria-haspopup="dialog" disabled>Cycles 出图…</button>
+      <button id="open-paint-render" type="button" aria-haspopup="dialog" disabled>路径追踪出图…</button>
       <button id="open-render-results" type="button" disabled>渲染结果</button>
       <button id="preview" type="button">生成 4K 预览</button>
       <button id="open-render-settings" type="button">渲染设置</button>
@@ -56,6 +59,7 @@
       <label><input type="checkbox" data-show-panel="layers">图层</label>
       <label><input type="checkbox" data-show-panel="properties">属性</label>
       <label><input type="checkbox" data-show-panel="assets">素材库</label>
+      <button id="open-workspace-layouts" type="button" aria-haspopup="dialog" hidden>工作区布局…</button>
       <button id="reset-docks" type="button" title="恢复当前区域的默认停靠位置与大小">重置布局</button>
     </div></details>
     <button id="open-settings" type="button" aria-haspopup="dialog" title="设置 · ⌘ / Ctrl + ,">设置</button>
@@ -385,36 +389,76 @@
       </section>
       <section id="settings-shortcuts" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-settings-section="shortcuts" hidden>
         <h2>快捷键参考</h2><p class="settings-hint">⌘ 对应 Mac；Windows 与 Linux 使用 Ctrl。</p>
-        <dl class="settings-shortcuts"><dt>打开设置</dt><dd>⌘ / Ctrl + ,</dd><dt>画笔／橡皮／抓手</dt><dd>B / E / H</dd><dt>矩形选区／套索</dt><dd>M / L</dd><dt>自由变换</dt><dd>⌘ / Ctrl + T</dd><dt>交换颜色／恢复黑白</dt><dd>X / D</dd><dt>取样／缩放</dt><dd>I / Z</dd><dt>调整笔刷大小</dt><dd>[ / ]</dd><dt>临时抓手</dt><dd>空格 + 拖动</dd><dt>适应画布／实际大小</dt><dd>⌘ / Ctrl + 0 / 1</dd><dt>撤销／重做</dt><dd>⌘Z / ⇧⌘Z</dd><dt>物体／编辑模式</dt><dd>Tab</dd><dt>点／边／面</dt><dd>1 / 2 / 3</dd><dt>移动／旋转／缩放</dt><dd>G / R / S</dd><dt>约束轴／切换坐标</dt><dd>X / Y / Z；重复按同一轴</dd><dt>平面约束</dt><dd>Shift + X / Y / Z</dd><dt>确认／取消变换</dt><dd>Enter / Esc；左键 / 右键</dd><dt>精调／增量吸附</dt><dd>Shift / Ctrl</dd><dt>输入下一数值分量</dt><dd>Tab</dd><dt>前／右／顶视</dt><dd>小键盘 1 / 3 / 7</dd><dt>视口显示侧栏</dt><dd>N</dd></dl>
+        <dl class="settings-shortcuts"><dt>打开设置</dt><dd>⌘ / Ctrl + ,</dd><dt>搜索命令</dt><dd>F3 / ⌘ 或 Ctrl + K</dd><dt>打开工程</dt><dd>⌘ / Ctrl + O</dd><dt>画笔／橡皮／抓手</dt><dd>B / E / H</dd><dt>矩形选区／套索</dt><dd>M / L</dd><dt>自由变换</dt><dd>⌘ / Ctrl + T</dd><dt>交换颜色／恢复黑白</dt><dd>X / D</dd><dt>取样／缩放</dt><dd>I / Z</dd><dt>调整笔刷大小</dt><dd>[ / ]</dd><dt>临时抓手</dt><dd>空格 + 拖动</dd><dt>适应画布／实际大小</dt><dd>⌘ / Ctrl + 0 / 1</dd><dt>撤销／重做</dt><dd>⌘Z / ⇧⌘Z</dd><dt>物体／编辑模式</dt><dd>Tab</dd><dt>点／边／面</dt><dd>1 / 2 / 3</dd><dt>移动／旋转／缩放</dt><dd>G / R / S</dd><dt>约束轴／切换坐标</dt><dd>X / Y / Z；重复按同一轴</dd><dt>平面约束</dt><dd>Shift + X / Y / Z</dd><dt>确认／取消变换</dt><dd>Enter / Esc；左键 / 右键</dd><dt>精调／增量吸附</dt><dd>Shift / Ctrl</dd><dt>输入下一数值分量</dt><dd>Tab</dd><dt>前／右／顶视</dt><dd>小键盘 1 / 3 / 7</dd><dt>视口显示侧栏</dt><dd>N</dd></dl>
       </section>
     </form>
   </div>
   <p id="settings-error" role="alert"></p>
   <footer><button id="reset-settings" type="button">恢复默认</button><output id="settings-save-state">设置保存在此浏览器</output><button id="cancel-settings" type="button">取消</button><button id="save-settings" type="submit" form="settings-form" class="primary">保存设置</button></footer>
 </dialog>
+<dialog id="workspace-layouts" class="workbench-picker" aria-labelledby="workspace-layouts-title">
+  <header><strong id="workspace-layouts-title">工作区布局</strong><button id="close-workspace-layouts" type="button">关闭</button></header>
+  <div class="workspace-layout-body">
+    <p id="workspace-layout-source">当前布局</p>
+    <div id="workspace-layout-previews" class="workspace-layout-previews"></div>
+  </div>
+  <footer>
+    <p id="workspace-layout-error" role="alert"></p>
+    <input id="workspace-layout-file" type="file" accept=".json,application/json" aria-label="工作区布局文件" hidden>
+    <button id="export-workspace-layouts" type="button">导出当前布局</button>
+    <button id="import-workspace-layouts" type="button">选择布局文件…</button>
+    <button id="apply-workspace-layouts" class="primary" type="button" hidden>应用布局</button>
+  </footer>
+</dialog>
+<dialog id="command-picker" class="workbench-picker" aria-labelledby="command-picker-title">
+  <header><strong id="command-picker-title">搜索命令</strong><button id="close-command-picker" type="button">关闭</button></header>
+  <div class="picker-search">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4"/><path d="m10 10 3.4 3.4"/></svg>
+    <input id="command-search" type="search" role="combobox" aria-label="搜索命令" aria-autocomplete="list" aria-controls="command-results" aria-expanded="false" placeholder="输入命令名称" autocomplete="off" autofocus>
+  </div>
+  <div id="command-results" class="picker-results" role="listbox" aria-label="可用命令" hidden></div>
+  <p class="picker-message" id="command-results-message" role="status"></p>
+</dialog>
+<dialog id="open-project-dialog" class="workbench-picker" aria-labelledby="open-project-title">
+  <header><strong id="open-project-title">打开工程</strong><button id="cancel-open-project" type="button">关闭</button></header>
+  <div class="picker-search">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4"/><path d="m10 10 3.4 3.4"/></svg>
+    <input id="project-search" type="search" role="combobox" aria-label="搜索工程" aria-autocomplete="list" aria-controls="project-results" aria-expanded="false" placeholder="搜索工程名称或 ID" autocomplete="off" autofocus>
+  </div>
+  <div id="project-results" class="picker-results" role="listbox" aria-label="涂装工程" hidden></div>
+  <p class="picker-message" id="project-results-message" role="status"></p>
+  <footer><p id="open-project-error" role="alert"></p><button id="confirm-open-project" class="primary" type="button" disabled>打开工程</button></footer>
+</dialog>
 <dialog id="project-dialog" aria-labelledby="project-dialog-title">
-  <header><strong id="project-dialog-title">工程</strong><button id="close-project-dialog" type="button">关闭</button></header>
+  <header><strong id="project-dialog-title">工程详情</strong><button id="close-project-dialog" type="button">关闭</button></header>
   <section class="project-dialog-content">
-    <label>打开工程<select id="projects" aria-label="涂装工程"></select></label>
-    <fieldset><legend>当前工程详情</legend><dl>
+    <dl>
       <dt>名称</dt><dd id="project-detail-name">未打开工程</dd>
       <dt>修订</dt><dd id="revision"></dd>
       <dt>工程 ID</dt><dd id="project-detail-id"></dd>
       <dt>保存时间</dt><dd id="project-detail-updated"></dd>
-    </dl></fieldset>
-    <p>工程修改自动保存在本机。模型、材质与绘制共用同一份工程。</p>
+    </dl>
   </section>
 </dialog>
+<dialog id="glb-migration-dialog" aria-labelledby="glb-migration-title">
+  <header><strong id="glb-migration-title">迁移为 GLB 工程</strong><button id="close-glb-migration" type="button">关闭</button></header>
+  <section class="project-dialog-content">
+    <p>将用本机 Blender 读取旧模型一次，核对原 UV，并在新工程中保留 GLB 支持的材质、原投影表面和可编辑涂装。旧工程保持原样。</p>
+    <p>迁移后，打开、编辑、烘焙和导出新工程无需 Blender。</p>
+    <p id="glb-migration-error" role="alert"></p>
+  </section>
+  <footer><button id="start-glb-migration" class="primary" type="button">迁移并打开新工程</button></footer>
+</dialog>
 <dialog id="paint-render-dialog" aria-labelledby="paint-render-title">
-  <header><strong id="paint-render-title">Cycles 出图</strong><button id="close-paint-render" type="button" autofocus>关闭</button></header>
+  <header><strong id="paint-render-title">路径追踪出图</strong><button id="close-paint-render" type="button" autofocus>关闭</button></header>
   <div class="paint-render-body">
     <section class="paint-render-image" aria-label="渲染结果">
-      <img id="paint-render-image" alt="Cycles 渲染结果" decoding="async" hidden>
+      <img id="paint-render-image" alt="渲染结果" decoding="async" hidden>
       <p id="paint-render-placeholder">还没有渲染结果</p>
     </section>
     <section class="paint-render-tasks" aria-label="渲染任务">
       <div id="paint-render-info" role="status"></div>
-      <progress id="paint-render-samples" aria-label="Cycles 实际采样进度" hidden></progress>
+      <progress id="paint-render-samples" aria-label="实际采样进度" hidden></progress>
       <p id="paint-render-error" role="alert"></p>
       <div class="paint-render-actions">
         <button id="cancel-paint-render" type="button" hidden>取消渲染</button>
@@ -425,7 +469,14 @@
     </section>
   </div>
   <footer>
-    <div><small id="paint-render-summary"></small><small id="paint-render-devices" role="status"></small></div>
+    <div>
+      <label>输出 <select id="paint-render-format" aria-label="出图格式">
+        <option value="png">PNG · 8 位</option>
+        <option value="exr16">OpenEXR · 16 位浮点</option>
+        <option value="exr32">OpenEXR · 32 位浮点</option>
+      </select></label>
+      <small id="paint-render-summary"></small>
+    </div>
     <div class="paint-render-actions">
       <a id="paint-render-download" hidden>下载 PNG</a>
       <a id="paint-render-passes" hidden>下载通道 EXR</a>
@@ -436,7 +487,7 @@
   </footer>
 </dialog>
 <dialog id="delivery-dialog" aria-labelledby="delivery-title">
-  <header><strong id="delivery-title">导出工程与贴图</strong><small id="delivery-revision"></small><button id="close-delivery" type="button" autofocus>关闭</button></header>
+  <header><strong id="delivery-title">导出</strong><small id="delivery-revision"></small><button id="close-delivery" type="button" autofocus>关闭</button></header>
   <section class="delivery-content">
     <div class="delivery-overview">
       <div><h2>审阅预览</h2><p id="delivery-preview"></p></div>
@@ -450,7 +501,8 @@
       <label>构图<select id="delivery-framing" aria-label="交付构图"><option value="auto">完整模型</option><option value="viewport">当前三维视角</option><option value="saved" disabled>工程渲染相机</option></select></label>
       <label>尺寸<select id="delivery-size" aria-label="交付尺寸"><option value="960x720">960 × 720</option><option value="1440x1080">1440 × 1080</option><option value="1920x1080">1920 × 1080</option><option value="1080x1440">1080 × 1440</option><option value="3840x2160">3840 × 2160 · 4K</option><option value="2160x3840">2160 × 3840 · 4K</option><option value="custom" hidden>自定义尺寸</option></select></label>
       <label>质量<select id="delivery-quality" aria-label="交付质量"><option value="fast">快速</option><option value="standard" selected>标准</option><option value="high">精细</option><option value="custom" hidden>自定义采样</option></select></label>
-      <small id="delivery-render-hint">输出设置同时用于 Blender 副本和成品渲染，八通道贴图保持 4K。</small>
+      <label>格式<select id="delivery-format" aria-label="交付渲染格式"><option value="png">PNG · 8 位</option><option value="exr16">OpenEXR · 16 位浮点</option><option value="exr32">OpenEXR · 32 位浮点</option></select></label>
+      <small id="delivery-render-hint"></small>
     </fieldset>
     <section class="delivery-task" aria-label="任务状态">
       <p id="task" role="status"></p>
@@ -462,7 +514,8 @@
   <div class="delivery-footer">
     <label><input type="checkbox" id="approved" disabled>我已检查当前 4K 预览和三维结果</label>
     <button id="export-textures" type="button" disabled>仅导出工程与贴图</button>
-    <button id="delivery" class="primary" type="button" disabled>导出此修订</button>
+    <button id="export-glb" type="button" disabled>导出 GLB</button>
+    <button id="delivery" class="primary" type="button" disabled>导出交付 ZIP</button>
   </div>
 </dialog>
 <dialog id="mask-editor" aria-labelledby="mask-title">
@@ -484,7 +537,8 @@
     <header><h2 id="new-paint-title">新建涂装工程</h2><button id="new-paint-close" type="button">关闭</button></header>
     <div class="paint-form-content">
       <label>工程名称<input id="new-paint-name" type="text" maxlength="100" required autofocus></label>
-      <small>模型 · 示例模型</small>
+      <label>模型<input id="new-paint-model" type="file" accept=".glb,model/gltf-binary"></label>
+      <small>选择自包含的 GLB，或留空使用示例模型。</small>
     </div>
     <div class="paint-form-footer"><span id="new-paint-error" role="alert"></span><button id="new-paint-submit" type="submit" class="primary">创建</button></div>
   </form>

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {compileMaterialGraph,defaultMaterialGraph,makeNode} from '../public/material-graph.mjs';
+import {pythonExecutable} from '../python-runtime.mjs';
 
 test('default graph retains eight independent paint channels and compiles only connected nodes',()=>{
   const g=defaultMaterialGraph();g.nodes.push(makeNode('value',0,0,'unused'));
@@ -37,7 +38,7 @@ test('linear-light evaluation, scalar math and image UV mapping agree with typed
   g.nodes.find(n=>n.id==='math').params={operation:'divide',a:.8,b:2};
   g.links=g.links.filter(l=>!['color','roughness'].includes(l.to.port));
   g.links.push({from:{node:'mix',port:'color'},to:{node:'pbr',port:'color'}},{from:{node:'math',port:'value'},to:{node:'pbr',port:'roughness'}});
-  const result=spawnSync(process.env.ARACHNE_PYTHON||'python3',['-c',`
+  const result=spawnSync(pythonExecutable(),['-c',`
 import sys,json,tempfile
 from pathlib import Path
 import numpy as np

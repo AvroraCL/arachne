@@ -1,11 +1,12 @@
+import {importGlbProject} from './model-registration.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
-import {saveProjectModel,preparePaintGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
+import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
 import {PAINT,createPaint,editPaint,importPaint,livePaintInput,savePaintText,restorePaint,imageDocumentInput,checkPaintPreview} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
 import {resolvePaintRenderSettings} from './cycles-options.mjs';
-import {renderSceneObjects,stopRenderSceneObjects} from './render-scene-objects.mjs';
+import {renderSceneObjects} from './render-scene-objects.mjs';
 import {cyclesViewRequest,renderCyclesView,stopPaintCyclesView} from './paint-cycles-view.mjs';
 import {cyclesSessionFrame,interactiveCyclesAvailable,stopCyclesSessions,updateCyclesSession} from './paint-cycles-session.mjs';
 import http from 'node:http';
@@ -17,12 +18,14 @@ import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 const compressLive=promisify(gzip);
 import {ROOT,DATA,list,read,commit,travel,projectHistory,projectDir} from './store.mjs';
-import {setBaseUrl,getJob,listJobs,submit,retryJob,cancel,jobDir,mime,recover,stop} from './jobs.mjs';
+import {setBaseUrl,getJob,listJobs,submit,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes} from './jobs.mjs';
 import {workspaceRoot} from './workspace-paths.mjs';
 import {demoProjectId} from './demo-source.mjs';
+import {migrateBlendProject,stopBlendMigrations} from './blend-migration.mjs';
 import {viewportManifest,startViewport,viewportFile,viewportTopology,viewportTopologyFile,stopViewport} from './viewport.mjs';
 
 const personalLibrary=createPersonalLibrary({root:path.join(DATA,'personal-library'),readProject:read,projectFolder:projectDir,commitProject:commit});
+const localWorkbenchMark=path.join(DATA,'workbench-mark.svg');
 
 const portArg=process.argv.indexOf('--port');const PORT=portArg<0?8766:Number(process.argv[portArg+1]);
 if(!Number.isInteger(PORT)||PORT<1024||PORT>65535)throw Error('端口无效');
@@ -71,6 +74,30 @@ async function receivePaintArchive(req){
     finally{importingPaintArchive=false;}
   }
 }
+let importingModel=false;
+const maxModel=128*1024*1024;
+async function receiveModel(req,name){
+  if(Number(req.headers['content-length'])>maxModel)throw Object.assign(Error('GLB 不能超过 128 MiB'),{status:413});
+  if(importingModel)throw Object.assign(Error('已有模型正在导入'),{status:429});
+  importingModel=true;
+  let scratch;
+  try{
+    scratch=await fs.promises.mkdtemp(path.join(DATA,'.model-import-'));
+    const input=path.join(scratch,'incoming.glb'),upload=await fs.promises.open(input,'wx');
+    try{
+      let size=0;
+      for await(const part of req.iterator({destroyOnReturn:false})){
+        size+=part.length;
+        if(size>maxModel)throw Object.assign(Error('GLB 不能超过 128 MiB'),{status:413});
+        await upload.writeFile(part);
+      }
+    }finally{await upload.close();}
+    return await importGlbProject(input,scratch,name);
+  }finally{
+    importingModel=false;
+    if(scratch)await fs.promises.rm(scratch,{recursive:true,force:true});
+  }
+}
 function file(res,p){if(!fs.existsSync(p)||!fs.statSync(p).isFile()){send(res,404,{error:'文件不存在'});return;}res.writeHead(200,{'Content-Type':mime(p),'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'});fs.createReadStream(p).pipe(res);}
 async function verifyExportPreview(res,doc,previewId){
   if(!previewId)throw Error('缺少已确认的 4K 预览');
@@ -87,6 +114,12 @@ const server=http.createServer(async(req,res)=>{
     if(![`127.0.0.1:${PORT}`,`localhost:${PORT}`].includes(req.headers.host)){send(res,403,{error:'仅限本地访问'});return;}
     if(req.headers.origin&&![local,`http://localhost:${PORT}`].includes(req.headers.origin)){send(res,403,{error:'拒绝跨来源访问'});return;}
     const url=new URL(req.url,local);
+    if(req.method==='POST'&&url.pathname==='/api/projects/model-import'){
+      if(req.headers['content-type']!=='model/gltf-binary'){send(res,415,{error:'请选择 GLB 模型'});return;}
+      const name=url.searchParams.get('name')?.trim()||'导入模型 · PBR 涂装';
+      if(name.length>100)throw Error('工程名称不能超过 100 字');
+      send(res,201,await receiveModel(req,name));return;
+    }
     if(req.method==='POST'&&url.pathname==='/api/projects/paint-import'){
       if(req.headers['content-type']!=='application/zip'){send(res,415,{error:'请选择涂装交付 ZIP'});return;}
       send(res,201,await receivePaintArchive(req));return;
@@ -95,6 +128,10 @@ const server=http.createServer(async(req,res)=>{
     const parts=url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     if(parts.some(p=>p==='..'||p==='.'||p.includes('/')||p.includes('\\')||p.includes('\0')))throw Error('路径无效');
     if(parts[0]!=='api'){
+      if(req.method==='GET'&&url.pathname==='/arachne-mark.svg'&&fs.statSync(localWorkbenchMark,{throwIfNoEntry:false})?.isFile()){
+        res.setHeader('Content-Security-Policy',"default-src 'none'; sandbox");
+        file(res,localWorkbenchMark);return;
+      }
       if(url.pathname==='/license'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','X-Content-Type-Options':'nosniff'});
         res.end(fs.readFileSync(path.join(workspaceRoot,'LICENSE')));return;
@@ -107,6 +144,10 @@ const server=http.createServer(async(req,res)=>{
         const relative=parts.slice(2).join('/');
         if(!/^(build|examples\/jsm)\/[\w./-]+\.js$/.test(relative)){send(res,404,{error:'模块不存在'});return;}
         file(res,path.join(ROOT,'node_modules','three',relative));return;
+      }
+      if(parts[0]==='vendor'&&['three-gpu-pathtracer','three-mesh-bvh'].includes(parts[1])&&
+         parts.slice(2).join('/')==='build/index.module.js'){
+        file(res,path.join(ROOT,'node_modules',parts[1],'build','index.module.js'));return;
       }
       if(url.pathname==='/'){
         const page='/paint.html';
@@ -137,7 +178,8 @@ const server=http.createServer(async(req,res)=>{
     if(action==='paint'&&doc.workflowType===PAINT){
       const operation=parts[4];
       if(req.method==='GET'&&operation==='guide'&&parts.length===6&&['silhouette','receiver','protected'].includes(parts[5])){
-        file(res,path.join(doc.source.bundle,'top',parts[5]+'.png'));return;
+        const source=doc.source.format==='glb'?(await prepareModelGeometry({...doc,modeling:undefined},{frozen:true})).source:doc.source;
+        file(res,path.join(source.bundle,'top',parts[5]+'.png'));return;
       }
       if(req.method==='GET'&&operation==='assets'&&parts.length===6){
         const a=doc.paint.assets[parts[5]];if(!a)throw Error('涂装素材不存在');
@@ -161,7 +203,7 @@ const server=http.createServer(async(req,res)=>{
         return;
       }
       if(req.method==='GET'&&operation==='history'){send(res,200,projectHistory(id));return;}
-      if(req.method==='GET'&&operation==='render-objects'){send(res,200,await renderSceneObjects(doc));return;}
+      if(req.method==='GET'&&operation==='render-objects'){send(res,200,renderSceneObjects(doc));return;}
       if(req.method==='GET'&&operation==='model-state'){send(res,200,modelGeometryStatus(doc));return;}
       if(req.method==='GET'&&operation==='model-log'){file(res,modelGeometryLog(doc,url.searchParams.get('binding')));return;}
       if(req.method==='GET'&&parts.length===4){send(res,200,{document:doc,jobs:listJobs(id)});return;}
@@ -205,6 +247,7 @@ const server=http.createServer(async(req,res)=>{
         }finally{res.off('close',disconnect);}
       }
       if(b.revision!==doc.revision){send(res,409,{error:'工程修订已变化',currentRevision:doc.revision});return;}
+      if(operation==='migrate-glb'){send(res,201,await migrateBlendProject(doc));return;}
       if(operation==='render-view'){
         const request=cyclesViewRequest(b),controller=new AbortController();
         const disconnect=()=>{if(!res.writableEnded)controller.abort();};
@@ -225,7 +268,7 @@ const server=http.createServer(async(req,res)=>{
       if(operation==='model'){send(res,200,saveProjectModel(doc,b));return;}
       if(operation==='commands'){
         const changesRenderVisibility=Array.isArray(b.operations)&&b.operations.length<=128&&b.operations.some(op=>op?.op==='renderVisibility');
-        const sourceVisibility=changesRenderVisibility?(await renderSceneObjects(doc)).visibility:undefined;
+        const sourceVisibility=changesRenderVisibility?(renderSceneObjects(doc)).visibility:undefined;
         send(res,200,editPaint(changesRenderVisibility?read(id):doc,b,sourceVisibility));
       }
       else if(operation==='assets')send(res,201,importPaint(doc,b));
@@ -238,26 +281,26 @@ const server=http.createServer(async(req,res)=>{
         send(res,202,submit(id,'paint-render',b.revision,b.requestId,null,null,{settings}));
       }
       else if(operation==='render-cancel'){
-        if(getJob(id,b.jobId).type!=='paint-render')throw Error('只能取消 Cycles 出图任务');
+        if(getJob(id,b.jobId).type!=='paint-render')throw Error('只能取消出图任务');
         send(res,200,await cancel(id,b.jobId));
       }
       else if(operation==='render-retry'){
-        if(getJob(id,b.jobId).type!=='paint-render')throw Error('只能重试 Cycles 出图任务');
+        if(getJob(id,b.jobId).type!=='paint-render')throw Error('只能重试出图任务');
         send(res,202,retryJob(id,b.jobId,b.requestId));
       }
       else if(operation==='cancel')send(res,200,await cancel(id,b.jobId));
       else if(operation==='export-retry'){
         if(req.headers.origin!==local&&req.headers.origin!==`http://localhost:${PORT}`)throw Error('请在工作台重试交付');
         const previous=getJob(id,b.jobId);
-        if(!['paint-export','paint-texture-export'].includes(previous.type))throw Error('只能重试涂装导出任务');
+        if(!paintExportTypes.includes(previous.type))throw Error('只能重试涂装导出任务');
         if(previous.revision!==doc.revision)throw Object.assign(Error('工程修订已变化，请重新确认当前预览'),{status:409,currentRevision:doc.revision});
         if(await verifyExportPreview(res,doc,previous.paintPreviewId))send(res,202,retryJob(id,previous.id,b.requestId));
       }
-      else if(operation==='export'||operation==='export-textures'){
+      else if(['export','export-textures','export-glb'].includes(operation)){
         if(req.headers.origin!==local&&req.headers.origin!==`http://localhost:${PORT}`)throw Error('请在工作台确认交付');
         if(b.confirmed!==true)throw Error('请确认当前修订');
         if(await verifyExportPreview(res,doc,b.previewId)){
-          const type=operation==='export-textures'?'paint-texture-export':'paint-export';
+          const type={'export':'paint-export','export-textures':'paint-texture-export','export-glb':'paint-glb-export'}[operation];
           send(res,202,submit(id,type,b.revision,b.requestId,null,null,b));
         }
       }else send(res,404,{error:'制作操作不存在'});
@@ -297,4 +340,18 @@ const server=http.createServer(async(req,res)=>{
 recover();
 server.on('error',e=>{console.error(e.code==='EADDRINUSE'?'端口被占用，请使用 --port 更换；未终止其他服务':e);process.exitCode=1;});
 server.listen(PORT,'127.0.0.1',()=>console.log(`阿拉克涅 Web 控制台 ${local}\n仅本机 · 数据保存在 ${DATA}`));
-for(const sig of ['SIGINT','SIGTERM'])process.on(sig,async()=>{server.close();stopCyclesDeviceProbe();stopRenderSceneObjects();const previewStop=stopPaintCyclesView(),interactiveStop=stopCyclesSessions();stopLivePaint();stopViewport();stopModelGeometry();await Promise.all([stop(),previewStop,interactiveStop]);process.exit(0);});
+let stopping=false;
+async function shutdown(){
+  if(stopping)return;
+  stopping=true;
+  server.close();stopCyclesDeviceProbe();
+  const previewStop=stopPaintCyclesView(),interactiveStop=stopCyclesSessions();
+  stopLivePaint();stopViewport();stopModelGeometry();stopBlendMigrations();
+  await Promise.all([stop(),previewStop,interactiveStop]);
+  process.exit(0);
+}
+for(const sig of ['SIGINT','SIGTERM'])process.on(sig,shutdown);
+if(process.send){
+  process.once('disconnect',shutdown);
+  if(!process.connected)void shutdown();
+}

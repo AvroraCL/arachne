@@ -29,7 +29,7 @@ export function primitiveTopology(geometry,data){
   }
   const topology={vertices,aliases};
   const polygonIds=data.polygons,index=geometry.index;
-  if(!index||polygonIds?.length!==index.count/3)return topology;
+  if(polygonIds?.length!==(index?.count??position.count)/3)return topology;
   const faces=new Map();
   for(let face=0;face<polygonIds.length;face++){
     const id=polygonIds[face];
@@ -39,7 +39,7 @@ export function primitiveTopology(geometry,data){
       faces.set(id,group);
     }
     const start=face*3;
-    const triangle=[index.getX(start),index.getX(start+1),index.getX(start+2)];
+    const triangle=index?[index.getX(start),index.getX(start+1),index.getX(start+2)]:[start,start+1,start+2];
     group.triangles.push(...triangle);
     for(let i=0;i<3;i++){
       const a=triangle[i],b=triangle[(i+1)%3],left=vertices[a],right=vertices[b];

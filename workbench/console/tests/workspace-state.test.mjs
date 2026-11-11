@@ -1,8 +1,24 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {area,split,leaves,validateLayout,workspacePreset,splitArea,changeEditor,joinAreas,joinable,adjacentAreas,swapAreas,areaRects,migrateLayerEditors} from '../public/workspace-state.mjs';
+import {area,split,leaves,validateLayout,workspacePreset,splitArea,changeEditor,joinAreas,joinable,adjacentAreas,swapAreas,areaRects,migrateLayerEditors,workspaceLayoutFile,parseWorkspaceLayoutFile} from '../public/workspace-state.mjs';
 import {createProjectState} from '../public/project-state.mjs';import {createEditorRegistry} from '../public/editor-registry.mjs';
 test('workspace presets are layouts only and every area can switch independently',()=>{
   for(const name of ['modeling','material','drawing']){const tree=workspacePreset(name);validateLayout(tree);for(const a of leaves(tree)){const changed=changeEditor(tree,a.id,'console');assert.equal(leaves(changed).find(n=>n.id===a.id).editor,'console');assert.equal(leaves(tree).find(n=>n.id===a.id).editor,a.editor);}}
+});
+test('portable workspaces preserve editor placement and strip project-specific state',()=>{
+  const model=split('x',area('viewport','main',{camera:{eye:[1,2,3]}}),area('scene','outline'),.64);
+  const material=area('shader','nodes',{resource:{id:'project-material'}});
+  const drawing=area('image','canvas',{documentId:'project-image'});
+  const exported=workspaceLayoutFile({modeling:model,material,drawing});
+  assert.equal(exported.layouts.modeling.ratio,.64);
+  assert.deepEqual(leaves(exported.layouts.modeling).map(node=>node.editor),['viewport','scene']);
+  assert.deepEqual(exported.layouts.drawing.states,{});
+  assert.equal(model.first.states.viewport.camera.eye[0],1);
+  assert.doesNotMatch(JSON.stringify(exported),/project-material|project-image|camera/);
+  const recovered=parseWorkspaceLayoutFile(JSON.parse(JSON.stringify(exported)));
+  assert.deepEqual(recovered,exported.layouts);
+  assert.throws(()=>parseWorkspaceLayoutFile({...exported,version:2}),/受支持/);
+  assert.throws(()=>parseWorkspaceLayoutFile({...exported,layouts:{...exported.layouts,drawing:null}}),/区域布局无效/);
+  assert.throws(()=>parseWorkspaceLayoutFile({...exported,layouts:{...exported.layouts,modeling:{...model,ratio:1}}}),/分割比例/);
 });
 test('split preserves editor views without aliasing; merge works across original tree branches',()=>{
   const a=area('viewport','a',{camera:{eye:[1,2,3]}}),tree=splitArea(a,'a','x',.5,'b');

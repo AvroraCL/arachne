@@ -17,8 +17,10 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   const sliders=[radiusInput,uvRadius,hardness,opacity],savedControls=[...sliders,pressureControl];
   const presets={hard:[.14,32,1,1],soft:[.25,72,.2,.55],scuff:[.08,20,.5,.35]};
   const settingsKey=customKey||'arachne-paint-brush-v1';
-  let mode='orbit',beforeSample='orbit',gesture=null,mirrorX=false,hover=null,hoverFrame=null;
+  let mode='orbit',beforeSample='orbit',gesture=null,mirrorX=false,hover=null,hoverFrame=null,uvHover=null;
   const brushMode=()=>mode==='paint'||mode==='mask';
+  uvCursor.hidden=true;
+  uvCursor.setAttribute('aria-hidden','true');
 
   function syncPreset(){
     const match=Object.entries(presets).find(([,values])=>values.every((value,i)=>value===Number(sliders[i].value)));
@@ -51,8 +53,20 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     syncPreset();
   }
 
+  function hideSurfaceCursors(){
+    hover=null;brushCursor.hidden=mirrorCursor.hidden=true;
+  }
+  function setUVCursorVisible(visible){
+    uvCursor.hidden=!visible;
+    uvHost.toggleAttribute('data-uv-brush-cursor',visible);
+  }
+  function clearUVCursor(){
+    uvHover=null;
+    setUVCursorVisible(false);
+  }
   function hideCursors(){
-    hover=null;brushCursor.hidden=mirrorCursor.hidden=uvCursor.hidden=true;
+    hideSurfaceCursors();
+    clearUVCursor();
   }
   function toggleMirror(){
     if(!brushMode()||gesture)return;
@@ -77,7 +91,10 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     scheduleCursors();saveBrush();return true;
   }
   radiusInput.oninput=scheduleCursors;
-  uvRadius.oninput=()=>{$('brush-uv-size').textContent=uvRadius.value+' px';};
+  uvRadius.oninput=()=>{
+    $('brush-uv-size').textContent=uvRadius.value+' px';
+    refreshUVCursor();
+  };
   for(const control of savedControls)control.addEventListener('change',saveBrush);
   presetControl.onchange=()=>{
     const name=presetControl.value;
@@ -88,23 +105,32 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     saveBrush();
   };
   restoreBrush();
-  function uvPoint(x,y){
-    const bounds=uvCanvas.getBoundingClientRect();
+  function uvPoint(x,y,bounds=uvCanvas.getBoundingClientRect()){
     if(!bounds.width||!bounds.height)return null;
     const u=(x-bounds.left)/bounds.width,v=(y-bounds.top)/bounds.height;
     return u>=0&&u<=1&&v>=0&&v<=1?[u,v]:null;
   }
-  function updateUVCursor(event){
-    const state=context(), {clientX:x,clientY:y}=event;
-    uvCursor.hidden=true;
-    if(!brushMode()||!state.uvEnabled||!state.layer?.visible||state.layer.locked||(mode==='paint'&&state.layer.kind!=='paint')||isHandHeld()||event.altKey||
-       (event.buttons&&!gesture?.uv)||uvControl(event)||!uvPoint(x,y))return;
-    const bounds=uvHost.getBoundingClientRect();
-    const diameter=2*Number(uvRadius.value)/4096*uvCanvas.getBoundingClientRect().width;
+  function trackUVCursor(event,x=event.clientX,y=event.clientY){
+    uvHover={x,y,buttons:event.buttons,sampling:event.altKey,overControls:uvControl(event)};
+    refreshUVCursor();
+  }
+  function refreshUVCursor(state){
+    if(!uvHover||!brushMode())return setUVCursorVisible(false);
+    state??=context();
+    const {x,y,buttons,sampling,overControls}=uvHover;
+    if(!state.uvEnabled||!state.layer?.visible||state.layer.locked||
+       (mode==='paint'&&state.layer.kind!=='paint')||isHandHeld()||sampling||
+       (buttons&&!gesture?.uv)||overControls)return setUVCursorVisible(false);
+    const canvasBounds=uvCanvas.getBoundingClientRect(),bounds=uvHost.getBoundingClientRect();
+    if(!uvPoint(x,y,canvasBounds)||x<bounds.left||x>bounds.right||y<bounds.top||y>bounds.bottom)
+      return setUVCursorVisible(false);
+    const radius=gesture?.uv?gesture.stroke.radius:Number(uvRadius.value)/4096;
+    const diameter=2*radius*canvasBounds.width;
     uvCursor.style.setProperty('--brush-diameter',Math.max(3,diameter)+'px');
+    uvCursor.toggleAttribute('data-small',diameter<6);
     uvCursor.style.left=x-bounds.left+'px';
     uvCursor.style.top=y-bounds.top+'px';
-    uvCursor.hidden=false;
+    setUVCursorVisible(true);
   }
   function uvControl(event){return event.target.closest('.uv-controls,#uv-wipe-control');}
   function showCursor(node,point,anchor,radius){
@@ -118,7 +144,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   }
   function updateCursors(event){
     if(!brushMode()||gesture||event.buttons||!event.target.matches('canvas')){
-      hideCursors();return;
+      hideSurfaceCursors();return;
     }
     hover=[event.clientX,event.clientY];
     scheduleCursors();
@@ -154,7 +180,8 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
       (mode==='sample'&&!canSample)||
       (['mask','fill'].includes(mode)&&!writable);
     if(unavailable&&!preserveUnavailableMode)mode='orbit';
-    if((!enabled&&!uvEnabled)||!brushMode()||unavailable)hideCursors();
+    if((!enabled&&!uvEnabled)||!brushMode()||unavailable)hideSurfaceCursors();
+    refreshUVCursor(state);
     uvHost.toggleAttribute('data-brushing',uvEnabled&&!!layer?.visible&&!unavailable&&(brushMode()||mode==='sample'));
     host.dataset.tool=mode;
     for(const tool of ['orbit','paint','mask','fill','sample'])$('surface-'+tool).setAttribute('aria-pressed',String(mode===tool));
@@ -195,6 +222,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   function cancel({preserveMode=false}={}){
     const prior=gesture;
     gesture=null;
+    clearUVCursor();
     if(preserveMode)render();else setMode(mode==='sample'?beforeSample:'orbit');
     if(prior){preview(null,prior.state);onIdle();}
   }
@@ -259,6 +287,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
         opacity:Number($('brush-opacity').value),stamps:[],
         ...(uv?{uv:true,...clip}:mirrorX?{mirrorX}:{}),...params}};
     hideCursors();
+    if(uv)trackUVCursor(event);
     stamp(event.clientX,event.clientY,pressure);
     if(gesture.stroke.stamps.length)preview(strokeOp(gesture),state);
     event.target.focus({preventScroll:true});
@@ -320,7 +349,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     }
     const dx=x-g.x,dy=y-g.y;
     if(g.stroke){
-      if(g.uv)updateUVCursor(g.axisStart?{clientX:x,clientY:y,buttons:event.buttons,altKey:event.altKey,target:event.target}:event);
+      if(g.uv)trackUVCursor(event,x,y);
       const spacing=g.uv?Math.max(.35,g.stroke.radius*uvCanvas.getBoundingClientRect().width*.35):3;
       const distance=Math.hypot(dx,dy);
       const pressure=g.pressure===null?null:clamp(event.pressure,0,1);
@@ -356,8 +385,16 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   }
   function finish(event){
     const g=gesture;
-    if(g?.pointer!==event.pointerId)return;
-    gesture=null;render();
+    if(g?.pointer!==event.pointerId){
+      if(event.currentTarget===uvHost&&event.type==='pointerup')trackUVCursor(event);
+      return;
+    }
+    gesture=null;
+    if(g.uv){
+      if(event.type==='pointerup')trackUVCursor(event);
+      else clearUVCursor();
+    }
+    render();
     if(event.type==='pointerup'){
       if(g.stroke?.stamps.length)commit(strokeOp(g),g.state);
       else if(g.projector!==undefined&&g.projector!==g.original)commit(transformOp(g),g.state);
@@ -384,11 +421,12 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   host.addEventListener('viewport-camera',()=>{hideCursors();render();});
   uvHost.addEventListener('pointerdown',beginUV,true);
   uvHost.addEventListener('pointermove',move,true);
-  uvHost.addEventListener('pointermove',updateUVCursor,true);
-  uvHost.addEventListener('pointerleave',()=>{uvCursor.hidden=true;});
+  uvHost.addEventListener('pointerenter',event=>trackUVCursor(event));
+  uvHost.addEventListener('pointermove',event=>{if(!gesture?.uv)trackUVCursor(event);},true);
+  uvHost.addEventListener('pointerleave',clearUVCursor);
   for(const name of ['pointerup','pointercancel','lostpointercapture'])uvHost.addEventListener(name,finish,true);
   const observer=new ResizeObserver(render);observer.observe(host);
-  return {dispose(){cancel();observer.disconnect();hideCursors();},render,setMode,cancel,projectorAt,toggleMirror,adjustRadius,fillUV,isEditing:()=>!!gesture,
+  return {dispose(){cancel();observer.disconnect();hideCursors();},render,setMode,cancel,projectorAt,toggleMirror,adjustRadius,fillUV,refreshUVCursor,isEditing:()=>!!gesture,
     getSettings:()=>({worldRadius:Number(radiusInput.value),uvRadius:Number(uvRadius.value),hardness:Number(hardness.value),
       opacity:Number(opacity.value),pressure:pressureControl.checked,mirror:mirrorX}),
     setSettings(settings,{persist=true}={}){

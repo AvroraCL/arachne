@@ -183,15 +183,25 @@
 #workspace .editor-scene-list{
   --outline-row:25px;--outline-eye:29px;--outline-step:17px;--outline-start:5px;--outline-line:#ffffff24;
   --outline-actions:calc(var(--outline-eye)*2);
-  --outline-column:#212121;
-  padding:0;gap:0;background:linear-gradient(to left,var(--outline-column) var(--outline-actions),#252525 var(--outline-actions));
+  --outline-column:#212121;--outline-list:#252525;
+  padding:0;gap:0;background:var(--outline-list);scrollbar-gutter:auto;
+}
+#workspace .editor-scene-list:has(>.editor-layer-row){
+  scrollbar-gutter:stable;
+  background:linear-gradient(to left,var(--outline-column) var(--outline-actions),var(--outline-list) var(--outline-actions));
 }
 #workspace .editor-scene-list:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
-#workspace .editor-scene-list :is(.editor-outline-root,.editor-layer-row){
+#workspace .editor-scene-list .editor-layer-row{
   background:linear-gradient(to left,var(--outline-column) var(--outline-actions),var(--outline-background,transparent) var(--outline-actions));
 }
-#workspace .editor-scene-list .editor-outline-root{top:0;min-height:var(--outline-row);width:100%;justify-content:flex-start;padding:0 var(--outline-actions) 0 var(--outline-start);gap:4px;border:0;--outline-background:#303030;font-weight:500;font-size:13px}
-#workspace .editor-scene-list button.editor-outline-root:hover{--outline-background:#383838}
+#workspace .editor-scene-list .editor-outline-root{
+  top:0;min-height:var(--outline-row);width:100%;justify-content:flex-start;
+  padding:0 var(--outline-start);gap:4px;border:0;background:#303030;font-weight:500;font-size:13px;
+}
+#workspace .editor-scene-list .editor-outline-root[aria-expanded=false]{
+  background:#2b2b2b;box-shadow:inset 0 -1px #ffffff0a;
+}
+#workspace .editor-scene-list button.editor-outline-root:hover{background:#383838}
 #workspace .editor-scene-list .editor-outline-root>.outline-disclosure{background:transparent}
 #workspace .editor-scene-list .editor-layer-row{min-height:var(--outline-row);border-radius:0;padding:0 0 0 var(--outline-start)}
 #workspace .editor-list.editor-scene-list .editor-layer-row:nth-child(even){--outline-background:#292929}

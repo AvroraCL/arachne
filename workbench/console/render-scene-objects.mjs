@@ -1,35 +1,33 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import {execFile} from 'node:child_process';
-import {blenderExecutable,blenderScriptArgs} from './blender-runtime.mjs';
+import {registeredViewportModel} from './viewport.mjs';
 import {checkRenderVisibility} from './public/render-visibility.mjs';
 
-const cache=new Map(),running=new Set(),marker='ARACHNE_RENDER_OBJECTS ';
-const worker=path.join(import.meta.dirname,'blender_render_visibility.py');
+const cache=new Map();
 
 export function renderSceneObjects(doc){
-  const source=doc.source.reviewSource,expected=doc.source.files[source],stat=fs.statSync(source);
-  if(!/^[a-f0-9]{64}$/.test(expected))throw Error('工程源场景未登记');
-  const key=JSON.stringify([source,expected,stat.size,stat.mtimeMs,stat.ctimeMs]);
+  const {file,sha256,metadata}=registeredViewportModel(doc);
+  const key=metadata.source_sha256+':'+sha256;
   if(cache.has(key))return cache.get(key);
-  const result=new Promise((resolve,reject)=>{
-    const child=execFile(blenderExecutable(),blenderScriptArgs(worker,[source,expected]),
-    {windowsHide:true,timeout:20000,maxBuffer:2*1024*1024},(error,stdout)=>{
-      running.delete(child);
-      if(error){reject(Error('无法读取 Blender 源场景的渲染物体'));return;}
-      try{
-        const raw=stdout.split(/\r?\n/).find(line=>line.startsWith(marker));
-        const parsed=JSON.parse(raw?.slice(marker.length));
-        if(parsed.sourceSha256!==expected)throw Error();
-        resolve({sourceSha256:expected,visibility:checkRenderVisibility(parsed.visibility)});
-      }catch{reject(Error('Blender 未返回有效的渲染物体列表'));}
-    });
-    running.add(child);
-  });
+
+  // Read only the GLB header and JSON chunk. Mesh buffers and images stay on disk.
+  const fd=fs.openSync(file,'r');
+  let gltf;
+  try{
+    const header=Buffer.alloc(20);
+    if(fs.readSync(fd,header)!==20||header.toString('ascii',0,4)!=='glTF'||
+      header.readUInt32LE(4)!==2||header.toString('ascii',16,20)!=='JSON')
+      throw Error('登记模型的 GLB 格式无效');
+    const length=header.readUInt32LE(12);
+    if(length>fs.fstatSync(fd).size-header.length)throw Error('登记模型的 GLB 数据不完整');
+    const json=Buffer.alloc(length);
+    if(fs.readSync(fd,json)!==length)throw Error('登记模型的 GLB 数据不完整');
+    gltf=JSON.parse(json.toString('utf8'));
+  }finally{fs.closeSync(fd);}
+  const visibility=checkRenderVisibility(Object.fromEntries((gltf.nodes||[])
+    .filter(node=>node.mesh!==undefined&&node.name)
+    .map(node=>[node.name,metadata.render_visibility?.[node.name]!==false])));
+  const result={sourceSha256:metadata.source_sha256,visibility};
   cache.set(key,result);
   while(cache.size>8)cache.delete(cache.keys().next().value);
-  void result.catch(()=>{if(cache.get(key)===result)cache.delete(key);});
   return result;
 }
-
-export function stopRenderSceneObjects(){for(const child of running)child.kill();}

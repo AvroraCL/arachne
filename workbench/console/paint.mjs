@@ -16,15 +16,14 @@ import {crc32} from 'node:zlib';
 import {ROOT,list,read,commit,forkProject,projectDir,hash,atomic} from './store.mjs';
 import {bindingFingerprint,demoProjectId as defaultSource} from './demo-source.mjs';
 import {cyclesOptions} from './cycles-options.mjs';
-import {pngSizeIs,validateCyclesOutput} from './cycles-output.mjs';
-import {blenderExecutable,blenderScriptArgs} from './blender-runtime.mjs';
-import {cyclesProgressReader} from './cycles-progress.mjs';
-import {checkRenderAppearance,matchesRenderAppearance} from './public/render-appearance.mjs';
+import {pngSizeIs,exrMatches} from './cycles-output.mjs';
+import {glbRegistrationFiles,installGlbRegistration} from './model-registration.mjs';
+import {renderPathTrace} from './path-trace-render.mjs';
+import {checkRenderAppearance} from './public/render-appearance.mjs';
 import {checkRenderLighting} from './public/render-lighting.mjs';
 import {checkRenderPreset} from './public/paint-delivery-options.mjs';
-import {matchesCyclesLightPaths} from './public/cycles-light-paths.mjs';
 import {checkRenderVisibility,updateRenderVisibility} from './public/render-visibility.mjs';
-import {checkRenderOptics,matchesRenderOptics} from './public/render-optics.mjs';
+import {checkRenderOptics} from './public/render-optics.mjs';
 import {checkRenderRegion,renderRegionPixels} from './public/render-region.mjs';
 import {layerParent,layerChildren,layerTreeOrder,layerLockOwner} from './public/paint-layer-tree.mjs';
 
@@ -137,7 +136,7 @@ async function verifyRegisteredFiles(doc,{signal}={}){
     if(await sha256File(file,{signal})!==expected)throw Error('模型、UV缓存或登记输入已改变：'+path.basename(file));
 }
 async function checkRegisteredSource(doc,options){
-  if(doc.source.material!=='f_16xl'||doc.source.bindingVersion!==2)throw Error('请选择已登记的示例模型');
+  if(doc.source.bindingVersion!==2||(doc.source.format!=='glb'&&doc.source.material!=='f_16xl'))throw Error('请选择已登记的模型');
   await verifyRegisteredFiles(doc,options);
 }
 function paintTemplate(doc,paint){
@@ -426,8 +425,8 @@ function paintBinding(doc){const model=modelFingerprint(doc);return model?crypto
 let compositorFingerprint;
 export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
   compositorFingerprint??=crypto.createHash('sha256').update(JSON.stringify([
-    'paint_worker.py','paint_channels.py','paint_surface.py','material_graph.py','image_documents.py','project_model.py','model-binding.mjs',
-    '../tools/geometry.py','../tools/prepare_guides.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
+    'paint_worker.py','paint_channels.py','paint_surface.py','material_graph.py','image_documents.py','project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
+    '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
   ].map(file=>hash(path.join(ROOT,file))))).digest('hex');
   const {objectNames,renderCamera,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,...content}=doc.paint;
   return crypto.createHash('sha256').update(JSON.stringify([compositorFingerprint,binding,content])).digest('hex');
@@ -710,7 +709,7 @@ export async function restorePaint(archive,scratch){
   const projectOnly=manifest.format===archiveFormat;
   if(typeof manifest.name!=='string'||!manifest.name.trim()||manifest.name.length>100||
      !Number.isSafeInteger(manifest.revision)||manifest.revision<0||
-     geometry.material!=='f_16xl'||!sha256(geometry.modelSha256)||!sha256(geometry.registrationSha256)||
+     typeof geometry.material!=='string'||!geometry.material||geometry.material.length>256||!sha256(geometry.modelSha256)||!sha256(geometry.registrationSha256)||
      (!projectOnly&&(typeof manifest.previewId!=='string'||!/^[\w-]{1,100}$/.test(manifest.previewId)||
        !sha256(geometry.uvSha256))))
     throw Error('涂装 ZIP 的可编辑清单无效');
@@ -751,22 +750,35 @@ export async function restorePaint(archive,scratch){
     source=candidate;
     break;
   }
-  if(!source)throw Error('本机没有与交付包模型和 UV 缓存一致的登记工程');
-  const doc=paintTemplate(source,paint);
-  if(manifest.modeling){
-    validateModelState(manifest.modeling);
-    doc.modeling=manifest.modeling;
-    if(modelFingerprint(doc)!==geometry.modelFingerprint)throw Error('建模修改指纹与工程副本不一致');
-  }
-  return forkProject(source.id,doc,manifest.name,destination=>{
-    for(const item of Object.values(paint.assets)){
-      const file=path.join(destination,item.file);
-      fs.copyFileSync(path.join(folder,item.file),file,fs.constants.COPYFILE_EXCL);
-      if(hash(file)!==item.id)throw Error('恢复时素材指纹变化');
+  const restore=async source=>{
+    const doc=paintTemplate(source,paint);
+    if(manifest.modeling){
+      validateModelState(manifest.modeling);
+      doc.modeling=manifest.modeling;
+      if(modelFingerprint(doc)!==geometry.modelFingerprint||
+         doc.source.format==='glb'&&doc.modeling.modelSha256!==geometry.modelSha256)
+        throw Error('建模修改指纹与工程副本不一致');
     }
+    return forkProject(source.id,doc,manifest.name,destination=>{
+      for(const item of Object.values(paint.assets)){
+        const file=path.join(destination,item.file);
+        fs.copyFileSync(path.join(folder,item.file),file,fs.constants.COPYFILE_EXCL);
+        if(hash(file)!==item.id)throw Error('恢复时素材指纹变化');
+      }
+    });
+  };
+  if(source)return restore(source);
+  const registration=path.join(folder,'registration');
+  if(fs.existsSync(registration))return installGlbRegistration(registration,async candidate=>{
+    const s=candidate.source;
+    if(s.material!==geometry.material||s.files[s.reviewSource]!==geometry.modelSha256||
+       registrationFingerprint(s)!==geometry.registrationSha256)throw Error('包内登记模型与工程清单不一致');
+    await checkRegisteredSource(candidate);
+    return restore(candidate);
   });
+  throw Error('本机没有与交付包模型和 UV 缓存一致的登记工程');
 }
-function prepareEditableFiles(doc,out,files,{preview,uv}={}){
+function prepareEditableFiles(doc,out,files){
   const manifestPath='editable/manifest.json',assets={};
   const entries=Object.entries(doc.paint.assets);
   if(entries.length>32000)throw Error('可编辑涂装素材数量超出打包限制');
@@ -781,10 +793,9 @@ function prepareEditableFiles(doc,out,files,{preview,uv}={}){
   }
   files[manifestPath]=path.join(out,manifestPath);
   const geometry={material:doc.source.material,modelSha256:doc.source.files[doc.source.reviewSource],
-    registrationSha256:registrationFingerprint(doc.source),...(doc.modeling?{modelFingerprint:modelFingerprint(doc)}:{}),...(uv&&modelFingerprint(doc)?{editedModelSha256:uv.source_sha256}:{}),...(uv?{uvSha256:uv.uv_before}:{})};
+    registrationSha256:registrationFingerprint(doc.source),...(doc.modeling?{modelFingerprint:modelFingerprint(doc)}:{})};
   const manifest={
-    format:preview?'arachne-pbr-paint':archiveFormat,version:1,name:doc.name,revision:doc.revision,
-    ...(preview?{previewId:preview.id}:{}),geometry,...(doc.modeling?{modeling:doc.modeling}:{}),
+    format:archiveFormat,version:1,name:doc.name,revision:doc.revision,geometry,...(doc.modeling?{modeling:doc.modeling}:{}),
     paint:{base:doc.paint.base,...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
   };
   if(Buffer.byteLength(JSON.stringify(manifest,null,2)+'\n')>16*1024*1024)throw Error('可编辑工程清单超过 16 MiB，无法生成可恢复的 ZIP');
@@ -869,17 +880,94 @@ async function copyPaintBake(doc,match,out,{binding,signal}){
   finally{await fsp.rm(incoming,{recursive:true,force:true});}
 }
 
-export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs,signal}){
+const hashBytes=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+
+async function writePaintGlb(doc,{bake,input,model,out,stage,j,run,python,signal}){
+  stage(j,'将已确认的 4K 贴图与建模修改写入 GLB');
+  const maps=Object.fromEntries(channelsForReport(bake).map(channel=>{
+    const name=channelSpecs[channel].file;
+    return [channel,{file:path.join(input,name),sha256:bake.files[name]}];
+  }));
+  const activeChannels=(bake.activeChannels||Object.keys(maps)).filter(channel=>Object.hasOwn(maps,channel));
+  await run('glb-input',{model,maps,activeChannels,out,material:doc.source.material,revision:doc.revision,
+    modeling:doc.modeling,verifyNativeUV:doc.source.format==='glb'},python,['-X','utf8',path.join(ROOT,'paint_glb.py')]);
+  return {sha256:await sha256File(out,{signal}),activeChannels};
+}
+
+async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,update,signal,registerBrowser}){
+  const renderAppearance=doc.paint.renderAppearance||null,renderLighting=doc.paint.renderLighting||null,renderOptics=doc.paint.renderOptics||null;
+  const renderVisibility=Object.keys(doc.paint.renderVisibility||{}).length?doc.paint.renderVisibility:null;
+  const settings=j.paintSettings,region=renderRegionPixels(doc.paint.renderRegion,settings.width,settings.height);
+  const active=report.activeChannels||legacyChannels;
+  const applied=['color','metallic','roughness','normal','emission','alpha'].filter(name=>active.includes(name));
+  const files=Object.fromEntries(applied.map(name=>['/input/'+name+'.png',path.join(input,channelSpecs[name].file)]));
+  files['/input/model.glb']=model.file;
+  stage(j,'路径追踪渲染冻结修订');
+  const result=await renderPathTrace({
+    settings,region,lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,
+    material:doc.source.material,channels:applied,modeling:doc.modeling,visibility:renderVisibility||{},
+    defaultVisibility:model.metadata.render_visibility||{}
+  },files,{signal,registerBrowser,onSample:sample=>{
+    if(!signal?.aborted)update(j,{progress:{phase:'sample',sample,total:settings.samples}});
+  }});
+  const resolution=region?.output||[settings.width,settings.height];
+  if(result.samples!==settings.samples||!pngSizeIs(result.png,...resolution)||result.png[24]!==8||
+     !(settings.transparent?[6]:[2,6]).includes(result.png[25])||
+     settings.camera&&!isDeepStrictEqual(settings.camera,result.camera))throw Error('渲染预览与冻结的出图设置不一致');
+  await verifyPaintBake(doc,report,input,{binding,signal});
+  await verifyPaint(doc,{signal});
+  if(await sha256File(model.file,{signal})!==model.sha256)throw Error('登记模型在出图过程中变化');
+  const render={
+    engine:'PATH_TRACING',revision:doc.revision,resolution,frameResolution:[settings.width,settings.height],
+    region,camera:result.camera,samples:result.samples,fileFormat:settings.fileFormat,bitDepth:settings.bitDepth,
+    transparent:settings.transparent,...(result.exr?{colorSpace:'scene-linear sRGB',alphaMode:'premultiplied'}:{}),
+    lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,visibility:renderVisibility,
+    modelSha256:model.sha256,uvSha256:model.uvSha256,materialFingerprint:report.materialFingerprint??null,
+    textures:Object.fromEntries(applied.map(name=>[name,report.files[channelSpecs[name].file]])),
+    pngSha256:hashBytes(result.png),...(result.exr?{exrSha256:hashBytes(result.exr)}:{}),
+    sha256:hashBytes(result.exr||result.png)
+  };
+  const pending=await fsp.mkdtemp(out+'-');
+  try{
+    await fsp.writeFile(path.join(pending,'render.png'),result.png,{signal});
+    if(settings.fileFormat==='OPEN_EXR'){
+      if(!result.exr)throw Error('路径追踪未返回 OpenEXR');
+      const exr=path.join(pending,'render.exr');
+      await fsp.writeFile(exr,result.exr,{signal});
+      if(!exrMatches(exr,...resolution,settings.bitDepth,['R','G','B','A'],{compressionType:0}))
+        throw Error('OpenEXR 的尺寸、通道或浮点位深与出图设置不一致');
+    }
+    atomic(path.join(pending,'validation.json'),render);
+    signal?.throwIfAborted();
+    fs.renameSync(pending,out);
+  }finally{await fsp.rm(pending,{recursive:true,force:true});}
+  signal?.throwIfAborted();
+  return render;
+}
+
+export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs,signal,registerBrowser}){
   stage(j,'核对登记模型、原 UV 与素材');
   const binding=await verifyPaint(doc,{signal}),folder=path.join(projectDir(doc.id),'jobs',j.id);
-  const python=process.env.ARACHNE_PYTHON||'python',blender=blenderExecutable();
+  const python=process.env.ARACHNE_PYTHON||'python';
   const url=name=>`/api/projects/${doc.id}/jobs/${j.id}/files/${name}`;
   const run=async(name,cfg,exe,args)=>{
     const file=path.join(folder,name+'.json');atomic(file,cfg);
-    const progress=cfg.progress===true?cyclesProgressReader(value=>{if(!signal?.aborted)update(j,{progress:value});}):null;
-    await runProcess(j,exe,[...args,file],progress?{onLine:progress}:undefined);
+    await runProcess(j,exe,[...args,file]);
   };
-  const blenderArgs=script=>blenderScriptArgs(path.join(ROOT,script));
+  if(j.type==='paint-glb-export'){
+    const preview=getJob(doc.id,j.paintPreviewId);
+    const input=await checkPaintPreview(doc,preview,{binding,signal});
+    const model=(await import('./viewport.mjs')).registeredViewportModel(doc);
+    const out=path.join(folder,'model.glb'),pending=out+'.tmp';
+    try{
+      const {sha256}=await writePaintGlb(doc,{bake:preview.paintReport,input,model,out:pending,stage,j,run,python,signal});
+      signal?.throwIfAborted();
+      if(read(doc.id).revision!==doc.revision)throw Error('工程已变化，请预览并确认当前修订');
+      fs.renameSync(pending,out);
+      update(j,{glbUrl:url('model.glb'),glbSha256:sha256});
+    }finally{fs.rmSync(pending,{force:true});}
+    return;
+  }
   if(['paint-backup','paint-texture-export'].includes(j.type)){
     const withTextures=j.type==='paint-texture-export';
     const out=path.join(folder,withTextures?'textures':'backup'),files={};
@@ -914,13 +1002,14 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     update(j,withTextures?{packageUrl:url('textures/project.zip')}:{archiveUrl:url('backup/project.zip')});
     return;
   }
-  if(modelFingerprint(doc))stage(j,'准备建模后的涂装表面与遮挡');
-  const geometry=await preparePaintGeometry(doc,{signal,frozen:true}),paintSource=geometry.source;
-  const renderAppearance=doc.paint.renderAppearance||null,renderLighting=doc.paint.renderLighting||null,renderOptics=doc.paint.renderOptics||null;
-  const renderVisibility=Object.keys(doc.paint.renderVisibility||{}).length?doc.paint.renderVisibility:null;
   if(j.type==='paint-preview'||j.type==='paint-draft'||j.type==='paint-render'){
+    if(modelFingerprint(doc))stage(j,'准备建模后的涂装表面与遮挡');
+    const geometry=await preparePaintGeometry(doc,{signal,frozen:true}),paintSource=geometry.source;
     const out=path.join(folder,'paint');
     const draft=j.type==='paint-draft',bakeFingerprint=paintBakeFingerprint(doc,binding);
+    const model=j.type==='paint-render'?(await import('./viewport.mjs')).registeredViewportModel(doc):null;
+    if(model&&doc.modeling?.steps?.length&&doc.modeling.modelSha256!==model.sha256)
+      throw Error('工程建模绑定与登记模型不一致');
     const compose={...paintInput(doc,binding),source:paintSource,surfaceSources:geometry.surfaceSources,out,draft,bakeFingerprint};
     const cached=!draft&&listJobs?await reusablePaintBake(doc,listJobs(doc.id),bakeFingerprint,{binding,signal}):null;
     if(cached)stage(j,'复用已验证的 4K 涂装贴图');
@@ -937,46 +1026,10 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
       await verifyPaintBake(doc,report,out,{draft,binding,signal});
       await verifyPaint(doc,{signal});
     }
-    if(j.type==='paint-render'){
-      const settings=j.paintSettings,channelFiles=renderChannels(report,out),sourceHash=geometry.report?.modelSha256||doc.source.files[doc.source.reviewSource];
-      const renderRegion=renderRegionPixels(doc.paint.renderRegion,settings.width,settings.height);
-      const nodeMaterial=await nativePaintMaterial(doc,report,out,{signal});
-      const texture={kind:'paint',roundId:j.id,sha256:report.files['f_16xl_BaseColor.png']};
-      const color=path.join(out,'f_16xl_BaseColor.png'),renderOut=path.join(folder,'cycles-render');
-      stage(j,'Cycles 渲染冻结修订');
-      await run('cycles-config',{source:paintSource,sourceSha256:sourceHash,color,channels:channelFiles,nodeMaterial,out:renderOut,revision:doc.revision,settings,renderAppearance,renderLighting,renderVisibility,renderOptics,renderRegion,texture,progress:true},
-        blender,blenderArgs('cycles_render.py'));
-      const cycles=JSON.parse(fs.readFileSync(path.join(renderOut,'validation.json'),'utf8'));
-      if(cycles.engine!=='CYCLES'||cycles.document_revision!==doc.revision||cycles.source_sha256!==sourceHash||
-        cycles.source_saved!==false||cycles.uv_unchanged!==true||!cycles.uv_before||cycles.uv_before!==cycles.uv_after||
-        !isDeepStrictEqual(cycles.texture,texture)||!isDeepStrictEqual(cycles.camera,settings.camera)||
-        !isDeepStrictEqual(cycles.frame_resolution,[settings.width,settings.height])||
-        !isDeepStrictEqual(cycles.render_region??null,renderRegion)||
-        cycles.samples!==settings.samples||cycles.denoising!==(settings.denoise??true)||
-        (settings.device==='cpu'&&cycles.device!=='CPU')||(settings.device==='gpu'&&cycles.device==='CPU'))
-        throw Error('Cycles 渲染结果与冻结工程或输出设置不一致');
-      for(const key of ['adaptive','noiseThreshold','maxBounces','transparent','bitDepth']){
-        const value=settings[key],actual=cycles.render_effective?.[key];
-        if(value!==undefined&&(key==='noiseThreshold'?typeof actual!=='number'||Math.abs(value-actual)>1e-6:value!==actual))
-          throw Error('Cycles 渲染设置与请求不一致');
-      }
-      if(settings.transparent&&cycles.render_effective?.colorMode!=='RGBA')throw Error('透明背景需要 RGBA 输出');
-      if(settings.lightPaths&&!matchesCyclesLightPaths(settings.lightPaths,cycles.render_effective?.lightPaths))
-        throw Error('Cycles 光线路径与出图设置不一致');
-      const output=await validateCyclesOutput(renderOut,settings,cycles,renderRegion,{signal});
-      if(!matchesRenderAppearance(renderAppearance,cycles.render_effective?.colorManagement))throw Error('Cycles 色彩管理与工程不一致');
-      if(!isDeepStrictEqual(cycles.lighting?.options??null,renderLighting))throw Error('Cycles 布光与工程不一致');
-      if(!isDeepStrictEqual(cycles.render_visibility??null,renderVisibility))throw Error('Cycles 物体渲染显隐与工程不一致');
-      if(!matchesRenderOptics(renderOptics,cycles.camera_framing?.optics))throw Error('Cycles 相机景深与工程不一致');
-      if(nodeMaterial&&cycles.nodeMaterial?.fingerprint!==nodeMaterial.fingerprint)throw Error('Cycles 节点材质指纹不一致');
-      for(const [key,input] of Object.entries(channelFiles))
-        if(cycles.channels?.[key]?.sha256!==input.sha256||cycles.channels[key].applied!==input.enabled||await sha256File(input.file,{signal})!==input.sha256)
-          throw Error('Cycles 贴图通道核对失败');
-      if(await sha256File(color,{signal})!==texture.sha256)throw Error('Cycles 颜色贴图指纹变化');
-      await verifyPaint(doc,{signal});
-      update(j,{paintReport:report,cycles,...output,...(output.outputSha256?{outputUrl:url('cycles-render/cycles.exr')}:{}),
-        ...(output.passesSha256?{passesUrl:url('cycles-render/cycles-passes.exr')}:{}),
-        renderUrl:url('cycles-render/cycles.png'),validationUrl:url('cycles-render/validation.json')});
+    if(model){
+      const render=await renderPaintFrame(j,doc,{model,report,input:out,out:path.join(folder,'path-tracing'),binding,stage,update,signal,registerBrowser});
+      update(j,{paintReport:report,render,renderUrl:url('path-tracing/render.png'),validationUrl:url('path-tracing/validation.json'),
+        ...(render.exrSha256?{outputUrl:url('path-tracing/render.exr'),outputSha256:render.exrSha256}:{})});
       return;
     }
     update(j,{paintReport:report,colorUrl:url('paint/f_16xl_BaseColor.png'),baseUrl:url('paint/base.png'),
@@ -984,84 +1037,59 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
       baseMaterialUrls:Object.fromEntries(channels.filter(k=>k!=='color').map(k=>[k,url('paint/base-'+k+'.png')])),
       coverageUrl:url('paint/coverage.png'),validationUrl:url('paint/report.json')});return;
   }
-  const preview=getJob(doc.id,j.paintPreviewId),input=await checkPaintPreview(doc,preview,{binding,signal}),out=path.join(folder,'delivery');
-  fs.mkdirSync(out);
-  const report=preview.paintReport,files={};
-  for(const file of Object.keys(report.files)){
-    files[file]=path.join(out,file);await fsp.copyFile(path.join(input,file),files[file]);
-  }
-  files['projection-report.json']=path.join(input,'report.json');
-  const color=files['f_16xl_BaseColor.png'];
-  const channelFiles=renderChannels(report,out);
-  const nodeMaterial=await nativePaintMaterial(doc,report,input,{signal});
-  const renderSettings=cyclesOptions(j.paintSettings);
-  const renderRegion=renderRegionPixels(doc.paint.renderRegion,renderSettings.width,renderSettings.height);
-  stage(j,'生成独立 Blender 副本');
-  await run('blend-config',{out,source:paintSource,color,channels:channelFiles,nodeMaterial,roundId:preview.id,settings:renderSettings,renderAppearance,renderLighting,renderVisibility,renderOptics,renderRegion},blender,blenderArgs('image_blend.py'));
-  stage(j,'Cycles 渲染冻结修订');
-  await run('cycles-config',{source:paintSource,color,channels:channelFiles,nodeMaterial,out:path.join(out,'cycles'),revision:doc.revision,
-    settings:renderSettings,renderAppearance,renderLighting,renderVisibility,renderOptics,renderRegion,progress:true,texture:{kind:'paint',roundId:preview.id,sha256:report.files['f_16xl_BaseColor.png']}},
-  blender,blenderArgs('cycles_render.py'));
-  const uv=JSON.parse(fs.readFileSync(path.join(out,'blend-validation.json'),'utf8'));
-  const cycles=JSON.parse(fs.readFileSync(path.join(out,'cycles/validation.json'),'utf8'));
-  if(nodeMaterial&&(uv.nodeMaterial?.fingerprint!==nodeMaterial.fingerprint||!isDeepStrictEqual(cycles.nodeMaterial,uv.nodeMaterial)))
-    throw Error('Blender 副本与 Cycles 节点材质指纹不一致');
-  if(!uv.uv_unchanged||!cycles.uv_unchanged||uv.source_saved||cycles.source_saved||
-     uv.source_sha256!==(geometry.report?.modelSha256||doc.source.files[doc.source.reviewSource])||
-     uv.source_sha256!==cycles.source_sha256||uv.uv_before!==cycles.uv_before||
-     cycles.texture.sha256!==report.files['f_16xl_BaseColor.png'])throw Error('交付 UV 或版本核对失败');
-  if(!isDeepStrictEqual(uv.camera_framing,cycles.camera_framing)||uv.render_settings?.width!==cycles.frame_resolution?.[0]||
-     uv.render_settings?.height!==cycles.frame_resolution?.[1]||uv.render_settings?.samples!==cycles.samples||
-     (uv.render_settings?.denoise??true)!==cycles.denoising)
-    throw Error('Blender 副本与 Cycles 的取景或输出设置不一致');
-  if(!matchesRenderOptics(renderOptics,cycles.camera_framing?.optics))throw Error('Blender 副本与 Cycles 的相机景深不一致');
-  if(!isDeepStrictEqual(cycles.render_region??null,renderRegion)||!isDeepStrictEqual(cycles.render_region,uv.render_region))
-    throw Error('Blender 副本与 Cycles 的渲染区域不一致');
-  const output=await validateCyclesOutput(path.join(out,'cycles'),renderSettings,cycles,renderRegion,{signal});
-  if(!matchesRenderAppearance(renderAppearance,cycles.render_effective?.colorManagement)||
-     !isDeepStrictEqual(uv.render_effective?.colorManagement,cycles.render_effective?.colorManagement))
-    throw Error('Blender 副本与 Cycles 的色彩管理不一致');
-  if(!isDeepStrictEqual(cycles.lighting?.options??null,renderLighting)||!isDeepStrictEqual(cycles.lighting,uv.lighting))
-    throw Error('Blender 副本与 Cycles 布光不一致');
-  if(!isDeepStrictEqual(cycles.passes,uv.passes))throw Error('Blender 副本与 Cycles 的渲染通道不一致');
-  if(!isDeepStrictEqual(cycles.render_visibility??null,renderVisibility)||!isDeepStrictEqual(cycles.render_visibility,uv.render_visibility))
-    throw Error('Blender 副本与 Cycles 物体渲染显隐不一致');
-  const advancedKeys=['adaptive','noiseThreshold','maxBounces','transparent','bitDepth'];
-  if(advancedKeys.some(key=>uv.render_settings?.[key]!==undefined)&&(!uv.render_effective||!cycles.render_effective))throw Error('缺少 Cycles 渲染设置核对结果');
-  if(uv.render_effective&&cycles.render_effective){
-    for(const key of ['adaptive','maxBounces','transparent','colorMode','bitDepth','fileFormat'])
-      if(uv.render_effective[key]!==cycles.render_effective[key])throw Error('Blender 副本与 Cycles 的渲染设置不一致');
-    if(Math.abs(uv.render_effective.noiseThreshold-cycles.render_effective.noiseThreshold)>1e-6)throw Error('Blender 副本与 Cycles 的噪波阈值不一致');
-    if(!matchesCyclesLightPaths(uv.render_effective.lightPaths,cycles.render_effective.lightPaths)||
-      renderSettings.lightPaths&&!matchesCyclesLightPaths(renderSettings.lightPaths,cycles.render_effective.lightPaths))
-      throw Error('Blender 副本与 Cycles 光线路径不一致');
-    for(const key of advancedKeys){
-      const requested=uv.render_settings?.[key],actual=cycles.render_effective[key];
-      if(requested!==undefined&&(key==='noiseThreshold'?Math.abs(requested-actual)>1e-6:requested!==actual))throw Error('Cycles 渲染设置与确认值不一致');
+  if(j.type!=='paint-export')throw Error('不支持的涂装任务');
+  const preview=getJob(doc.id,j.paintPreviewId),input=await checkPaintPreview(doc,preview,{binding,signal});
+  const out=path.join(folder,'delivery'),pending=await fsp.mkdtemp(path.join(folder,'delivery-'));
+  try{
+    const bake=preview.paintReport;
+    const model=(await import('./viewport.mjs')).registeredViewportModel(doc);
+    const modelFile=path.join(pending,'model.glb');
+    const {sha256:modelSha256,activeChannels}=await writePaintGlb(doc,{bake,input,model,out:modelFile,stage,j,run,python,signal});
+    const render=await renderPaintFrame(j,doc,{model,report:bake,input,out:path.join(pending,'frame'),binding,stage,update,signal,registerBrowser});
+    stage(j,'核对模型、材质、贴图与渲染并打包');
+    const files={'model.glb':modelFile,'materials.json':path.join(pending,'materials.json'),
+      'render.png':path.join(pending,'frame','render.png'),'render-report.json':path.join(pending,'frame','validation.json'),
+      'projection-report.json':path.join(pending,'projection-report.json')};
+    atomic(files['projection-report.json'],bake);
+    const expected={'model.glb':modelSha256,'render.png':render.pngSha256};
+    if(render.exrSha256){
+      files['render.exr']=path.join(pending,'frame','render.exr');
+      expected['render.exr']=render.exrSha256;
     }
-    if(uv.render_settings?.transparent&&cycles.render_effective.colorMode!=='RGBA')throw Error('透明背景需要 RGBA 输出');
-  }
-  if((uv.render_settings?.device==='cpu'&&cycles.device!=='CPU')||(uv.render_settings?.device==='gpu'&&cycles.device==='CPU'))throw Error('Cycles 使用的渲染设备与确认设置不一致');
-  for(const [name,channel] of Object.entries(channelFiles)){
-    if(uv.channels?.[name]?.sha256!==channel.sha256||cycles.channels?.[name]?.sha256!==channel.sha256||
-       await sha256File(channel.file,{signal})!==channel.sha256)throw Error('Blender、Cycles 或贴图通道指纹不一致');
-  }
-  if(await sha256File(color,{signal})!==report.files['f_16xl_BaseColor.png']||uv.roundId!==preview.id||cycles.texture.roundId!==preview.id)
-    throw Error('交付文件与冻结预览不一致');
-  if(read(doc.id).revision!==doc.revision)throw Error('工程已变化，请预览并确认当前修订');
-  await checkPaintPreview(doc,preview,{signal});
-  Object.assign(files,{'preview.blend':path.join(out,'preview.blend'),'cycles.png':path.join(out,'cycles/cycles.png'),
-    'blend-validation.json':path.join(out,'blend-validation.json'),'cycles-validation.json':path.join(out,'cycles/validation.json'),
-    'snapshot.json':path.join(folder,'snapshot.json')});
-  if(output.outputSha256)files['cycles.exr']=path.join(out,'cycles/cycles.exr');
-  if(output.passesSha256)files['cycles-passes.exr']=path.join(out,'cycles/cycles-passes.exr');
-  stage(j,'核对并打包交付文件');
-  const editable=prepareEditableFiles(doc,out,files,{preview,uv});
-  await run('package-config',{out,files,report:{revision:doc.revision,previewId:preview.id,confirmedAt:j.paintConfirmedAt,projection:report,uv,cycles,editable}},
-    python,['-X','utf8',path.join(ROOT,'image_worker.py'),'package']);
-  if(read(doc.id).revision!==doc.revision)throw Error('工程已变化，请预览并确认当前修订');
-  update(j,{packageUrl:url('delivery/delivery.zip'),blendUrl:url('delivery/preview.blend'),cycles,...output,
-    ...(output.outputSha256?{outputUrl:url('delivery/cycles/cycles.exr')}:{}),
-    ...(output.passesSha256?{passesUrl:url('delivery/cycles/cycles-passes.exr')}:{}),
-    renderUrl:url('delivery/cycles/cycles.png'),validationUrl:url('delivery/delivery-report.json')});
+    const textures={};
+    for(const [name,digest] of Object.entries(bake.files)){
+      const member='textures/'+name;
+      files[member]=path.join(input,name);
+      textures[member]=digest;
+    }
+    atomic(files['materials.json'],{format:'arachne-pbr-material',version:1,revision:doc.revision,material:doc.source.material,
+      model:'model.glb',uv:'TEXCOORD_0',uvSha256:model.uvSha256,resolution:bake.resolution,
+      channels:Object.fromEntries(channelsForReport(bake).map(key=>{
+        const spec=channelSpecs[key],file='textures/'+spec.file,active=activeChannels.includes(key);
+        return [key,{file,sha256:textures[file],colorSpace:spec.srgb?'sRGB':'linear',active,embedded:active&&key!=='height'}];
+      }))});
+    const registration=doc.source.format==='glb'?{}:null;
+    if(registration)for(const name of glbRegistrationFiles(doc.source.preservedSurface)){
+      const file=path.join(path.dirname(doc.source.reviewSource),name),member='registration/'+name;
+      const digest=doc.source.files[file];
+      if(!digest)throw Error('缺少可恢复的 GLB 登记文件');
+      files[member]=file;registration[member]=expected[member]=digest;
+    }
+    const editable=prepareEditableFiles(doc,pending,files);
+    const report={format:archiveFormat,revision:doc.revision,editable,bake:{previewId:preview.id,resolution:bake.resolution,files:textures},
+      delivery:{version:1,confirmedAt:j.paintConfirmedAt,model:{file:'model.glb',sha256:modelSha256,
+        sourceGlbSha256:model.sha256,uvSha256:model.uvSha256},material:'materials.json',render:{
+        file:render.exrSha256?'render.exr':'render.png',preview:'render.png',report:'render-report.json',engine:render.engine,resolution:render.resolution,
+        sha256:render.sha256,pngSha256:render.pngSha256
+      },...(registration?{registration}:{})}};
+    await run('package-config',{out:pending,files,report,expected,writeReport:true},python,['-X','utf8',path.join(ROOT,'paint_archive.py'),'pack']);
+    signal?.throwIfAborted();
+    await fsp.rm(path.join(pending,'editable'),{recursive:true,force:true});
+    signal?.throwIfAborted();
+    if(read(doc.id).revision!==doc.revision)throw Error('工程已变化，请预览并确认当前修订');
+    fs.renameSync(pending,out);
+    update(j,{packageUrl:url('delivery/project.zip'),glbUrl:url('delivery/model.glb'),glbSha256:modelSha256,render,
+      renderUrl:url('delivery/frame/render.png'),materialUrl:url('delivery/materials.json'),validationUrl:url('delivery/project-report.json'),
+      ...(render.exrSha256?{outputUrl:url('delivery/frame/render.exr'),outputSha256:render.exrSha256}:{})});
+  }finally{await fsp.rm(pending,{recursive:true,force:true});}
 }

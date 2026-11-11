@@ -127,10 +127,10 @@ const tools=[
   ['preview','为当前修订启动八通道预览',edit,['projectId','revision'],true],
   ['render_devices','读取本机 Blender 版本、CPU 和兼容的 Cycles GPU',{},[],false],
   ['render_objects','读取已登记场景的原始物体名称和渲染开关。工程覆盖可从 paint_get 获取。',{projectId:id},['projectId'],false],
-  ['render','以当前工程修订独立出图。可指定工程相机，或使用工程保存的渲染预设；使用预设时 settings 只可覆盖本机 device。用 paint_job 查询进度、原片和报告。',
+  ['render','以当前工程修订通过路径追踪导出 8 位 PNG 或 16/32 位浮点 OpenEXR。可指定工程相机，或使用工程保存的渲染预设；使用预设时 settings 只可覆盖本机 device。用 paint_job 查询进度、原片和报告。',
     {...edit,settings:renderSettings,useProjectCamera:{type:'boolean'},useProjectPreset:{type:'boolean'},requestId:id},['projectId','revision'],true],
-  ['render_cancel','取消指定 Cycles 出图任务',{...edit,jobId:id},['projectId','revision','jobId'],true],
-  ['render_retry','按原工程快照和原渲染设置重试失败或取消的 Cycles 出图',{...edit,jobId:id,requestId:id},['projectId','revision','jobId'],true],
+  ['render_cancel','取消指定出图任务',{...edit,jobId:id},['projectId','revision','jobId'],true],
+  ['render_retry','按原工程快照和原渲染设置重试失败或取消的路径追踪出图',{...edit,jobId:id,requestId:id},['projectId','revision','jobId'],true],
   ['job','查询任务、进度与诊断结果；文件链接相对于本机服务',{projectId:id,jobId:id},['projectId','jobId'],false],
 ].map(([name,description,properties,required,write])=>({
   name:'paint_'+name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},write

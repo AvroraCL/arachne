@@ -56,7 +56,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         app.addItem(withTitle:"退出阿拉克涅",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         let file=group("文件")
         command(file,"新建工程…","newProject","n");command(file,"打开工程…","openProject","o")
-        command(file,"打开涂装 ZIP…","importArchive")
+        command(file,"打开涂装 ZIP…","importArchive");command(file,"迁移为 GLB 工程…","migrateModel")
         file.addItem(.separator());command(file,"保存工程","save","s")
         command(file,"生成工程副本","createBackup");command(file,"下载工程副本…","downloadBackup")
         command(file,"工程详情…","projectDetails");file.addItem(.separator());command(file,"导出…","export","e")
@@ -65,9 +65,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         for (title,selector,key) in [("剪切","cut:","x"),("拷贝","copy:","c"),("粘贴","paste:","v"),("全选","selectAll:","a")] {
             edit.addItem(withTitle:title,action:Selector(selector),keyEquivalent:key)
         }
-        edit.addItem(.separator());command(edit,"历史记录…","history")
+        edit.addItem(.separator());command(edit,"历史记录…","history");command(edit,"搜索命令…","searchCommands","k")
         let render=group("渲染");command(render,"渲染设置","renderSettings")
-        let window=group("窗口")
+        let window=group("窗口");command(window,"工作区布局…","workspaceLayouts");window.addItem(.separator())
         window.addItem(withTitle:"最小化",action:#selector(NSWindow.performMiniaturize(_:)),keyEquivalent:"m")
         window.addItem(withTitle:"关闭窗口",action:#selector(NSWindow.performClose(_:)),keyEquivalent:"w")
         let full=window.addItem(withTitle:"切换全屏",action:#selector(NSWindow.toggleFullScreen(_:)),keyEquivalent:"f");full.keyEquivalentModifierMask=[.control,.command]

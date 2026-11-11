@@ -1,10 +1,29 @@
 import {execFile} from 'node:child_process';
-import {accessSync,constants} from 'node:fs';
+import {accessSync,constants,readdirSync,statSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+function windowsBlender(env){
+  const roots=[env.ProgramW6432,env.ProgramFiles,env.LOCALAPPDATA&&path.join(env.LOCALAPPDATA,'Programs')];
+  for(const root of new Set(roots.filter(value=>value&&path.isAbsolute(value)))){
+    const foundation=path.join(root,'Blender Foundation');
+    let versions=[];
+    try{
+      versions=readdirSync(foundation).filter(name=>/^Blender \d+(?:\.\d+)*$/.test(name))
+        .sort((a,b)=>b.localeCompare(a,'en',{numeric:true}));
+    }catch{}
+    const candidates=[...versions,'Blender'].map(name=>path.join(foundation,name,'blender.exe'));
+    candidates.push(path.join(root,'Blender','blender.exe'));
+    for(const file of candidates){
+      try{if(statSync(file).isFile())return file;}catch{}
+    }
+  }
+  return 'blender.exe';
+}
+
 export function blenderExecutable(env=process.env,platform=process.platform){
   if(env.ARACHNE_BLENDER)return env.ARACHNE_BLENDER;
+  if(platform==='win32')return windowsBlender(env);
   if(platform==='darwin'){
     const relative='Applications/Blender.app/Contents/MacOS/Blender';
     for(const file of [path.join('/',relative),path.join(os.homedir(),relative)]){

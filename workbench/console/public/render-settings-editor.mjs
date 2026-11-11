@@ -5,11 +5,8 @@ import {workspaceIcons} from './workspace-icons.mjs';
 import {capturePropertyTarget,propertyTargetStatus} from './property-targets.mjs';
 import {createObjectPropertyEditor} from './object-property-editor.mjs';
 import {createMaterialResourceProperties} from './material-resource-properties.mjs';
-import {cyclesDeviceText,cyclesDeviceBlocked} from './paint-cycles-devices.mjs';
 import {cyclesLimits,cyclesFormats,cyclesViewportLimits} from './cycles-limits.mjs';
 import {viewportSamplingDefaults} from './cycles-viewport-sampling.mjs';
-import {cyclesLightPaths,cyclesLightPathDefaults} from './cycles-light-paths.mjs';
-import {cyclesRenderPasses,renderPassBytes} from './cycles-render-passes.mjs';
 import {renderOpticsDefaults,renderOpticsFields} from './render-optics.mjs';
 import {renderRegionPixels} from './render-region.mjs';
 import {renderAppearanceDefaults,renderAppearanceLimits,renderTransforms,renderLooks} from './render-appearance.mjs';
@@ -62,84 +59,29 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     input.addEventListener('change',()=>{try{write({[key]:input.checked});}catch(error){ctx.error(error);sync();}});
     row(parent,label,input).closest('label').classList.add('render-settings-check');return input;
   }
-  const engine=section('render','engine','渲染引擎');readout(engine,'引擎','Cycles');
+  const engine=section('render','engine','渲染引擎');readout(engine,'视口','GPU 路径追踪');readout(engine,'出图','路径追踪 · PNG / EXR');
   const device=el('select');device.setAttribute('aria-label','渲染设备');
-  device.append(new Option('自动 · 优先 GPU','auto'),new Option('CPU','cpu'),new Option('GPU','gpu'));
-  device.title='自动模式在 GPU 不可用时使用 CPU；指定 GPU 时失败不会自动切换';
-  device.addEventListener('change',()=>{try{settings.set({device:device.value});}catch(error){ctx.error(error);sync();}});row(engine,'设备',device);
-  const hardwareRow=el('div','render-settings-hardware'),hardware=el('p','',''),detect=el('button','','重新检测');
-  hardwareRow.dataset.search='Blender Cycles CPU GPU Metal CUDA 渲染设备';hardware.setAttribute('role','status');
-  detect.type='button';detect.onclick=()=>void settings.devices.check(true);
-  hardwareRow.append(hardware,detect);if(settings.devices)engine.append(hardwareRow);
-  function syncHardware(){
-    if(!settings.devices)return;
-    const info=settings.devices.read(),deviceMode=settings.read().device;
-    const version=info.value?.version;
-    const message=[version?'Blender '+version:null,cyclesDeviceText(info),
-      deviceMode==='gpu'&&info.value?.available&&cyclesDeviceBlocked(info,deviceMode)?'请选择自动或 CPU。':null].filter(Boolean).join('\n');
-    if(hardware.textContent!==message)hardware.textContent=message;
-    detect.disabled=info.status==='checking';
-    detect.textContent=info.status==='checking'?'检测中…':'重新检测';
-  }
+  device.append(new Option('自动','auto'),new Option('CPU · 软件渲染','cpu'));
+  device.title='使用内置路径追踪器的默认图形后端，或明确使用 CPU 软件渲染';
+  device.addEventListener('change',()=>{try{settings.set({device:device.value});}catch(error){ctx.error(error);sync();}});
+  row(engine,'出图设备',device);
   const sampling=section('render','sampling','渲染采样');
-  const adaptive=check(sampling,'adaptive','自适应采样');
-  const noiseThreshold=number(sampling,'noiseThreshold','噪波阈值',0,1,.001,.0001);
-  noiseThreshold.title='0 自动选择；数值越低，通常耗时越长';
-  const samples=number(sampling,'samples','最大采样数',1,cyclesLimits.maxSamples,1);
-  const denoise=check(sampling,'denoise','渲染降噪');
+  const samples=number(sampling,'samples','采样数',1,cyclesLimits.maxSamples,1);
   const viewportSampling=section('render','viewportSampling','视口采样',false);
-  const viewportAdaptive=check(viewportSampling,'adaptive','视口自适应采样',settings.setViewportSampling);
-  const viewportNoise=number(viewportSampling,'noiseThreshold','视口噪波阈值',0,1,.001,.0001,settings.setViewportSampling);
   const draftSamples=number(viewportSampling,'draftSamples','快速预览采样',1,cyclesViewportLimits.draft.samples,1,1,settings.setViewportSampling);
   const detailSamples=number(viewportSampling,'detailSamples','细化预览采样',1,cyclesViewportLimits.detail.samples,1,1,settings.setViewportSampling);
-  detailSamples.title='开启自动细化后，使用 4K 贴图和此处的采样上限';
-  const viewportDenoise=check(viewportSampling,'denoise','视口降噪',settings.setViewportSampling);
+  detailSamples.title='开启自动细化后，视口停止移动时累积到此采样数';
   const resetSampling=el('button','','恢复默认');resetSampling.type='button';resetSampling.title='恢复视口采样默认值';
   resetSampling.onclick=()=>settings.setViewportSampling(viewportSamplingDefaults);
   const viewportActions=el('div','render-settings-camera-actions');viewportActions.dataset.search='恢复默认 视口采样';viewportActions.append(resetSampling);
   viewportSampling.append(viewportActions);
   function syncViewportSampling(){
     const value=settings.readViewportSampling();
-    viewportAdaptive.checked=value.adaptive;viewportDenoise.checked=value.denoise;
-    viewportNoise.closest('label').toggleAttribute('data-viewport-adaptive-off',!value.adaptive);
-    for(const [key,input] of Object.entries({draftSamples,detailSamples,noiseThreshold:viewportNoise}))
+    for(const [key,input] of Object.entries({draftSamples,detailSamples}))
       if(!input.closest('.workspace-range-field')?.matches('[data-dragging],[data-editing]'))input.value=String(value[key]);
-    resetSampling.disabled=Object.keys(viewportSamplingDefaults).every(key=>value[key]===viewportSamplingDefaults[key]);
+    resetSampling.disabled=value.draftSamples===viewportSamplingDefaults.draftSamples&&value.detailSamples===viewportSamplingDefaults.detailSamples;
   }
   const paths=section('render','paths','光线路径',false),maxBounces=number(paths,'maxBounces','最大反弹',0,64,1);
-  const customPaths=el('input');customPaths.type='checkbox';customPaths.setAttribute('aria-label','自定义光线路径');
-  row(paths,'自定义光线路径',customPaths).closest('label').classList.add('render-settings-check');
-  const pathFields=el('div','render-path-fields'),pathInputs={};paths.append(pathFields);
-  function setLightPaths(patch){
-    settings.set({lightPaths:patch===null?null:{...(settings.read().lightPaths||cyclesLightPathDefaults),...patch}});
-  }
-  customPaths.onchange=()=>{try{setLightPaths(customPaths.checked?{}:null);}catch(error){ctx.error(error);sync();}};
-  for(const [heading,keys] of [
-    ['反弹次数',['diffuseBounces','glossyBounces','transmissionBounces','volumeBounces','transparentBounces']],
-    ['亮度限制',['directClamp','indirectClamp']],
-    ['焦散',['glossyFilter','reflectiveCaustics','refractiveCaustics']]
-  ]){
-    pathFields.append(el('p','render-path-heading',heading));
-    for(const key of keys){
-      const {label,min,max,step,default:initial}=cyclesLightPaths[key];
-      if(typeof initial==='boolean'){
-        const input=el('input');input.type='checkbox';input.setAttribute('aria-label',label);
-        input.onchange=()=>{try{setLightPaths({[key]:input.checked});}catch(error){ctx.error(error);sync();}};
-        row(pathFields,label,input).closest('label').classList.add('render-settings-check');pathInputs[key]=input;
-      }else{
-        pathInputs[key]=number(pathFields,key,label,min,max,step===1?1:.02,step,setLightPaths);
-        if(heading==='亮度限制')pathInputs[key].title='0 表示不限制';
-      }
-    }
-  }
-  function syncPaths(value){
-    customPaths.checked=!!value.lightPaths;pathFields.hidden=!value.lightPaths;
-    for(const [key,input] of Object.entries(pathInputs)){
-      const next=(value.lightPaths||cyclesLightPathDefaults)[key];
-      if(input.type==='checkbox')input.checked=next;
-      else if(!input.closest('.workspace-range-field')?.matches('[data-dragging],[data-editing]'))input.value=String(next);
-    }
-  }
   const film=section('render','film','胶片',false),transparent=check(film,'transparent','透明背景');
   const appearancePanel=section('render','appearance','色彩管理',false);
   const override=el('input');override.type='checkbox';override.setAttribute('aria-label','覆盖源场景色彩');
@@ -229,31 +171,13 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
       const exr=selected==='OPEN_EXR';
       bitDepth.setAttribute('aria-label',cyclesFormats[selected].label+' 位深');
       bitDepth.replaceChildren(...(exr?[new Option('16 位浮点','16'),new Option('32 位浮点','32')]:
-        [new Option('跟随源场景',''),new Option('8 位','8'),new Option('16 位','16')]));
+        [new Option('8 位','8')]));
     }
-    bitDepth.value=String(value.bitDepth??'');syncSelectMenu(format);syncSelectMenu(bitDepth);
+    bitDepth.value=String(selected==='OPEN_EXR'?value.bitDepth??16:8);
+    bitDepth.disabled=selected==='PNG';syncSelectMenu(format);syncSelectMenu(bitDepth);
   }
   bitDepth.onchange=()=>{try{settings.set({bitDepth:bitDepth.value?Number(bitDepth.value):null});}catch(error){ctx.error(error);sync();}};
   row(output,'位深',bitDepth);
-  const passesPanel=section('output','passes','渲染通道',false),passInputs={};
-  const passSummary=el('p','render-camera-state');passesPanel.append(passSummary);
-  for(const [key,{label}] of Object.entries(cyclesRenderPasses)){
-    const input=el('input');input.type='checkbox';input.setAttribute('aria-label','渲染通道：'+label);
-    input.onchange=()=>{
-      const values=new Set(settings.read().renderPasses||[]);
-      if(input.checked)values.add(key);else values.delete(key);
-      try{settings.set({renderPasses:[...values]});}catch(error){ctx.error(error);sync();}
-    };
-    row(passesPanel,label,input).closest('label').classList.add('render-settings-check');passInputs[key]=input;
-  }
-  function syncPasses(value){
-    const selected=value.renderPasses||[],detected=settings.devices?.read().value;
-    const unavailable=detected?.available&&detected.renderPasses===false;
-    for(const [key,input] of Object.entries(passInputs)){input.checked=selected.includes(key);input.disabled=!!unavailable&&!input.checked;}
-    passSummary.textContent=unavailable?'当前 Blender 不支持多层 EXR；可清除已选通道。':selected.length?
-      `合成图＋${selected.length} 个通道 · 32 位浮点 EXR · 未压缩约 ${Math.ceil(renderPassBytes(selected,value.width,value.height)/1048576)} MiB`:
-      '勾选后从同一帧输出多层 EXR。';
-  }
   const presets=section('output','projectPreset','工程渲染预设',false);
   const presetStatus=el('p','render-camera-state'),presetActions=el('div','render-settings-camera-actions');
   presetActions.dataset.search='保存为工程预设 恢复工程预设 移除工程预设';
@@ -425,7 +349,7 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   const drawingEditor=adapters.drawing(drawingHost,drawingTools,frame.panel('drawing'),drawingProject);
   const note=el('p','','渲染设置保存在本机，用于出图与导出。');
   const open=el('button','','打开导出');open.type='button';open.onclick=()=>settings.openExport();frame.footer.append(note,open);
-  if(settings.openRender){const render=el('button','','Cycles 出图');render.type='button';render.onclick=()=>settings.openRender();frame.footer.append(render);}
+  if(settings.openRender){const render=el('button','','路径追踪出图');render.type='button';render.onclick=()=>settings.openRender();frame.footer.append(render);}
   let observed=null,lastContext=null;
   function selectionKeys(){
     const scene=project.scene;return {project:project.document?.id||null,
@@ -475,7 +399,6 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     refresh();
   }
   function refresh(){
-    if(frame.category==='render'&&project.document)void settings.devices?.check();
     syncCamera();syncAppearance();syncLighting();syncOptics();syncRegion();
     for(const category of categories){
       const current=status(category),value=target(category),message=unavailable[category];
@@ -497,17 +420,16 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   }
   function sync(event){
     const value=settings.read();
-    for(const [key,input] of Object.entries({samples,width,height,noiseThreshold,maxBounces})){
+    for(const [key,input] of Object.entries({samples,width,height,maxBounces})){
       const field=input.closest('.workspace-range-field');
       if(!field?.hasAttribute('data-dragging')&&!field?.hasAttribute('data-editing'))input.value=String(value[key]);
     }
-    denoise.checked=value.denoise;adaptive.checked=value.adaptive;transparent.checked=value.transparent;
-    noiseThreshold.disabled=!value.adaptive;device.value=value.device;
-    syncViewportSampling();syncSelectMenu(device);syncFormat(value);syncHardware();syncPreset();syncPaths(value);syncPasses(value);
+    transparent.checked=value.transparent;device.value=value.device==='cpu'?'cpu':'auto';
+    syncViewportSampling();syncSelectMenu(device);syncFormat(value);syncPreset();
     open.disabled=!project.document;observe(event?.kind?event:{kind:'sync'});
   }
   const unsubscribe=settings.subscribe(sync),unsubscribeProject=project.subscribe(event=>event.kind==='project'?sync(event):observe(event));
-  const unsubscribeHardware=settings.devices?.subscribe(()=>{syncHardware();syncPasses(settings.read());});sync();
+  sync();
   return {kind:'renderSettings',sync,getState:()=>({...frame.getState(),sections:{...openSections},pins:structuredClone(pins),object:objectEditor.getState(),material:materialEditor.getState()}),
-    dispose(){unsubscribe();unsubscribeProject();unsubscribeHardware?.();materialEditor.dispose();drawingEditor.dispose();}};
+    dispose(){unsubscribe();unsubscribeProject();materialEditor.dispose();drawingEditor.dispose();}};
 }

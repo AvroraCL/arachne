@@ -23,7 +23,8 @@ export function createCyclesDevices(request){
 }
 
 export function cyclesDeviceText({status,value}){
-  if(status==='idle'||status==='checking')return '正在检查 Blender 和 Cycles 设备…';
+  if(status==='idle')return '尚未检测 Cycles 设备';
+  if(status==='checking')return '正在检查 Blender 和 Cycles 设备…';
   if(status==='failed')return '设备检查失败，请在渲染属性中重试。';
   if(!value.available)return value.reason;
   if(!value.gpus.length)return 'CPU 可用 · 未检测到兼容 GPU';

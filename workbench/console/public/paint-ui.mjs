@@ -1,3 +1,6 @@
+import {setupWorkspaceLayouts} from './paint-workspace-layouts.mjs';
+import {setupCommandPicker} from './paint-command-picker.mjs';
+import {setupProjectPicker} from './paint-project-picker.mjs';
 import {paintChannels,channelSpecs,effectiveValues,baseChannelEnabled} from './paint-channels.mjs';
 import {installPaintTooltips} from './paint-tooltips.mjs';
 import {setupPaintAreas} from './paint-area-adapter.mjs';
@@ -17,7 +20,6 @@ import {createPaintModeling} from './paint-modeling.mjs';
 import {createModelOutliner} from './paint-model-outliner.mjs';
 import {createMaskEditor} from './paint-mask.mjs';
 import {createPaintRenderResults} from './paint-render-results.mjs';
-import {createCyclesDevices} from './paint-cycles-devices.mjs';
 import {viewportSamplingOptions,updateViewportSampling} from './cycles-viewport-sampling.mjs';
 import {cyclesProgressLabel} from './cycles-progress-ui.mjs';
 import {checkRenderAppearance,matchesRenderAppearance,renderAppearanceDefaults,renderLooks} from './render-appearance.mjs';
@@ -185,9 +187,11 @@ function renderProjectState(){
   const state=!doc?'empty':pending?'saving':failure?'error':'saved';
   status.dataset.state=state;status.textContent={empty:'',saving:'正在保存…',error:'保存失败',saved:'已保存'}[state];
   status.title=failure||'工程修改自动保存在本机';
+  $('open-project-details').disabled=!doc;
   $('project-detail-name').textContent=doc?.name||'未打开工程';
   $('project-detail-id').textContent=doc?.id||'—';
   $('project-detail-updated').textContent=doc?.updated?new Date(doc.updated).toLocaleString():'—';
+  $('open-glb-migration').hidden=!(doc?.source.bindingVersion===2&&doc.source.format!=='glb'&&/\.blend$/i.test(doc.source.reviewSource));
 }
 async function api(url,data){
   const write=data!==undefined&&url.match(/^\/api\/projects\/([^/]+)\/paint\/(?:commands|model|undo|redo|assets|text|library-import)$/);
@@ -1263,7 +1267,8 @@ function refreshComparison(){
   select.disabled=!available.length;
   syncSelectMenu(select);
 }
-const isPaintExport=job=>['paint-export','paint-texture-export'].includes(job?.type);
+const exportLabels={'paint-export':'交付','paint-texture-export':'工程与贴图','paint-glb-export':'GLB'};
+const isPaintExport=job=>Object.hasOwn(exportLabels,job?.type);
 const deliveryJobs=()=>jobs.filter(job=>isPreview(job)||isPaintExport(job));
 function renderJobs(){
   refreshComparison();
@@ -1312,12 +1317,17 @@ function renderDelivery(j,active,last){
   $('approved').disabled=!ready||!!active;
   $('delivery').disabled=!approvedPreviewId||!approvedRenderSettings||!!active;
   $('export-textures').disabled=!ready||!!active;
-  for(const control of Object.values(deliveryControls)){control.disabled=active?.type==='paint-export';syncSelectMenu(control);}
-  const renderValues=deliveryEditorValues(effectiveDeliveryPreferences()),renderDetail=`${renderValues.samples} 次采样 · 降噪${renderValues.denoise?'开启':'关闭'} · ${cyclesFormatLabel(renderValues.fileFormat)}${renderValues.bitDepth?' '+renderValues.bitDepth+' 位':''}`;
+  $('export-glb').disabled=!ready||!!active;
+  $('export-glb').title='导出建模结果和内嵌 4K PBR 贴图';
+  for(const control of [...Object.values(deliveryControls),$('delivery-format')]){
+    control.disabled=active?.type==='paint-export';syncSelectMenu(control);
+  }
+  const renderValues=deliveryEditorValues(effectiveDeliveryPreferences());
+  const renderDetail=renderValues.fileFormat==='OPEN_EXR'?cyclesFormatLabel(renderValues.fileFormat)+' '+(renderValues.bitDepth??16)+' 位 + PNG 预览':'PNG 8 位';
   const region=renderRegionPixels(doc.paint.renderRegion,renderValues.width,renderValues.height);
-  $('delivery-render-hint').textContent=(renderValues.framing==='saved'?'使用工程渲染相机。':approvedRenderSettings?.camera?'已固定确认时的三维视角。修改视角或输出设置后需重新确认。':renderValues.framing==='viewport'?'以当前三维视角渲染；八通道贴图保持 4K。':'输出设置同时用于 Blender 副本和成品渲染。')+' '+renderDetail+
-    (renderValues.renderPasses?.length?` · ${renderValues.renderPasses.length} 个渲染通道`:'')+
-    (region?` · ${region.crop?'裁切':'区域渲染'} ${region.output.join(' × ')}`:'');
+  $('delivery-render-hint').textContent=(renderValues.framing==='saved'?'使用工程渲染相机。':
+    approvedRenderSettings?.camera?'已固定确认时的三维视角。':renderValues.framing==='viewport'?'使用当前三维视角。':'自动取景。')+
+    ` ${renderValues.samples} 次采样 · ${renderDetail}`+(region?` · ${region.crop?'裁切':'区域渲染'} ${region.output.join(' × ')}`:'');
   $('delivery-revision').textContent='当前修订 r'+revision;
   $('delivery-preview').textContent=ready?`4K · r${revision} · 原 UV 已校验`:j?
     `${previewLabel(j)} · r${j.revision} · 交付需要当前修订的 4K 预览`:'先生成当前修订的 4K 预览';
@@ -1338,7 +1348,7 @@ function renderDelivery(j,active,last){
     }));
     $('delivery-reference').replaceChildren(...(j?[deliveryLink('写入诊断图',j.coverageUrl),deliveryLink('预览校验报告',j.validationUrl)]:[]));
   }
-  const task=last?`r${last.revision} · ${last.type==='paint-texture-export'?'工程与贴图':isPaintExport(last)?'交付':previewLabel(last)} · ${last===active&&cyclesProgressLabel(last.progress)||last.stage}${last.error?' · '+last.error:''}`:'';
+  const task=last?`r${last.revision} · ${exportLabels[last.type]||previewLabel(last)} · ${last===active&&cyclesProgressLabel(last.progress)||last.stage}${last.error?' · '+last.error:''}`:'';
   if($('task').textContent!==task)$('task').textContent=task;
   $('cancel').hidden=!active;
   $('retry-preview').hidden=!!active||!isPreview(last||{})||last.revision!==revision||
@@ -1350,17 +1360,26 @@ function renderDelivery(j,active,last){
   if(last){$('log').href='/api/projects/'+doc.id+'/jobs/'+last.id+'/files/run.log';$('log').target='_blank';}
   const delivered=jobs.find(j=>j.type==='paint-export'&&j.packageUrl&&j.status==='completed');
   const textures=jobs.find(j=>j.type==='paint-texture-export'&&j.packageUrl&&j.status==='completed');
-  const deliveryKey=[delivered?.id,textures?.id].join(':');
+  const model=jobs.find(j=>j.type==='paint-glb-export'&&j.glbUrl&&j.status==='completed');
+  const deliveryKey=[delivered?.id,textures?.id,model?.id].join(':');
   if($('downloads').dataset.job!==deliveryKey){
     $('downloads').dataset.job=deliveryKey;
     const entries=[];
+    if(model)entries.push(Object.assign(link('模型 GLB · r'+model.revision,model.glbUrl),
+      {download:'Arachne-r'+model.revision+'.glb'}));
     if(textures)entries.push(Object.assign(link('工程与贴图 ZIP · r'+textures.revision,textures.packageUrl),
       {download:'Arachne-r'+textures.revision+'-textures.zip'}));
-    if(delivered)entries.push(link('ZIP · r'+delivered.revision,delivered.packageUrl),
-      link('Blender',delivered.blendUrl),deliveryLink('Cycles PNG',delivered.renderUrl),
-      ...(delivered.outputUrl?[Object.assign(link('OpenEXR',delivered.outputUrl),{download:`Cycles-r${delivered.revision}.exr`})]:[]),
-      ...(delivered.passesUrl?[Object.assign(link('通道 EXR',delivered.passesUrl),{download:`Cycles-r${delivered.revision}-Passes.exr`})]:[]),
-      deliveryLink('交付校验报告',delivered.validationUrl));
+    if(delivered){
+      const name=`Arachne-r${delivered.revision}`;
+      entries.push(Object.assign(link('交付 ZIP · r'+delivered.revision,delivered.packageUrl),{download:name+'.zip'}));
+      if(delivered.glbUrl)entries.push(Object.assign(link('模型 GLB',delivered.glbUrl),{download:name+'.glb'}));
+      if(delivered.materialUrl)entries.push(deliveryLink('材质清单',delivered.materialUrl));
+      if(delivered.blendUrl)entries.push(link('Blender',delivered.blendUrl));
+      if(delivered.renderUrl)entries.push(deliveryLink('渲染 PNG',delivered.renderUrl));
+      if(delivered.outputUrl)entries.push(Object.assign(link('OpenEXR',delivered.outputUrl),{download:name+'.exr'}));
+      if(delivered.passesUrl)entries.push(Object.assign(link('通道 EXR',delivered.passesUrl),{download:name+'-Passes.exr'}));
+      entries.push(deliveryLink('交付校验报告',delivered.validationUrl));
+    }
     $('downloads').replaceChildren(...(entries.length?entries:[element('small','尚无导出')]));
   }
 }
@@ -1406,16 +1425,13 @@ async function run(action,errorOutput=null){
     surfaceTools.render();uvSelection.sync();areaSystem?.sync();
   }
 }
-async function projects(id){
-  const all=await api('/api/projects');
-  const items=all.filter(p=>p.workflowType==='pbr_paint');
-  const placeholder=new Option('选择涂装工程','');placeholder.disabled=true;
-  $('projects').replaceChildren(placeholder,...items.map(p=>new Option(p.name+' · '+p.id.slice(0,6),p.id)));
-  if(id)setSelectValue($('projects'),id);
-  return items;
+async function projects(){
+  return (await api('/api/projects')).filter(project=>project.workflowType==='pbr_paint');
 }
 async function load(id){
-  if(maskEditor.isOpen()){setSelectValue($('projects'),doc.id);throw Error('请先保存或取消当前蒙版');}
+  if(maskEditor.isOpen())throw Error('请先保存或取消当前蒙版');
+  const next=await api('/api/projects/'+id);
+  if(next.workflowType!=='pbr_paint')throw Error('请选择涂装工程');
   replaceProjection=null;
   modeler.close();
   uvSelection.clear();
@@ -1425,7 +1441,7 @@ async function load(id){
   setTextPlacement(false);
   clearTimeout(autoTimer);
   liveView.clear();
-  doc=await api('/api/projects/'+id);projectSaveErrors.delete(id);if(doc.workflowType!=='pbr_paint'){doc=null;return;}
+  doc=next;projectSaveErrors.delete(id);
   setLayerSearch(false,false);
   pendingBackupId=null;
   collapsedFolders=new Set();
@@ -1440,38 +1456,80 @@ async function load(id){
   render();
   showView(view);
 }
-const projectDialog=$('project-dialog');
-function openProjectDialog(){
-  if(busy||modeler.isDragging()||surfaceTools.isEditing()||document.querySelector('dialog[open]'))return;
-  renderProjectState();document.querySelectorAll('.paint-menu[open]').forEach(menu=>menu.open=false);projectDialog.showModal();
+function canOpenProjectDialog(){
+  return !busy&&!modeler.isDragging()&&!modelMarquee&&!surfaceTools.isEditing()&&
+    !uvSelection.isDragging()&&!uvSelection.isTransforming()&&!areaSystem?.isEditing()&&!document.querySelector('dialog[open]');
 }
-$('open-projects').onclick=openProjectDialog;$('open-project-details').onclick=openProjectDialog;
+const projectDialog=$('project-dialog');
+$('open-project-details').onclick=()=>{
+  if(!doc||!canOpenProjectDialog())return;
+  renderProjectState();document.querySelectorAll('.paint-menu[open]').forEach(menu=>menu.open=false);projectDialog.showModal();
+};
 $('close-project-dialog').onclick=()=>projectDialog.close();
+const projectPicker=setupProjectPicker({list:projects,current:()=>doc?.id,open:(id,error)=>run(()=>load(id),error),canOpen:canOpenProjectDialog});
+$('open-projects').onclick=projectPicker;
+setupCommandPicker({canOpen:canOpenProjectDialog});
+document.addEventListener('keydown',event=>{
+  if(event.defaultPrevented||event.repeat||event.isComposing||event.altKey||event.shiftKey||
+     !(event.metaKey||event.ctrlKey)||event.key.toLowerCase()!=='o')return;
+  if(projectPicker()){event.preventDefault();event.stopPropagation();}
+},true);
+const glbMigration=$('glb-migration-dialog'),migrationStart=$('start-glb-migration'),migrationClose=$('close-glb-migration');
+$('open-glb-migration').onclick=()=>{
+  if(busy||modeler.isDragging()||surfaceTools.isEditing()||document.querySelector('dialog[open]'))return;
+  document.querySelectorAll('.paint-menu[open]').forEach(menu=>menu.open=false);
+  $('glb-migration-error').textContent='';
+  glbMigration.showModal();
+};
+migrationClose.onclick=()=>glbMigration.close();
+glbMigration.addEventListener('cancel',event=>{if(migrationStart.disabled)event.preventDefault();});
+migrationStart.onclick=async()=>{
+  migrationStart.disabled=migrationClose.disabled=true;
+  migrationStart.textContent='正在转换并核对…';
+  const error=$('glb-migration-error');error.textContent='';
+  try{
+    if(await run(async()=>{
+      const next=await post('migrate-glb');
+      await load(next.id);
+    },error))glbMigration.close();
+  }finally{
+    migrationStart.disabled=migrationClose.disabled=false;
+    migrationStart.textContent='迁移并打开新工程';
+  }
+};
+
 historyPanel=setupPaintHistory({trigger:$('open-history'),read:()=>doc,load:id=>api('/api/projects/'+id+'/paint/history'),canEdit:()=>!busy&&!modeler.isDragging()&&!surfaceTools.isEditing()&&!uvSelection.isDragging()&&!uvSelection.isTransforming(),
   restore:(direction,steps,origin)=>run(async()=>{if(doc.id!==origin.id)throw Error('当前工程已切换');await api('/api/projects/'+origin.id+'/paint/'+direction,{revision:origin.revision,steps});approvedPreviewId=null;},$('history-error'))});
-$('projects').onchange=()=>void run(()=>load($('projects').value)).then(ok=>{if(ok)projectDialog.close();});
-const newPaintDialog=$('new-paint-dialog'),newPaintName=$('new-paint-name'),newPaintSubmit=$('new-paint-submit');
+const newPaintDialog=$('new-paint-dialog'),newPaintName=$('new-paint-name'),newPaintSubmit=$('new-paint-submit'),newPaintModel=$('new-paint-model');
 $('new').onclick=()=>{
   if(busy||uvSelection.isTransforming()||surfaceTools.isEditing())return;
   newPaintName.value='示例模型 · PBR 涂装';
+  newPaintModel.value='';
   $('new-paint-error').textContent='';
   newPaintDialog.showModal();
   newPaintName.select();
 };
 $('new-paint-close').onclick=()=>newPaintDialog.close();
+newPaintModel.onchange=()=>{
+  const file=newPaintModel.files[0];
+  if(file&&newPaintName.value==='示例模型 · PBR 涂装')newPaintName.value=file.name.replace(/\.glb$/i,'').slice(0,100);
+};
 newPaintDialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
 $('new-paint-form').onsubmit=async event=>{
   event.preventDefault();
   const name=newPaintName.value.trim(),error=$('new-paint-error'),close=$('new-paint-close');
   if(!name){error.textContent='请输入工程名称';return;}
-  close.disabled=newPaintName.disabled=newPaintSubmit.disabled=true;
+  const model=newPaintModel.files[0];
+  if(model&&model.size>128*1024*1024){error.textContent='GLB 不能超过 128 MiB';return;}
+  close.disabled=newPaintName.disabled=newPaintModel.disabled=newPaintSubmit.disabled=true;
   try{
     if(await run(async()=>{
-      const project=await api('/api/projects',{workflowType:'pbr_paint',name});
-      await projects(project.id);
+      const project=model?await responseJson(await fetch('/api/projects/model-import?'+new URLSearchParams({name}),{
+        method:'POST',headers:{'Content-Type':'model/gltf-binary'},body:model
+      })):await api('/api/projects',{workflowType:'pbr_paint',name});
       await load(project.id);
     },error))newPaintDialog.close();
-  }finally{close.disabled=newPaintName.disabled=newPaintSubmit.disabled=false;}
+  }finally{close.disabled=newPaintName.disabled=newPaintModel.disabled=newPaintSubmit.disabled=false;}
 };
 const importDialog=$('paint-import-dialog'),importForm=importDialog.querySelector('form');
 const importFile=importForm.querySelector('input[type=file]'),importClose=importForm.querySelector('button[type=button]');
@@ -1495,7 +1553,6 @@ importForm.onsubmit=async event=>{
       const response=await fetch('/api/projects/paint-import',{method:'POST',
         headers:{'Content-Type':'application/zip'},body:file});
       const project=await responseJson(response);
-      await projects(project.id);
       await load(project.id);
     },importStatus))importDialog.close();
   }finally{
@@ -1811,6 +1868,7 @@ function syncDeliveryPreferences(){
   size.hidden=preferences.size!=='custom';size.textContent=`${values.width} × ${values.height} · 自定义`;
   quality.hidden=preferences.quality!=='custom';quality.textContent=`${values.samples} 次采样 · 自定义`;
   for(const [key,control] of Object.entries(deliveryControls))setSelectValue(control,preferences[key]);
+  setSelectValue($('delivery-format'),values.fileFormat==='OPEN_EXR'?'exr'+(values.bitDepth??16):'png');
 }
 function changeDeliveryPreferences(change,{refresh=true,persist=true}={}){
   const before=JSON.stringify(workingDeliveryPreferences()),local=JSON.stringify(renderPreferences.local());
@@ -1827,6 +1885,11 @@ syncDeliveryPreferences();
 for(const [key,control] of Object.entries(deliveryControls)){
   control.onchange=()=>applyDeliveryPreferences({...workingDeliveryPreferences(),[key]:control.value});
 }
+$('delivery-format').onchange=()=>{
+  const format=$('delivery-format').value;
+  applyDeliveryPreferences(updateDeliveryOptions(workingDeliveryPreferences(),format==='png'?{fileFormat:'PNG',bitDepth:8}:
+    {fileFormat:'OPEN_EXR',bitDepth:format==='exr32'?32:16}));
+};
 window.addEventListener('storage',event=>{
   if(event.key===viewportSamplingKey||event.key===null)setViewportSampling(readViewportSampling(),false);
   if(event.key===deliveryPreferenceKey||event.key===null)
@@ -1925,10 +1988,13 @@ async function pickProjectFocus(){
   if(!await areaSystem.pickRenderFocus(camera))throw Error('请先结束当前视口操作');
   applyDeliveryPreferences({...workingDeliveryPreferences(),framing:'saved'});
 }
-const cyclesDevices=createCyclesDevices(force=>api('/api/cycles-devices'+(force?'?refresh=1':'')));
 const paintRenderResults=createPaintRenderResults({
-  read:()=>({doc,jobs,busy}),run,post,settings:()=>deliveryEditorValues(effectiveDeliveryPreferences()),camera:captureRenderSettings,
-  openSettings:()=>$('open-render-settings').click(),openExport:()=>$('open-delivery').click(),devices:cyclesDevices
+  read:()=>({doc,jobs,busy}),run,post,settings:()=>deliveryEditorValues(effectiveDeliveryPreferences()),
+  camera:()=>{
+    const {width,height,samples,camera,maxBounces,transparent}=captureRenderSettings();
+    return {width,height,samples,camera,maxBounces,transparent};
+  },
+  openSettings:()=>$('open-render-settings').click(),openExport:()=>$('open-delivery').click()
 });
 const renderResultsBridge={
   read:()=>({doc,jobs}),openJobs:paintRenderResults.open,
@@ -1965,7 +2031,7 @@ const renderSettingsBridge={
     else deliveryViewport().applyCamera(camera);
   },
   subscribe:listener=>{renderSettingsListeners.add(listener);return ()=>renderSettingsListeners.delete(listener);},
-  canUseViewport:visibleDeliveryCamera,openExport:()=>$('open-delivery').click(),openRender:paintRenderResults.open,devices:cyclesDevices
+  canUseViewport:visibleDeliveryCamera,openExport:()=>$('open-delivery').click(),openRender:paintRenderResults.open
 };
 function syncDeliveryControls(){
   const available=visibleDeliveryCamera();
@@ -1995,6 +2061,10 @@ $('cancel').onclick=()=>run(()=>{
 $('export-textures').onclick=()=>run(async()=>{
   const previewId=current()?.id;
   if(previewId)await post('export-textures',{confirmed:true,previewId,requestId:crypto.randomUUID()});
+},$('delivery-error'));
+$('export-glb').onclick=()=>run(async()=>{
+  const previewId=current()?.id;
+  if(previewId)await post('export-glb',{confirmed:true,previewId,requestId:crypto.randomUUID()});
 },$('delivery-error'));
 $('delivery').onclick=()=>run(async()=>{
   if(!approvedPreviewId||approvedPreviewId!==current()?.id||!approvedRenderSettings)return;
@@ -2663,11 +2733,12 @@ $('inspect-channel').onclick=()=>{
   if(inspectChannel&&view==='uv')showView('split');
   else void renderTexture();
 };
+if(areaSystem)setupWorkspaceLayouts({areas:areaSystem.areas,canOpen:canOpenProjectDialog});
 const rememberedWorkbench=restoreWorkbenchSession();
 await run(async()=>{
   const params=new URLSearchParams(location.search);
   const id=params.has('project')?params.get('project'):rememberedWorkbench.projectId;
-  const items=await projects(id);
+  const items=await projects();
   if(id&&items.some(project=>project.id===id))await load(id);
   else render();
 });

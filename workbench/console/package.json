@@ -5,17 +5,24 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test \"tests/*.test.mjs\"",
     "seed:demo": "node scripts/seed-demo.mjs",
     "package:mac": "node scripts/package-macos.mjs",
-    "verify:demo": "node tests/demo-integration.mjs"
+    "package:win": "node scripts/package-windows.mjs",
+    "package:win:installer": "node scripts/package-windows-installer.mjs",
+    "verify:demo": "node tests/demo-integration.mjs",
+    "verify:model-import": "node tests/model-import-integration.mjs",
+    "verify:blend-migration": "node tests/blend-migration-integration.mjs"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
     "playwright-core": "1.58.2",
-    "three": "0.180.0"
+    "three": "0.180.0",
+    "three-gpu-pathtracer": "0.0.24",
+    "three-mesh-bvh": "0.9.1",
+    "xatlas-web": "0.1.0"
   },
   "license": "GPL-3.0-only"
 }

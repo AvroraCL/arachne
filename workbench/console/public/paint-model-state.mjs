@@ -7,10 +7,15 @@ export function applyModelState(root,state){
   if(!root)return;
   let baseline=baselines.get(root);
   if(!baseline){
-    const objects=new Map(),meshes=[];
+    const objects=new Map(),meshes=[],seenGeometry=new Set();
     root.traverse(node=>{
       if(node.userData.modelingObject!==undefined)objects.set(node.userData.modelingObject,node);
-      if(node.isMesh)meshes.push(node);
+      if(node.isMesh){
+        // glTF nodes can instance one geometry. A vertex edit is local to its object.
+        if(seenGeometry.has(node.geometry))node.geometry=node.geometry.clone();
+        seenGeometry.add(node.geometry);
+        meshes.push(node);
+      }
     });
     baseline={objects,meshes,nodes:[]};
     root.traverse(node=>baseline.nodes.push({node,matrix:node.matrix.clone(),

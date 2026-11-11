@@ -1,19 +1,18 @@
-import {cyclesDeviceText,cyclesDeviceBlocked} from './paint-cycles-devices.mjs';
 import {cyclesProgressLabel} from './cycles-progress-ui.mjs';
 import {cyclesFormatLabel,showRenderDownload,showRenderPassDownload} from './render-output-ui.mjs';
 import {renderRegionPixels} from './render-region.mjs';
+import {setSelectValue} from './paint-select.mjs';
 
 const active=job=>['queued','running'].includes(job?.status);
 const canRetry=job=>['failed','cancelled','interrupted'].includes(job?.status);
 const statusLabels={queued:'排队中',running:'渲染中',completed:'已完成',cancelled:'已取消',failed:'失败',interrupted:'已中断'};
-const settingsDevice={auto:'自动选择设备',cpu:'CPU',gpu:'GPU'};
 const framingLabel={auto:'完整模型',viewport:'当前视口',saved:'工程渲染相机'};
 
-export function createPaintRenderResults({read,run,post,settings,camera,openSettings,openExport,devices}){
+export function createPaintRenderResults({read,run,post,settings,camera,openSettings,openExport}){
   const $=id=>document.getElementById(id),dialog=$('paint-render-dialog'),error=$('paint-render-error');
   const list=$('paint-render-list'),info=$('paint-render-info'),image=$('paint-render-image'),sampling=$('paint-render-samples');
   const download=$('paint-render-download'),report=$('paint-render-report'),log=$('paint-render-log');
-  const passes=$('paint-render-passes');
+  const passes=$('paint-render-passes'),format=$('paint-render-format');
   const start=$('start-paint-render'),cancel=$('cancel-paint-render'),retry=$('retry-paint-render');
   const background=$('render-background-status'),backgroundText=background.querySelector('span');
   let projectId=null,selectedId=null,pending=false,listKey='',backgroundJob=null;
@@ -47,25 +46,19 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     const values=settings(),blocked=busy||pending;
     const framing=framingLabel[values.framing];
     const region=renderRegionPixels(doc?.paint.renderRegion,values.width,values.height);
-    $('paint-render-summary').textContent=`${values.width} × ${values.height} · ${values.samples} 次采样 · ${settingsDevice[values.device]} · ${framing}`+
-      ` · ${cyclesFormatLabel(values.fileFormat)}`+(values.bitDepth?` ${values.bitDepth} 位`:'')+
-      (values.renderPasses?.length?` · ${values.renderPasses.length} 个渲染通道`:'')+
+    $('paint-render-summary').textContent=`${values.width} × ${values.height} · ${values.samples} 次采样 · ${framing}`+
       (region?` · ${region.crop?'裁切':'区域渲染'} ${region.output.join(' × ')}`:'');
-    const hardware=devices.read(),deviceLabel=$('paint-render-devices');
-    const description=cyclesDeviceText(hardware);
-    if(deviceLabel.textContent!==description)deviceLabel.textContent=description;
-    const supportsPasses=options=>!options?.renderPasses?.length||hardware.value?.renderPasses!==false;
-    start.disabled=!doc||blocked||!!running||cyclesDeviceBlocked(hardware,values.device)||!supportsPasses(values);
+    start.disabled=format.disabled=!doc||blocked||!!running;
     cancel.hidden=!active(selected);cancel.disabled=blocked;
-    retry.hidden=!canRetry(selected);retry.disabled=blocked||!!running||cyclesDeviceBlocked(hardware,selected?.paintSettings?.device)||!supportsPasses(selected?.paintSettings);
-    start.title=supportsPasses(values)?'':'当前 Blender 不支持已选渲染通道';
+    retry.hidden=!canRetry(selected);retry.disabled=blocked||!!running;
     const progress=active(selected)?selected.progress:null;
     sampling.hidden=progress?.phase!=='sample';
     if(!sampling.hidden){sampling.max=progress.total;sampling.value=progress.sample;}
     const detail=selected?[
       `r${selected.revision} · ${cyclesProgressLabel(progress)||selected.stage||statusLabels[selected.status]}`,
-      selected.cycles?`${selected.cycles.device} · ${selected.cycles.resolution.join(' × ')} · ${selected.cycles.samples} 次采样`:selected.error,
-      selected.cycles?.render_effective?.bitDepth?`${cyclesFormatLabel(selected.cycles.render_effective.fileFormat)} · ${selected.cycles.render_effective.bitDepth} 位`:'',
+      selected.render?`路径追踪 · ${selected.render.resolution.join(' × ')} · ${selected.render.samples} 次采样`:selected.cycles?`${selected.cycles.device} · ${selected.cycles.resolution.join(' × ')} · ${selected.cycles.samples} 次采样`:selected.error,
+      selected.render?`${cyclesFormatLabel(selected.render.fileFormat)} · ${selected.render.bitDepth} 位${selected.render.fileFormat==='OPEN_EXR'?'浮点':''}`:
+        selected.cycles?.render_effective?.bitDepth?`${cyclesFormatLabel(selected.cycles.render_effective.fileFormat)} · ${selected.cycles.render_effective.bitDepth} 位`:'',
       selected.cycles?.gpu_fallback?'已从 GPU 切换至 CPU':'',
       result&&result.id!==selected.id?`画面显示最近成功的结果 · r${result.revision}`:'',
     ].filter(Boolean).join('\n'):'渲染会使用工程当前的模型、材质和 4K 贴图。';
@@ -77,7 +70,7 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     $('paint-render-placeholder').hidden=!!result;
     if(result){
       if(image.getAttribute('src')!==result.renderUrl)image.src=result.renderUrl;
-      image.alt=`工程修订 r${result.revision} 的 Cycles 渲染结果`;
+      image.alt=`工程修订 r${result.revision} 的渲染结果`;
       showRenderDownload(download,result,doc.name);
       report.href=result.validationUrl;
     }else image.removeAttribute('src');
@@ -109,7 +102,9 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
   }
   start.onclick=()=>act(async()=>{
     const {doc}=read();
-    const job=await post('render',{requestId:crypto.randomUUID(),settings:camera()});
+    const output=format.value==='png'?{fileFormat:'PNG',bitDepth:8}:
+      {fileFormat:'OPEN_EXR',bitDepth:format.value==='exr32'?32:16};
+    const job=await post('render',{requestId:crypto.randomUUID(),settings:{...camera(),...output}});
     if(doc.id===read().doc?.id)selectedId=job.id;
   });
   cancel.onclick=()=>act(()=>post('render-cancel',{jobId:current().id}));
@@ -120,7 +115,9 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
   $('open-paint-render').onclick=()=>{
     if(!read().doc||dialog.open)return;
     $('open-paint-render').closest('details').open=false;
-    dialog.showModal();sync();void devices.check();
+    const preferences=settings();
+    setSelectValue(format,preferences.fileFormat==='OPEN_EXR'?(preferences.bitDepth===32?'exr32':'exr16'):'png');
+    dialog.showModal();sync();
   };
   background.onclick=()=>{
     if(!backgroundJob||backgroundJob.projectId!==read().doc?.id)return;
@@ -130,6 +127,5 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
   };
   $('close-paint-render').onclick=()=>dialog.close();
   $('paint-render-settings').onclick=()=>{dialog.close();openSettings();};
-  devices.subscribe(sync);
   return {sync,open:()=>$('open-paint-render').click()};
 }

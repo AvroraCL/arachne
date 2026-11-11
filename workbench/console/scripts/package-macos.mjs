@@ -88,17 +88,37 @@ try{
   await tree(browser,path.join(resources,'runtime/browser'));
   await copy(path.join(root,'release-support/licenses/Node-LICENSE.txt'),path.join(licenses,'Node-LICENSE.txt'));
   await copy(path.join(py.prefix,'lib/python3.12/LICENSE.txt'),path.join(licenses,'Python-LICENSE.txt'));
-  await fs.writeFile(path.join(licenses,'README.txt'),'Bundled component notices remain beside their components:\nNode: Node-LICENSE.txt\nPython: Python-LICENSE.txt\nNumPy, Pillow, fontTools: runtime/python/lib/python3.12/site-packages/*dist-info/\nChromium: runtime/browser/LICENSE.headless_shell\nThree.js and Playwright: workspace/workbench/console/node_modules/*/LICENSE*\nInterface fonts: workspace/workbench/console/public/fonts/\nBlender is installed separately and is not redistributed.\n');
+  await fs.writeFile(path.join(licenses,'README.txt'),'Bundled component notices remain beside their components:\nNode: Node-LICENSE.txt\nPython: Python-LICENSE.txt\nNumPy, Pillow, fontTools: runtime/python/lib/python3.12/site-packages/*dist-info/\nChromium: runtime/browser/LICENSE.headless_shell\nJavaScript dependencies: workspace/workbench/console/node_modules/*/LICENSE*\nInterface fonts: workspace/workbench/console/public/fonts/\nBlender is installed separately and is not redistributed.\n');
 
-  console.log('Building the native Mac launcher and transparent icon');
+  console.log('Building the native Mac launcher and application icon');
   await fs.mkdir(path.join(contents,'MacOS'),{recursive:true});
   run('/usr/bin/swiftc',['-swift-version','5','-O','-target','arm64-apple-macos14.0','-module-cache-path',path.join(staging,'.swift-cache'),'-framework','AppKit','-framework','WebKit',path.join(root,'release-support/Launcher.swift'),path.join(root,'release-support/NativeWorkbench.swift'),'-o',path.join(contents,'MacOS/Arachne')]);
   await copy(path.join(contents,'MacOS/Arachne'),path.join(contents,'MacOS/ArachneMCP'));
-  const {chromium}=await import('playwright-core'),instance=await chromium.launch({executablePath:path.join(resources,'runtime/browser/chrome-headless-shell')});
-  const iconset=path.join(staging,'.icon.iconset');await fs.mkdir(iconset);
-  try{const page=await instance.newPage({viewport:{width:1024,height:1024},deviceScaleFactor:1});await page.setContent('<style>html,body{margin:0;background:transparent}svg{display:block}</style>'+await fs.readFile(path.join(root,'public/arachne-mark.svg'),'utf8'));await page.screenshot({path:path.join(iconset,'icon_512x512@2x.png'),omitBackground:true});}finally{await instance.close();}
-  for(const [name,size] of Object.entries({'16x16':16,'16x16@2x':32,'32x32':32,'32x32@2x':64,'128x128':128,'128x128@2x':256,'256x256':256,'256x256@2x':512,'512x512':512}))run('/usr/bin/sips',['-z',String(size),String(size),path.join(iconset,'icon_512x512@2x.png'),'--out',path.join(iconset,'icon_'+name+'.png')]);
-  run('/usr/bin/iconutil',['-c','icns',iconset,'-o',path.join(resources,'Arachne.icns')]);
+  const appIcon=path.join(resources,'Arachne.icns');
+  const localIcon=process.env.ARACHNE_PACKAGE_MAC_ICON||path.join(dataDirectory(root),'workbench-macos.icns');
+  const iconData=await fs.readFile(localIcon).catch(error=>{
+    if(error.code!=='ENOENT'||process.env.ARACHNE_PACKAGE_MAC_ICON)throw error;
+    return null;
+  });
+  if(iconData){
+    if(iconData.length<8||iconData.toString('ascii',0,4)!=='icns'||iconData.readUInt32BE(4)!==iconData.length)
+      throw Error('Invalid macOS application icon: '+localIcon);
+    await fs.writeFile(appIcon,iconData);
+  }else{
+    const {chromium}=await import('playwright-core');
+    const instance=await chromium.launch({executablePath:path.join(resources,'runtime/browser/chrome-headless-shell')});
+    const iconset=path.join(staging,'.icon.iconset');
+    await fs.mkdir(iconset);
+    try{
+      const page=await instance.newPage({viewport:{width:1024,height:1024},deviceScaleFactor:1});
+      const mark=await fs.readFile(path.join(root,'public/arachne-mark.svg'),'utf8');
+      await page.setContent('<style>html,body{margin:0;background:transparent}svg{display:block}</style>'+mark);
+      await page.screenshot({path:path.join(iconset,'icon_512x512@2x.png'),omitBackground:true});
+    }finally{await instance.close();}
+    for(const [name,size] of Object.entries({'16x16':16,'16x16@2x':32,'32x32':32,'32x32@2x':64,'128x128':128,'128x128@2x':256,'256x256':256,'256x256@2x':512,'512x512':512}))run('/usr/bin/sips',['-z',String(size),String(size),path.join(iconset,'icon_512x512@2x.png'),'--out',path.join(iconset,'icon_'+name+'.png')]);
+    run('/usr/bin/iconutil',['-c','icns',iconset,'-o',appIcon]);
+    await fs.rm(iconset,{recursive:true});
+  }
   await fs.writeFile(path.join(contents,'Info.plist'),`<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>CFBundleName</key><string>阿拉克涅</string><key>CFBundleDisplayName</key><string>阿拉克涅</string><key>CFBundleIdentifier</key><string>com.arachne.workbench.public</string><key>CFBundleExecutable</key><string>Arachne</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleIconFile</key><string>Arachne</string><key>CFBundleShortVersionString</key><string>0.0.1</string><key>CFBundleVersion</key><string>1</string><key>ArachneReleaseVersion</key><string>${APP_VERSION}</string><key>LSMinimumSystemVersion</key><string>14.0</string><key>NSHighResolutionCapable</key><true/><key>LSMultipleInstancesProhibited</key><true/><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict></dict></plist>\n`);
   for(const name of ['LICENSE','THIRD_PARTY.md'])await copy(path.join(workspaceRoot,name),path.join(workspace,name));
   await copy(path.join(root,'release-support/使用说明.md'),path.join(staging,'使用说明.md'));
@@ -107,7 +127,7 @@ try{
   run('/usr/bin/codesign',['--force','--sign','-',app]);run('/usr/bin/codesign',['--verify','--deep','--strict',app]);
   const files={};async function manifest(dir){for(const entry of await fs.readdir(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())await manifest(file);else if(entry.isFile())files[path.relative(staging,file)]=await hash(file);else throw Error('Unexpected symlink in release: '+file);}}
   // Build scratch is never included in the archive.
-  await fs.rm(path.join(staging,'.swift-cache'),{recursive:true,force:true});await fs.rm(iconset,{recursive:true});
+  await fs.rm(path.join(staging,'.swift-cache'),{recursive:true,force:true});
   await manifest(staging);await writeJSON(path.join(staging,'release-manifest.json'),{...info,files});
   await fs.rename(staging,versionDir);
   const zip=path.join(path.dirname(versionDir),`Arachne-${APP_VERSION}-macos-arm64.zip`);

@@ -1,4 +1,6 @@
 import {blenderExecutable,blenderScriptArgs} from './blender-runtime.mjs';
+import {pythonExecutable} from './python-runtime.mjs';
+import {registeredViewportModel,viewportManifest} from './viewport.mjs';
 import {pinSurfaceInputs} from './paint-surface-bindings.mjs';
 import {modelFingerprint,validateModelState,nativeModelSteps} from './model-binding.mjs';
 export {modelFingerprint,validateModelState,nativeModelSteps} from './model-binding.mjs';
@@ -21,13 +23,12 @@ const invalid=()=>{throw Error('建模命令或模型绑定无效');};
 export function saveProjectModel(doc,{revision,modeling}){
   if(revision!==doc.revision)throw Object.assign(Error('工程修订已变化'),{status:409,currentRevision:doc.revision});
   validateModelState(modeling);
-  const folder=path.join(DATA,'viewport',modeling.binding),model=path.join(folder,'model.glb');
-  const meta=JSON.parse(fs.readFileSync(path.join(folder,'metadata.json'),'utf8'));
-  if(meta.source_sha256!==doc.source.files[doc.source.reviewSource]||hash(model)!==modeling.modelSha256)invalid();
-  const bytes=fs.readFileSync(model),glb=JSON.parse(bytes.toString('utf8',20,20+bytes.readUInt32LE(12)));
+  const model=registeredViewportModel(doc),folder=path.dirname(model.file);
+  if(viewportManifest(doc).key!==modeling.binding||model.sha256!==modeling.modelSha256)invalid();
+  const bytes=fs.readFileSync(model.file),glb=JSON.parse(bytes.toString('utf8',20,20+bytes.readUInt32LE(12)));
   let topology;
   if(modeling.steps.some(step=>step.targets.some(target=>target.mesh!==undefined))){
-    for(const name of fs.readdirSync(folder).filter(name=>/^topology-[a-f0-9]+\.json$/.test(name))){
+    for(const name of fs.readdirSync(folder).filter(name=>name==='topology.json'||/^topology-[a-f0-9]+\.json$/.test(name))){
       const value=JSON.parse(fs.readFileSync(path.join(folder,name),'utf8'));
       if(value.modelSha256===modeling.modelSha256){topology=value;break;}
     }
@@ -36,27 +37,33 @@ export function saveProjectModel(doc,{revision,modeling}){
   if(JSON.stringify(expected)!==JSON.stringify(modeling.nativeSteps))invalid();
   return commit(doc.id,revision,next=>{pinSurfaceInputs(next);next.modeling=structuredClone(modeling);return next;},[{op:'model',steps:modeling.steps.length}]);
 }
-function location(doc){
-  const fingerprint=modelFingerprint(doc);
-  if(!fingerprint)return null;
-  // Shared immutable geometry can be reused by reopened/restored projects.
-  const key=digest([doc.source.material,Object.entries(doc.source.files).sort(([a],[b])=>a.localeCompare(b)),fingerprint,hash(path.join(ROOT,'project_model.py')),hash(path.join(ROOT,'native_worker_lock.py')),
-    hash(path.join(ROOT,'../tools/geometry.py')),hash(path.join(ROOT,'../tools/prepare_guides.py')),
-    ...['projection_scope.py','uv_raster.py','view_select.py'].map(name=>hash(path.join(ROOT,'../tools',name)))]);
+function location(doc,legacyScene){
+  const fingerprint=modelFingerprint(doc),native=doc.source.format==='glb';
+  if(!fingerprint&&(!native||doc.source.preservedSurface))return null;
+  if(!fingerprint){
+    const folder=path.dirname(doc.source.cacheRun);
+    return {key:folder,folder,fingerprint};
+  }
+  const scripts=legacyScene?['project_model.py','../tools/geometry.py','../tools/prepare_guides.py']:
+    ['model_glb.py','model_surface.py'];
+  const version=[...scripts,'native_worker_lock.py','../tools/guide_raster.py','../tools/projection_scope.py',
+    '../tools/uv_raster.py','../tools/view_select.py'].map(file=>hash(path.join(ROOT,file)));
+  const key=digest([doc.source.material,Object.entries(doc.source.files),fingerprint,version]);
   return {key,folder:path.join(DATA,'model-geometry',key),fingerprint};
 }
-export function modelGeometry(doc){
-  const item=location(doc);if(!item)return {source:doc.source,status:'ready'};
+export function modelGeometry(doc,{legacyScene=false}={}){
+  const item=location(doc,legacyScene);if(!item)return {source:doc.source,status:'ready'};
   const state=builds.get(item.key);
   if(state?.status==='queued')return {...item,status:'queued',stage:state.stage};
   const reportFile=path.join(item.folder,'report.json');
-  if(!fs.existsSync(reportFile))return {...item,status:builds.get(item.key)?.status||'idle',error:builds.get(item.key)?.error};
+  if(!fs.existsSync(reportFile))
+    return {...item,status:state&&state.status!=='ready'?state.status:'idle',error:state?.error};
   try{
     const report=JSON.parse(fs.readFileSync(reportFile,'utf8'));
     if(report.modelFingerprint!==item.fingerprint||report.sourceSha256!==doc.source.files[doc.source.reviewSource]||!report.uvUnchanged)
       throw Error('建模缓存的修订或 UV 指纹不一致');
     for(const [file,expected] of Object.entries(report.files))verifyFile(path.join(item.folder,file),expected);
-    const source={...doc.source,reviewSource:path.join(item.folder,'model.blend'),cacheRun:path.join(item.folder,'cache'),bundle:path.join(item.folder,'guides')};
+    const source={...doc.source,...(legacyScene?{reviewSource:path.join(item.folder,'model.blend')}:{}),cacheRun:path.join(item.folder,'cache'),bundle:path.join(item.folder,'guides')};
     return {...item,status:'ready',stage:'模型表面已就绪',source,report};
   }catch(error){return {...item,status:'failed',error:error.message,invalid:true};}
 }
@@ -83,9 +90,11 @@ export function modelGeometryLog(doc,binding){
   return path.join(result.folder,'build.log');
 }
 export async function preparePaintGeometry(doc,options={}){
-  const current=await prepareModelGeometry(doc,options),surfaceSources={};
+  if(options.legacyScene&&doc.source.format==='glb')throw Error('GLB 工程支持路径追踪出图、GLB 和贴图导出');
+  const baseline=doc.source.format==='glb'?await prepareModelGeometry({...doc,modeling:undefined},{...options,frozen:true}):null;
+  const current=baseline&&!modelFingerprint(doc)?baseline:await prepareModelGeometry(doc,options),surfaceSources={};
   const entry=(key,source)=>({source,bindingFingerprint:digest([doc.source.files,key])});
-  surfaceSources.original=entry('original',doc.source);
+  surfaceSources.original=entry('original',baseline?.source||doc.source);
   if(modelFingerprint(doc))surfaceSources[modelFingerprint(doc)]=entry(modelFingerprint(doc),current.source);
   await Promise.all(referenceDocuments(doc).map(async([key,snapshot])=>{
     if(surfaceSources[key])return;
@@ -94,9 +103,9 @@ export async function preparePaintGeometry(doc,options={}){
   }));
   return {...current,surfaceSources};
 }
-export function prepareModelGeometry(doc,{signal,frozen=false}={}){
+export function prepareModelGeometry(doc,{signal,frozen=false,legacyScene=false}={}){
   if(signal?.aborted)return waitForGeometry(Promise.resolve(),signal);
-  const ready=modelGeometry(doc);if(ready.status==='ready')return Promise.resolve(ready);
+  const ready=modelGeometry(doc,{legacyScene});if(ready.status==='ready')return Promise.resolve(ready);
   const previous=builds.get(ready.key);
   if(['queued','running'].includes(previous?.status)){
     previous.frozen||=frozen;
@@ -111,11 +120,15 @@ export function prepareModelGeometry(doc,{signal,frozen=false}={}){
     const requests=path.join(DATA,'model-builds');fs.mkdirSync(requests,{recursive:true});
     // A restarted server must never replace a still-starting worker's input.
     const cfg=path.join(requests,crypto.randomUUID()+'.json');
-    atomic(cfg,{source:doc.source,modeling:doc.modeling,out:ready.folder,modelFingerprint:ready.fingerprint,ownerPid:process.pid});
+    const model=legacyScene?null:registeredViewportModel(doc);
+    if(model&&doc.modeling&&model.sha256!==doc.modeling.modelSha256)invalid();
+    atomic(cfg,{source:doc.source,modeling:doc.modeling??null,out:ready.folder,modelFingerprint:ready.fingerprint,ownerPid:process.pid,
+      ...(model?{model:model.file,modelSha256:model.sha256}:{})});
     return new Promise((resolve,reject)=>{
       const log=fs.createWriteStream(path.join(ready.folder,'build.log'));
-      const child=spawn(blenderExecutable(),
-        blenderScriptArgs(path.join(ROOT,'project_model.py'),[cfg]),
+      const child=spawn(legacyScene?blenderExecutable():pythonExecutable(),
+        legacyScene?blenderScriptArgs(path.join(ROOT,'project_model.py'),[cfg]):
+          ['-X','utf8',path.join(ROOT,'model_surface.py'),'rebuild',cfg],
         {cwd:ROOT,stdio:['ignore','pipe','pipe'],windowsHide:true});
       state.child=child;child.stdout.pipe(log,{end:false});child.stderr.pipe(log,{end:false});
       let partial='';
@@ -133,7 +146,7 @@ export function prepareModelGeometry(doc,{signal,frozen=false}={}){
         fs.rmSync(cfg,{force:true});
         clearTimeout(timer);state.controller.signal.removeEventListener('abort',abort);log.end();state.child=null;
         if(code!==0){reject(Error(state.timeout?'模型表面准备超时，可重试':'模型表面准备失败，请查看建模日志后重试'));return;}
-        try{const result=modelGeometry(doc);if(result.status!=='ready')throw Error(result.error||'模型表面准备未完成');state.status='ready';state.stage=result.stage;resolve(result);}
+        try{const result=modelGeometry(doc,{legacyScene});if(result.status!=='ready')throw Error(result.error||'模型表面准备未完成');state.status='ready';state.stage=result.stage;resolve(result);}
         catch(error){reject(error);}
       });
     });

@@ -20,6 +20,18 @@ TEXTURE_NAMES = {f'textures/f_16xl_{channel}.png' for channel in
                  ('BaseColor', 'metallic', 'roughness', 'normal', 'height', 'emission', 'alpha', 'ao')}
 LEGACY_TEXTURE_NAMES = {'textures/f_16xl_BaseColor.png', 'textures/f_16xl_metallic.png',
                         'textures/f_16xl_roughness.png'}
+REGISTRATION_LIMITS = {'registration/model.glb':128, 'registration/base.png':72,
+                       'registration/metadata.json':1, 'registration/registration.json':1}
+PRESERVED_SURFACE_LIMITS = {
+    'registration/surface/cache/geometry_report.json': 8,
+    'registration/surface/cache/resolved_config.json': 8,
+    'registration/surface/cache/mapping/surface.npz': 320,
+    'registration/surface/cache/mapping/faces.npz': 128,
+    'registration/surface/cache/mapping/edges.npz': 64,
+    'registration/surface/guides/cameras.json': 8,
+    'registration/surface/guides/surfaces.npz': 160,
+    **{f'registration/surface/guides/top/{name}.png': 8 for name in ('receiver','protected','silhouette')}
+}
 MIB = 1024 * 1024
 ZIP_END = struct.Struct('<4s4H2LH')
 ZIP_END_MARKER = b'PK\x05\x06'
@@ -103,6 +115,51 @@ def check_project_textures(archive, report, hashes):
         read_checked(archive, name, 72 * MIB, digest)
 
 
+def unpack_registration(archive, report, output):
+    delivery = report['delivery']
+    require(delivery['version'] == 1 and 'bake' in report, '原生交付包格式无效')
+    entries = delivery.get('registration')
+    if entries is None:
+        return
+    from model_glb import Model
+    from PIL import Image
+
+    hashes = report['fileSha256']
+    model_report = delivery['model']
+    geometry = report['editable']['geometry']
+    preserved = set(entries) == set(REGISTRATION_LIMITS) | set(PRESERVED_SURFACE_LIMITS)
+    limits = {**REGISTRATION_LIMITS,**PRESERVED_SURFACE_LIMITS} if preserved else REGISTRATION_LIMITS
+    require(set(entries) == set(limits) and
+            entries['registration/model.glb'] == geometry['modelSha256'] == model_report['sourceGlbSha256'],
+            '原生交付包的登记文件不一致')
+    folder = output / 'registration'
+    folder.mkdir()
+    for member, limit in limits.items():
+        digest = entries[member]
+        require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}',digest) and hashes[member] == digest,
+                '登记文件指纹无效')
+        destination = folder / member.removeprefix('registration/')
+        destination.parent.mkdir(parents=True,exist_ok=True)
+        destination.write_bytes(read_checked(archive, member, limit*MIB, digest))
+    meta = json.loads((folder/'metadata.json').read_bytes(), object_pairs_hook=unique_object)
+    require((meta.get('legacySurface') is True) == preserved, '迁移后的原绘制表面缺失')
+    if preserved:
+        record = json.loads((folder/'surface/cache/geometry_report.json').read_bytes(),object_pairs_hook=unique_object)
+        require(record['legacy_uv_sha256'] == meta['legacyUvSha256'] and
+                record['uv_before_sha256'] == record['uv_after_sha256'] == meta['uv_before'] and
+                record['materials'] == [{'name':meta['material'],'file':'surface'}],
+                '迁移后的原绘制表面指纹不一致')
+    model = Model(folder/'model.glb')
+    require(meta['source_sha256'] == geometry['modelSha256'] and meta['material'] == geometry['material'] and
+            meta['uv_unchanged'] is True and meta['uv_before'] == meta['uv_after'] == model_report['uvSha256'] ==
+            model.uv_digest() and any(p['label']==meta['material'] and p['uv'] is not None for p in model.primitives),
+            '包内登记模型的材质或原 UV 不一致')
+    with Image.open(folder/'base.png') as image:
+        sizes_ok = all(0<size<=8192 for size in image.size) if preserved else image.size == (4096,4096)
+        require(image.format == 'PNG' and sizes_ok, '包内底图格式无效')
+        image.verify()
+
+
 def unpack(file, output):
     check_zip_index(file)
     with ZipFile(file) as archive:
@@ -122,6 +179,8 @@ def unpack(file, output):
         check_metadata(manifest, report, report_name)
         if report_name == PROJECT and 'bake' in report:
             check_project_textures(archive, report, hashes)
+        if report_name == PROJECT and 'delivery' in report:
+            unpack_registration(archive, report, output)
         assets = manifest['paint']['assets']
         require(isinstance(assets, dict) and len(assets) == report['editable']['assetCount'])
         total_size = 0
@@ -142,11 +201,14 @@ def unpack(file, output):
 def pack_project(config):
     report = config['report']
     hashes = {}
+    expected = config.get('expected',{})
     total_assets = 0
     with ZipFile(Path(config['out']) / 'project.zip', 'x', ZIP_DEFLATED, compresslevel=3) as archive:
         for name, source in config['files'].items():
             data = Path(source).read_bytes()
             digest = hashes[name] = hashlib.sha256(data).hexdigest()
+            if name in expected:
+                require(digest == expected[name], '打包时交付文件指纹变化')
             if name in report.get('bake', {}).get('files', {}):
                 require(digest == report['bake']['files'][name], '打包时贴图指纹变化')
             if name.startswith('editable/assets/'):
@@ -157,7 +219,11 @@ def pack_project(config):
             else:
                 archive.writestr(name, data)
         report['fileSha256'] = hashes
-        archive.writestr(PROJECT, json.dumps(report, ensure_ascii=False))
+        require(set(expected) <= set(hashes), '交付包缺少文件')
+        report_data = json.dumps(report, ensure_ascii=False, indent=2)
+        archive.writestr(PROJECT, report_data)
+    if config.get('writeReport'):
+        (Path(config['out']) / PROJECT).write_text(report_data, encoding='utf-8')
 
 
 if __name__ == '__main__':

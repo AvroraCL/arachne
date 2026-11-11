@@ -24,7 +24,6 @@ import {startAssetDrag,endAssetDrag,hasAssetDrag,readAssetDrag} from './paint-as
 import {createShaderTargets} from './shader-targets.mjs';
 import {createRenderSettingsEditor} from './render-settings-editor.mjs';
 import {sampleMaterialFrame} from './paint-live-view.mjs';
-import {createCyclesViewport,cyclesViewportSize} from './paint-cycles-viewport.mjs';
 import {viewportSamplingDefaults} from './cycles-viewport-sampling.mjs';
 import {cameraFrameSize} from './render-camera-frame.mjs';
 import {renderObjectVisible} from './render-visibility.mjs';
@@ -60,7 +59,7 @@ export function registerAreaEditors(registry,bridge){
   registry.register('viewport',ctx=>{
     const {host,project,state,onChange}=ctx,lifecycle=new AbortController(),signal=lifecycle.signal;
     let mode=state.mode||'object',disposed=false,shown=true,loading=null,projectId=null,revision=-1,frame=null,modelState=null,lastScene=null,placement=null,lastPointer=null,layerGeneration=0,modeGeneration=0;
-    let picking=false,sampledBrush=null,pickerMessage='',cyclesView=null,navigating=false,lastWheelAt=-Infinity;
+    let picking=false,sampledBrush=null,pickerMessage='',navigating=false,wheelTimer=null,display;
     let cameraFrame=state.cameraFrame===true,returnCamera=state.returnCamera||null,cyclesPaused=state.cyclesPaused===true;
     let projectCameraView=cameraFrame&&state.projectCameraView===true,projectCameraKey='';
     const inModeling=()=>mode==='object'||mode==='edit';
@@ -117,15 +116,15 @@ export function registerAreaEditors(registry,bridge){
     for(const axis of ['X','Y','Z']){const i=el('input');Object.assign(i,{type:'number',step:'any',value:state.tool==='scale'?'1':'0'});i.setAttribute('aria-label','变换 '+axis);axes.push(i);const l=el('label','',axis);l.append(i);numeric.append(l);}
     const apply=button('应用',()=>{});apply.type='submit';numeric.append(apply);numeric.onsubmit=e=>{e.preventDefault();try{modeler.applyNumeric(axes.map(i=>i.valueAsNumber));view.querySelector('canvas')?.focus({preventScroll:true});}catch(error){ctx.error(error);}};
     const previewBar=el('div','editor-preview-status'),resolution=el('output'),retry=button('重试预览',()=>{
-      if(display.mode==='cycles')cyclesView?.sync(true);else void bridge.retryPreview().catch(ctx.error);
+      if(display.mode==='cycles')syncRenderPreview(true);else void bridge.retryPreview().catch(ctx.error);
     });
-    const pauseCycles=button('暂停 Cycles 视口',()=>{
+    const pauseCycles=button('暂停路径追踪',()=>{
       cyclesPaused=!cyclesPaused;
-      syncCyclesControl();cyclesView?.sync();onChange();
+      syncCyclesControl();syncRenderPreview();onChange();
     });
     pauseCycles.classList.add('cycles-pause-control','viewport-display-button');pauseCycles.hidden=true;
     function syncCyclesControl(){
-      const icon=cyclesPaused?'play':'pause',label=cyclesPaused?'继续 Cycles 视口':'暂停 Cycles 视口';
+      const icon=cyclesPaused?'play':'pause',label=cyclesPaused?'继续路径追踪':'暂停路径追踪';
       if(pauseCycles.getAttribute('aria-label')!==label){chromeButton(pauseCycles,icon,label);pauseCycles.title=label;}
       pauseCycles.hidden=display.mode!=='cycles';
       pauseCycles.disabled=view.dataset.state!=='ready';
@@ -134,7 +133,7 @@ export function registerAreaEditors(registry,bridge){
     pickerStatus.setAttribute('role','status');
     exitInspection.hidden=retry.hidden=pickerStatus.hidden=true;
     previewBar.append(status,pickerStatus,resolution,retry,exitInspection);host.append(numeric,controls.bar,stage,previewBar);headerControls(ctx,toolbar);for(const b of toolbar.querySelectorAll('button')){const icon={'适应':'fit','正交':'orthographic'}[b.textContent];if(icon)chromeButton(b,icon);}
-    const viewport=createViewport({host:view,animateAxes:true,localUI:true,onStatus:(text,kind)=>{
+    const viewport=createViewport({host:view,animateAxes:true,localUI:true,onRenderPreviewStatus:syncPreviewStatus,onStatus:(text,kind)=>{
       // Background texture updates must not erase selection or transform feedback.
       if(kind==='error'||view.dataset.state!=='ready'||!['object','edit'].includes(mode))status.textContent=text;
     },onModelingPick:event=>{if(mode==='object'||mode==='edit'){modeler.pick(event);return true;}return false;}});
@@ -163,7 +162,7 @@ export function registerAreaEditors(registry,bridge){
             (projectCameraView?'工程相机':'相机取景框')+' · '+width+' × '+height;
       }
       regionGesture.sync(cameraFrame);
-      cyclesView?.sync();
+      syncRenderPreview();
     }
     function toggleCameraFrame(camera,enabled=!cameraFrame){
       if(view.dataset.state!=='ready'||modeler.isDragging()||painter.isEditing()||marquee.isDragging()||regionGesture.editing()||focusGesture.editing())return false;
@@ -211,7 +210,7 @@ export function registerAreaEditors(registry,bridge){
       apply.disabled=!next.hasTransformTarget||next.dragging;boxSelect.disabled=!canBoxSelect();
       view.toggleAttribute('data-local-view',next.localActive);
       showModelStatus();
-      cyclesView?.sync();
+      syncRenderPreview();
       if(next.sceneItems.length){lastScene=next;if(!project.scene||project.scene.owner===ctx.areaId)publishScene();}
     },{signal,read:()=>project.document,save:(modeling,rev,id)=>bridge.saveModel(modeling,{id,revision:rev}),travel:direction=>project.travel(direction)});
     function canBoxSelect(){
@@ -302,8 +301,8 @@ export function registerAreaEditors(registry,bridge){
       sample:pickMaterial,place:(projector,hit)=>{const origin=placement;if(!origin||origin.layerId!==project.layerId)return;void bridge.validateSurface(hit,origin).then(()=>project.commands([{op:'update',id:origin.layerId,patch:{projector}}],origin)).then(()=>{placement=null;setMode('view');}).catch(ctx.error);},isHandHeld:()=>false,uvClip:()=>null
     });
     const brushBinding=createBrushBinding({project,painter,onApplied:settings=>{elements['brush-mirror-enabled'].checked=settings.mirror;}});
-    function displayModeChanged(){cyclesView?.sync();syncPreviewStatus();bridge.viewportDisplayChanged?.();}
-    const display=createViewportDisplayControls({ctx,view,viewport,isEditing:()=>modeler.isDragging()||painter.isEditing(),
+    function displayModeChanged(){syncRenderPreview();syncPreviewStatus();bridge.viewportDisplayChanged?.();}
+    display=createViewportDisplayControls({ctx,view,viewport,isEditing:()=>modeler.isDragging()||painter.isEditing(),
       openRenderSettings:()=>bridge.renderSettings?.openSettings(),renderPlayback:pauseCycles,
       onMode:displayModeChanged,
       change:({mode,xray,overlays,axis:showAxis,transform})=>{
@@ -314,30 +313,18 @@ export function registerAreaEditors(registry,bridge){
       }
     });
     display.refresh();
-    cyclesView=createCyclesViewport({host:view,onStatus:syncPreviewStatus,onVisibility:viewport.setCyclesOverlay,read:()=>{
-      const doc=project.document,enabled=shown&&display.mode==='cycles';
-      const visibility={enabled,projectId:doc?.id,frozen:cyclesPaused};
-      if(!enabled||!doc||projectId!==doc.id||view.dataset.state!=='ready')return visibility;
-      if(bridge.materialPreview().inspection)return {...visibility,inspection:true};
-      const editing=modeler.isDragging()||painter.isEditing()||marquee.isDragging();
-      const camera=viewport.readCamera(),values=bridge.renderSettings?.read()||{},preferences=bridge.preferences();
+    function syncRenderPreview(retry=false){
+      const doc=project.document;
+      const enabled=shown&&display?.mode==='cycles'&&doc?.id===projectId&&view.dataset.state==='ready';
       const sampling=bridge.renderSettings?.readViewportSampling?.()||viewportSamplingDefaults;
-      const rect=view.getBoundingClientRect();
-      const [width,height]=cyclesViewportSize(rect.width,rect.height);
-      const [detailWidth,detailHeight]=cyclesViewportSize(rect.width,rect.height,1536);
-      const hiddenObjects=modelState?.hasHidden?modelState.sceneItems.filter(item=>
-        modelState.visibility.get(item.id)!=='visible').map(item=>item.label).sort():[];
-      const settings={camera,device:values.device??'auto',denoise:sampling.denoise,adaptive:sampling.adaptive,
-        ...(sampling.adaptive?{noiseThreshold:sampling.noiseThreshold}:{}),maxBounces:values.maxBounces??12,transparent:values.transparent??false,
-        ...(values.lightPaths?{lightPaths:values.lightPaths}:{})};
-      return {...visibility,navigating,editing,lastWheelAt,input:{projectId:doc.id,revision:doc.revision,hiddenObjects,aspect:rect.width/Math.max(rect.height,1),
-        settings:{...settings,width,height,samples:sampling.draftSamples},
-        detail:preferences.autoDetail?{delay:preferences.detailDelay,settings:{...settings,width:detailWidth,height:detailHeight,samples:sampling.detailSamples}}:null}};
-    }});
+      const suspended=enabled&&(!!bridge.materialPreview().inspection||modeler.isDragging()||painter.isEditing()||marquee.isDragging());
+      viewport.setRenderPreview({enabled,paused:cyclesPaused,suspended,interacting:navigating||wheelTimer!==null,
+        samples:bridge.preferences().autoDetail?sampling.detailSamples:sampling.draftSamples},retry);
+    }
     const unsubscribeCyclesSettings=bridge.renderSettings?.subscribe(syncCameraFrame);
     function syncPreviewStatus(){
       syncCyclesControl();
-      const {inspection,status:preview}=bridge.materialPreview(),cycles=cyclesView?.state();
+      const {inspection,status:preview}=bridge.materialPreview(),cycles=viewport.renderPreviewState();
       const rendered=display.mode==='cycles'&&cycles?.phase!=='off'&&cycles;
       resolution.textContent=rendered?cycles.text:materialPreviewText(frame,inspection,preview);
       resolution.title=rendered?cycles.text:preview?.message||'';
@@ -353,7 +340,7 @@ export function registerAreaEditors(registry,bridge){
         else modeler.close();
       }
       foreground.hidden=mode!=='paint';visible(maskInk,['mask','fill'].includes(mode));numeric.hidden=!inModeling();controls.bar.hidden=!['paint','mask'].includes(mode);visible(component,mode==='edit');visible(tool,inModeling());visible(orientation,inModeling());boxSelect.hidden=!inModeling();boxSelect.disabled=!canBoxSelect();syncPicker();onChange();
-      cyclesView?.sync();
+      syncRenderPreview();
     }
     function releaseFrame(){
       if(!frame)return;
@@ -380,9 +367,9 @@ export function registerAreaEditors(registry,bridge){
       createPaintLayer.disabled=!bridge.canAddMaterialLayer();
       if(projectId!==doc.id){
         marquee.cancel();
-        projectId=doc.id;lastScene=null;frame=null;revision=-1;navigating=false;lastWheelAt=-Infinity;delete view.dataset.materialInspection;modeler.close();
+        projectId=doc.id;lastScene=null;frame=null;revision=-1;navigating=false;delete view.dataset.materialInspection;modeler.close();
         const task=loading=viewport.loadProject(doc);
-        cyclesView.sync();
+        syncRenderPreview();
         try{
           await task;
           if(disposed||task!==loading||doc.id!==project.document?.id||view.dataset.state!=='ready')return;
@@ -404,7 +391,7 @@ export function registerAreaEditors(registry,bridge){
       if(!shown)return;
       const {frame:current,inspection}=bridge.materialPreview();
       applyFrame(current);syncPicker();painter.render();syncInspectionControl(exitInspection,inspection,doc);
-      cyclesView.sync();syncPreviewStatus();ctx.title.textContent=doc.name;
+      syncRenderPreview();syncPreviewStatus();ctx.title.textContent=doc.name;
     }
     function navigate(command){
       if(!command||view.dataset.state!=='ready'||modeler.isDragging()||painter.isEditing())return false;
@@ -465,17 +452,20 @@ export function registerAreaEditors(registry,bridge){
       }
       event.stopPropagation();
     },{signal});
-    window.addEventListener('blur',()=>{painter.cancel({preserveMode:true});navigating=false;cyclesView.sync();},{signal});
+    window.addEventListener('blur',()=>{painter.cancel({preserveMode:true});navigating=false;syncRenderPreview();},{signal});
     // A paused image can outlive the current pose. Allow orbiting, but never pick through the old image.
     for(const type of ['pointerdown','pointerup'])view.addEventListener(type,event=>{
-      if(!view.hasAttribute('data-cycles-frozen-frame')||event.target.tagName!=='CANVAS'||event.button!==0||event.altKey)return;
+      if(view.dataset.renderPhase!=='paused'||event.target.tagName!=='CANVAS'||event.button!==0||event.altKey)return;
       event.preventDefault();event.stopPropagation();
     },{capture:true,signal});
-    view.addEventListener('wheel',event=>{
-      if(event.target.tagName==='CANVAS'&&event.target.parentElement===view)lastWheelAt=performance.now();
+    view.addEventListener('wheel',()=>{
+      if(display.mode!=='cycles')return;
+      clearTimeout(wheelTimer);
+      wheelTimer=setTimeout(()=>{wheelTimer=null;syncRenderPreview();},110);
+      syncRenderPreview();
     },{capture:true,passive:true,signal});
-    view.addEventListener('viewport-interaction',event=>{navigating=event.detail.active;if(navigating)markCameraFree();cyclesView.sync();},{signal});
-    view.addEventListener('viewport-camera',()=>{modeler.syncCamera();cyclesView.sync();bridge.cameraChanged?.();onChange();},{signal});
+    view.addEventListener('viewport-interaction',event=>{navigating=event.detail.active;if(navigating)markCameraFree();syncRenderPreview();},{signal});
+    view.addEventListener('viewport-camera',()=>{modeler.syncCamera();syncRenderPreview();bridge.cameraChanged?.();onChange();},{signal});
     const subscription=project.subscribe(event=>{
       if(!shown&&(event.kind==='frame'||event.kind==='preview'))return;
       if(event.kind==='project'){syncProjectCamera();syncCameraFrame();}
@@ -489,7 +479,7 @@ export function registerAreaEditors(registry,bridge){
     });
     setMode(mode);viewportControllers.set(ctx.areaId,publishScene);
     viewport.setActive(true);void sync().catch(ctx.error);
-    return {kind:'viewport',viewport,showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>display.mode!=='cycles',preferencesChanged:()=>cyclesView.sync(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
+    return {kind:'viewport',viewport,showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
       getState:()=>({mode,element:component.value,tool:tool.value,orientation:orientation.value,...display.getState(),
         camera:view.dataset.state==='ready'?viewport.readCamera():state.camera,cameraFrame,returnCamera,projectCameraView,cyclesPaused}),
       isEditing:()=>modeler.isDragging()||painter.isEditing()||marquee.isDragging()||regionGesture.editing()||focusGesture.editing(),
@@ -497,9 +487,9 @@ export function registerAreaEditors(registry,bridge){
         if(shown===visible)return;
         shown=visible;viewport.setActive(visible);
         if(visible)void sync().catch(ctx.error);
-        else{display.close();navigating=false;marquee.cancel();regionGesture.cancel();focusGesture.cancel();setPicking(false);releaseFrame();cyclesView.sync();}
+        else{display.close();navigating=false;marquee.cancel();regionGesture.cancel();focusGesture.cancel();setPicking(false);releaseFrame();syncRenderPreview();}
       },
-      dispose(){disposed=true;marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();cyclesView.dispose();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
+      dispose(){disposed=true;clearTimeout(wheelTimer);marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
   });
 
   registry.register('shader',ctx=>{

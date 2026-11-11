@@ -61,7 +61,7 @@ function run(exe,args,signal){
 async function stageDocument(doc,quality,signal,listBakes){
   const fingerprint=paintBakeFingerprint(doc),key=doc.id+':'+fingerprint+':'+quality,prior=cache.get(key);
   if(prior){cache.delete(key);cache.set(key,prior);return prior;}
-  const binding=await verifyPaint(doc,{signal}),geometry=await preparePaintGeometry(doc,{signal});
+  const binding=await verifyPaint(doc,{signal}),geometry=await preparePaintGeometry(doc,{signal,legacyScene:true});
   ensureRunning(signal);
   let owned=null,report,out,nodeMaterial;
   if(quality==='detail'){
