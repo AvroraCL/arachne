@@ -76,6 +76,13 @@ try{
   for(const id of ['child','base','clip'])await select(id).click({modifiers:[modifier]});
   assert.deepEqual(await panel.locator('.document-layer-row[data-selected]').evaluateAll(rows=>rows.map(row=>row.dataset.imageLayerId).sort()),
     ['base','child','clip','source']);
+  await row('source').getByRole('button',{name:'收起 原图层组'}).click();
+  await select('child').waitFor({state:'hidden'});
+  await panel.getByRole('status').filter({hasText:'4 个图层已选 · 1 个未在列表中显示'}).waitFor();
+  assert.equal((await api(route)).revision,initial.revision);
+  assert.equal(await row('child').getAttribute('data-selected'),'');
+  await row('source').getByRole('button',{name:'展开 原图层组'}).click();
+  assert.equal(await select('child').getAttribute('aria-pressed'),'true');
 
   await row('child2').getByRole('button',{name:'锁定 子图层二'}).click();
   const locked=await atRevision(initial.revision+1,'锁定组内未单独选中的子层');

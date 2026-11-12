@@ -1000,7 +1000,8 @@ export function createImagePanel(type,ctx){
   function updateBatchFeedback(){
     if(!feedback)return;
     const visible=new Set(renderedRows.map(row=>row.layer.id)),hidden=[...selectedRows].filter(id=>!visible.has(id)).length;
-    feedback.textContent=completedAction||(selectedRows.size>1?selectedRows.size+' 个图层已选'+(hidden?' · '+hidden+' 个不在筛选结果中':''):'');
+    feedback.textContent=completedAction||(selectedRows.size>1||hidden?
+      selectedRows.size+' 个图层已选'+(hidden?' · '+hidden+' 个未在列表中显示':''):'');
     feedback.hidden=!feedback.textContent;
   }
   function noteBatch(text){
@@ -1028,11 +1029,7 @@ export function createImagePanel(type,ctx){
   }
   function changeGroup(id,open){
     if(open)collapsedGroups.delete(id);
-    else{
-      collapsedGroups.add(id);
-      const layers=currentDocument(project)?.layers??[],children=new Set(layerTreeOrder(layers,id).map(item=>item.id));
-      if([...selectedRows].some(key=>children.has(key)))setRowSelection([id],id);
-    }
+    else collapsedGroups.add(id);
     sync();ctx.onChange?.();
   }
   function createGroup(fromSelection){
