@@ -570,12 +570,18 @@ class Surface:
         if not strokes:
             return affected,paint
         samples = [(stroke,*(sampler or self.stroke)(stroke)) for stroke in strokes]
-        extra = np.unique(np.concatenate([ids for _,ids,_ in samples]))
+        expanding = [ids for stroke,ids,_ in samples if not stroke.get('preserveAlpha')]
+        extra = np.unique(np.concatenate(expanding)) if expanding else np.empty(0, dtype=np.int32)
         affected,paint = self._expand_paint(affected,paint,extra)
         for stroke, ids, opacity in samples:
-            if not len(ids):
+            if not len(ids) or not len(affected):
                 continue
-            ids = np.searchsorted(affected,ids)
+            if stroke.get('preserveAlpha'):
+                lookup = np.minimum(len(affected)-1, np.searchsorted(affected, ids))
+                found = affected[lookup] == ids
+                ids, opacity = lookup[found], opacity[found]
+            else:
+                ids = np.searchsorted(affected,ids)
             for name, enabled in stroke['channels'].items():
                 if not enabled or name not in channels:
                     continue
@@ -584,6 +590,10 @@ class Surface:
                     paint[name] = (np.zeros(len(affected),dtype=np.float32),
                                    np.zeros((len(affected),count),dtype=np.float32))
                 alpha, premult = paint[name]
+                if stroke.get('preserveAlpha'):
+                    value = channel_value(name,stroke['values'].get(name,DEFAULTS[name]),color)
+                    premult[ids] = premult[ids]*(1-opacity[:,None])+alpha[ids,None]*opacity[:,None]*value
+                    continue
                 premult[ids] *= 1-opacity[:,None]
                 alpha[ids] *= 1-opacity
                 if not stroke['erase']:

@@ -103,10 +103,18 @@ def clone_layer(surface, affected, paint, stroke):
             samples.append((batch[keep], alpha[keep]*weight, premult[keep]*weight[:, None]))
     if not samples:
         return affected, paint
-    affected, paint = surface._expand_paint(affected, paint, np.concatenate([tile[0] for tile in samples]))
+    preserve = stroke.get('preserveAlpha')
+    if not preserve:
+        affected, paint = surface._expand_paint(affected, paint, np.concatenate([tile[0] for tile in samples]))
     alpha, premult = paint['color']
     for targets, opacity, color in samples:
         index = np.searchsorted(affected, targets)
-        premult[index] = premult[index]*(1-opacity[:, None])+color
-        alpha[index] = alpha[index]*(1-opacity)+opacity
+        if preserve:
+            index = np.minimum(len(affected)-1, index)
+            keep = affected[index] == targets
+            index, opacity, color = index[keep], opacity[keep], color[keep]
+            premult[index] = premult[index]*(1-opacity[:, None])+color*alpha[index, None]
+        else:
+            premult[index] = premult[index]*(1-opacity[:, None])+color
+            alpha[index] = alpha[index]*(1-opacity)+opacity
     return affected, paint

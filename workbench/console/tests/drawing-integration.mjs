@@ -786,9 +786,104 @@ try{
   await page.screenshot({path:path.join(data,'shape-tools.png')});
   await page.reload();
   await canvas.waitFor();
-  assert.equal(shapes(await api(projectRoute))[0].rotation,30);
-  assert.deepEqual(pageErrors,[]);
+  const reopenedShapes=await api(projectRoute);
+  assert.equal(shapes(reopenedShapes)[0].rotation,30);
   console.log('PASS editable shape layers, rounded stroke, Shift square, Alt-centered ellipse, recolor, transform and reopen');
+
+  const alphaDoc='alpha-document',alphaLayer='alpha-layer';
+  await api(paintRoute+'/commands',{revision:reopenedShapes.revision,operations:[
+    {op:'image',action:'create',documentId:alphaDoc,patch:{name:'透明度锁定验收'}},
+    {op:'image',action:'addLayer',documentId:alphaDoc,layerId:alphaLayer,kind:'pixel',patch:{name:'半透明图层'}},
+    {op:'image',action:'stroke',documentId:alphaDoc,layerId:alphaLayer,target:'pixels',
+      stroke:{uv:true,rect:[.15,.2,.4,.8],opacity:.5,color:'#213a67',erase:false}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(alphaDoc,{force:true});
+  await page.getByRole('button',{name:'半透明图层',exact:true}).click();
+  const lockAlpha=page.getByRole('button',{name:'锁定透明像素',exact:true});
+  await lockAlpha.click();
+  const alphaState=current=>current.paint.imageDocuments[alphaDoc].layers[0];
+  const lockedAlpha=await until(async()=>{
+    const current=await api(projectRoute);
+    return alphaState(current).alphaLocked&&current;
+  },'启用像素透明度锁');
+  await until(()=>lockAlpha.isEnabled(),'透明度锁保存完成');
+  assert.equal(await eraserTool.isDisabled(),true);
+  await editor.getByLabel('图像前景色',{exact:true}).fill('#ed522b');
+  await canvas.focus();
+  await page.keyboard.press('Alt+Backspace');
+  const recoloredAlpha=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>lockedAlpha.revision&&alphaState(current).strokes.at(-1).preserveAlpha&&current;
+  },'填充整层但保留每个像素的透明度');
+  const alphaSamples=[xy(.25,.5),xy(.7,.5)];
+  assert.deepEqual(rgba(await imagePng('locked-alpha.png',recoloredAlpha.revision,alphaDoc),alphaSamples)[1],
+    [[237,82,43,128],[0,0,0,0]]);
+  await lockAlpha.click();
+  const unlockedAlpha=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>recoloredAlpha.revision&&alphaState(current).alphaLocked===false&&current;
+  },'解除透明度锁');
+  assert.deepEqual(rgba(await imagePng('unlocked-alpha.png',unlockedAlpha.revision,alphaDoc),alphaSamples)[1],
+    [[237,82,43,128],[0,0,0,0]]);
+  assert.equal(alphaState(unlockedAlpha).strokes.at(-1).preserveAlpha,true);
+  console.log('PASS alpha lock UI, preserved translucent pixels, blocked eraser and historical lock after unlock');
+
+  const importDoc='drawing-import';
+  const importSeed=await api(paintRoute+'/commands',{revision:unlockedAlpha.revision,operations:[
+    {op:'image',action:'create',documentId:importDoc,patch:{name:'图片导入验收'}}
+  ]});
+  const jpeg=path.join(data,'photo.jpg'),webp=path.join(data,'transparent.webp');
+  execFileSync(pythonExecutable(),['-c',[
+    'from PIL import Image','import sys',
+    'photo=Image.new("RGB",(312,196),(56,111,174))','exif=photo.getexif();exif[274]=6',
+    'photo.save(sys.argv[1],quality=99,exif=exif)',
+    'Image.new("RGBA",(96,64),(204,109,43,143)).save(sys.argv[2],lossless=True)'
+  ].join('\n'),jpeg,webp]);
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(importDoc,{force:true});
+  const importButton=editor.getByRole('button',{name:'导入图片至画布',exact:true});
+  const [fileChooser]=await Promise.all([page.waitForEvent('filechooser'),importButton.click()]);
+  await fileChooser.setFiles(jpeg);
+  const importedLayers=current=>current.paint.imageDocuments[importDoc].layers;
+  const importedPhoto=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>importSeed.revision&&importedLayers(current).length===1&&current;
+  },'用图片按钮导入 JPEG');
+  const photoLayer=importedLayers(importedPhoto)[0],photoAsset=importedPhoto.paint.assets[photoLayer.asset];
+  assert.deepEqual([photoAsset.width,photoAsset.height],[196,312]);
+  assert.equal(photoLayer.scale,312/4096);
+  assert.equal(photoLayer.name,'photo.png');
+  await until(()=>importButton.isEnabled(),'JPEG 导入完成');
+  const at=await point([.72,.32]),webpBytes=[...await fs.readFile(webp)];
+  const transfer=await page.evaluateHandle(bytes=>{
+    const data=new DataTransfer();
+    data.items.add(new File([new Uint8Array(bytes)],'transparent.webp',{type:'image/webp'}));
+    return data;
+  },webpBytes);
+  await canvas.dispatchEvent('drop',{dataTransfer:transfer,clientX:at[0],clientY:at[1]});
+  await transfer.dispose();
+  const importedWebp=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>importedPhoto.revision&&importedLayers(current).length===2&&current;
+  },'拖入保留透明度的 WebP');
+  const webpLayer=importedLayers(importedWebp)[1],webpAsset=importedWebp.paint.assets[webpLayer.asset];
+  assert.deepEqual([webpAsset.width,webpAsset.height],[96,64]);
+  assert.equal(webpLayer.scale,96/4096);
+  assert.ok(Math.abs(webpLayer.x-.72)<.005&&Math.abs(webpLayer.y-.32)<.005);
+  const [,inputPixels]=rgba(await imagePng('imported-images.png',importedWebp.revision,importDoc),
+    [xy(.5,.5),xy(webpLayer.x,webpLayer.y)]);
+  assert.ok(inputPixels[0].slice(0,3).every((channel,i)=>Math.abs(channel-[56,111,174][i])<=2));
+  assert.equal(inputPixels[0][3],255);
+  assert.ok(inputPixels[1].slice(0,3).every((channel,i)=>Math.abs(channel-[204,109,43][i])<=1));
+  assert.equal(inputPixels[1][3],143);
+  await page.reload();
+  await canvas.waitFor();
+  assert.equal(importedLayers(await api(projectRoute)).length,2);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS JPEG chooser and EXIF orientation, WebP drag and drop, original pixel size and preserved alpha');
 }catch(error){
   console.error(logs);
   throw error;

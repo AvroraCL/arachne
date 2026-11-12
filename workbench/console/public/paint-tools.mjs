@@ -208,7 +208,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
        uvHost.dataset.selectionTool&&uvHost.dataset.selectionTool!=='none')$('surface-orbit').setAttribute('aria-pressed','false');
     $('surface-paint').disabled=!writable||layer.kind!=='paint'&&!state.maskTarget;
     const erasing=brushMode()&&$('brush-erase').checked;
-    $('uv-eraser-tool').disabled=!writable||layer.kind!=='paint'&&!state.maskTarget;
+    $('uv-eraser-tool').disabled=!writable||!state.maskTarget&&(layer.kind!=='paint'||drawingBrush&&!!layer.alphaLocked);
     $('uv-eraser-tool').setAttribute('aria-pressed',String(erasing));
     if(uvEnabled&&erasing)for(const id of ['surface-paint','surface-mask'])$(id).setAttribute('aria-pressed','false');
     $('surface-sample').hidden=(!sampleAnyLayer&&layer?.kind!=='paint')||state.maskTarget;
@@ -328,7 +328,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     const target=pixelBrush()?'material':'mask',params=strokeInk(state.layer,target,state);
     if(!params)return;
     const isDrawing=uv&&drawingBrush;
-    if(isDrawing&&amount(opacity)===0)return;
+    if(isDrawing&&(amount(opacity)===0||target==='material'&&params.erase&&state.layer.alphaLocked))return;
     const clone=mode==='clone'?cloneTool()?.prepare(uvPoint(event.clientX,event.clientY),state):null;
     if(mode==='clone'&&!clone)return;
     const clip=uv?uvClip():null;

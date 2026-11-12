@@ -6,6 +6,21 @@ import {imageDocumentInput} from '../paint.mjs';
 import {newImageAdjustment,checkImageAdjustment,imageBlendModes} from '../public/image-adjustments.mjs';
 const defaults=()=>({layers:[],assets:{}}),options={requireUnlocked:()=>{}},checks={checkStroke:s=>{assert.equal(s.uv,true);assert.ok(s.rect||s.stamps);},checkedUVTransform:t=>assert.ok(t.rect)};
 const edit=(paint,action,extra={})=>imageDocumentOperation(paint,{op:'image',documentId:'doc',action,...extra},options);
+test('alpha locking is recorded per pixel stroke without restricting independent mask edits',()=>{
+ const paint=defaults(),layerId='pixels',stroke={uv:true,rect:[0,0,1,1],opacity:1,color:'#114477',erase:false};
+ edit(paint,'create');
+ edit(paint,'addLayer',{layerId,kind:'pixel',patch:{alphaLocked:true}});
+ edit(paint,'stroke',{layerId,target:'pixels',stroke});
+ edit(paint,'stroke',{layerId,target:'mask',stroke:{uv:true,rect:[0,0,1,1],opacity:1,value:.5}});
+ assert.throws(()=>edit(paint,'stroke',{layerId,target:'pixels',stroke:{...stroke,erase:true}}),/解锁透明像素/);
+ assert.throws(()=>edit(paint,'clear',{layerId,rect:stroke.rect}),/解锁透明像素/);
+ edit(paint,'updateLayer',{layerId,patch:{alphaLocked:false}});
+ edit(paint,'stroke',{layerId,target:'pixels',stroke});
+ const layer=paint.imageDocuments.doc.layers[0];
+ assert.deepEqual(layer.strokes.map(item=>item.preserveAlpha),[true,undefined]);
+ assert.equal(layer.maskStrokes[0].preserveAlpha,undefined);
+ validateImageDocuments(paint,checks);
+});
 test('clipping groups follow adjacent layers and hidden bases cannot clip against another visible layer',()=>{
  const paint=defaults();
  edit(paint,'create');

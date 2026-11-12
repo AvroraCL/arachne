@@ -133,13 +133,13 @@ function checkStroke(s,isMask,image=false){
   const validInk=stroke=>isMask?unit(stroke.value):
     channelFlags(stroke.channels)&&materialValues(stroke.values)&&typeof stroke.erase==='boolean';
   if(s?.rect!==undefined){
-    fields(s,['uv','rect',...uvShapeFields,'opacity',...inkFields]);
+    fields(s,['uv','rect',...uvShapeFields,'opacity',...inkFields,...(image?['preserveAlpha']:[])]);
     if(s.uv!==true||!validUVRect(s.rect)||!validUVSelection(s,s.rect)||!unit(s.opacity)||!validInk(s))
       throw Error('选区填充参数无效');
     return;
   }
   fields(s,['radius','hardness','opacity','stamps','mirrorX','uv','clip',...uvShapeFields,'surfaceBinding',...inkFields,
-    ...(image?['flow','spacing','breaks','clone']:[])]);
+    ...(image?['flow','spacing','breaks','clone','preserveAlpha']:[])]);
   const uv=s.uv===true;
   const brushPath=s.flow!==undefined||s.spacing!==undefined||s.breaks!==undefined;
   if((s.uv!==undefined&&!uv)||(uv&&s.mirrorX!==undefined)||

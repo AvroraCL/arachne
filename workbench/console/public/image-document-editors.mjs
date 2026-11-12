@@ -1,4 +1,5 @@
-import {copyImagePixels,copiedImage,onImageClipboardChange,imageClipboardPlacement,clipboardPngSize} from './image-clipboard.mjs';
+import {copyImagePixels,copiedImage,onImageClipboardChange,imageClipboardPlacement} from './image-clipboard.mjs';
+import {drawingImageTypes,acceptsDrawingImage,prepareDrawingImage} from './drawing-image-import.mjs';
 import {headerControls,chromeButton,createContextActions} from './area-chrome.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
@@ -74,14 +75,24 @@ export function createDocumentEditor(ctx,bridge){
     destination.value=previous||linked?.id||'';syncSelectMenu(destination);
   }
   const copy=button('复制图像选区',()=>copySelection()),paste=button('粘贴为图像层',pasteSelection);
+  const importInput=el('input');
+  importInput.type='file';importInput.accept=drawingImageTypes;importInput.hidden=true;
+  importInput.setAttribute('aria-label','选择要导入的图片');
+  const importButton=chromeButton(button('导入图片至画布',()=>importInput.click()),'importImage');
+  importButton.title='导入 PNG、JPEG 或 WebP 至当前画布';
+  importInput.onchange=()=>{
+    const file=importInput.files[0];
+    importInput.value='';
+    if(file)importFile(file);
+  };
   const download=chromeButton(button('导出当前贴图 PNG',downloadDocument),'download');
   download.classList.add('document-export-button');
   download.title='导出当前贴图 · 4096 × 4096 PNG';
   chromeButton(copy,'copy');chromeButton(paste,'paste');
   copy.title='复制图像选区 · ⌘ / Ctrl + C';paste.title='粘贴为图像层 · ⌘ / Ctrl + V';
-  copy.disabled=paste.disabled=download.disabled=true;
-  let copying=false,exportRequest=null;
-  header.append(picker,create,channel,destination,bind,copy,paste,download);headerControls(ctx,header);
+  copy.disabled=paste.disabled=importButton.disabled=download.disabled=true;
+  let copying=false,importing=false,exportRequest=null;
+  header.append(picker,create,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const parameters=el('div','document-tool-parameters'),viewOptions=el('div','document-view-options');
   const rail=el('aside','document-tools'),stage=el('div','editor-image-stage document-image-stage'),canvas=el('canvas'),empty=el('div','document-empty'),status=el('output','editor-message');
@@ -107,7 +118,7 @@ export function createDocumentEditor(ctx,bridge){
   controls.bar.classList.add('document-brush-options');
   parameters.append(controls.bar);
   options.append(toolName,parameters,viewOptions);
-  host.classList.add('document-editor');host.append(options,rail,stage,status);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
+  host.classList.add('document-editor');host.append(options,rail,stage,status,importInput);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
   let mode=state.tool||'orbit',selectionShape=Object.hasOwn(selectionNames,state.selectionTool)?state.selectionTool:'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
   let painter,gradientTool,bucketTool,cloneTool,shapeTool,pendingImageEdit=null,previewCaption='',fillGroup=state.fillGroup==='bucket'?'bucket':'gradient';
   function extent(){return Math.max(1,Math.min(stage.clientWidth,stage.clientHeight)-48);}
@@ -127,7 +138,7 @@ export function createDocumentEditor(ctx,bridge){
   const imageOrigin=()=>({id:project.document?.id,revision:project.document?.revision,imageDocumentId:project.imageContext?.documentId});
   const mapOperation=(op,origin)=>op?surfaceToImageCommand(op,origin?.imageDocumentId||project.imageContext?.documentId):null;
   function draft(op,origin){const mapped=mapOperation(op,origin);live.update(mapped);project.draft(mapped);}
-  const writing=()=>bridge.busy()||!!pendingImageEdit||strokeQueue.saving;
+  const writing=()=>bridge.busy()||!!pendingImageEdit||strokeQueue.saving||importing;
   function submitEdit(operation,origin,onSaved){
     const task=(async()=>{
       try{
@@ -198,7 +209,7 @@ export function createDocumentEditor(ctx,bridge){
   status.onclick=()=>{if(stage.dataset.previewPhase==='error')live.retryDetail();};status.onkeydown=event=>{if(stage.dataset.previewPhase==='error'&&['Enter',' '].includes(event.key)){event.preventDefault();event.stopPropagation();live.retryDetail();}};
   function brushContext(){
     const layer=currentLayer(project),origin=imageOrigin(),maskTarget=project.imageContext?.target==='mask';
-    const busy=!!pendingImageEdit||bridge.busy()&&!strokeQueue.saving||!strokeQueue.accepts(imageSelectionOrigin(project));
+    const busy=!!pendingImageEdit||importing||bridge.busy()&&!strokeQueue.saving||!strokeQueue.accepts(imageSelectionOrigin(project));
     return {...origin,busy,enabled:false,uvEnabled:!!layer&&!busy,brushColor:bridge.foreground(),
       maskValue:maskTarget&&elements['brush-erase'].checked?maskGray(bridge.colorPair('mask').background):bridge.maskInk(),maskTarget,
       layer:layer?{...layer,kind:layer.kind==='pixel'?'paint':'image',channels:{color:true,metallic:false,roughness:false},
@@ -262,8 +273,9 @@ export function createDocumentEditor(ctx,bridge){
       const image=asset?{x:layer.x,y:layer.y,scale:layer.scale,rotation:layer.rotation,
         stretch:layer.stretch,size:[asset.width,asset.height]}:null;
       return {...origin,id:layer?.id,projectId:origin.id,active:!!currentDocument(project),interactive:!drawingGesture()&&!nav,image,
-        canTransform:editable&&pixels&&(!!image||layer.kind==='pixel'&&!!layer.strokes?.length),
-        canClear:editable&&pixels&&layer.kind==='pixel',canFillMaterial:editable&&pixels&&layer.kind==='pixel',canFillMask:editable};
+        canTransform:editable&&pixels&&(!!image||layer.kind==='pixel'&&!layer.alphaLocked&&!!layer.strokes?.length),
+        canClear:editable&&pixels&&layer.kind==='pixel'&&!layer.alphaLocked,
+        canFillMaterial:editable&&pixels&&layer.kind==='pixel',canFillMask:editable};
     },
     activate:()=>{setMode('select');return true;},onTransformState:syncToolName,selectionMode:state.selectionMode,selectionFeather:state.selectionFeather,onMode:ctx.onChange,onError:ctx.error,
     preview:op=>draft(op),commit:(op,origin)=>save(op,{...origin,id:origin.projectId}),
@@ -392,6 +404,8 @@ export function createDocumentEditor(ctx,bridge){
   function syncClipboard(){
     copy.disabled=!canCopy();paste.disabled=!canPaste()||!copiedImage();
     copy.setAttribute('aria-busy',String(copying));
+    importButton.disabled=!canPaste();
+    importButton.setAttribute('aria-busy',String(importing));
     download.disabled=!canPaste()||!!exportRequest;
     download.setAttribute('aria-busy',String(!!exportRequest));
     download.title=exportRequest?'正在导出 4K PNG…':'导出当前贴图 · 4096 × 4096 PNG';
@@ -436,13 +450,20 @@ export function createDocumentEditor(ctx,bridge){
     return true;
   }
   function importFile(file,position,pixelSize=false){
+    if(!canPaste())return;
     const origin=imageSelectionOrigin(project),layerId=crypto.randomUUID();
+    importing=true;
+    syncClipboard();
     void run(async()=>{
       if(!origin.documentId)throw Error('请先新建贴图');
-      const placement=pixelSize?imageClipboardPlacement(...await clipboardPngSize(file)):position;
-      await bridge.importDocumentAsset(file,origin,layerId,placement);
+      const prepared=await prepareDrawingImage(file);
+      if(disposed)return;
+      const [width,height]=prepared.size;
+      const placement=position?.scale!==undefined?position:imageClipboardPlacement(width,height,position&&[position.x,position.y]);
+      if(!pixelSize&&position?.scale===undefined)placement.scale=Math.min(1,placement.scale);
+      await bridge.importDocumentAsset(prepared.file,origin,layerId,placement);
       if(!disposed)selectAddedLayer(project,origin,layerId);
-    });
+    }).finally(()=>{importing=false;if(!disposed)sync();});
   }
   function pasteSelection(){
     const entry=copiedImage();
@@ -460,7 +481,8 @@ export function createDocumentEditor(ctx,bridge){
   },{signal});
   host.addEventListener('paste',event=>{
     if(event.target.closest('input,textarea,[contenteditable]')||!canPaste())return;
-    const file=[...event.clipboardData?.items||[]].find(item=>item.type==='image/png')?.getAsFile();
+    const file=[...event.clipboardData?.items||[]].filter(item=>item.kind==='file')
+      .map(item=>item.getAsFile()).find(acceptsDrawingImage);
     if(file){event.preventDefault();event.stopPropagation();importFile(file,undefined,true);}
     else if(!event.clipboardData?.types.length&&pasteSelection()){event.preventDefault();event.stopPropagation();}
   },{signal});
@@ -479,7 +501,11 @@ export function createDocumentEditor(ctx,bridge){
     event.preventDefault();event.stopPropagation();const position=dropPosition(event);
     if(!currentDocument(project)){ctx.error(Error('请先新建贴图'));return;}
     if(!position){ctx.error(Error('请将图片放到画布内'));return;}
-    if(transfer.types.includes('Files')){const files=[...transfer.files],file=files[0];if(files.length!==1||!(file.type==='image/png'||!file.type&&/\.png$/i.test(file.name))){ctx.error(Error('每次可拖入一张 PNG 图片'));return;}importFile(file,position);return;}
+    if(transfer.types.includes('Files')){
+      const files=[...transfer.files],file=files[0];
+      if(files.length!==1||!acceptsDrawingImage(file)){ctx.error(Error('每次可拖入一张 PNG、JPEG 或 WebP 图片'));return;}
+      importFile(file,position);return;
+    }
     const dragged=readAssetDrag(transfer,project.document);if(!dragged){ctx.error(Error('素材所属工程或修订已变化，请重新拖动'));return;}
     const origin=imageSelectionOrigin(project),name=project.document.paint.assets[dragged.id].name;void run(()=>addImageAsset(project,origin,dragged.id,name,position));
   },{signal});
@@ -504,11 +530,11 @@ export function createDocumentEditor(ctx,bridge){
       else if(key==='i'){
         const layer=currentLayer(project);
         handled=project.imageContext?.target==='mask'&&hasImageLayerMask(layer)&&!layer.locked&&
-          (!!pendingImageEdit||!bridge.busy())&&!selection.isTransforming();
+          (!!pendingImageEdit||strokeQueue.saving||!bridge.busy())&&!selection.isTransforming();
         if(handled){
-          const origin=imageSelectionOrigin(project),previous=pendingImageEdit;
+          const origin=imageSelectionOrigin(project),previous=pendingImageEdit,strokes=strokeQueue.flush();
           void run(async()=>{
-            if((previous&&!await previous)||disposed)return;
+            if((previous&&!await previous)||!await strokes||disposed)return;
             const current=imageSelectionOrigin(project);
             if(current.id!==origin.id||current.documentId!==origin.documentId||current.layerId!==origin.layerId||current.target!=='mask')return;
             await submitEdit({op:'image',action:'invertMask',documentId:current.documentId,layerId:current.layerId},current);
@@ -595,7 +621,7 @@ export function createDocumentEditor(ctx,bridge){
     picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||writing();gradientButton.disabled=!image||writing()||c?.target==='mask'&&!!layer?.locked;bucketButton.disabled=cloneButton.disabled=!canPaintPixels();shapeButton.disabled=!canCreateShape();bucketTool.sync();cloneTool.layout();shapeTool.sync();empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();syncStrokePreview();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
     canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
     getSelection(origin){return shown&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&
       !selection.isDragging()&&!selection.isTransforming()?selection.clip():null;},
@@ -911,6 +937,8 @@ export function createImagePanel(type,ctx){
       copy,
       {label:item.visible?'隐藏':'显示',icon:item.visible?'hidden':'eye',run:update({visible:!item.visible})},
       {label:item.locked?'解锁':'锁定',icon:item.locked?'unlock':'lock',run:update({locked:!item.locked})},
+      ...(item.kind==='pixel'?[{label:item.alphaLocked?'解锁透明像素':'锁定透明像素',icon:'alphaLock',
+        enabled:editable,run:update({alphaLocked:!item.alphaLocked})}]:[]),
       null,up,down,null,
       {label:item.clipped?'释放剪贴蒙版':'创建剪贴蒙版',icon:'clippingMask',shortcut:'⌥⌘G',
         enabled:editable&&!!imageClippingBase(layers,index),
@@ -1217,6 +1245,14 @@ export function createImagePanel(type,ctx){
       blend.disabled=!canEdit;
       controls.append(blend);
       addControl(controls,'不透明度','number',Math.round((layer?.opacity??1)*100),value=>command(project,{action:'updateLayer',layerId:layer.id,patch:{opacity:value/100}}),{min:0,max:100,disabled:!canEdit});
+      const alphaLock=chromeButton(button('锁定透明像素',()=>{
+        const origin=imageSelectionOrigin(project);
+        void run(()=>commandAt(project,origin,{action:'updateLayer',layerId:layer.id,patch:{alphaLocked:!layer.alphaLocked}}));
+      }),'alphaLock');
+      alphaLock.disabled=!canEdit||layer?.kind!=='pixel';
+      alphaLock.setAttribute('aria-pressed',String(!!layer?.alphaLocked));
+      alphaLock.classList.add('document-alpha-lock');
+      controls.append(alphaLock);
       if(bar)bar.replaceWith(controls);
       else body.replaceChildren(controls,message,rowsHost);
       bar=controls;

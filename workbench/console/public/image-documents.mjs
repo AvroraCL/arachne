@@ -7,7 +7,7 @@ const record=o=>o&&typeof o==='object'&&!Array.isArray(o),id=s=>typeof s==='stri
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
 const ink=s=>typeof s==='string'&&/^#[a-f\d]{6}$/i.test(s);
-const layerFields=['name','visible','locked','opacity','blend','maskEnabled','maskBase','maskGradient','asset','x','y','scale','rotation','stretch','gradient','adjustment','clipped','shape'];
+const layerFields=['name','visible','locked','alphaLocked','opacity','blend','maskEnabled','maskBase','maskGradient','asset','x','y','scale','rotation','stretch','gradient','adjustment','clipped','shape'];
 const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层',shape:'形状层'};
 const pair=(values,check)=>Array.isArray(values)&&values.length===2&&values.every(check);
 function checkGradient(gradient,checkStroke,mask=false){
@@ -83,6 +83,8 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
       if(!exact(layer,['id','kind',...layerFields,'strokes','maskStrokes','text'])||!id(layer.id)||ids.has(layer.id)||typeof layer.kind!=='string'||!Object.hasOwn(layerNames,layer.kind)||!label(layer.name)||typeof layer.visible!=='boolean'||typeof layer.locked!=='boolean'||!unit(layer.opacity)||!imageBlendModes.includes(layer.blend)||typeof layer.maskEnabled!=='boolean'||!unit(layer.maskBase))throw Error('图像图层无效');
       if(layer.clipped!==undefined&&(typeof layer.clipped!=='boolean'||layer.clipped&&!imageClippingBase(doc.layers,index)))
         throw Error('剪贴蒙版需要下方的底层');
+      if(layer.alphaLocked!==undefined&&(layer.kind!=='pixel'||typeof layer.alphaLocked!=='boolean'))
+        throw Error('只有像素图层可以锁定透明度');
       ids.add(layer.id);
       if(layer.kind==='gradient')checkGradient(layer.gradient,checkStroke);
       else if(layer.gradient!==undefined)throw Error('请选择渐变填充层');
@@ -97,11 +99,13 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
         const strokes=layer[field]??[];if(!Array.isArray(strokes)||strokes.length>400||field==='strokes'&&layer.kind!=='pixel'&&strokes.length)throw Error('图像笔触无效');
         for(const stroke of strokes){
           if(!record(stroke))throw Error('图像笔触无效');
+          if(stroke.preserveAlpha!==undefined&&(stroke.preserveAlpha!==true||mask||stroke.erase!==false))
+            throw Error('锁定透明度的笔触无效');
           if(stroke.transformUV){if(!exact(stroke,['transformUV'])||mask)throw Error('图像变换无效');checkedUVTransform(stroke.transformUV);}
           else if(stroke.clearUV){if(!exact(stroke,['clearUV',...uvShapeFields])||mask)throw Error('图像清除无效');checkStroke({uv:true,rect:stroke.clearUV,...uvShapePayload(stroke),opacity:1,value:0},true);}
           else if(stroke.flood!==undefined){
             const fill=stroke.flood;
-            if(mask||!exact(stroke,['uv','flood','opacity','clip',...uvShapeFields,'color','erase'])||
+            if(mask||!exact(stroke,['uv','flood','opacity','clip',...uvShapeFields,'color','erase','preserveAlpha'])||
               stroke.uv!==true||stroke.erase!==false||!ink(stroke.color)||!unit(stroke.opacity)||
               !exact(fill,['point','tolerance','contiguous'])||!pair(fill.point,unit)||
               !Number.isInteger(fill.tolerance)||fill.tolerance<0||fill.tolerance>255||typeof fill.contiguous!=='boolean')
@@ -110,7 +114,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
               checkStroke({uv:true,rect:stroke.clip,...uvShapePayload(stroke),opacity:1,value:0},true);
           }
           else{
-            const keys=['uv','radius','hardness','opacity','flow','spacing','stamps','breaks','clone','clip',...uvShapeFields,'rect',...(mask?['value']:['color','erase'])];
+            const keys=['uv','radius','hardness','opacity','flow','spacing','stamps','breaks','clone','clip',...uvShapeFields,'rect',...(mask?['value']:['color','erase','preserveAlpha'])];
             if(!exact(stroke,keys)||stroke.uv!==true||!mask&&!ink(stroke.color))throw Error('图像只接受二维 RGB 笔触');
             if(stroke.clone!==undefined&&(mask||stroke.rect!==undefined||stroke.erase!==false||
               !exact(stroke.clone,['offset'])||!pair(stroke.clone.offset,n=>Number.isFinite(n)&&n>=-1&&n<=1)))
@@ -241,8 +245,17 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
   }
   else if(o.action==='stroke'){
     if(!['pixels','mask'].includes(o.target)||o.target==='pixels'&&layer.kind!=='pixel')throw Error('请在像素层或蒙版上绘制');
-    const key=o.target==='mask'?'maskStrokes':'strokes';if(o.target==='mask')layer.maskEnabled=true;(layer[key]??=[]).push(structuredClone(o.stroke));
+    if(!record(o.stroke)||Object.hasOwn(o.stroke,'preserveAlpha'))throw Error('图像笔触参数无效');
+    const stroke=structuredClone(o.stroke),mask=o.target==='mask';
+    if(mask)layer.maskEnabled=true;
+    else if(layer.alphaLocked){
+      if(stroke.erase)throw Error('请先解锁透明像素再擦除');
+      stroke.preserveAlpha=true;
+    }
+    (layer[mask?'maskStrokes':'strokes']??=[]).push(stroke);
   }else if(o.action==='transform'||o.action==='clear'){
-    if(layer.kind!=='pixel')throw Error('请选择像素层');(layer.strokes??=[]).push(o.action==='transform'?{transformUV:structuredClone(o.transform)}:{clearUV:o.rect,...uvShapePayload(o)});
+    if(layer.kind!=='pixel')throw Error('请选择像素层');
+    if(layer.alphaLocked)throw Error('请先解锁透明像素再清除或变换');
+    (layer.strokes??=[]).push(o.action==='transform'?{transformUV:structuredClone(o.transform)}:{clearUV:o.rect,...uvShapePayload(o)});
   }else throw Error('不支持的图像命令');
 }
