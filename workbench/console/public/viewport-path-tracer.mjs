@@ -19,6 +19,7 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
       delete host.dataset.renderPhase;
       delete host.dataset.renderBackend;
       delete host.dataset.renderSamples;
+      delete host.dataset.renderResolution;
     }else{
       host.dataset.renderBackend='path-tracer';
       host.dataset.renderPhase=phase;
@@ -232,7 +233,10 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
         engine.pausePathTracing=engine.samples>=target;
         present();
         const samples=Math.floor(engine.samples);
-        publish(samples>=target?'ready':'sampling',`路径追踪 · ${samples} / ${target} 采样`,samples);
+        const resolution=`${engine.target.width} × ${engine.target.height}`;
+        host.dataset.renderResolution=resolution;
+        if(engine.isCompiling&&samples===0)publish('loading','路径追踪 · 正在编译着色器');
+        else publish(samples>=target?'ready':'sampling',`路径追踪 · ${resolution} · ${samples} / ${target} 采样`,samples);
         if(engine.samples<target)accumulate();
         return samples>=1;
       }catch(error){fail(error);return false;}
