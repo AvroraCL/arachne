@@ -111,8 +111,9 @@ function renderDrawingLayerSettings(){
     blend.dataset.channel=blendChannel;
     blend.replaceChildren(...channelBlendChoices(blendChannel).map(([value,label])=>new Option(label,value)));
   }
-  blend.title=channelSpecs[blendChannel].name+'混合';
-  opacity.title=channel?channelSpecs[channel].name+'不透明度':'整层不透明度';
+  const inactive=channel&&item&&!item.channels?.[channel]?' · 当前图层未启用':'';
+  blend.title=channelSpecs[blendChannel].name+'混合'+inactive;
+  opacity.title=(channel?channelSpecs[channel].name+'不透明度':'整层不透明度')+inactive;
   if(!busy&&blend.value!==blendMode)setSelectValue(blend,blendMode);
   else syncSelectMenu(blend);
   if(!busy&&document.activeElement!==opacity&&!$('drawing-opacity-label').classList.contains('scrubbing'))
@@ -1066,10 +1067,13 @@ function renderLayer(l,depth,channel,filtering){
     else thumbnail.style.background=l.values.color;
     const title=element('span',l.name);title.className='layer-title';
     node.append(thumbnail,title,element('small',l.visible?'':'隐藏'));
-    node.title='双击名称重命名 · ⌘ 多选 · Shift 连续选择';
+    node.title=channel
+      ?(l.channels?.[channel]?names[channel]+' · '+Number(((l.channelOpacity?.[channel]??1)*100).toFixed(2))+'%':names[channel]+' · 未启用')
+      :'双击名称重命名 · ⌘ / Ctrl 多选 · Shift 连续选择';
     const row=element('div');row.className='layer-row';row.dataset.layerId=l.id;
     row.style.setProperty('--layer-depth',depth);
     row.toggleAttribute('data-inherited-hidden',l.visible&&!layerIsVisible(doc.paint.layers,l));
+    row.toggleAttribute('data-channel-inactive',!!channel&&!folder&&!l.channels?.[channel]);
     row.toggleAttribute('data-locked',!!owner);
     const visibility=localButton('',event=>{
       if(event.altKey){toggleLayerIsolation(l);return;}
@@ -1133,21 +1137,6 @@ function renderLayer(l,depth,channel,filtering){
     }
     if(hasMask)maskButton.setAttribute('aria-pressed',String(paintTarget==='mask'&&selected===l.id));
     row.append(maskButton);
-    if(channel){
-      row.dataset.channel=channel;
-      const opacity=element('input');
-      const label=l.name+' · '+names[channel]+'不透明度 (%)';
-      Object.assign(opacity,{className:'layer-opacity',type:'number',min:0,max:100,step:'any',
-        disabled:!!owner||!l.channels[channel],value:l.channels[channel]?Number(((l.channelOpacity?.[channel]??1)*100).toFixed(3)):'',title:label});
-      opacity.setAttribute('aria-label',label);
-      opacity.onchange=()=>void run(()=>{
-        if(!opacity.validity.valid||!Number.isFinite(opacity.valueAsNumber)){
-          renderLayers();throw Error('通道不透明度须为 0 至 100%');
-        }
-        return command([{op:'update',id:l.id,patch:{channelOpacity:{...l.channelOpacity,[channel]:opacity.valueAsNumber/100}}}]);
-      });
-      row.append(opacity);
-    }
     return row;
 }
 function isLayerUnder(layer,folder){

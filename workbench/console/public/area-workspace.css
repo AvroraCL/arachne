@@ -221,7 +221,6 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .area-header #add-folder{width:27px;min-width:27px;padding:4px}
 .modular-workspace #layers{gap:2px;margin:5px 0}
 .modular-workspace #layers .layer-row{min-height:36px;grid-template-columns:24px minmax(0,1fr) 22px 32px;gap:3px}
-.modular-workspace #layers .layer-row[data-channel]{grid-template-columns:24px minmax(0,1fr) 22px 32px 48px}
 .modular-workspace #layers .layer-select{min-height:36px;gap:7px;padding:3px 5px;border-radius:3px;background:transparent}
 .modular-workspace #layers .layer-select[aria-pressed=true]{background:#414141;border-color:#5b5b5b}
 .modular-workspace #layers :is(.layer-mask,.layer-visibility,.layer-lock,.layer-disclosure){min-height:32px;padding:2px}

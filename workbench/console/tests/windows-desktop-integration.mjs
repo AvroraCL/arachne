@@ -190,8 +190,10 @@ try{
   });
   assert.match(await Promise.race([desktop.evaluate(()=>globalThis.arachneQuitPrompt),
     delay(10000,undefined,{ref:false})]),/后台任务/);
-  const cancelled=await page.request.post(origin+'/api/projects/'+seedId+'/jobs/'+taskId+'/cancel',{headers:{Origin:origin}});
-  assert.equal(cancelled.status(),200);
+  const cancelled=await page.request.post(origin+'/api/projects/'+seedId+'/jobs/'+taskId+'/cancel',{
+    headers:{Origin:origin},data:{}
+  });
+  assert.equal(cancelled.status(),200,cancelled.ok()?'':await cancelled.text());
   await waitFor(async()=> (await read('/api/desktop-activity')).state==='ready','renderer cleanup');
   console.log('PASS native quit checks active jobs in other projects');
   const bounds=await desktop.evaluate(({BrowserWindow,screen})=>{
