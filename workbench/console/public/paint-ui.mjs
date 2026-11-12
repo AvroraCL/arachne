@@ -3,6 +3,7 @@ import {compositionKey} from './text-input.mjs';
 import {connectDesktopSettings} from './paint-desktop-settings.mjs';
 import {setupProjectFiles} from './paint-project-files.mjs';
 import {textureExportPresets} from './texture-export-presets.mjs';
+import {maskEffectLabels,maskEffectBlends,maskGeneratorFields,newMaskEffect} from './paint-mask-effects.mjs';
 import {setupTaskMonitor} from './paint-task-monitor.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {setupProjectWelcome} from './paint-project-welcome.mjs';
@@ -618,39 +619,36 @@ $('brush-ink').onchange=()=>{
   const value=$('brush-ink').value;
   if(value!=='custom')changePaintColors(()=>paintColors.set('mask',$('brush-erase').checked?'background':'foreground',value==='1'?'#ffffff':'#000000'),'mask');
 };
-const effectLabels={invert:'反相',levels:'色阶',height:'位置渐变',facing:'表面朝向'};
 const effectAxes=[['z','朝上'],['-z','朝下'],['x','X 正向'],['-x','X 负向'],['y','Y 正向'],['-y','Y 负向']];
-function newMaskEffect(kind){
-  const effect={kind,enabled:true,opacity:1};
-  if(kind==='levels')return {...effect,black:.15,white:.85,gamma:1};
-  if(kind==='height'||kind==='facing')
-    return {...effect,axis:'z',center:kind==='height'?.38:.7,feather:.25,blend:'multiply'};
-  return effect;
-}
 function renderMaskEffects(l,editTarget=edit){
   const effects=l.maskEffects||[],stack=element('fieldset');
   stack.className='property-material mask-effects';
   stack.append(element('legend','蒙版效果'));
-  stack.append(field('添加效果','select','',kind=>kind&&editTarget({maskEffects:[...effects,newMaskEffect(kind)]}),
-    {choices:[['','选择效果'],...Object.entries(effectLabels)]}));
-  if(effects.length)stack.append(element('small','按列表从上到下应用'));
+  if(effects.length<12)stack.append(field('添加效果','select','',kind=>kind&&editTarget({maskEffects:[...effects,newMaskEffect(kind)]}),
+    {choices:[['','选择效果'],...Object.entries(maskEffectLabels)]}));
   for(const [index,effect] of effects.entries()){
-    const section=element('section'),label=effectLabels[effect.kind];
+    const section=element('section'),label=maskEffectLabels[effect.kind];
     section.className='mask-effect';
     section.append(element('strong',label));
     const change=patch=>editTarget({maskEffects:effects.map((item,i)=>i===index?{...item,...patch}:item)});
-    section.append(field('启用'+label,'checkbox',effect.enabled,enabled=>change({enabled})),
-      field(label+'强度','number',effect.opacity,opacity=>change({opacity}),{min:0,max:1}));
-    if(effect.kind==='levels'){
+    section.append(field('启用'+label,'checkbox',effect.enabled,enabled=>change({enabled})));
+    if(effect.enabled) section.append(field(label+'强度','number',effect.opacity,opacity=>change({opacity}),{min:0,max:1}));
+    if(effect.enabled&&effect.kind==='levels'){
       for(const [key,name,min,max] of [['black','输入黑点',0,1],['white','输入白点',0,1],['gamma','中间调',.1,5]])
         section.append(field(name,'number',effect[key],value=>change({[key]:value}),{min,max}));
     }
-    if(effect.kind==='height'||effect.kind==='facing'){
+    if(effect.enabled&&['height','facing'].includes(effect.kind)){
       section.append(field(label+'方向','select',effect.axis,axis=>change({axis}),{choices:effectAxes}),
         field('阈值','number',effect.center,center=>change({center}),{min:0,max:1}),
-        field('过渡','number',effect.feather,feather=>change({feather}),{min:.01,max:1}),
-        field('合成','select',effect.blend,blend=>change({blend}),{choices:[['multiply','乘以已有蒙版'],['replace','替换已有蒙版']]}));
+        field('过渡','number',effect.feather,feather=>change({feather}),{min:.01,max:1}));
     }
+    if(effect.enabled&&Object.hasOwn(maskGeneratorFields,effect.kind)){
+      for(const {key,label,choices,min,max,step,dragSpeed} of maskGeneratorFields[effect.kind])
+        section.append(field(label,choices?'select':'number',effect[key],value=>change({[key]:value}),
+          choices?{choices}:{min,max,step,dragSpeed}));
+    }
+    if(effect.enabled&&effect.blend)
+      section.append(field(label+'合成','select',effect.blend,blend=>change({blend}),{choices:maskEffectBlends}));
     const actions=element('div');actions.className='bar';
     for(const [delta,text] of [[-1,'上移'],[1,'下移']]){
       const control=button(text,()=>{

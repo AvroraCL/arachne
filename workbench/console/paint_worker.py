@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from paint_surface import Surface, registered_surface
+from paint_mask_generators import edge_wear, surface_noise, smooth
 from material_graph import MaterialGraph
 from image_documents import document_pixels,composite_document,clipboard_png,png_bytes
 
@@ -242,6 +243,8 @@ def mask_values(mask, surface_mask, ids, u, v, base=1):
 def mask_effects(coverage, effects, generated, surface, ids):
     eligible = surface.allowed[ids]
     selected = ids[eligible]
+    if not len(selected):
+        return np.zeros_like(coverage) if generated else coverage
     previous = coverage[eligible]
     for effect in effects:
         kind = effect['kind']
@@ -250,6 +253,10 @@ def mask_effects(coverage, effects, generated, surface, ids):
         elif kind=='levels':
             black,white = effect['black'],effect['white']
             value = np.clip((previous-black)/(white-black),0,1)**(1/effect['gamma'])
+        elif kind=='edgeWear':
+            value = edge_wear(surface, selected, effect)
+        elif kind=='surfaceNoise':
+            value = surface_noise(surface, selected, effect)
         else:
             axis = 'xyz'.index(effect['axis'][-1])
             if kind=='height':
@@ -259,11 +266,9 @@ def mask_effects(coverage, effects, generated, surface, ids):
                 value = (surface.normals[surface.owner[selected],axis]+1)*.5
             if effect['axis'].startswith('-'):
                 value = 1-value
-            width = effect['feather']
-            value = np.clip((value-effect['center'])/width+.5,0,1)
-            value = value*value*(3-2*value)
-            if effect['blend']=='multiply':
-                value *= previous
+            value = smooth((value-effect['center'])/effect['feather']+.5)
+        if effect.get('blend')=='multiply':
+            value *= previous
         previous = previous*(1-effect['opacity'])+value*effect['opacity']
     coverage[eligible] = previous
     if generated:
@@ -328,7 +333,7 @@ def composite(cfg, step):
         surface_mask = surface.mask(layer.get('maskStrokes',[]),stroke_sample) if masking else None
         effects = [e for e in layer.get('maskEffects',[]) if e['enabled'] and e['opacity']] if masking else []
         mask_base = layer.get('maskBase',1) if masking else 1
-        generated = any(e['kind'] in ('height','facing') for e in effects)
+        generated = any(e['kind'] in ('height','facing','edgeWear','surfaceNoise') for e in effects)
         has_generator |= generated
         projector = layer.get('projector')
         projection_surface, reference_valid, reference_uv = reference_geometry(layer) if image is not None else (surface,valid,uv)

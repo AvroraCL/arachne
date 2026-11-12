@@ -4,6 +4,7 @@ import {imageStrokeQueueLimit} from './public/image-stroke-queue.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels,channelBlendChoices} from './public/paint-channels.mjs';
 import {checkedTexturePreset,textureExportPresets} from './public/texture-export-presets.mjs';
+import {maskGeneratorFields,maskEffectBlends} from './public/paint-mask-effects.mjs';
 import {validateLibraries,libraryOperation,compileLibraryMaterial} from './public/paint-library.mjs';
 import {compileMaterialGraph} from './public/material-graph.mjs';
 import {pinSurfaceInputs,validateSurfaceBindings} from './paint-surface-bindings.mjs';
@@ -84,6 +85,14 @@ function checkMaskEffects(effects){
       if(!['x','-x','y','-y','z','-z'].includes(effect.axis)||!unit(effect.center)||
          !ranged(effect.feather,.01,1)||!['replace','multiply'].includes(effect.blend))
         throw Error('几何蒙版参数无效');
+    }else if(Object.hasOwn(maskGeneratorFields,effect.kind)){
+      const specs=maskGeneratorFields[effect.kind];
+      fields(effect,[...common,'blend',...specs.map(spec=>spec.key)]);
+      if(!maskEffectBlends.some(([value])=>effect.blend===value)||specs.some(spec=>{
+        const value=effect[spec.key];
+        return spec.choices?!spec.choices.some(([choice])=>value===choice):
+          !ranged(value,spec.min,spec.max)||(spec.integer&&!Number.isInteger(value));
+      }))throw Error('几何蒙版生成器参数无效');
     }else throw Error('不支持的蒙版效果');
   }
 }
@@ -520,7 +529,7 @@ function paintBinding(doc){const model=modelFingerprint(doc);return model?crypto
 let compositorFingerprint;
 export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
   compositorFingerprint??=crypto.createHash('sha256').update(JSON.stringify([
-    'paint_worker.py','paint_channels.py','paint_surface.py','material_graph.py','image_documents.py','image_adjustments.py','image_raster_tools.py',
+    'paint_worker.py','paint_channels.py','paint_surface.py','paint_mask_generators.py','material_graph.py','image_documents.py','image_adjustments.py','image_raster_tools.py',
     'project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
     '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
   ].map(file=>hash(path.join(ROOT,file))))).digest('hex');
