@@ -125,7 +125,8 @@
 .document-layer-controls .document-property{flex:none;white-space:nowrap;font-size:12px;gap:4px}
 .document-layer-controls .document-alpha-lock{flex:none;width:25px;height:var(--chrome-control);padding:3px}
 .document-layer-controls .document-alpha-lock[aria-pressed=true]{background:var(--chrome-selected,#454545);color:#eee}
-.document-layer-controls .document-property>:is(input,.workspace-range-field){flex:0 0 50px;width:50px;min-width:50px}
+.document-layer-controls .document-property>:is(input,.workspace-range-field){flex:0 0 54px;width:54px;min-width:54px}
+.document-layer-controls .workspace-range-field>.workspace-range-value{padding-inline:4px}
 @container(max-width:215px){.document-layer-controls .document-opacity-caption{display:none}}
 .document-layer-row{
   position:relative;display:grid;grid-template-columns:24px 30px minmax(0,1fr) 22px;

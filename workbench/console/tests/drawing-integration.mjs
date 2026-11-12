@@ -949,6 +949,9 @@ try{
   const alphaBounds=await layersPanel.getByRole('button',{name:'锁定透明像素',exact:true}).boundingBox();
   const opacityBounds=await layersPanel.locator('input.workspace-number-input[aria-label="不透明度"]').boundingBox();
   assert.ok(Math.abs(alphaBounds.y+alphaBounds.height/2-opacityBounds.y-opacityBounds.height/2)<6);
+  const opacityReadout=layersPanel.locator('.document-layer-controls .workspace-range-value');
+  assert.equal(await opacityReadout.textContent(),'100%');
+  assert.equal(await opacityReadout.evaluate(node=>node.scrollWidth<=node.clientWidth),true);
   const parameters=editor.locator('.document-tool-parameters');
   await parameters.waitFor();
   const horizontal=await parameters.evaluate(element=>element.scrollWidth>element.clientWidth);
