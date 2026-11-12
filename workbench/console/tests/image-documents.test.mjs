@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand,hasImageLayerMask} from '../public/image-documents.mjs';
+import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand,hasImageLayerMask,imageDocumentLimit} from '../public/image-documents.mjs';
 import {imageDocumentInput} from '../paint.mjs';
 const defaults=()=>({layers:[],assets:{}}),options={requireUnlocked:()=>{}},checks={checkStroke:s=>{assert.equal(s.uv,true);assert.ok(s.rect||s.stamps);},checkedUVTransform:t=>assert.ok(t.rect)};
 const edit=(paint,action,extra={})=>imageDocumentOperation(paint,{op:'image',documentId:'doc',action,...extra},options);
@@ -16,6 +16,29 @@ test('document commands cannot smuggle PBR channels, surface stamps or invalid r
  for(const stroke of [{uv:true,stamps:[[.5,.5]],radius:.02,color:'#112233',channels:{roughness:true}},{uv:false,stamps:[[0,0,0,0,0,1]],color:'#112233'}]){const next=structuredClone(paint);edit(next,'stroke',{layerId:'pixel',target:'pixels',stroke});assert.throws(()=>validateImageDocuments(next,checks),/二维 RGB/);}
  edit(paint,'bind',{channel:'color',newLayerId:'material'});paint.layers[0].documentMaps.color='missing';assert.throws(()=>validateImageDocuments(paint,checks),/绑定/);
  const wrapped=surfaceToImageCommand({op:'stroke',id:'pixel',target:'material',stroke:{uv:true,values:{color:'#112233',roughness:.8},channels:{color:true},erase:false,rect:[0,0,1,1],opacity:1}},'doc');assert.equal(wrapped.target,'pixels');assert.equal(wrapped.stroke.color,'#112233');assert.equal(wrapped.stroke.values,undefined);assert.equal(wrapped.stroke.channels,undefined);
+});
+test('duplicated image documents retain editable data without copying their material bindings',()=>{
+ const paint=defaults();
+ edit(paint,'create',{patch:{name:'独立贴图',colorSpace:'linear'}});
+ const gradient={kind:'linear',start:[.2,.5],end:[.8,.5],colors:['#000000','#ffffff'],alpha:[1,1]};
+ edit(paint,'addLayer',{layerId:'pixels',kind:'pixel',patch:{maskEnabled:true,maskGradient:gradient}});
+ edit(paint,'stroke',{layerId:'pixels',target:'pixels',stroke:{uv:true,rect:[0,0,1,1],color:'#112233',opacity:1}});
+ edit(paint,'stroke',{layerId:'pixels',target:'mask',stroke:{uv:true,rect:[.1,.1,.2,.2],value:0,opacity:1}});
+ edit(paint,'bind',{channel:'roughness',newLayerId:'material'});
+ const original=structuredClone(paint.imageDocuments.doc);
+ edit(paint,'duplicate',{newDocumentId:'copy'});
+ edit(paint,'duplicate',{newDocumentId:'another'});
+ assert.deepEqual(paint.imageDocuments.copy,{...original,name:'独立贴图 副本'});
+ assert.equal(paint.imageDocuments.another.name,'独立贴图 副本 2');
+ edit(paint,'invertMask',{documentId:'copy',layerId:'pixels'});
+ assert.notDeepEqual(paint.imageDocuments.copy.layers,original.layers);
+ assert.deepEqual(paint.imageDocuments.doc,original);
+ assert.deepEqual(paint.layers[0].documentMaps,{roughness:'doc'});
+ assert.throws(()=>edit(paint,'duplicate',{newDocumentId:'copy'}),/编号无效/);
+ for(let i=Object.keys(paint.imageDocuments).length;i<imageDocumentLimit;i++)
+  edit(paint,'duplicate',{newDocumentId:'copy-'+i});
+ assert.throws(()=>edit(paint,'duplicate',{newDocumentId:'overflow'}),/最多包含/);
+ validateImageDocuments(paint,checks);
 });
 test('mask inversion preserves soft brush coverage and deletion resets only the mask',()=>{
  const paint=defaults();edit(paint,'create');edit(paint,'addLayer',{layerId:'pixel',kind:'pixel'});

@@ -3,7 +3,7 @@ import {headerControls,chromeButton,createContextActions} from './area-chrome.mj
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
 import {createLiveView} from './paint-live-view.mjs';
-import {hasImageLayerMask,surfaceToImageCommand} from './image-documents.mjs';
+import {hasImageLayerMask,imageDocumentLimit,surfaceToImageCommand} from './image-documents.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {layerLockOwner} from './paint-layer-tree.mjs';
@@ -171,6 +171,12 @@ export function createDocumentEditor(ctx,bridge){
     const position=field.dataset.transformField==='x'||field.dataset.transformField==='y';
     field.dataset.scrubSpeed=position?'4':'0.5';
   }
+  const fitSelectionButton=button('适应选区',()=>{if(fitSelection())stage.focus({preventScroll:true});});
+  fitSelectionButton.title='适应选区 · Ctrl Shift 0 / ⌘⇧0';
+  fitSelectionButton.setAttribute('aria-keyshortcuts','Control+Shift+0 Meta+Shift+0');
+  fitSelectionButton.disabled=true;
+  elements['uv-selection-fit']=fitSelectionButton;
+  elements['uv-selection-options'].append(fitSelectionButton);
   parameters.append(transformOptions,elements['uv-selection-options'],sampleNotice);
   selection=bridge.createSelection({pane:stage,canvas,elements,isHandHeld:()=>space||!!nav,
     context:()=>{const l=currentLayer(project),origin=imageOrigin(),editable=!!l&&!l.locked&&!bridge.busy(),pixels=project.imageContext?.target!=='mask';return {...origin,id:l?.id,projectId:origin.id,active:!!currentDocument(project),interactive:!painter.isEditing()&&!nav,image:l?.kind==='image'?{x:l.x,y:l.y,scale:l.scale,rotation:l.rotation,stretch:l.stretch,size:[project.document.paint.assets[l.asset].width,project.document.paint.assets[l.asset].height]}:null,canTransform:editable&&pixels&&(l.kind==='image'||l.kind==='pixel'&&!!l.strokes?.length),canClear:editable&&pixels&&l.kind==='pixel',canFillMaterial:editable&&pixels&&l.kind==='pixel',canFillMask:editable};},
@@ -218,6 +224,16 @@ export function createDocumentEditor(ctx,bridge){
   chromeButton(fitCanvas,'fit');fitCanvas.append(el('span','document-fit-label','适应画布'));
   fitCanvas.title='适应画布 · Ctrl 0 / ⌘0';fitCanvas.setAttribute('aria-keyshortcuts','Control+0 Meta+0');
   actualSize.title='实际像素 · Ctrl 1 / ⌘1';actualSize.setAttribute('aria-keyshortcuts','Control+1 Meta+1');viewOptions.append(fitCanvas,actualSize);
+  function fitSelection(){
+    const region=selection.clip();
+    if(!region||selection.isDragging()||selection.isTransforming())return false;
+    const [left,top,right,bottom]=region.clip,size=extent();
+    const fitted=Math.min(Math.max(1,stage.clientWidth-48)/(right-left),Math.max(1,stage.clientHeight-48)/(bottom-top));
+    zoom=Math.max(.03,Math.min(40,fitted/size));
+    pan=[(.5-(left+right)/2)*size*zoom,(.5-(top+bottom)/2)*size*zoom];
+    layout();
+    return true;
+  }
   stage.addEventListener('pointerdown',event=>{if(gradientTool?.isEditing())return;if(event.button===1||event.button===0&&(space||mode==='orbit'&&!event.target.closest('svg'))){nav={pointer:event.pointerId,x:event.clientX,y:event.clientY,pan:[...pan]};painter.refreshUVCursor();stage.setPointerCapture(event.pointerId);event.preventDefault();event.stopImmediatePropagation();}},{capture:true,signal});
   stage.addEventListener('pointermove',event=>{if(nav?.pointer!==event.pointerId)return;pan=[nav.pan[0]+event.clientX-nav.x,nav.pan[1]+event.clientY-nav.y];layout();},{signal});
   const end=event=>{if(nav?.pointer!==event.pointerId)return;nav=null;painter.refreshUVCursor();if(stage.hasPointerCapture(event.pointerId))stage.releasePointerCapture(event.pointerId);};for(const name of ['pointerup','pointercancel','lostpointercapture'])stage.addEventListener(name,end,{signal});
@@ -362,6 +378,7 @@ export function createDocumentEditor(ctx,bridge){
       else if(key==='a')selection.selectAll(selectionShape);
       else if(key==='d')selection.clear();
       else if(key==='t')selection.start();
+      else if(event.code==='Digit0'&&event.shiftKey)handled=fitSelection();
       else if(key==='0'){zoom=1;pan=[0,0];layout();}
       else if(key==='1'){zoom=4096/extent();pan=[0,0];layout();}
       else if(['=','+','-'].includes(key)){
@@ -848,7 +865,25 @@ export function createImagePanel(type,ctx){
       const layerType={pixel:'像素层',image:'图像层',gradient:'渐变填充'};
       body.append(el('strong','document-properties-heading',c?.target==='mask'?'图层蒙版':layer?layer.text?'文字层':layerType[layer.kind]:'图像文档'));
       addControl(body,'文档名称','text',image.name,name=>command(project,{action:'update',patch:{name}}));
-      const colorSpace=choice('图像颜色空间',[['srgb','颜色（sRGB）'],['linear','数据（线性）']],image.colorSpace,value=>void run(()=>command(project,{action:'update',patch:{colorSpace:value}})));body.append(colorSpace);enhanceSelectMenu(colorSpace);body.append(el('div','document-muted','4096 × 4096 · RGBA'));
+      const colorSpace=choice('图像颜色空间',[['srgb','颜色（sRGB）'],['linear','数据（线性）']],image.colorSpace,value=>void run(()=>command(project,{action:'update',patch:{colorSpace:value}})));body.append(colorSpace);enhanceSelectMenu(colorSpace);
+      const refs=doc.paint.layers.flatMap(layer=>Object.entries(layer.documentMaps??{}).filter(([,id])=>id===c.documentId).map(([channel])=>({layer,channel})));
+      const documentActions=el('div','document-property-actions');
+      const duplicate=button('复制贴图',()=>{
+        const origin=imageSelectionOrigin(project),documentId=crypto.randomUUID();
+        duplicate.disabled=true;
+        void run(async()=>{
+          await commandAt(project,origin,{action:'duplicate',newDocumentId:documentId});
+          const current=imageSelectionOrigin(project);
+          if(!disposed&&current.id===origin.id&&current.documentId===origin.documentId&&current.layerId===origin.layerId&&current.target===origin.target)
+            selectImage(project,{documentId,layerId:origin.layerId,target:'pixels'});
+        }).finally(()=>{if(duplicate.isConnected)duplicate.disabled=documents.length>=imageDocumentLimit||!!ctx.busy?.();});
+      });
+      duplicate.disabled=busy||documents.length>=imageDocumentLimit;
+      duplicate.title=documents.length>=imageDocumentLimit?'工程最多包含 16 个图像文档':'复制贴图的全部图层和蒙版';
+      const remove=button('删除贴图',()=>void run(()=>command(project,{action:'remove'})),'删除图像文档');
+      remove.disabled=!!refs.length;remove.title=refs.length?'请先解除材质通道引用':'删除图像文档';
+      documentActions.append(duplicate,remove);
+      body.append(el('div','document-muted','4096 × 4096 · RGBA'),documentActions);
       if(layer){addControl(body,'图层名称','text',layer.name,name=>command(project,{action:'updateLayer',layerId:layer.id,patch:{name}}));addControl(body,'锁定图层','checkbox',layer.locked,locked=>command(project,{action:'updateLayer',layerId:layer.id,patch:{locked}}));
         if(layer.text&&c.target!=='mask'){const edit=button('编辑文字…',()=>editText(layer));edit.disabled=layer.locked;body.append(edit);}
         if(layer.gradient&&c.target!=='mask'){
@@ -879,12 +914,11 @@ export function createImagePanel(type,ctx){
         }
         if(layer.kind==='image'){for(const [name,key,min,max] of [['位置 X','x',0,1],['位置 Y','y',0,1],['缩放','scale',1/4096,4],['旋转','rotation',-360,360]])addControl(body,name,'number',layer[key],value=>command(project,{action:'updateLayer',layerId:layer.id,patch:{[key]:value}}),{min,max,step:'any'});}
       }
-      const refs=doc.paint.layers.flatMap(layer=>Object.entries(layer.documentMaps??{}).filter(([,id])=>id===c.documentId).map(([channel])=>({layer,channel})));
       body.append(el('strong','document-properties-heading','材质引用'));for(const {layer,channel} of refs){
         const reference=el('div','document-reference');reference.append(el('span','',layer.name+' · '+channelSpecs[channel].name));
         reference.append(button('定位',()=>ctx.openMaterial?.(layer.id),'定位材质图层 '+layer.name));
         const unlink=button('解除',()=>void run(()=>{const documentMaps={...layer.documentMaps};delete documentMaps[channel];return project.commands([{op:'update',id:layer.id,patch:{documentMaps}}]);}),'解除材质引用 '+layer.name+' · '+channelSpecs[channel].name);unlink.disabled=!!layerLockOwner(doc.paint.layers,layer);reference.append(unlink);body.append(reference);
-      }if(!refs.length)body.append(el('div','document-muted','尚未绑定材质通道'));const remove=button('删除图像文档',()=>void run(()=>command(project,{action:'remove'})));remove.disabled=!!refs.length;remove.title=refs.length?'请先解除材质通道引用':'删除图像文档';body.append(remove);
+      }if(!refs.length)body.append(el('div','document-muted','尚未绑定材质通道'));
       const assets=Object.entries(doc.paint.assets);if(assets.length){const select=choice('图像层素材',[['','选择素材…'],...assets.map(([id,a])=>[id,a.name])],'',asset=>{if(!asset)return;const origin=imageSelectionOrigin(project),name=doc.paint.assets[asset].name;void run(()=>addImageAsset(project,origin,asset,name));});body.append(select);enhanceSelectMenu(select);}
     }
     if(ctx.busy?.())for(const control of body.querySelectorAll('input,select,button'))control.disabled=true;

@@ -18,6 +18,7 @@ function checkGradient(gradient,checkStroke,mask=false){
     checkStroke({uv:true,rect:gradient.clip,polygon:gradient.polygon,opacity:1,value:1},true);
 }
 export const imageLayerDefaults={visible:true,locked:false,opacity:1,blend:'normal',maskEnabled:false,maskBase:1};
+export const imageDocumentLimit=16;
 export const hasImageLayerMask=layer=>!!layer&&(layer.maskEnabled||Array.isArray(layer.maskStrokes)||!!layer.maskGradient);
 export function imageStrokeToMaterial(s,mask=false){
   if(s.transformUV||s.clearUV)return structuredClone(s);
@@ -35,7 +36,7 @@ export function surfaceToImageCommand(op,documentId){
 }
 export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,validateText}){
   const documents=paint.imageDocuments??{};
-  if(!record(documents)||Object.keys(documents).length>16)throw Error('工程最多包含 16 个图像文档');
+  if(!record(documents)||Object.keys(documents).length>imageDocumentLimit)throw Error('工程最多包含 16 个图像文档');
   let stamps=0;
   for(const [key,doc] of Object.entries(documents)){
     if(!id(key)||!exact(doc,['name','width','height','colorSpace','layers'])||!label(doc.name)||doc.width!==4096||doc.height!==4096||!['srgb','linear'].includes(doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>64)throw Error('图像文档无效');
@@ -72,14 +73,27 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
     if(layer.kind!=='fill'||layer.materialId||Object.values(layer.documentMaps).some(key=>!id(key)||!Object.hasOwn(documents,key)))throw Error('图像文档只能绑定到独立填充层的通道');
   }
 }
+function duplicateImageName(documents,source){
+  const names=new Set(Object.values(documents).map(doc=>doc.name));
+  const candidate=suffix=>source.slice(0,100-suffix.length).trimEnd()+suffix;
+  let number=1,name=candidate(' 副本');
+  while(names.has(name))name=candidate(' 副本 '+(++number));
+  return name;
+}
 export function imageDocumentOperation(paint,o,{requireUnlocked}){
-  if(!exact(o,['op','action','documentId','layerId','patch','kind','target','stroke','transform','rect','polygon','index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
+  if(!exact(o,['op','action','documentId','newDocumentId','layerId','patch','kind','target','stroke','transform','rect','polygon','index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
   const documents=paint.imageDocuments??={},doc=Object.hasOwn(documents,o.documentId)?documents[o.documentId]:null;
   if(o.action==='create'){
     if(doc||!exact(o.patch??{},['name','colorSpace']))throw Error('图像文档已存在或参数无效');
     paint.imageDocuments={...documents,[o.documentId]:{name:'未命名贴图',width:4096,height:4096,colorSpace:'srgb',...o.patch,layers:[]}};return;
   }
   if(!doc)throw Error('图像文档不存在');
+  if(o.action==='duplicate'){
+    if(!id(o.newDocumentId)||Object.hasOwn(documents,o.newDocumentId))throw Error('图像副本编号无效');
+    if(Object.keys(documents).length>=imageDocumentLimit)throw Error('工程最多包含 16 个图像文档');
+    paint.imageDocuments={...documents,[o.newDocumentId]:{...structuredClone(doc),name:duplicateImageName(documents,doc.name)}};
+    return;
+  }
   if(o.action==='update'){if(!exact(o.patch,['name','colorSpace']))throw Error('图像文档参数无效');Object.assign(doc,o.patch);return;}
   if(o.action==='remove'){
     if(paint.layers.some(l=>Object.values(l.documentMaps??{}).includes(o.documentId)))throw Error('图像文档仍被材质引用，请先解除绑定');delete documents[o.documentId];return;

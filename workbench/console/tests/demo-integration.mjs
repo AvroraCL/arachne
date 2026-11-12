@@ -628,6 +628,17 @@ try{
   await page.mouse.down();
   await page.mouse.move(imageBounds.x+imageBounds.width*.66,imageBounds.y+imageBounds.height*.67,{steps:5});
   await page.mouse.up();
+  const selectedFrame=imageEditor.getByRole('button',{name:'适应选区',exact:true});
+  await selectedFrame.click();
+  const zoomedBounds=await imageCanvas.boundingBox(),stageBounds=await imageEditor.locator('.document-image-stage').boundingBox();
+  assert.ok(zoomedBounds.width>imageBounds.width*1.6);
+  assert.ok(Math.abs(zoomedBounds.x+zoomedBounds.width*.38-stageBounds.x-stageBounds.width/2)<2);
+  assert.ok(Math.abs(zoomedBounds.y+zoomedBounds.height*.385-stageBounds.y-stageBounds.height/2)<2);
+  await page.keyboard.press('Control+0');
+  assert.ok(Math.abs((await imageCanvas.boundingBox()).width-imageBounds.width)<2);
+  await page.keyboard.press('Control+Shift+0');
+  assert.ok(Math.abs((await imageCanvas.boundingBox()).width-zoomedBounds.width)<2);
+  await page.keyboard.press('Control+0');
   await page.keyboard.press('Control+c');
   const pastePixels=imageEditor.getByRole('button',{name:'粘贴为图像层',exact:true});
   await pastePixels.click();
@@ -651,6 +662,7 @@ try{
   assert.deepEqual([pasted.x,pasted.y,pasted.scale,pasted.asset],[.5,.5,imageLayer.scale,imageLayer.asset]);
   assert.deepEqual(crossDocument.paint.imageDocuments[clipboardDocument].layers,inPlace.paint.imageDocuments[clipboardDocument].layers);
   assert.deepEqual(errors,[]);
+  console.log('PASS fit selection, center the canvas, restore view and use the keyboard shortcut');
   console.log('PASS 4K selection copy, lasso transparency, original scale, same-document placement and cross-document paste');
   const [pngDownload]=await Promise.all([
     page.waitForEvent('download',{timeout:120000}),
@@ -730,6 +742,37 @@ try{
   assert.deepEqual(await sourceLayer(),invertedMask);
   assert.deepEqual(errors,[]);
   console.log('PASS isolated mask view, inversion shortcut, removal and undo');
+  const beforeDuplicate=await api(project(libraryTarget.id));
+  const sourceMaterial='document-copy-material';
+  const boundDocument=await api(paint(libraryTarget.id)+'/commands',{revision:beforeDuplicate.revision,operations:[
+    {op:'image',action:'bind',documentId:clipboardDocument,channel:'color',newLayerId:sourceMaterial}
+  ]});
+  const properties=page.locator('.editor-area[data-editor=imageProperties]').first();
+  await properties.getByRole('button',{name:'定位材质图层 剪贴板来源',exact:true}).waitFor();
+  await properties.getByRole('button',{name:'复制贴图',exact:true}).click();
+  const duplicate=await waitFor(async()=>{
+    const state=await api(project(libraryTarget.id));
+    const match=Object.entries(state.paint.imageDocuments).find(([,doc])=>doc.name==='剪贴板来源 副本');
+    return match&&{state,id:match[0],image:match[1]};
+  },'复制整张贴图');
+  assert.deepEqual(duplicate.image,{...boundDocument.paint.imageDocuments[clipboardDocument],name:'剪贴板来源 副本'});
+  assert.deepEqual(duplicate.state.paint.layers.find(l=>l.id===sourceMaterial).documentMaps,{color:clipboardDocument});
+  const duplicateName=properties.getByRole('textbox',{name:'文档名称',exact:true});
+  await page.waitForFunction(()=>document.querySelector('.editor-area[data-editor=imageProperties] input[aria-label="文档名称"]')?.value==='剪贴板来源 副本');
+  await duplicateName.fill('独立试色贴图');
+  await duplicateName.press('Enter');
+  const editedDuplicate=await waitFor(async()=>{
+    const state=await api(project(libraryTarget.id));
+    return state.paint.imageDocuments[duplicate.id]?.name==='独立试色贴图'&&state;
+  },'只修改副本名称');
+  assert.deepEqual(editedDuplicate.paint.imageDocuments[clipboardDocument],boundDocument.paint.imageDocuments[clipboardDocument]);
+  await page.reload();
+  await page.locator('[data-area-mode=drawing]').click();
+  await imageEditor.getByRole('button',{name:'图像文档',exact:true}).click();
+  await page.getByRole('option',{name:'独立试色贴图',exact:true}).click();
+  await page.locator('[data-image-layer-id="'+clipboardLayer+'"] .document-layer-mask').waitFor();
+  await imageCanvas.focus();
+  console.log('PASS independent drawing document duplication with editable mask, original material binding and reopen');
   const copySource=await api(project(libraryTarget.id));
   const staleCopy=await api(paint(copySource.id)+'/save-copy',{revision:copySource.revision-1,name:'旧修订副本'},409);
   assert.equal(staleCopy.currentRevision,copySource.revision);

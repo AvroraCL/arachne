@@ -98,6 +98,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
       ? Math.round((rect[2]-rect[0])*resolution)+' × '+Math.round((rect[3]-rect[1])*resolution)+' px'
       : {lasso:'沿边缘拖动，松开闭合选区',ellipse:'拖出椭圆 · Shift 正圆',rect:'拖出矩形 · Shift 正方形'}[tool]||'';
     $('uv-selection-clear').disabled=!selected;
+    if(elements?.['uv-selection-fit'])elements['uv-selection-fit'].disabled=!selected||!!gesture||!!draft;
     eraseButton.disabled=!selected||!state.canClear||!!gesture;
     fillMaterial.disabled=!selected||!state.canFillMaterial||!!gesture;
     fillMask.disabled=!selected||!state.canFillMask||!!gesture;
