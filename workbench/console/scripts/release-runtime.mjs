@@ -3,10 +3,11 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import {spawn,execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {once} from 'node:events';
 import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
-import {demoProjectId} from '../demo-source.mjs';
+import {demoProjectId,nativeDemoProjectId} from '../demo-source.mjs';
 import {APP_VERSION} from '../public/app-version.mjs';
 
 const consoleRoot=path.resolve(import.meta.dirname,'..'),workspace=path.resolve(consoleRoot,'../..');
@@ -17,13 +18,45 @@ const applicationData=windows
   :path.join(os.homedir(),'Library/Application Support/Arachne/Public Workbench');
 export const userRoot=path.resolve(process.env.ARACHNE_USER_DATA_DIR||applicationData);
 const data=path.join(userRoot,'data'),record=path.join(userRoot,'current-server.json');
-const seedId=demoProjectId;
 async function json(file){return JSON.parse(await fs.readFile(file,'utf8'));}
 async function write(file,value){await fs.mkdir(path.dirname(file),{recursive:true});const tmp=file+'.'+process.pid+'.tmp';await fs.writeFile(tmp,JSON.stringify(value,null,2)+'\n');await fs.rename(tmp,file);}
 async function exists(file){return fs.access(file).then(()=>true,()=>false);}
 function alive(pid){try{process.kill(pid,0);return true;}catch{return false;}}
 async function health(url){try{const r=await fetch(url+'/api/health',{signal:AbortSignal.timeout(1000)});return r.ok&&await r.json();}catch{return null;}}
 async function portAvailable(port){const socket=net.createServer();try{socket.listen(port,'127.0.0.1');await once(socket,'listening');return true;}catch{return false;}finally{socket.close();}}
+
+async function installNativeDemo(template,target){
+  const document=await json(path.join(template,'project.json')),source=document.source;
+  const prefix='arachne-package:/workbench/console/.demo-native/';
+  const names=['model.glb','base.png','metadata.json','registration.json'];
+  const expected=names.map(name=>source?.files?.[prefix+name]);
+  if(document.id!==nativeDemoProjectId||source?.format!=='glb'||!expected.every(value=>/^[a-f0-9]{64}$/.test(value)))
+    throw Error('内置 GLB 示例登记无效');
+  const key=createHash('sha256').update(expected.join('')).digest('hex').slice(0,24);
+  const folder=path.join(data,'model-sources','demo-'+key);
+  if(!await exists(folder)){
+    await fs.mkdir(path.dirname(folder),{recursive:true});
+    const staging=await fs.mkdtemp(path.join(path.dirname(folder),'.demo-'));
+    try{
+      for(const [index,name] of names.entries()){
+        const bytes=await fs.readFile(path.join(consoleRoot,'.demo-native',name));
+        if(createHash('sha256').update(bytes).digest('hex')!==expected[index])throw Error('内置 GLB 示例校验失败');
+        await fs.writeFile(path.join(staging,name),bytes);
+      }
+      const topology=await fs.readFile(path.join(consoleRoot,'.demo-native/topology.json'));
+      if(JSON.parse(topology).modelSha256!==expected[0])throw Error('内置 GLB 示例拓扑校验失败');
+      await fs.writeFile(path.join(staging,'topology.json'),topology);
+      try{await fs.rename(staging,folder);}
+      catch(error){if(!['EEXIST','ENOTEMPTY','EPERM'].includes(error.code)||!await exists(folder))throw error;}
+    }finally{await fs.rm(staging,{recursive:true,force:true});}
+  }
+  document.source={...source,reviewSource:path.join(folder,'model.glb'),baseImage:path.join(folder,'base.png'),
+    bundle:path.join(folder,'surface/guides'),cacheRun:path.join(folder,'surface/cache'),
+    files:Object.fromEntries(names.map((name,index)=>[path.join(folder,name),expected[index]]))};
+  const history=path.join(target,'history.json');
+  if(!await exists(history))await write(history,{undo:[],redo:[]});
+  await write(path.join(target,'project.json'),document);
+}
 
 export async function startRelease({signal}={}){
   signal?.throwIfAborted();
@@ -54,9 +87,21 @@ export async function startRelease({signal}={}){
   if(!windows)env.PYTHONHOME=path.dirname(path.dirname(python));
   execFileSync(python,['-B','-X','utf8','-c','import numpy,PIL,fontTools'],{env,stdio:'pipe',windowsHide:true,timeout:15000});
   const seed=path.join(consoleRoot,'seed');
-  if(!await exists(path.join(data,'projects',seedId,'project.json'))){
-    await fs.mkdir(path.join(data,'projects'),{recursive:true});await fs.cp(path.join(seed,'projects',seedId),path.join(data,'projects',seedId),{recursive:true,errorOnExist:true,force:false});
+  let seedId;
+  for(const id of [nativeDemoProjectId,demoProjectId]){
+    const template=path.join(seed,'projects',id);
+    if(!await exists(path.join(template,'project.json')))continue;
+    seedId??=id;
+    const target=path.join(data,'projects',id);
+    if(!await exists(path.join(target,'project.json'))){
+      if(id===nativeDemoProjectId)await installNativeDemo(template,target);
+      else{
+        await fs.mkdir(path.dirname(target),{recursive:true});
+        await fs.cp(template,target,{recursive:true,errorOnExist:true,force:false});
+      }
+    }
   }
+  if(!seedId)throw Error('示例工程未随应用打包，请重新解压完整发布包');
   if(await exists(path.join(seed,'viewport')))for(const folder of await fs.readdir(path.join(seed,'viewport'))){
     const target=path.join(data,'viewport',folder);if(!await exists(target))await fs.cp(path.join(seed,'viewport',folder),target,{recursive:true});
   }

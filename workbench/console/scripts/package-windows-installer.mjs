@@ -7,7 +7,8 @@ import {APP_VERSION} from '../public/app-version.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const output=path.resolve(process.env.ARACHNE_PACKAGE_OUTPUT_DIR||path.join(root,'release'));
-const bundle=path.join(output,'Arachne-'+APP_VERSION+'-windows-x64');
+const suffix=process.env.ARACHNE_PACKAGE_INCLUDE_BLENDER==='1'?'-with-blender':'';
+const bundle=path.join(output,'Arachne-'+APP_VERSION+'-windows-x64'+suffix);
 const installer=bundle+'-setup.exe';
 await fs.access(path.join(bundle,'Arachne.exe'));
 const pending=installer+'.'+randomUUID()+'.tmp';

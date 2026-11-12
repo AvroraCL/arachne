@@ -6,6 +6,7 @@ node_modules/
 __pycache__/
 *.pyc
 /workbench/console/.demo/
+/workbench/console/.demo-native/
 /workbench/console/.demo-staging-*/
 /workbench/console/data/
 /workbench/console/release/

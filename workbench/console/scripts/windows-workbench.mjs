@@ -1,7 +1,6 @@
 import {execFileSync,spawnSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
-import {blenderExecutable} from '../blender-runtime.mjs';
 import {windowsVenv,windowsVenvPython} from '../python-runtime.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
@@ -29,22 +28,18 @@ function setup(){
   }
   check(python,['-c','import sys; sys.exit(sys.version_info[:2] != (3, 12))'],
     '无法使用 Python 3.12。请检查 ARACHNE_PYTHON 或仓库内的 .venv。');
-  if(!existsSync(path.join(root,'.demo','project.json'))){
-    check(blenderExecutable(),['--version'],
-      '无法启动 Blender。请安装 Blender 5.2，或将 ARACHNE_BLENDER 设为 blender.exe 的完整路径。');
-  }
   const npm=process.env.npm_execpath;
   if(!npm)throw Error('请在仓库根目录运行 npm run setup:win。');
   run(process.execPath,[npm,'ci']);
   run(python,['-m','pip','install','-r','requirements.txt']);
   process.env.ARACHNE_PYTHON=python;
-  run(process.execPath,['scripts/seed-demo.mjs']);
+  run(process.execPath,['scripts/seed-native-demo.mjs']);
 }
 
 async function start(){
   if((!process.env.ARACHNE_PYTHON&&!existsSync(python))||
      !existsSync(path.join(root,'node_modules','three','package.json'))||
-     !existsSync(path.join(root,'.demo','project.json'))){
+     !['.demo-native','.demo'].some(folder=>existsSync(path.join(root,folder,'project.json')))){
     throw Error('首次运行请先在仓库根目录执行 npm run setup:win。');
   }
   process.env.ARACHNE_PYTHON=python;

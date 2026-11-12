@@ -9,6 +9,7 @@
     "start:win": "node workbench/console/scripts/windows-workbench.mjs start",
     "test": "npm --prefix workbench/console test",
     "seed:demo": "npm --prefix workbench/console run seed:demo",
+    "seed:demo:legacy": "npm --prefix workbench/console run seed:demo:legacy",
     "package:mac": "npm --prefix workbench/console run package:mac",
     "package:win": "npm --prefix workbench/console run package:win",
     "package:win:installer": "npm --prefix workbench/console run package:win:installer",

@@ -14,7 +14,7 @@ import {isDeepStrictEqual,promisify} from 'node:util';
 import {execFile} from 'node:child_process';
 import {crc32} from 'node:zlib';
 import {ROOT,list,read,commit,forkProject,projectDir,hash,atomic} from './store.mjs';
-import {bindingFingerprint,demoProjectId as defaultSource} from './demo-source.mjs';
+import {bindingFingerprint,demoProjectId,nativeDemoProjectId} from './demo-source.mjs';
 import {cyclesOptions} from './cycles-options.mjs';
 import {pngSizeIs,exrMatches} from './cycles-output.mjs';
 import {glbRegistrationFiles,installGlbRegistration} from './model-registration.mjs';
@@ -145,13 +145,16 @@ function paintTemplate(doc,paint){
   doc.paint=paint;
   return doc;
 }
-export async function createPaint({sourceProjectId=defaultSource,name='示例模型 · PBR 涂装'}){
+export async function createPaint({sourceProjectId,name='示例模型 · PBR 涂装'}){
   let doc;
-  try{doc=read(sourceProjectId);}
-  catch(error){if(error.code!=='ENOENT')throw error;throw Error('示例模型尚未生成，请先运行 npm run seed:demo');}
+  for(const id of sourceProjectId?[sourceProjectId]:[nativeDemoProjectId,demoProjectId]){
+    try{doc=read(id);break;}
+    catch(error){if(error.code!=='ENOENT')throw error;}
+  }
+  if(!doc)throw Error(sourceProjectId?'找不到指定的模型工程':'示例模型尚未生成，请先运行 npm run seed:demo');
   await checkRegisteredSource(doc);
   paintTemplate(doc,{base:{...values},layers:[],assets:{}});
-  return forkProject(sourceProjectId,doc,(typeof name==='string'?name.trim().slice(0,100):'')||'示例模型 · PBR 涂装');
+  return forkProject(doc.id,doc,(typeof name==='string'?name.trim().slice(0,100):'')||'示例模型 · PBR 涂装');
 }
 function checkedRenderCamera(value){
   fields(value,['projection','eye','target','up','fov','orthoHeight']);
@@ -738,7 +741,7 @@ export async function restorePaint(archive,scratch){
   }
   validate({paint});
   let source;
-  for(const id of new Set([defaultSource,...list().map(project=>project.id)])){
+  for(const id of new Set([nativeDemoProjectId,demoProjectId,...list().map(project=>project.id)])){
     let candidate;
     try{candidate=read(id);}
     catch(error){if(['ENOENT','EINVALIDPROJECT'].includes(error.code))continue;throw error;}

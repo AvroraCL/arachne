@@ -41,8 +41,9 @@ function location(doc,legacyScene){
   const fingerprint=modelFingerprint(doc),native=doc.source.format==='glb';
   if(!fingerprint&&(!native||doc.source.preservedSurface))return null;
   if(!fingerprint){
-    const folder=path.dirname(doc.source.cacheRun);
-    return {key:folder,folder,fingerprint};
+    const folder=path.dirname(doc.source.cacheRun),relative=path.relative(DATA,folder);
+    if(relative&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative))
+      return {key:folder,folder,fingerprint};
   }
   const scripts=legacyScene?['project_model.py','../tools/geometry.py','../tools/prepare_guides.py']:
     ['model_glb.py','model_surface.py'];

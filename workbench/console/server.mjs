@@ -20,7 +20,7 @@ const compressLive=promisify(gzip);
 import {ROOT,DATA,list,read,commit,travel,projectHistory,projectDir} from './store.mjs';
 import {setBaseUrl,getJob,listJobs,submit,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes,readJobLog} from './jobs.mjs';
 import {workspaceRoot} from './workspace-paths.mjs';
-import {demoProjectId} from './demo-source.mjs';
+import {demoProjectId,nativeDemoProjectId} from './demo-source.mjs';
 import {migrateBlendProject,stopBlendMigrations} from './blend-migration.mjs';
 import {viewportManifest,startViewport,viewportFile,viewportTopology,viewportTopologyFile,stopViewport} from './viewport.mjs';
 
@@ -160,7 +160,10 @@ const server=http.createServer(async(req,res)=>{
       }
       if(url.pathname==='/'){
         const page='/paint.html';
-        if(!url.searchParams.has('project')&&list().some(p=>p.id===demoProjectId))url.searchParams.set('project',demoProjectId);
+        if(!url.searchParams.has('project')){
+          const seed=[nativeDemoProjectId,demoProjectId].find(id=>fs.existsSync(path.join(projectDir(id),'project.json')));
+          if(seed)url.searchParams.set('project',seed);
+        }
         res.writeHead(302,{Location:page+url.search});res.end();return;
       }
       const name=url.pathname==='/'?'index.html':url.pathname.slice(1);

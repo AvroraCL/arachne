@@ -6,17 +6,17 @@ import os from 'node:os';
 import path from 'node:path';
 import {chromium} from 'playwright-core';
 import {registry} from 'playwright-core/lib/server/registry/index';
-import {demoProjectId} from '../demo-source.mjs';
+import {stageReleaseDemo} from './release-demo.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from '../public/app-version.mjs';
-import {resolveSource,workspaceRoot} from '../workspace-paths.mjs';
+import {workspaceRoot} from '../workspace-paths.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const python=process.env.ARACHNE_PACKAGE_PYTHON||pythonExecutable();
 const output=path.resolve(process.env.ARACHNE_PACKAGE_OUTPUT_DIR||path.join(root,'release'));
 const cache=path.resolve(process.env.ARACHNE_WIN_RUNTIME_CACHE||path.join(os.tmpdir(),'arachne-windows-runtime'));
-const includeBlender=process.env.ARACHNE_PACKAGE_INCLUDE_BLENDER!=='0';
-const baseName='Arachne-'+APP_VERSION+'-windows-x64'+(includeBlender?'':'-no-blender');
+const includeBlender=process.env.ARACHNE_PACKAGE_INCLUDE_BLENDER==='1';
+const baseName='Arachne-'+APP_VERSION+'-windows-x64'+(includeBlender?'-with-blender':'');
 const electron='45.3.0',pythonVersion='3.13.17',blender='5.2.3';
 const archives=[
   ['electron-v'+electron+'-win32-x64.zip','https://github.com/electron/electron/releases/download/v'+electron+'/',
@@ -74,28 +74,7 @@ async function stageWorkbench(workspace){
   for(const name of ['workspace-paths.json','LICENSE','THIRD_PARTY.md'])
     await copy(path.join(workspaceRoot,name),path.join(workspace,name));
 
-  const demo=path.join(root,'.demo');
-  const seed=await read(path.join(demo,'project.json'));
-  const source=resolveSource(seed.source);
-  if(seed.id!==demoProjectId||seed.revision!==0||source.reviewSource!==path.join(demo,'demo.blend')||source.bindingVersion!==2)
-    throw Error('Expected the generated demo template. Run npm run seed:demo first.');
-  const inputs={};
-  for(const [file,digest] of Object.entries(source.files)){
-    const relative=path.relative(demo,file);
-    if(!relative||relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative)||await hash(file)!==digest)
-      throw Error('Invalid generated demo input: '+file);
-    await copy(file,path.join(target,'.demo',relative));
-    inputs[relative.split(path.sep).join('/')]=digest;
-  }
-  const viewport=path.join(demo,'viewport'),metadata=await read(path.join(viewport,'metadata.json'));
-  if(!metadata.uv_unchanged||metadata.source_sha256!==source.files[source.reviewSource])throw Error('Demo viewport binding does not match');
-  const key=createHash('sha256').update(JSON.stringify([metadata.source_sha256,
-    await hash(path.join(root,'viewport_export.py')),source.material])).digest('hex').slice(0,32);
-  for(const name of ['model.glb','metadata.json'])await copy(path.join(viewport,name),path.join(target,'seed/viewport',key,name));
-  const project=path.join(target,'seed/projects',demoProjectId);
-  await write(path.join(project,'project.json'),seed);
-  await write(path.join(project,'history.json'),{undo:[],redo:[]});
-  return inputs;
+  return stageReleaseDemo(workspace,python);
 }
 
 async function stageIcon(staging,app){

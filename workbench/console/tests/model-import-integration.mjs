@@ -11,6 +11,7 @@ import {chromium} from 'playwright-core';
 import {FloatType} from 'three';
 import {EXRLoader} from 'three/addons/loaders/EXRLoader.js';
 import {pythonExecutable} from '../python-runtime.mjs';
+import {nativeDemoProjectId} from '../demo-source.mjs';
 import {nativeModelSteps} from '../model-binding.mjs';
 import {captureRenderPreset,updateDeliveryOptions} from '../public/paint-delivery-options.mjs';
 
@@ -263,6 +264,33 @@ try{
   await reopened.reload();
   await reopened.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
   console.log('PASS GLB drag and drop, invalid file validation, ZIP chooser and project reopen');
+  execFileSync(process.execPath,['scripts/seed-native-demo.mjs'],{cwd:root,stdio:'inherit',
+    env:{...process.env,ARACHNE_DATA_DIR:clean,ARACHNE_ALLOW_EXTERNAL_DATA:'1',ARACHNE_BLENDER:probe},timeout:30000});
+  const seed=await fetch(other+'/api/projects/'+nativeDemoProjectId).then(response=>response.json());
+  assert.equal(seed.source.format,'glb');
+  assert.equal(seed.source.material,'Housing');
+  const created=await fetch(other+'/api/projects',{method:'POST',headers:{Origin:other,'Content-Type':'application/json'},
+    body:JSON.stringify({workflowType:'pbr_paint',name:'原生示例验收'})});
+  assert.equal(created.status,201);
+  const sample=await created.json();
+  assert.deepEqual(sample.source.files,seed.source.files);
+  const nativeRoute='/api/projects/'+sample.id;
+  const nativeView=await fetch(other+nativeRoute+'/viewport').then(response=>response.json());
+  assert.equal(nativeView.metadata.uv_before,seed.source.uvSha256);
+  const nativeBake=await fetch(other+nativeRoute+'/paint/preview',{method:'POST',
+    headers:{Origin:other,'Content-Type':'application/json'},body:JSON.stringify({revision:sample.revision,requestId:'native-demo-4k'})});
+  assert.equal(nativeBake.status,202);
+  const {id:sampleJob}=await nativeBake.json();
+  const bakedSample=await until(async()=>{
+    const job=await fetch(other+nativeRoute+'/jobs/'+sampleJob).then(response=>response.json());
+    if(job.status==='failed')throw Error(job.error);
+    return job.status==='completed'&&job;
+  });
+  assert.equal(bakedSample.paintReport.uv_unchanged,true);
+  assert.equal(Object.keys(bakedSample.paintReport.files).length,8);
+  await assert.rejects(fs.stat(path.dirname(seed.source.cacheRun)),{code:'ENOENT'});
+  assert.ok((await fs.readdir(path.join(clean,'model-geometry'))).length);
+  console.log('PASS native example creation and eight-channel 4K bake without Blender or writes to sample sources');
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
 }finally{

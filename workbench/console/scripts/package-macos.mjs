@@ -4,14 +4,13 @@ import {createReadStream} from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {demoProjectId} from '../demo-source.mjs';
+import {stageReleaseDemo} from './release-demo.mjs';
 import {APP_VERSION,PACKAGE_VERSION,RELEASE_TAG} from '../public/app-version.mjs';
 import {dataDirectory} from '../release-paths.mjs';
-import {resolveSource,workspacePath,workspaceRoot} from '../workspace-paths.mjs';
+import {workspaceRoot} from '../workspace-paths.mjs';
 
 if(process.platform!=='darwin'||process.arch!=='arm64')throw Error('This builder requires Apple Silicon macOS');
 const root=path.resolve(import.meta.dirname,'..'),releaseRoot=path.resolve(process.env.ARACHNE_PACKAGE_OUTPUT_DIR||path.join(root,'release')),versionDir=path.join(releaseRoot,APP_VERSION);
-const seedId=demoProjectId;
 const python=process.env.ARACHNE_PACKAGE_PYTHON||process.env.ARACHNE_PYTHON||'python3';
 const run=(file,args,options={})=>execFileSync(file,args,{cwd:root,encoding:'utf8',...options});
 const readJSON=async file=>JSON.parse(await fs.readFile(file,'utf8'));
@@ -41,31 +40,7 @@ try{
   for(const name of await fs.readdir(toolRoot))if(name.endsWith('.py'))await copy(path.join(toolRoot,name),path.join(workspace,'workbench/tools',name));
   const aliases=await readJSON(path.join(workspaceRoot,'workspace-paths.json'));await writeJSON(path.join(workspace,'workspace-paths.json'),aliases);
   console.log('Copying and verifying the generated demo');
-  run(process.execPath,[path.join(import.meta.dirname,'seed-demo.mjs')]);
-  const original=await readJSON(path.join(root,'.demo/project.json'));
-  original.source=resolveSource(original.source);
-  if(original.source.bindingVersion!==2||original.source.material!=='f_16xl')throw Error('The generated demo binding is required');
-  const inputs={};
-  async function input(file,expected){
-    file=workspacePath(file);const relative=path.relative(workspaceRoot,file);
-    if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw Error('Input outside the checkout: '+file);
-    if(inputs[relative])return;
-    const digest=await hash(file);if(expected&&digest!==expected)throw Error('Bound input changed: '+relative);
-    await copy(file,path.join(workspace,relative));inputs[relative]=digest;
-  }
-  for(const [file,expected] of Object.entries(original.source.files))await input(file,expected);
-  await input(path.join(original.source.bundle,'top/facing.png'));
-  for(const folder of [original.source.bundle,original.source.cacheRun]){
-    const cfg=await readJSON(path.join(folder,'resolved_config.json'));
-    for(const file of [cfg.model,cfg.camera_file,...Object.values(cfg.designs||{}).map(d=>d.image)].filter(Boolean))await input(file);
-  }
-  const canonical=file=>'arachne-package:/'+path.relative(workspaceRoot,workspacePath(file)).split(path.sep).join('/');
-  const source=Object.fromEntries(['bundle','cacheRun','reviewSource','baseImage','material','bindingVersion'].map(k=>[k,['material','bindingVersion'].includes(k)?original.source[k]:canonical(original.source[k])]));
-  source.files=Object.fromEntries(Object.entries(original.source.files).map(([file,digest])=>[canonical(file),digest]));
-  const seed={schemaVersion:original.schemaVersion,id:seedId,name:'示例模型 · PBR 涂装',canvas:original.canvas,assets:{},fonts:{},layers:[],source,basecoat:original.basecoat,guides:{},workflowType:'pbr_paint',paint:original.paint,revision:0,updated:new Date().toISOString()};
-  await writeJSON(path.join(consoleOut,'seed/projects',seedId,'project.json'),seed);await writeJSON(path.join(consoleOut,'seed/projects',seedId,'history.json'),{undo:[],redo:[]});
-  const key=crypto.createHash('sha256').update(JSON.stringify([await hash(original.source.reviewSource),await hash(path.join(root,'viewport_export.py')),original.source.material])).digest('hex').slice(0,32);
-  for(const name of ['model.glb','metadata.json'])await copy(path.join(dataDirectory(root),'viewport',key,name),path.join(consoleOut,'seed/viewport',key,name));
+  const inputs=await stageReleaseDemo(workspace,python);
 
   console.log('Bundling Node, Python and the local render browser');
   const py=JSON.parse(run(python,['-c','import sys,numpy,PIL,fontTools,json; print(json.dumps({"prefix":sys.base_prefix,"version":sys.version.split()[0],"packages":[numpy.__path__[0],PIL.__path__[0],fontTools.__path__[0]]}))']));

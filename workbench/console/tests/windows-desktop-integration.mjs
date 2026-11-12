@@ -5,11 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {_electron as electron} from 'playwright-core';
+import {demoProjectId} from '../demo-source.mjs';
 
 const [executable,appFolder]=process.argv.slice(2);
 if(!executable)throw Error('Specify the packaged desktop executable');
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-desktop-test-'));
-const withoutBlender=process.env.ARACHNE_TEST_WITHOUT_BLENDER==='1';
+const withoutBlender=process.env.ARACHNE_TEST_WITH_BLENDER!=='1'||process.env.ARACHNE_TEST_WITHOUT_BLENDER==='1';
 const env={...process.env,ARACHNE_USER_DATA_DIR:profile,ARACHNE_CYCLES_INTERACTIVE:'0'};
 delete env.ELECTRON_RUN_AS_NODE;
 if(process.platform==='win32')delete env.ARACHNE_BLENDER;
@@ -79,12 +80,16 @@ try{
   await page.locator('#new-paint-submit').click();
   await page.waitForFunction(expected=>document.querySelector('#project-name')?.textContent===expected,name);
   const id=new URL(page.url()).searchParams.get('project');
-  assert.equal((await read('/api/projects/'+id)).name,name);
+  const project=await read('/api/projects/'+id);
+  assert.equal(project.name,name);
+  assert.equal(project.source.format,'glb');
   const target=await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getTitle());
   assert.match(target,/桌面验收/);
   if(!withoutBlender){
-    const frame=await page.request.post(origin+'/api/projects/'+id+'/paint/render-view',{
-      headers:{Origin:origin},timeout:120000,data:{revision:0,quality:'draft',settings:{
+    const legacy=(await read('/api/projects')).find(project=>project.id===demoProjectId);
+    assert.ok(legacy,'Generate the legacy demo before packaging to verify historical Cycles');
+    const frame=await page.request.post(origin+'/api/projects/'+legacy.id+'/paint/render-view',{
+      headers:{Origin:origin},timeout:120000,data:{revision:legacy.revision,quality:'draft',settings:{
         width:192,height:144,samples:2,device:'cpu',
         camera:{projection:'perspective',eye:[5,-7,5],target:[0,0,0],up:[0,0,1]}
       }}
