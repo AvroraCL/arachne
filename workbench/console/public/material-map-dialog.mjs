@@ -1,5 +1,5 @@
 import {channelSpecs,paintChannels} from './paint-channels.mjs';
-import {groupMaterialMaps,mappedLibraryMaterial} from './paint-library-maps.mjs';
+import {groupMaterialMaps,mappedLibraryMaterial,packedMaterialLayouts} from './paint-library-maps.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 
 function el(tag,className,text){
@@ -30,30 +30,47 @@ export function createMaterialMapDialog({read,origin,save,upload}){
   const name=el('input');name.type='text';name.required=true;name.maxLength=100;
   field('材质名称',name);
   const group=el('select'),groupRow=field('贴图组',group);
-  const selectors=Object.fromEntries(paintChannels.map(channel=>{
+  const packedFormat=el('select'),packedAsset=el('select'),packedHint=el('small','material-map-packed-hint');
+  packedFormat.append(new Option('独立通道贴图',''),...Object.entries(packedMaterialLayouts).map(([id,layout])=>new Option(layout.label,id)));
+  field('贴图通道布局',packedFormat);
+  const packedRow=field('打包贴图',packedAsset);
+  content.append(packedHint);
+  const rows={},selectors=Object.fromEntries(paintChannels.map(channel=>{
     const control=el('select');
-    field(channel==='normal'?'法线（OpenGL）':channelSpecs[channel].name,control);
+    rows[channel]=field(channelSpecs[channel].name,control);
     return [channel,control];
   }));
+  const normal=el('select');
+  normal.append(new Option('OpenGL（+Y）','opengl'),new Option('DirectX（−Y）','directx'));
+  const normalRow=field('法线方向',normal);
   const alpha=el('select');
   alpha.append(new Option('灰度值','value'),new Option('Alpha 通道','alpha'));
   const alphaRow=field('不透明度来源',alpha);
   let start=null,assets={},groups=[],aliases=[],suggested='贴图材质',pending=false;
 
   function sync(){
-    const hasMaps=Object.values(selectors).some(control=>control.value);
+    const layout=packedMaterialLayouts[packedFormat.value];
+    packedRow.hidden=packedHint.hidden=!layout;
+    packedHint.textContent=layout?.description||'';
+    for(const channel of paintChannels)rows[channel].hidden=!!layout?.channels[channel];
+    normalRow.hidden=!selectors.normal.value;
+    const hasMaps=layout?!!packedAsset.value:Object.values(selectors).some(control=>control.value);
     alphaRow.hidden=!selectors.alpha.value;
     confirm.disabled=pending||!hasMaps||!name.value.trim();
     name.disabled=close.disabled=importButton.disabled=pending;
-    for(const select of [group,alpha,...Object.values(selectors)]){
+    for(const select of [group,packedFormat,packedAsset,normal,alpha,...Object.values(selectors)]){
       select.disabled=pending;syncSelectMenu(select);
     }
   }
   name.oninput=sync;
+  packedFormat.onchange=sync;packedAsset.onchange=sync;
   for(const select of Object.values(selectors))select.onchange=sync;
   function selectGroup(){
     const chosen=groups.find(entry=>entry.key===group.value);
     if(!chosen)return;
+    const packs=Object.entries(chosen.packed??{}).filter(([,id])=>id);
+    packedFormat.value=packs.length===1?packs[0][0]:'';
+    packedAsset.value=packs.length===1?packs[0][1]:'';
     for(const [channel,control] of Object.entries(selectors)){
       const previous=control.dataset.alias;
       if(previous&&Object.hasOwn(assets,previous)){
@@ -80,13 +97,16 @@ export function createMaterialMapDialog({read,origin,save,upload}){
     group.value=groups.some(entry=>entry.key===selectedGroup)?selectedGroup:'';
     groupRow.hidden=!groups.length;
     const entries=Object.entries(assets).sort((a,b)=>a[1].name.localeCompare(b[1].name,'zh-CN'));
+    const previousPack=packedAsset.value;
+    packedAsset.replaceChildren(new Option('选择打包贴图…',''),...entries.map(([id,asset])=>new Option(asset.name,id)));
+    packedAsset.value=Object.hasOwn(assets,previousPack)?previousPack:'';
     for(const [channel,control] of Object.entries(selectors)){
       control.replaceChildren(new Option('无',''),...entries.map(([id,asset])=>new Option(asset.name,id)));
       delete control.dataset.alias;
       control.value=Object.hasOwn(assets,previous[channel])?previous[channel]:'';
     }
     const suggestions=imported.length?groupMaterialMaps({},imported):groups;
-    if(!Object.values(previous).some(id=>Object.hasOwn(assets,id))&&suggestions.length===1){
+    if(!packedAsset.value&&!Object.values(previous).some(id=>Object.hasOwn(assets,id))&&suggestions.length===1){
       group.value=suggestions[0].key;selectGroup();
     }else sync();
   }
@@ -110,7 +130,8 @@ export function createMaterialMapDialog({read,origin,save,upload}){
     const maps=Object.fromEntries(Object.entries(selectors).map(([channel,control])=>[channel,control.value]));
     error.textContent='';pending=true;sync();
     try{
-      const graph=mappedLibraryMaterial(maps,assets,{alphaOutput:alpha.value});
+      const packed=packedFormat.value?{format:packedFormat.value,asset:packedAsset.value}:null;
+      const graph=mappedLibraryMaterial(maps,assets,{alphaOutput:alpha.value,packed,normalFormat:normal.value});
       await save({name:name.value.trim(),graph},start);
       dialog.close();
     }catch(failure){error.textContent=failure.message;}
@@ -124,6 +145,7 @@ export function createMaterialMapDialog({read,origin,save,upload}){
       start=origin();assets=doc.paint.assets;aliases=[];group.value='';
       for(const control of Object.values(selectors))control.value='';
       suggested=name.value='贴图材质';error.textContent='';alpha.value='value';
+      packedFormat.value=packedAsset.value='';normal.value='opengl';
       updateOptions();
       dialog.showModal();name.select();
       return true;

@@ -4,7 +4,7 @@ import {importGlbProject,importObjProject} from './model-registration.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
-import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,imageExportInput,checkPaintPreview} from './paint.mjs';
+import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,imageExportInput,checkPaintPreview,validateProjectPaint} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
 import {resolvePaintRenderSettings} from './cycles-options.mjs';
@@ -28,7 +28,7 @@ import {migrateBlendProject,hasBlendMigrations,stopBlendMigrations} from './blen
 import {viewportManifest,startViewport,viewportFile,viewportTopology,viewportTopologyFile,stopViewport} from './viewport.mjs';
 import {acquireServiceProfile} from './service-owner.mjs';
 
-const personalLibrary=createPersonalLibrary({root:path.join(DATA,'personal-library'),readProject:read,projectFolder:projectDir,commitProject:commit});
+const personalLibrary=createPersonalLibrary({root:path.join(DATA,'personal-library'),readProject:read,projectFolder:projectDir,commitProject:commit,validatePaint:validateProjectPaint});
 const localWorkbenchMark=path.join(DATA,'workbench-mark.svg');
 
 const portArg=process.argv.indexOf('--port');const PORT=portArg<0?8766:Number(process.argv[portArg+1]);

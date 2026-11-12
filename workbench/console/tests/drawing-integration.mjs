@@ -954,11 +954,15 @@ try{
   assert.equal(await opacityReadout.evaluate(node=>node.scrollWidth<=node.clientWidth),true);
   const parameters=editor.locator('.document-tool-parameters');
   await parameters.waitFor();
-  const horizontal=await parameters.evaluate(element=>element.scrollWidth>element.clientWidth);
-  assert.equal(horizontal,true);
-  await parameters.evaluate(element=>{element.scrollLeft=element.scrollWidth;});
+  const nextParameters=editor.getByRole('button',{name:'下一组工具参数',exact:true});
+  const previousParameters=editor.getByRole('button',{name:'上一组工具参数',exact:true});
+  if(!await nextParameters.isVisible())await page.setViewportSize({width:820,height:600});
+  await nextParameters.waitFor();
+  await nextParameters.click();
   await editor.locator('.document-tool-parameters[data-scroll-start]').waitFor();
   await page.screenshot({path:path.join(data,'compact-drawing-tools.png')});
+  await previousParameters.click();
+  await editor.locator('.document-tool-parameters[data-scroll-start]').waitFor({state:'hidden'});
   const radiusBeforeTip=Number(await option('像素半径').inputValue());
   const hardnessBeforeTip=Number(await option('硬度').inputValue());
   const [tipX,tipY]=await point([.47,.53]);

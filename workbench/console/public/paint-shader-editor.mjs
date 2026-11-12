@@ -7,7 +7,7 @@ import {nodeTypes as materialNodeTypes,portNames as materialPortNames,makeGraphN
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 
-const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',pressure:'压感',mirror:'镜像 X'};
+const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',pressure:'压感',mirror:'镜像 X',red:'红色',green:'绿色',blue:'蓝色'};
 const operations={add:'加',subtract:'减',multiply:'乘',divide:'除',minimum:'最小值',maximum:'最大值'};
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 export function createShaderEditor({host,read,save,draft:onDraft,busy,importImage,viewAsset,readTarget=()=>null,onIdle=()=>{},viewKey='',initialView=null,onViewChange=()=>{}}){
@@ -201,7 +201,7 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
           else for(const [id,text] of Object.entries(operations))input.append(new Option(text,id));
         }else{
           input=el('input');input.type=typeof value==='boolean'?'checkbox':typeof value==='string'?'color':'number';
-          if(input.type==='number'){input.step='any';input.dataset.scrubSpeed=param==='rotation'?'.5':'.01';if(['factor','metallic','roughness','height','alpha','ao','hardness','opacity'].includes(param)){input.min='0';input.max='1';}if(param==='worldRadius'){input.min='.02';input.max='.65';}if(param==='uvRadius'){input.min='2';input.max='256';input.dataset.scrubSpeed='1';}}
+          if(input.type==='number'){input.step='any';input.dataset.scrubSpeed=param==='rotation'?'.5':'.01';if(['factor','metallic','roughness','height','alpha','ao','hardness','opacity','red','green','blue'].includes(param)){input.min='0';input.max='1';}if(param==='worldRadius'){input.min='.02';input.max='.65';}if(param==='uvRadius'){input.min='2';input.max='256';input.dataset.scrubSpeed='1';}}
         }
         input.value=value;if(input.type==='checkbox')input.checked=value;input.setAttribute('aria-label',`${spec.name} ${labels[param]}`);input.dataset.param=param;row.append(caption,input);
         if(Object.hasOwn(spec.inputs,param))row.append(socket(node,param,'in',spec.inputs[param]));

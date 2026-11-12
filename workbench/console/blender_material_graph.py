@@ -35,6 +35,7 @@ def apply_material_graph(material, config):
         node.image = bpy.data.images.load(file, check_existing=False)
         if scalar:
             node.image.colorspace_settings.name = 'Non-Color'
+            node.image.alpha_mode = 'CHANNEL_PACKED'
         node.interpolation = 'Linear'
         node.extension = 'REPEAT'
         return node
@@ -94,6 +95,19 @@ def apply_material_graph(material, config):
                 node = new('ShaderNodeRGB',source);node.outputs[0].default_value = (0,0,0,0)
                 zero = new('ShaderNodeValue',source,'-empty');zero.outputs[0].default_value = 0
                 ports = bind(node,{},dict(color=node.outputs[0],alpha=zero.outputs[0],value=zero.outputs[0]))
+        elif kind == 'separateColor':
+            node = new('ShaderNodeSeparateColor',source)
+            node.mode = 'RGB'
+            node.inputs['Color'].default_value = color(p['color'])
+            ports = bind(node,dict(color=node.inputs['Color']),
+                         {key:node.outputs[key.title()] for key in ('red','green','blue')})
+        elif kind == 'combineColor':
+            node = new('ShaderNodeCombineColor',source)
+            node.mode = 'RGB'
+            targets = {key:node.inputs[key.title()] for key in ('red','green','blue')}
+            for key, target in targets.items():
+                target.default_value = p[key]
+            ports = bind(node,targets,dict(color=node.outputs['Color']))
         elif kind == 'mix':
             node = new('ShaderNodeMixRGB',source);node.blend_type='MIX';node.use_clamp=False
             node.inputs[0].default_value=p['factor'];node.inputs[1].default_value=color(p['a']);node.inputs[2].default_value=color(p['b'])

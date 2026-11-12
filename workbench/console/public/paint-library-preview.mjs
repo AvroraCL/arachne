@@ -1,4 +1,5 @@
 import {evaluateBrushGraph} from './paint-library.mjs';
+import {workspaceIcons} from './workspace-icons.mjs';
 
 export function drawBrushPreview(canvas,settings){
   canvas.width=200;canvas.height=100;const c=canvas.getContext('2d');c.clearRect(0,0,200,100);
@@ -26,12 +27,25 @@ export function resourcePreview(kind,item,assetUrl){
   }else if(kind==='brushes'){
     const canvas=document.createElement('canvas');
     drawBrushPreview(canvas,evaluateBrushGraph(item.graph));preview.append(canvas);
+  }else if(kind==='smartMaterials'){
+    const stack=document.createElement('span');
+    stack.className='library-smart-preview';
+    stack.style.setProperty('--material-color',item.color||'#808080');
+    stack.innerHTML=workspaceIcons.fillLayer;
+    preview.append(stack);
   }else{
     const sphere=document.createElement('span');
     sphere.className='library-sphere';
     const nodes=item.graph.nodes;
     const pbr=nodes.find(node=>node.type==='pbr'),color=nodes.find(node=>node.type==='color');
-    const texture=nodes.find(node=>node.type==='image'&&node.params.asset);
+    const links=item.graph.links;
+    let from=links.find(link=>link.to.node===pbr?.id&&link.to.port==='color')?.from;
+    let texture=null;
+    while(from){
+      const node=nodes.find(item=>item.id===from.node);
+      if(node?.type==='image'&&node.params.asset){texture=node;break;}
+      from=node?.type==='reroute'?links.find(link=>link.to.node===node.id)?.from:null;
+    }
     sphere.style.setProperty('--material-color',color?.params.color||pbr?.params.color||'#808080');
     if(texture)sphere.append(previewImage(assetUrl(texture.params.asset)));
     preview.append(sphere);

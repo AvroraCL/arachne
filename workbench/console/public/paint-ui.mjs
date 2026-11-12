@@ -498,6 +498,7 @@ libraryUI=createPaintLibrary({host:$('paint-library'),read:()=>doc,uploadMaps:im
   saveMap:(ops,origin)=>areaSystem.project.commands(ops,origin),
   selectedImage:()=>selectedAsset,
   onImportedImage:id=>{selectedAsset=id;renderAssets();renderAssetRoles();},
+  onAppliedSmart:id=>{setSelection([id]);render(true);areaSystem?.materialSelectionChanged();},
   importResource:async(item,libraryRevision)=>{const origin={id:doc.id,revision:doc.revision};let result;const ok=await run(async()=>{result=await api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id});});return ok===true?result:false;},
   canEdit:()=>!!doc&&!busy&&!shaderEditor?.isEditing()&&!surfaceTools.isEditing()&&!modeler.isDragging()&&!maskEditor.isOpen(),
   selectedLayer:()=>layer(),brushSettings:()=>areaSystem?.brushSettings()||surfaceTools.getSettings(),applyBrush:settings=>surfaceTools.setSettings(settings),
@@ -731,12 +732,11 @@ function renderProperties(form=$('properties'),scope=null){
   material?.append(channels);
   if(!maskTarget&&l?.kind==='fill'){
     const source=element('div');source.className='property-material-source';material.append(source);
-    source.append(field('引用材质','select',l.materialId||'',async materialId=>{await editTarget({materialId:materialId||null,...(materialId?{documentMaps:{}}:{})});if(materialId)libraryUI.select('materials',materialId);},
+    source.append(field('引用材质','select',l.materialId||'',async materialId=>{await editTarget({materialId:materialId||null});if(materialId)libraryUI.select('materials',materialId);},
       {choices:[['','独立材质值'],...Object.entries(doc.paint.materials||{}).map(([id,m])=>[id,m.name])]}));
     if(l.materialId){
       const linked=element('div');linked.className='property-linked-material';
-      linked.append(element('strong',doc.paint.materials[l.materialId]?.name||'引用材质'),
-        element('small','通道值由材质节点提供'),localButton('编辑引用材质节点',()=>libraryUI.select('materials',l.materialId)));
+      linked.append(localButton('编辑材质节点',()=>libraryUI.select('materials',l.materialId)));
       source.append(linked);
     }
   }
@@ -774,6 +774,21 @@ function renderProperties(form=$('properties'),scope=null){
       const controls=[...section.querySelectorAll(':scope>label')];
       controls.forEach((control,index)=>control.classList.add(index===0?'property-channel-value':'property-channel-map'));
       material.append(section);
+    }
+  }
+  if(material&&l?.materialId&&Object.keys(doc.paint.imageDocuments??{}).length){
+    const bound=Object.keys(l.documentMaps??{}).length;
+    const drawings=propertySection(form,'linked-drawings','绘制贴图',{open:bound>0});
+    const docs=Object.entries(doc.paint.imageDocuments).map(([id,image])=>[id,image.name]);
+    for(const key of paintChannels){
+      if(!l.channels[key])continue;
+      const documentId=l.documentMaps?.[key]||'';
+      drawings.append(field(names[key],'select',documentId,id=>{
+        const documentMaps={...l.documentMaps};
+        if(id)documentMaps[key]=id;else delete documentMaps[key];
+        return editTarget({documentMaps});
+      },{choices:[['','沿用库材质'],...docs]}));
+      if(documentId)drawings.append(localButton('编辑'+names[key]+'贴图',()=>areaSystem.openImage(documentId)));
     }
   }
   if(!l)return;
@@ -1165,6 +1180,10 @@ function openMaterialLayerMenu(event,id,rename=startLayerRename){
     edit('隐藏所选图层','hidden',()=>command(ids.map(id=>({op:'update',id,patch:{visible:false}}))),items.some(layer=>layer.visible)),
     edit('显示所选图层','eye',()=>command(ids.map(id=>({op:'update',id,patch:{visible:true}}))),items.some(layer=>!layer.visible))];
   if(single)actions.push(name(isolatedLayerId===single.id?'退出图层独显':'独显图层','eye',()=>toggleLayerIsolation(single),true,'⌥ 点击眼睛'));
+  if(single?.kind==='group')actions.push(null,name('保存为智能材质','material',()=>{
+    areaSystem?.areas.openEditor('library');
+    return libraryUI.saveSmart(single.id);
+  }));
   if(single&&single.kind!=='group'){
     actions.push(null);
     if(hasLayerMask(single))actions.push(name('编辑蒙版','mask',()=>selectMaskTarget(single)),
@@ -2520,7 +2539,7 @@ function canDropCanvasFile(event){
   return canPlaceCanvasFile()&&event.dataTransfer.types.includes('Files');
 }
 document.addEventListener('paste',event=>{
-  if(!canPlaceCanvasFile()||event.defaultPrevented||
+  if(areaSystem||!canPlaceCanvasFile()||event.defaultPrevented||
      event.target.closest?.('input,textarea,select,.custom-select,[contenteditable]'))return;
   const file=[...(event.clipboardData?.files||[])].find(isPNG);
   if(!file)return;

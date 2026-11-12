@@ -322,6 +322,7 @@ function validate(doc){
   }
   if(stampCount>30000)throw Error('工程笔触超出首版上限');
 }
+export {validate as validateProjectPaint};
 function makeFolder(patch,parentId){
   return {id:crypto.randomUUID(),kind:'group',name:'文件夹',visible:true,parentId,
     ...fields(patch??{},folderFields)};

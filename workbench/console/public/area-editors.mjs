@@ -794,14 +794,21 @@ function createLibraryEditor(ctx,bridge){
     },
     onImported:(packet,projectId)=>{
       if(disposed||project.document?.id!==projectId||packet.view!==viewGeneration||packet.selection!==selectionGeneration)return false;
-      const result=packet.result;scope='project';scopeSelect.value=scope;syncSelectMenu(scopeSelect);
+      const result=packet.result;
+      if(result.resource.kind==='smartMaterials'){project.selectLayer(result.resource.id);return true;}
+      scope='project';scopeSelect.value=scope;syncSelectMenu(scopeSelect);
       kind=result.resource.kind==='images'?'assets':result.resource.kind;tabs.value=kind;syncSelectMenu(tabs);
       if(kind==='assets')pickedAsset=result.resource.id;else project.selectResource({library:kind,id:result.resource.id});
       key='';sync();ctx.onChange();
     }
   });
-  scopeSelect=choice('资源库范围',[['project','当前项目'],['personal','个人']],scope,value=>{scope=value;viewGeneration++;key='';sync();ctx.onChange();});toolbar.prepend(scopeSelect);enhanceSelectMenu(scopeSelect);
-  const tabs=choice('资源类型',[['materials','材质'],['brushes','笔刷'],['assets','图片']],kind,value=>{kind=value;viewGeneration++;key='';sync();ctx.onChange();});toolbar.prepend(tabs);enhanceSelectMenu(tabs);
+  scopeSelect=choice('资源库范围',[['project','当前项目'],['personal','个人']],scope,value=>{
+    scope=value;
+    if(scope==='project'&&kind==='smartMaterials')kind='materials';
+    viewGeneration++;key='';sync();ctx.onChange();
+  });toolbar.prepend(scopeSelect);enhanceSelectMenu(scopeSelect);
+  if(scope==='project'&&kind==='smartMaterials')kind='materials';
+  const tabs=choice('资源类型',[['materials','材质'],['brushes','笔刷'],['assets','图片'],['smartMaterials','智能材质']],kind,value=>{kind=value;viewGeneration++;key='';sync();ctx.onChange();});toolbar.prepend(tabs);enhanceSelectMenu(tabs);
   createResource=button('＋ 新建',async()=>{
     if(kind==='assets'){file.click();return;}
     const id=crypto.randomUUID(),library=kind,origin=project.origin(),selection=selectionGeneration,view=viewGeneration;
@@ -842,6 +849,10 @@ function createLibraryEditor(ctx,bridge){
     const doc=project.document;if(!doc)return;
     if(pickedAsset&&!doc.paint.assets[pickedAsset])pickedAsset=null;
     const projectScope=scope==='project',image=kind==='assets';
+    const smartOption=tabs.querySelector('option[value=smartMaterials]');
+    if(smartOption.hidden!==projectScope||tabs.value!==kind){
+      smartOption.hidden=projectScope;tabs.value=kind;syncSelectMenu(tabs);
+    }
     personal.set({kind:image?'images':kind,query,active:!projectScope});
     body.hidden=!projectScope;
     createResource.hidden=savePersonal.hidden=!projectScope;

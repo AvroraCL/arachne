@@ -1,6 +1,8 @@
 import {paintChannels,legacyChannels,channelSpecs,channelDefaults} from './paint-channels.mjs';
 // Data-only, typed PBR graph. Shared by browser, command validation and workers.
 const scalar={value:'scalar'}, color={color:'color'};
+const rgb={red:'scalar',green:'scalar',blue:'scalar'};
+const imagePixelLimit=64*1024*1024;
 export const nodeTypes={
   reroute:{name:'重定向',inputs:{input:'any'},outputs:{output:'any'},defaults:{}},
   paint:{name:'涂装结果',inputs:{},outputs:Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].type==='color'?'color':'scalar'])),defaults:{}},
@@ -9,13 +11,15 @@ export const nodeTypes={
   uv:{name:'UV 坐标',inputs:{},outputs:{uv:'vector'},defaults:{}},
   mapping:{name:'映射',inputs:{uv:'vector'},outputs:{uv:'vector'},defaults:{x:0,y:0,scale:1,rotation:0}},
   image:{name:'图像纹理',inputs:{uv:'vector'},outputs:{color:'color',alpha:'scalar',value:'scalar'},defaults:{asset:'',colorSpace:'srgb'}},
+  separateColor:{name:'分离 RGB',inputs:color,outputs:rgb,defaults:{color:'#000000'}},
+  combineColor:{name:'合并 RGB',inputs:rgb,outputs:color,defaults:{red:0,green:0,blue:0}},
   mix:{name:'混合颜色',inputs:{a:'color',b:'color',factor:'scalar'},outputs:color,defaults:{a:'#000000',b:'#ffffff',factor:.5}},
   math:{name:'数学',inputs:{a:'scalar',b:'scalar'},outputs:scalar,defaults:{operation:'multiply',a:1,b:.5}},
   ramp:{name:'颜色渐变',inputs:scalar,outputs:color,defaults:{low:'#000000',high:'#ffffff',value:.5}},
   pbr:{name:'基础 PBR',inputs:Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].type==='color'?'color':'scalar'])),outputs:{surface:'surface'},defaults:{...channelDefaults,color:'#808080',roughness:.5}},
   output:{name:'材质输出',inputs:{surface:'surface'},outputs:{},defaults:{}}
 };
-export const portNames={input:'输入',output:'输出',...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),color:'颜色',metallic:'金属度',roughness:'粗糙度',value:'数值',uv:'UV',a:'A',b:'B',factor:'系数',alpha:'透明度',surface:'表面'};
+export const portNames={input:'输入',output:'输出',...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),color:'颜色',metallic:'金属度',roughness:'粗糙度',value:'数值',uv:'UV',a:'A',b:'B',factor:'系数',alpha:'透明度',surface:'表面',red:'红色',green:'绿色',blue:'蓝色'};
 export function makeNode(type,x=40,y=40,id=globalThis.crypto.randomUUID()){
   if(!Object.hasOwn(nodeTypes,type))throw Error('不支持的材质节点');
   return {id,type,x,y,params:{...nodeTypes[type].defaults}};
@@ -54,7 +58,7 @@ function compileGraph(graph,assets,nodeTypes,domain){
         if(typeof value!=='boolean')throw Error('笔刷开关无效');
       }else if(typeof spec.defaults[key]==='string'){
         if(!hex(value))throw Error('节点颜色无效');
-      }else if(!number(value)||(['factor','metallic','roughness','height','alpha','ao'].includes(key)&&(value<0||value>1))||key==='scale'&&Math.abs(value)<.001)
+      }else if(!number(value)||(['factor','metallic','roughness','height','alpha','ao','red','green','blue'].includes(key)&&(value<0||value>1))||key==='scale'&&Math.abs(value)<.001)
         throw Error('节点数值无效');
     }
     nodes.set(node.id,node);
@@ -85,7 +89,7 @@ function compileGraph(graph,assets,nodeTypes,domain){
   function reach(id){if(reachable.has(id))return;reachable.add(id);for(const p of Object.values(incoming.get(id)))reach(p.node);}
   reach(outputs[0].id);
   const images=new Set(order.filter(id=>reachable.has(id)&&nodes.get(id).type==='image').map(id=>nodes.get(id).params.asset).filter(Boolean));
-  if([...images].reduce((sum,id)=>sum+(assets[id]?.width||0)*(assets[id]?.height||0),0)>32*1024*1024)throw Error('节点图像总像素超过 32 Mi 像素，请缩小素材或减少图像节点');
+  if([...images].reduce((sum,id)=>sum+(assets[id]?.width||0)*(assets[id]?.height||0),0)>imagePixelLimit)throw Error('材质图像总像素超过 64 Mi 像素，请缩小素材或减少图像节点');
   return {version:1,output:outputs[0].id,nodes:order.filter(id=>reachable.has(id)).map(id=>({id,type:nodes.get(id).type,params:nodes.get(id).type==='reroute'?{dataType:specs.get(id).outputs.output==='any'?'scalar':specs.get(id).outputs.output}:canonicalParams(nodes.get(id)),inputs:incoming.get(id)}))};
 }
 

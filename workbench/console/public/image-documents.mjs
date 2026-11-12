@@ -131,7 +131,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
     if(layer.documentMaps===undefined)continue;
     if(!exact(layer.documentMaps,paintChannels))throw Error('图像文档引用无效');
     if(!Object.keys(layer.documentMaps).length)continue;
-    if(layer.kind!=='fill'||layer.materialId||Object.values(layer.documentMaps).some(key=>!id(key)||!Object.hasOwn(documents,key)))throw Error('图像文档只能绑定到独立填充层的通道');
+    if(layer.kind!=='fill'||Object.values(layer.documentMaps).some(key=>!id(key)||!Object.hasOwn(documents,key)))throw Error('图像文档只能绑定到填充层的通道');
   }
 }
 function duplicateImageName(documents,source){
@@ -170,7 +170,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     let layer=paint.layers.find(l=>l.id===o.materialLayerId);
     if(o.materialLayerId&&!layer)throw Error('材质图层不存在');
     if(!layer){if(!id(o.newLayerId)||paint.layers.some(l=>l.id===o.newLayerId))throw Error('新材质图层编号无效');layer={id:o.newLayerId,kind:'fill',name:doc.name,visible:true,opacity:1,blend:'normal',channels:{color:false,metallic:false,roughness:false},values:{color:'#808080',metallic:0,roughness:.5},x:.5,y:.5,scale:1,rotation:0,mask:null};paint.layers.push(layer);}
-    requireUnlocked(paint.layers,layer);if(layer.kind!=='fill'||layer.materialId)throw Error('请选择独立填充层');
+    requireUnlocked(paint.layers,layer);if(layer.kind!=='fill')throw Error('请选择填充层');
     layer.documentMaps={...layer.documentMaps,[o.channel]:o.documentId};layer.channels[o.channel]=true;if(layer.maps)delete layer.maps[o.channel];return;
   }
   if(o.action==='addLayer'){

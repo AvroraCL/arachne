@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {compileLibraryMaterial,evaluateBrushGraph,libraryOperation} from './public/paint-library.mjs';
+import {captureSmartMaterial,applySmartMaterial,smartMaterialAssets} from './smart-material.mjs';
 
-const kinds=['materials','brushes','images'],sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+const kinds=['materials','brushes','images','smartMaterials'],sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const failure=(message,status=400,extra={})=>Object.assign(Error(message),{status,...extra});
 const label=value=>{if(typeof value!=='string'||!value.trim()||value.length>100)throw failure('资源名称须为 1–100 个字符');return value.trim();};
 function tags(value){
@@ -18,8 +19,9 @@ function tags(value){
   return result;
 }
 const key=value=>{if(typeof value!=='string'||!/^[\w-]{1,100}$/.test(value))throw failure('资源编号无效');return value;};
-export function createPersonalLibrary({root,readProject,projectFolder,commitProject}){
+export function createPersonalLibrary({root,readProject,projectFolder,commitProject,validatePaint}){
   const index=path.join(root,'index.json'),blobs=path.join(root,'assets');
+  const presetFile=id=>path.join(root,'presets',key(id)+'.json');
   function read(){if(!fs.existsSync(index))return {schemaVersion:1,revision:0,items:{}};const state=JSON.parse(fs.readFileSync(index,'utf8'));if(state.schemaVersion!==1||!Number.isInteger(state.revision)||!state.items)throw failure('个人库索引损坏',500);return state;}
   function expected(revision){const state=read();if(state.revision!==revision)throw failure('个人库已被其他窗口修改，请刷新后重试',409,{currentRevision:state.revision});return state;}
   function write(state){fs.mkdirSync(root,{recursive:true});const temporary=index+'.'+crypto.randomUUID()+'.tmp';fs.writeFileSync(temporary,JSON.stringify({...state,revision:state.revision+1},null,2)+'\n');fs.renameSync(temporary,index);return read();}
@@ -32,22 +34,42 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
   function ensure(file,bytes){fs.mkdirSync(path.dirname(file),{recursive:true});if(fs.existsSync(file)){if(sha(fs.readFileSync(file))!==sha(bytes))throw failure('资源文件指纹变化');return;}const tmp=file+'.'+crypto.randomUUID()+'.tmp';try{fs.writeFileSync(tmp,bytes,{flag:'wx'});fs.renameSync(tmp,file);}finally{if(fs.existsSync(tmp))fs.unlinkSync(tmp);}}
   function save({projectId,projectRevision,revision,kind,resourceId,name}){
     const state=expected(revision),doc=project(projectId,projectRevision);if(!kinds.includes(kind))throw failure('资源类型无效');if(Object.keys(state.items).length>=1000)throw failure('个人库最多 1000 项');
-    key(resourceId);const source=kind==='images'?doc.paint.assets[resourceId]:doc.paint[kind]?.[resourceId];if(!source)throw failure('项目资源不存在',404);
+    key(resourceId);
+    const preset=kind==='smartMaterials'?captureSmartMaterial(doc.paint,resourceId):null;
+    const source=preset?.layers[0]||(kind==='images'?doc.paint.assets[resourceId]:doc.paint[kind]?.[resourceId]);
+    if(!source)throw failure('项目资源不存在',404);
     const entry={id:crypto.randomUUID(),kind,name:label(name??source.name),assets:{},updated:new Date().toISOString()},dependencies=new Set();
-    if(kind==='images'){entry.image=resourceId;dependencies.add(resourceId);}else{entry.graph=structuredClone(source.graph);if(kind==='materials'){compileLibraryMaterial(entry.graph,doc.paint.assets);for(const node of entry.graph.nodes)if(node.type==='image'&&node.params.asset)dependencies.add(node.params.asset);}else evaluateBrushGraph(entry.graph);}
+    let presetBytes;
+    if(preset){
+      presetBytes=Buffer.from(JSON.stringify(preset));
+      entry.presetSha256=sha(presetBytes);
+      entry.layerCount=preset.layers.length-1;
+      entry.color=preset.layers.find(layer=>layer.kind==='fill'&&layer.visible)?.values.color||'#808080';
+      for(const id of smartMaterialAssets(preset))dependencies.add(id);
+    }else if(kind==='images'){entry.image=resourceId;dependencies.add(resourceId);}else{entry.graph=structuredClone(source.graph);if(kind==='materials'){compileLibraryMaterial(entry.graph,doc.paint.assets);for(const node of entry.graph.nodes)if(node.type==='image'&&node.params.asset)dependencies.add(node.params.asset);}else evaluateBrushGraph(entry.graph);}
     const copies=[];for(const id of dependencies){const asset=doc.paint.assets[id];if(!asset)throw failure('材质图片依赖不存在');const bytes=assetBytes(asset,path.join(projectFolder(doc.id),'assets',path.basename(asset.file)));entry.assets[id]=structuredClone(asset);copies.push([path.join(blobs,asset.file),bytes]);}
-    for(const [file,bytes] of copies)ensure(file,bytes);state.items[entry.id]=entry;return {state:write(state),item:entry};
+    for(const [file,bytes] of copies)ensure(file,bytes);
+    if(presetBytes)ensure(presetFile(entry.id),presetBytes);
+    state.items[entry.id]=entry;return {state:write(state),item:entry};
   }
   function importResource({projectId,projectRevision,revision,id}){
     const state=expected(revision),entry=resource(state,id),doc=project(projectId,projectRevision),copies=[];
     for(const asset of Object.values(entry.assets)){const bytes=assetBytes(asset,path.join(blobs,path.basename(asset.file)));const existing=doc.paint.assets[asset.id];if(existing&&(existing.sha256!==asset.sha256||existing.file!==asset.file))throw failure('项目素材编号冲突');copies.push([entry.kind==='images'?{...asset,name:entry.name}:asset,bytes]);}
-    const resourceId=entry.kind==='images'?entry.image:crypto.randomUUID();
+    let resourceId=entry.kind==='images'?entry.image:crypto.randomUUID(),preset;
+    if(entry.kind==='smartMaterials'){
+      const bytes=fs.readFileSync(presetFile(entry.id));
+      if(sha(bytes)!==entry.presetSha256)throw failure('智能材质的图层数据指纹变化');
+      preset=JSON.parse(bytes.toString('utf8'));
+    }
     const document=commitProject(doc.id,projectRevision,next=>{
       for(const [asset] of copies)next.paint.assets[asset.id]??=structuredClone(asset);
-      if(entry.kind!=='images')libraryOperation(next.paint,{library:entry.kind,id:resourceId,action:'create',patch:{name:entry.name,graph:structuredClone(entry.graph)}});
+      if(preset){
+        resourceId=applySmartMaterial(next.paint,preset,entry.name);
+        validatePaint(next);
+      }else if(entry.kind!=='images')libraryOperation(next.paint,{library:entry.kind,id:resourceId,action:'create',patch:{name:entry.name,graph:structuredClone(entry.graph)}});
       for(const [asset,bytes] of copies)ensure(path.join(projectFolder(doc.id),'assets',asset.file),bytes);
       return next;
-    },'从个人库导入独立资源副本');
+    },preset?'应用智能材质':'从个人库导入独立资源副本');
     return {document,resource:{kind:entry.kind,id:resourceId}};
   }
   function update({revision,id,patch}){

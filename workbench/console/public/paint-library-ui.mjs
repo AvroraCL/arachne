@@ -7,7 +7,7 @@ import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mj
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
-export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,selectedImage=()=>null,importResource,onImportedImage}){
+export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,selectedImage=()=>null,importResource,onImportedImage,onAppliedSmart}){
   let kind='materials',picked=null,project=null,brushKey='',gridKey='',nodesOpen=true,selectionGeneration=0;
   let scope='project';try{scope=localStorage.getItem('arachne-library-scope')==='personal'?'personal':'project';}catch{}
   const bar=el('div','library-bar'),tabs=el('div','library-tabs'),tools=el('div','library-actions'),grid=el('div','library-grid');
@@ -15,7 +15,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','资源库');
   const search=el('input');search.type='search';search.placeholder='搜索资源';search.setAttribute('aria-label','搜索资源');
   function button(text,action,label){const b=el('button','',text);b.type='button';b.onclick=action;if(label)b.setAttribute('aria-label',label);return b;}
-  for(const [id,name] of [['materials','材质'],['brushes','笔刷'],['images','图片']]){
+  for(const [id,name] of [['materials','材质'],['brushes','笔刷'],['images','图片'],['smartMaterials','智能材质']]){
     const b=button(name,()=>{if(!canEdit())return;selectionGeneration++;kind=id;picked=null;gridKey='';remember();sync();changed();});b.dataset.library=id;b.setAttribute('role','tab');tabs.append(b);
   }
   const create=button('＋ 新建',()=>mutate('create'));
@@ -41,7 +41,9 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   const scopeSelect=el('select');scopeSelect.setAttribute('aria-label','资源库范围');scopeSelect.append(new Option('当前项目','project'),new Option('个人','personal'));scopeSelect.value=scope;
   const savePersonal=button('保存到个人库',()=>void personal.save(kind,kind==='images'?selectedImage():picked));
   tools.append(create,fromMaps,capture,duplicate,rename,remove,apply,nodes,output,savePersonal);bar.append(tabs,scopeSelect,search,tools);host.append(bar,grid);enhanceSelectMenu(scopeSelect);scopeSelect.closest('.custom-select').classList.add('library-scope');
-  scopeSelect.onchange=()=>{if(!canEdit()){setSelectValue(scopeSelect,scope);return;}selectionGeneration++;scope=scopeSelect.value;try{localStorage.setItem('arachne-library-scope',scope);}catch{}sync();changed();};
+  scopeSelect.onchange=()=>{if(!canEdit()){setSelectValue(scopeSelect,scope);return;}selectionGeneration++;scope=scopeSelect.value;
+    if(scope==='project'&&kind==='smartMaterials'){kind='materials';picked=null;remember();}
+    try{localStorage.setItem('arachne-library-scope',scope);}catch{}sync();changed();};
   const personal=createPersonalShelf({
     host,read,canEdit,
     importResource:async(item,revision)=>{
@@ -50,7 +52,10 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
     },
     onImported:(packet,projectId)=>{
       if(read()?.id!==projectId||packet.selection!==selectionGeneration||packet.image!==selectedImage())return false;
-      const result=packet.result;if(result.resource.kind==='images'){showImages();onImportedImage?.(result.resource.id);}else select(result.resource.kind,result.resource.id);
+      const result=packet.result;
+      if(result.resource.kind==='smartMaterials')onAppliedSmart?.(result.resource.id);
+      else if(result.resource.kind==='images'){showImages();onImportedImage?.(result.resource.id);}
+      else select(result.resource.kind,result.resource.id);
     }
   });
   const dialog=el('dialog','library-name-dialog'),form=el('form'),name=el('input'),heading=el('strong','','重命名资源'),actions=el('div','bar');
@@ -77,14 +82,17 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   }
   function sync(){
     const doc=read();if(!doc)return;
-    if(project!==doc.id){selectionGeneration++;project=doc.id;picked=null;brushKey='';gridKey='';try{const saved=JSON.parse(localStorage.getItem('arachne-library:'+project));if(saved&&['materials','brushes','images'].includes(saved.kind)){kind=saved.kind;picked=saved.picked;nodesOpen=saved.nodesOpen!==false;}}catch{}}
+    if(project!==doc.id){selectionGeneration++;project=doc.id;picked=null;brushKey='';gridKey='';try{const saved=JSON.parse(localStorage.getItem('arachne-library:'+project));if(saved&&['materials','brushes','images',...(scope==='personal'?['smartMaterials']:[])].includes(saved.kind)){kind=saved.kind;picked=saved.picked;nodesOpen=saved.nodesOpen!==false;}}catch{}}
     if(picked&&!current()){picked=null;brushKey='';}
     const item=current();
     if(scope==='project'&&kind==='brushes'&&item&&canEdit()){const key=JSON.stringify([project,picked,item.graph]);if(key!==brushKey){applyBrush(evaluateBrushGraph(item.graph));brushKey=key;}}
     const images=kind==='images',isPersonal=scope==='personal';document.getElementById('image-library').hidden=!images||isPersonal;grid.hidden=images||isPersonal;
     document.getElementById('shader-editor').toggleAttribute('data-library-open',!isPersonal&&!!item&&nodesOpen);
     personal.set({kind,query:search.value,active:isPersonal});
-    for(const b of tabs.children)b.setAttribute('aria-selected',String(b.dataset.library===kind));
+    for(const b of tabs.children){
+      b.setAttribute('aria-selected',String(b.dataset.library===kind));
+      b.hidden=b.dataset.library==='smartMaterials'&&!isPersonal;
+    }
     for(const b of tools.querySelectorAll('button'))b.disabled=!canEdit();
     for(const b of [duplicate,rename,remove])b.disabled||=!item;
     const referenced=kind==='materials'&&doc.paint.layers.some(layer=>layer.materialId===picked);
@@ -117,5 +125,12 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   }
   search.oninput=sync;
   function showImages(){selectionGeneration++;scope='project';setSelectValue(scopeSelect,scope);kind='images';picked=null;gridKey='';remember();sync();changed();}
-  return {sync,select,target,showImages};
+  function saveSmart(id){
+    selectionGeneration++;scope='personal';setSelectValue(scopeSelect,scope);
+    kind='smartMaterials';picked=null;search.value='';gridKey='';
+    try{localStorage.setItem('arachne-library-scope',scope);}catch{}
+    remember();sync();changed();
+    return personal.save('smartMaterials',id);
+  }
+  return {sync,select,target,showImages,saveSmart};
 }

@@ -8,22 +8,33 @@ def decode(c):
     return np.where(c <= .04045, c / 12.92, ((c + .055) / 1.055) ** 2.4)
 
 
-class MaterialGraph:
-    def __init__(self, plan, assets):
-        self.plan = plan
+class MaterialImages:
+    def __init__(self, assets):
+        self.assets = assets
         self.images = {}
+        self.pixel_count = 0
+
+    def load(self, asset):
+        if asset not in self.images:
+            with Image.open(self.assets[asset]) as image:
+                pixels = image.width * image.height
+                if self.pixel_count + pixels > 64 * 1024 * 1024:
+                    raise ValueError('当前可见材质的图像超过 64 Mi 像素，请缩小素材或隐藏暂时不用的图层')
+                self.images[asset] = np.asarray(image.convert('RGBA'))
+                self.pixel_count += pixels
+        return self.images[asset]
+
+
+class MaterialGraph:
+    def __init__(self, plan, assets, image_cache=None):
+        self.plan, self.images = plan, {}
         if not plan:
             return
-        pixel_count = 0
+        cache = image_cache if image_cache is not None else MaterialImages(assets)
         for node in plan['nodes']:
             if node['type'] == 'image' and node['params']['asset']:
                 asset = node['params']['asset']
-                if asset not in self.images:
-                    with Image.open(assets[asset]) as image:
-                        pixel_count += image.width * image.height
-                        if pixel_count > 32 * 1024 * 1024:
-                            raise ValueError('节点图像总像素超过 32 Mi 像素，请缩小素材或减少图像节点')
-                        self.images[asset] = np.asarray(image.convert('RGBA'))
+                self.images[asset] = cache.load(asset)
 
     def evaluate(self, paint, indices, width, height):
         if not self.plan:
@@ -70,6 +81,12 @@ class MaterialGraph:
                         return result
                     pixels = (texel(ix,iy) * (1-fx) + texel(ix+1,iy) * fx) * (1-fy) + (texel(ix,iy+1) * (1-fx) + texel(ix+1,iy+1) * fx) * fy
                     out = dict(color=pixels[:, :3], alpha=pixels[:, 3], value=pixels[:, :3] @ [.2126, .7152, .0722])
+            elif kind == 'separateColor':
+                color = get('color', rgb(p['color']))
+                out = {name:color[..., i] for i, name in enumerate(('red', 'green', 'blue'))}
+            elif kind == 'combineColor':
+                parts = np.broadcast_arrays(*(get(name,p[name]) for name in ('red', 'green', 'blue')))
+                out = dict(color=np.stack(parts,axis=-1))
             elif kind == 'mix':
                 factor = np.clip(get('factor', p['factor']), 0, 1)
                 if np.ndim(factor):

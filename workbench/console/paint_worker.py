@@ -13,7 +13,7 @@ from PIL import Image
 
 from paint_surface import Surface, registered_surface
 from paint_mask_generators import edge_wear, surface_noise, smooth
-from material_graph import MaterialGraph
+from material_graph import MaterialGraph, MaterialImages
 from image_documents import document_pixels,composite_document,clipboard_png,png_bytes
 
 
@@ -304,6 +304,7 @@ def composite(cfg, step):
     isolated = cfg.get('isolatedLayer')
     layers = []
     fill_graphs = {}
+    material_images = MaterialImages(cfg['assets'])
     has_generator = False
     folder_visibility = {}
     def art(asset, kind):
@@ -326,7 +327,8 @@ def composite(cfg, step):
         image = art(layer['image'],'decal') if layer['kind']=='decal' else None
         masking = layer.get('maskEnabled',True) or inspection
         mask = art(layer['mask'],'mask') if masking and layer['mask'] else None
-        maps = {name: art(asset_id,name) for name,asset_id in layer.get('maps',{}).items() if name in opacity}
+        material_id = layer.get('materialId')
+        maps = {} if material_id else {name: art(asset_id,name) for name,asset_id in layer.get('maps',{}).items() if name in opacity}
         for name,document_id in layer.get('documentMaps',{}).items():
             if name not in opacity:continue
             maps[name]={'document':document_pixels(paint['imageDocuments'][document_id],cfg['assets'],shape[0]),'colorSpace':paint['imageDocuments'][document_id]['colorSpace']}
@@ -344,12 +346,11 @@ def composite(cfg, step):
             projection = projected_ids[keep], projected_uv[keep]
         canvas_bounds = canvas_decal_bounds(layer,image.shape,shape) if layer.get('space')=='uv' else None
         strokes = surface.paint(layer.get('strokes',[]),opacity,color,stroke_sample) if layer['kind']=='paint' and not inspection else None
-        material_id = layer.get('materialId')
         if material_id and material_id not in fill_graphs and not inspection:
-            fill_graphs[material_id] = MaterialGraph(cfg['fillMaterialPlans'][material_id],cfg['assets'])
+            fill_graphs[material_id] = MaterialGraph(cfg['fillMaterialPlans'][material_id],cfg['assets'],material_images)
         layers.append((layer,image,mask,maps,opacity,surface_mask,mask_base,effects,generated,projection,canvas_bounds,strokes,reference_valid,reference_uv))
     base = enabled_base(paint)
-    graph = MaterialGraph(cfg.get('materialPlan'),cfg['assets']) if not inspect else MaterialGraph(None,{})
+    graph = MaterialGraph(cfg.get('materialPlan') if not inspect else None,cfg['assets'],material_images)
     combined = np.empty((len(valid),14),dtype=np.uint8)
     if graph.plan and cfg.get('_captureGraphPaint'):
         cfg['_graphPaint'] = np.empty_like(combined)
@@ -426,6 +427,11 @@ def composite(cfg, step):
                     written[ids[channel_weight>0]] = True
                 elif material_values is not None:
                     value = material_values[:,col]
+                    overlay=maps.get(name)
+                    if isinstance(overlay,dict):
+                        drawing,alpha=sample_document(overlay['document'],u,v,name,linear=overlay['colorSpace']=='linear')
+                        alpha=alpha[:,None] if name in RGB else alpha
+                        value=value*(1-alpha)+drawing*alpha
                 elif name in maps:
                     texture=maps[name]
                     if isinstance(texture,dict):

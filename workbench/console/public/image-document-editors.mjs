@@ -79,21 +79,42 @@ export function createDocumentEditor(ctx,bridge){
     const c=project.imageContext;if(!disposed&&project.document?.id===origin.id&&c?.documentId===origin.documentId&&c?.layerId===origin.layerId&&c?.target===origin.target)selectImage(project,{documentId,layerId,target:'pixels'});
   });});
   const channel=choice('材质引用通道',paintChannels.map(k=>[k,channelSpecs[k].name]),state.channel||'color',()=>{syncDestination(true);ctx.onChange();});
-  const destination=choice('材质引用图层',[],'',()=>{});
+  const destination=choice('材质引用图层',[],'',value=>{destinationChoice=value;syncBind();});
   const bind=button('应用至材质',()=>{const origin=imageSelectionOrigin(project),materialLayerId=destination.value||undefined,newLayerId=materialLayerId?undefined:crypto.randomUUID(),targetChannel=channel.value,imageName=currentDocument(project)?.name;void run(async()=>{
     if(!origin.documentId||!imageName)throw Error('请先打开图像文档');
     const operations=[{op:'image',action:'bind',documentId:origin.documentId,channel:targetChannel,...(materialLayerId?{materialLayerId}:{newLayerId})}];
     if(newLayerId)operations.push({op:'update',id:newLayerId,patch:{name:('贴图 · '+imageName).slice(0,100)}});
     await project.commands(operations,origin);
+    if(!disposed&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&channel.value===targetChannel){
+      destinationChoice=materialLayerId||newLayerId;
+      syncDestination();
+    }
   });});
-  let destinationDocument=null,destinationProject=null,destinationChannel=null,destinationOptionsKey='',pickerOptionsKey='';
+  let destinationDocument=null,destinationProject=null,destinationChannel=null,destinationChoice=null,destinationOptionsKey='',pickerOptionsKey='';
   function syncDestination(force=false){
     const id=project.imageContext?.documentId,doc=project.document;if(!doc)return;
-    const previous=destinationProject===doc.id&&destinationDocument===id&&destinationChannel===channel.value&&!force?destination.value:'';destinationDocument=id;destinationProject=doc.id;destinationChannel=channel.value;
+    if(force||destinationProject!==doc.id||destinationDocument!==id||destinationChannel!==channel.value)destinationChoice=null;
+    destinationDocument=id;destinationProject=doc.id;destinationChannel=channel.value;
     const linked=id&&doc.paint.layers.find(l=>l.kind==='fill'&&l.documentMaps?.[channel.value]===id);
-    const layers=doc.paint.layers.filter(l=>l.kind==='fill'&&!l.materialId),key=JSON.stringify([doc.id,layers.map(l=>[l.id,l.name])]);
-    if(destinationOptionsKey!==key){destinationOptionsKey=key;destination.replaceChildren(new Option('新建材质填充层',''),...layers.map(l=>new Option(l.name,l.id)));}
-    destination.value=previous||linked?.id||'';syncSelectMenu(destination);
+    const layers=doc.paint.layers.filter(l=>l.kind==='fill'&&!layerLockOwner(doc.paint.layers,l));
+    const key=JSON.stringify([doc.id,layers.map(l=>[l.id,l.name,!!l.materialId])]);
+    if(destinationOptionsKey!==key){
+      destinationOptionsKey=key;
+      destination.replaceChildren(new Option('新建材质填充层',''),...layers.map(l=>new Option(l.name+(l.materialId?' · 库材质':''),l.id)));
+    }
+    const target=destinationChoice??linked?.id;
+    destination.value=layers.some(layer=>layer.id===target)?target:'';
+    syncSelectMenu(destination);
+    syncBind();
+  }
+  function syncBind(){
+    const doc=project.document,id=project.imageContext?.documentId;
+    const layer=doc?.paint.layers.find(item=>item.id===destination.value);
+    const bound=layer?.documentMaps?.[channel.value],same=!!id&&bound===id;
+    bind.disabled=!currentDocument(project)||writing()||same;
+    bind.textContent=same?'已应用':bound?'替换贴图':'应用至材质';
+    bind.setAttribute('aria-label',bind.textContent);
+    bind.title=same?'修改此贴图会同步到已绑定通道':bound?'以当前图像文档替换此通道的贴图':'应用至材质';
   }
   const copy=button('复制图像选区',()=>copySelection()),paste=button('粘贴为图像层',()=>pasteSelection());
   const importInput=el('input');
@@ -116,16 +137,36 @@ export function createDocumentEditor(ctx,bridge){
   header.append(picker,create,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const parameters=el('div','document-tool-parameters'),viewOptions=el('div','document-view-options');
+  const parameterStrip=el('div','document-parameter-strip');
+  const scrollBack=chromeButton(button('上一组工具参数',()=>scrollParameters(-1)),'chevron','上一组工具参数');
+  const scrollForward=chromeButton(button('下一组工具参数',()=>scrollParameters(1)),'chevron','下一组工具参数');
+  scrollBack.classList.add('document-parameter-back');
+  scrollForward.classList.add('document-parameter-forward');
+  scrollBack.hidden=scrollForward.hidden=true;
+  parameterStrip.append(scrollBack,parameters,scrollForward);
   const rail=el('aside','document-tools'),toolList=el('div','document-tool-list');
   const stage=el('div','editor-image-stage document-image-stage'),canvas=el('canvas'),empty=el('div','document-empty'),status=el('output','editor-message');
   rail.append(toolList);
   options.setAttribute('role','group');options.setAttribute('aria-label','图像工具选项');
   viewOptions.setAttribute('role','group');viewOptions.setAttribute('aria-label','画布缩放');
   function syncParameterEdges(){
+    const overflowing=parameterStrip.clientWidth>0&&parameters.scrollWidth>parameterStrip.clientWidth+1;
+    scrollBack.hidden=scrollForward.hidden=!overflowing;
     const remaining=parameters.scrollWidth-parameters.clientWidth-parameters.scrollLeft;
-    parameters.toggleAttribute('data-scroll-start',parameters.scrollLeft>1);
-    parameters.toggleAttribute('data-scroll-end',remaining>1);
+    const hasPrevious=overflowing&&parameters.scrollLeft>1,hasNext=overflowing&&remaining>1;
+    parameters.toggleAttribute('data-scroll-start',hasPrevious);
+    parameters.toggleAttribute('data-scroll-end',hasNext);
+    scrollBack.setAttribute('aria-disabled',String(!hasPrevious));
+    scrollForward.setAttribute('aria-disabled',String(!hasNext));
   }
+  function scrollParameters(direction){
+    const control=direction===1?scrollForward:scrollBack;
+    if(control.getAttribute('aria-disabled')==='true')return;
+    const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+    parameters.scrollBy({left:direction*Math.max(48,parameters.clientWidth*.75),behavior:reduceMotion?'instant':'smooth'});
+  }
+  const stripResize=new ResizeObserver(syncParameterEdges);
+  stripResize.observe(parameterStrip);
   parameters.addEventListener('scroll',syncParameterEdges,{passive:true,signal});
   parameters.addEventListener('wheel',event=>{
     if(event.deltaX||!event.deltaY||event.ctrlKey||event.metaKey||parameters.scrollWidth<=parameters.clientWidth)return;
@@ -146,7 +187,7 @@ export function createDocumentEditor(ctx,bridge){
   }
   controls.bar.classList.add('document-brush-options');
   parameters.append(controls.bar);
-  options.append(toolName,parameters,viewOptions);
+  options.append(toolName,parameterStrip,viewOptions);
   host.classList.add('document-editor');host.append(options,rail,stage,status,importInput);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
   let mode=state.tool||'orbit',selectionShape=Object.hasOwn(selectionNames,state.selectionTool)?state.selectionTool:'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
   let lassoShape=state.lassoShape==='polygon'?'polygon':'lasso';
@@ -705,9 +746,9 @@ export function createDocumentEditor(ctx,bridge){
     const documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}
     const next=JSON.stringify([doc.id,doc.revision]);if(sourceKey!==next){sourceKey=next;syncDestination();}else if(destinationDocument!==c?.documentId)syncDestination();
     picker.value=c?.documentId||'';syncSelectMenu(picker);
-    bind.disabled=!image||writing();textTool.disabled=bind.disabled||!canInsertImage(project);
+    syncBind();textTool.disabled=!image||writing()||!canInsertImage(project);
     const locked=layer&&layerLockOwner(image.layers,layer);
-    gradientButton.disabled=bind.disabled||(c?.target==='mask'||layer?.kind==='gradient'?!!locked:!canInsertImage(project));
+    gradientButton.disabled=!image||writing()||(c?.target==='mask'||layer?.kind==='gradient'?!!locked:!canInsertImage(project));
     bucketButton.disabled=cloneButton.disabled=!canPaintPixels();shapeButton.disabled=!canCreateShape();
     bucketTool.sync();cloneTool.layout();shapeTool.sync();empty.hidden=!!image;canvas.hidden=!image;
     if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}
@@ -730,7 +771,7 @@ export function createDocumentEditor(ctx,bridge){
       if(!visible){gradientTool.cancel();shapeTool.cancel();}
       if(visible)sync();
     },
-    dispose(){disposed=true;exportRequest?.abort();unsub();stopClipboard();gradientTool.cancel();shapeTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.dispose();resize.disconnect();},setPaintMode(next){setMode(next);}};
+    dispose(){disposed=true;exportRequest?.abort();unsub();stopClipboard();gradientTool.cancel();shapeTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
 }
 
 export function createImagePanel(type,ctx){

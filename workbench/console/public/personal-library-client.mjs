@@ -25,7 +25,14 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
   };
   async function refresh(){await refreshPersonalLibrary();loaded=true;}
   async function act(action){if(working||!canEdit())return false;working=true;error='';notice='';sync();try{return await action();}catch(e){error=e.message;if(e.status===409)await refresh().catch(()=>{});return false;}finally{working=false;sync();}}
-  async function importItem(item){const doc=read();if(!item||!doc)return;const result=await importResource(item,state.revision);if(result!==false&&onImported?.(result,doc.id)===false)notice='已导入项目，保留当前选择。';}
+  async function importItem(item){
+    const doc=read();if(!item||!doc)return;
+    const result=await importResource(item,state.revision);
+    if(result===false)return;
+    const selected=onImported?.(result,doc.id)!==false;
+    notice=item.kind==='smartMaterials'?'已应用到工程 · '+item.name:
+      selected?'':'已导入项目，保留当前选择。';
+  }
   function icon(control,key,label){
     if(control.dataset.icon!==key){control.innerHTML=workspaceIcons[key];control.dataset.icon=key;}
     control.title=label;control.setAttribute('aria-label',label);
@@ -91,6 +98,7 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
   function sync(){
     panel.hidden=!active;
     const selected=current();
+    add.textContent=kind==='smartMaterials'?'应用到工程':'导入项目';
     for(const control of [add,edit,star,remove])control.disabled=working||!canEdit()||!selected;
     icon(star,selected?.favorite?'starFilled':'star',selected?.favorite?'取消收藏':'收藏资源');
     star.setAttribute('aria-pressed',String(!!selected?.favorite));
@@ -110,7 +118,7 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
         tile.type='button';tile.dataset.resourceId=item.id;tile.setAttribute('aria-label',item.name);
         tile.onclick=()=>{picked=item.id;sync();};
         tile.ondblclick=()=>{picked=item.id;void act(()=>importItem(item));};
-        tile.title=[item.name,...(item.tags||[]),'双击导入项目'].join(' · ');
+        tile.title=[item.name,...(item.tags||[]),item.kind==='smartMaterials'?'双击应用到工程':'双击导入项目'].join(' · ');
         tile.append(resourcePreview(kind,item,id=>'/api/personal-library/'+item.id+'/assets/'+id),el('span','library-name',item.name));
         if(item.favorite){
           const badge=el('span','personal-favorite-badge');
@@ -118,7 +126,8 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
         }
         return tile;
       }));
-      if(!entries.length&&state)grid.append(el('p','library-empty',terms.length?'没有匹配的个人资源':favoritesOnly?'没有已收藏的资源':'个人库还没有这类资源'));
+      if(!entries.length&&state)grid.append(el('p','library-empty',terms.length?'没有匹配的个人资源':
+        favoritesOnly?'没有已收藏的资源':kind==='smartMaterials'?'在材质图层中右击文件夹即可保存智能材质。':'个人库还没有这类资源'));
       if(focused)grid.querySelector('[data-resource-id="'+CSS.escape(focused)+'"]')?.focus({preventScroll:true});
     }
     for(const tile of grid.querySelectorAll('.library-tile')){
