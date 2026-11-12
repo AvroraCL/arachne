@@ -1,7 +1,9 @@
 """Evaluate the validated PBR instruction plan in bounded-size linear-light tiles."""
 from paint_channels import CHANNELS, DEFAULTS, RGB, SRGB
+from collections import OrderedDict
 from contextlib import ExitStack
 import mmap
+import os
 import tempfile
 import numpy as np
 from PIL import Image
@@ -11,12 +13,48 @@ def decode(c):
     return np.where(c <= .04045, c / 12.92, ((c + .055) / 1.055) ** 2.4)
 
 
+def decode_image(file, mode, max_edge=None):
+    with Image.open(file) as image:
+        image = image.convert(mode)
+        if max_edge:
+            image.thumbnail((max_edge, max_edge), Image.Resampling.BILINEAR)
+        return np.asarray(image)
+
+
+class PreviewImages:
+    """Share exact decoded texels between frames of the interactive worker."""
+    def __init__(self, budget=96 * 1024 * 1024, max_entries=16):
+        self.images = OrderedDict()
+        self.used_bytes = 0
+        self.budget, self.max_entries = budget, max_entries
+
+    def load(self, file, mode='RGBA', max_edge=None):
+        file = os.fspath(file)
+        version = os.stat(file)
+        identity = (file, mode, max_edge)
+        signature = (version.st_dev, version.st_ino, version.st_size, version.st_mtime_ns, version.st_ctime_ns)
+        entry = self.images.get(identity)
+        if entry is not None:
+            if entry[0] == signature:
+                self.images.move_to_end(identity)
+                return entry[1]
+            self.used_bytes -= self.images.pop(identity)[1].nbytes
+        pixels = decode_image(file, mode, max_edge)
+        if pixels.nbytes <= self.budget:
+            while self.images and (self.used_bytes + pixels.nbytes > self.budget or len(self.images) >= self.max_entries):
+                self.used_bytes -= self.images.popitem(last=False)[1][1].nbytes
+            self.images[identity] = signature, pixels
+            self.used_bytes += pixels.nbytes
+        return pixels
+
+
 class MaterialImages:
-    def __init__(self, assets, memory_limit=256 * 1024 * 1024):
+    def __init__(self, assets, memory_limit=256 * 1024 * 1024, preview=None):
         self.assets = assets
         self.images = {}
         self.memory_bytes = 0
         self.memory_limit = memory_limit
+        self.preview = preview
         self.spills = None
 
     def __enter__(self):
@@ -32,22 +70,21 @@ class MaterialImages:
     def load(self, asset, mode='RGBA'):
         key = (asset, mode)
         if key not in self.images:
-            with Image.open(self.assets[asset]) as image:
-                pixels = np.asarray(image.convert(mode))
-                if self.memory_bytes + pixels.nbytes <= self.memory_limit:
-                    self.images[key] = pixels
-                    self.memory_bytes += pixels.nbytes
-                elif self.spills is not None:
-                    # Decode each map once and let the OS page large sets as
-                    # individual tiles use them.
-                    file = self.spills.enter_context(tempfile.TemporaryFile())
-                    file.truncate(pixels.nbytes)
-                    mapping = self.spills.enter_context(mmap.mmap(file.fileno(), pixels.nbytes))
-                    stored = np.ndarray(pixels.shape, dtype=np.uint8, buffer=mapping)
-                    stored[:] = pixels
-                    self.images[key] = stored
-                else:
-                    raise ValueError('材质图像超过本次合成的内存预算')
+            file = self.assets[asset]
+            pixels = self.preview.load(file, mode) if self.preview is not None else decode_image(file, mode)
+            if self.memory_bytes + pixels.nbytes <= self.memory_limit:
+                self.images[key] = pixels
+                self.memory_bytes += pixels.nbytes
+            elif self.spills is not None:
+                # Let the OS page large material sets as individual tiles use them.
+                file = self.spills.enter_context(tempfile.TemporaryFile())
+                file.truncate(pixels.nbytes)
+                mapping = self.spills.enter_context(mmap.mmap(file.fileno(), pixels.nbytes))
+                stored = np.ndarray(pixels.shape, dtype=np.uint8, buffer=mapping)
+                stored[:] = pixels
+                self.images[key] = stored
+            else:
+                raise ValueError('材质图像超过本次合成的内存预算')
         return self.images[key]
 
 

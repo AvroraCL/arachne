@@ -48,7 +48,7 @@ try{
   const {id}=await response.json(),url=origin+'/paint.html?project='+id;
   await run(tests[1],url);
   const {revision}=await fetch(origin+'/api/projects/'+id).then(response=>response.json());
-  await run(tests[2],url,id,String(revision));
+  await run(tests[2],url,id,String(revision),'--draft');
 }finally{
   if(server.exitCode===null&&server.signalCode===null){const stopped=once(server,'exit');server.kill();await stopped;}
   console.log('Isolated macOS verification:',data);

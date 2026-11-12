@@ -12,8 +12,8 @@ import numpy as np
 from PIL import Image
 
 from paint_surface import Surface, registered_surface
-from paint_mask_generators import edge_wear, surface_noise, smooth
-from material_graph import MaterialGraph, MaterialImages
+from paint_mask_generators import preview_generator, smooth
+from material_graph import MaterialGraph, MaterialImages, PreviewImages
 from image_documents import document_pixels,composite_document,clipboard_png,png_bytes
 
 
@@ -231,14 +231,6 @@ def picking_atlas(cache, material, binding):
     return result
 
 
-@lru_cache(maxsize=8)
-def preview_art(file, mode):
-    with Image.open(file) as im:
-        im = im.convert(mode)
-        im.thumbnail((2048,2048),Image.Resampling.BILINEAR)
-        return np.asarray(im)
-
-
 def at_range(ids, start, end):
     return slice(*np.searchsorted(ids,[start,end]))
 
@@ -283,10 +275,8 @@ def mask_effects(coverage, effects, generated, surface, ids):
         elif kind=='levels':
             black,white = effect['black'],effect['white']
             value = np.clip((previous-black)/(white-black),0,1)**(1/effect['gamma'])
-        elif kind=='edgeWear':
-            value = edge_wear(surface, selected, effect)
-        elif kind=='surfaceNoise':
-            value = surface_noise(surface, selected, effect)
+        elif kind in ('edgeWear','surfaceNoise'):
+            value = preview_generator(surface, selected, effect)
         else:
             axis = 'xyz'.index(effect['axis'][-1])
             if kind=='height':
@@ -330,8 +320,11 @@ def finish_layer_groups(stack, keep, result, written, surface, ids, u, v):
         parent_writes |= child_writes & (amount > 0)
 
 
+preview_images = PreviewImages()
+
+
 def composite(cfg, step):
-    with MaterialImages(cfg['assets']) as material_images:
+    with MaterialImages(cfg['assets'], preview=preview_images if step>=8 else None) as material_images:
         return composite_layers(cfg, step, material_images)
 
 
@@ -368,7 +361,7 @@ def composite_layers(cfg, step, material_images):
     inspected_folder = None
     def art(asset, kind):
         mode = 'RGBA' if kind=='decal' else 'RGB' if kind in RGB else 'L'
-        return preview_art(cfg['assets'][asset], mode) if step>=8 else material_images.load(asset, mode)
+        return preview_images.load(cfg['assets'][asset], mode, max_edge=2048) if step>=8 else material_images.load(asset, mode)
 
     def prepare_mask(layer, inspection):
         if not (layer.get('maskEnabled', True) or inspection):

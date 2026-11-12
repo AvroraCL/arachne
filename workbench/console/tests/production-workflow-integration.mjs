@@ -20,6 +20,8 @@ if(process.platform!=='win32')await fs.writeFile(probe,'#!/bin/sh\ntouch "$(dirn
 const model=primitiveGlb('cube'),modelPath=path.join(data,'实物样件 - 原 UV.glb');
 const digest=value=>createHash('sha256').update(value).digest('hex');
 await fs.writeFile(modelPath,model);
+execFileSync(pythonExecutable(),['-B','-X','utf8',path.join(import.meta.dirname,'preview-cache-verification.py')],
+  {stdio:'inherit'});
 const services=[];
 let browser,logs='';
 async function until(read,label,timeout=45000){
@@ -141,6 +143,15 @@ try{
   await until(async()=>wearState(await readDoc()).maskStrokeOrder==='after','手绘覆盖效果');
   await until(async()=>await page.locator('#project-save-state').textContent()==='已保存','材质参数已保存');
   const beforeStrokes=await readDoc(),strokeAttempts=[];
+  await page.evaluate(()=>{
+    const setItem=Storage.prototype.setItem;
+    window.restoreStrokeJournalStorage=()=>{Storage.prototype.setItem=setItem;};
+    Storage.prototype.setItem=function(key,value){
+      if(this===sessionStorage&&key.startsWith('arachne-material-stroke-draft:'))
+        throw new DOMException('stroke journal quota test','QuotaExceededError');
+      return setItem.call(this,key,value);
+    };
+  });
   let releaseFirst,undoGate;
   const firstGate=new Promise(resolve=>{releaseFirst=resolve;});
   await page.route(origin+paint+'/commands',async intercepted=>{
@@ -171,9 +182,19 @@ try{
   }finally{releaseFirst();}
   const recovery=page.locator('.material-stroke-recovery');
   await recovery.getByRole('alert').filter({hasText:'2 笔待保存'}).waitFor();
+  await recovery.getByRole('alert').filter({hasText:'无法写入恢复草稿'}).waitFor();
   assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'unsaved');
   assert.equal(wearState(await readDoc()).maskStrokes.length,1);
   await page.screenshot({path:path.join(evidence,'01-material-save-recovery.png')});
+  const isSnapshot=url=>url.pathname===paint&&url.searchParams.has('knownRevision');
+  const offline=intercepted=>intercepted.abort('connectionreset');
+  await page.route(isSnapshot,offline);
+  await page.evaluate(()=>window.restoreStrokeJournalStorage());
+  await recovery.getByRole('button',{name:'重试保存笔触',exact:true}).click();
+  await recovery.getByRole('alert').filter({hasText:'无法连接本机服务'}).waitFor();
+  assert.doesNotMatch(await recovery.getByRole('alert').textContent(),/无法写入恢复草稿/);
+  assert.equal(await page.evaluate(id=>JSON.parse(sessionStorage.getItem('arachne-material-stroke-draft:'+id)).pending.length,id),2);
+  await page.unroute(isSnapshot,offline);
   await page.reload();
   await recovery.getByRole('alert').filter({hasText:'从此窗口恢复'}).waitFor();
   await page.getByRole('button',{name:'绘制蒙版 · 旧化 · 磨痕',exact:true}).and(page.locator('[aria-pressed=true]')).waitFor();

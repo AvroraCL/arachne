@@ -190,7 +190,7 @@ async function start(){
     console.error('工作台显示进程已停止',details.reason,details.exitCode);
     void (async()=>{
       const {response}=await dialog.showMessageBox(win,{type:'warning',message:'工作台显示进程已停止',
-        detail:'重新载入后会打开工程的最新保存版本。',buttons:['重新载入','关闭窗口'],defaultId:0,cancelId:1,noLink:true});
+        detail:'重新载入后会打开最新保存的工程，并检查此窗口可恢复的笔触。',buttons:['重新载入','关闭窗口'],defaultId:0,cancelId:1,noLink:true});
       if(win.isDestroyed()||closing)return;
       if(response!==0){win.close();return;}
       const current=win.webContents.getURL();

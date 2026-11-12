@@ -1,4 +1,5 @@
 """Editable mesh-space masks evaluated on the registered UV samples."""
+from collections import OrderedDict
 import numpy as np
 
 
@@ -86,3 +87,29 @@ def surface_noise(surface, indexes, effect):
             for dz, wz in ((0,1-fz),(1,fz)):
                 value += wx*wy*wz*hash_cell(x+dx,y+dy,z+dz,effect['seed'])
     return smooth((value - effect['threshold']) / effect['softness'] + .5)
+
+
+def preview_generator(surface, indexes, effect):
+    kind = effect['kind']
+    generate = edge_wear if kind == 'edgeWear' else surface_noise
+    # Full-resolution baking stays tiled. Only small interactive surfaces
+    # hold generated masks so new brush strokes reuse unchanged effects.
+    if surface.allowed.size > 256 * 256:
+        return generate(surface, indexes, effect)
+    fields = ('edge', 'angle', 'width', 'softness') if kind == 'edgeWear' else ('scale', 'seed', 'threshold', 'softness')
+    key = (kind, *(effect[field] for field in fields))
+    cache = getattr(surface, 'preview_generators', None)
+    if cache is None:
+        surface.preview_generators = cache = OrderedDict()
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key][indexes]
+    if len(indexes) < 4096:
+        return generate(surface, indexes, effect)
+    eligible = np.flatnonzero(surface.allowed)
+    values = np.zeros(surface.allowed.size, dtype=np.float32)
+    values[eligible] = generate(surface, eligible, effect)
+    if len(cache) >= 12:
+        cache.popitem(last=False)
+    cache[key] = values
+    return values[indexes]

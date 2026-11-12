@@ -21,6 +21,7 @@ import {createImageGradientTool} from './image-gradient-tool.mjs';
 import {createImageFillTool} from './image-fill-tool.mjs';
 import {createImageCloneTool} from './image-clone-tool.mjs';
 import {createImageStrokeQueue} from './image-stroke-queue.mjs';
+import {createStrokeDraftJournal,unavailableStrokeJournal} from './stroke-draft-journal.mjs';
 import {createImageShapeTool} from './image-shape-tool.mjs';
 import {imageShapeKinds,imageShapeSize} from './image-shapes.mjs';
 import {uvShapePayload,maxUVFeather} from './uv-selection-region.mjs';
@@ -312,24 +313,17 @@ export function createDocumentEditor(ctx,bridge){
   function syncStrokeSave(){
     const failure=strokeQueue.failure;
     recovery.hidden=!failure;
-    if(failure)saveMessage.textContent=`${strokeQueue.size} 笔待保存。 ${failure.message}`;
+    if(failure)saveMessage.textContent=`${strokeQueue.size} 笔待保存。 ${failure.message}${journal.unavailable?' '+unavailableStrokeJournal:''}`;
     rebaseStroke.hidden=!strokeQueue.canRebase;
     retryStroke.disabled=rebaseStroke.disabled=discardStroke.disabled=drawingGesture();
     bridge.saveStateChanged();
   }
-  const strokeDraftKey=id=>`arachne-image-stroke-draft:${id}:${ctx.workspaceName}:${ctx.areaId}`;
+  const journal=createStrokeDraftJournal(id=>`arachne-image-stroke-draft:${id}:${ctx.workspaceName}:${ctx.areaId}`);
   const strokeQueue=createImageStrokeQueue({read:()=>project.document,readLatest:bridge.readStrokeProject,
     write:(operation,origin)=>project.commands([operation],origin),
     onPreview:syncStrokePreview,onStateChange:()=>{sync();syncStrokeSave();},
     onError:error=>{if(!disposed)ctx.error(error);},
-    onDraftChange:(id,entry)=>{
-      if(!id)return;
-      try{
-        const key=strokeDraftKey(id);
-        if(entry)sessionStorage.setItem(key,JSON.stringify(entry));
-        else sessionStorage.removeItem(key);
-      }catch{}
-    }
+    onDraftChange:journal.write
   });
   function showSampleNotice(text='',pending=false){
     sampleNotice.textContent=text;sampleNotice.hidden=!text;
@@ -825,9 +819,9 @@ export function createDocumentEditor(ctx,bridge){
     brushBinding.sync(reselect);
     if(restoredProject!==doc.id){
       restoredProject=doc.id;
-      let saved,draft;
+      let saved;
       try{saved=JSON.parse(localStorage.getItem('arachne-image-selection:'+doc.id));}catch{}
-      try{draft=JSON.parse(sessionStorage.getItem(strokeDraftKey(doc.id)));}catch{}
+      const draft=journal.read(doc.id);
       if(strokeQueue.restore(doc.id,draft)){
         const [,documentId,layerId,target]=draft.target;
         if(doc.paint.imageDocuments?.[documentId]?.layers.some(item=>item.id===layerId))saved={documentId,layerId,target};

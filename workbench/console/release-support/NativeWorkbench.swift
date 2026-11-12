@@ -148,7 +148,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         recoveryPromptOpen = true
         let alert = NSAlert()
         alert.messageText = "工作台显示进程已停止"
-        alert.informativeText = "重新载入后会打开工程的最新保存版本。"
+        alert.informativeText = "重新载入后会打开最新保存的工程，并检查此窗口可恢复的笔触。"
         alert.addButton(withTitle: "重新载入")
         alert.addButton(withTitle: "暂时隐藏")
         alert.beginSheetModal(for: window) { [weak self] result in

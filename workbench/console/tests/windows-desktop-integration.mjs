@@ -339,6 +339,11 @@ try{
   assert.equal(await desktop.evaluate(({clipboard})=>clipboard.readText()),textProbe);
   await editMenu('粘贴');
   await page.waitForFunction(text=>document.querySelector('#native-text-cut-check').value===text,textProbe);
+  await page.locator('#native-text-cut-check').evaluate(old=>{
+    const input=old.cloneNode();input.value='';old.replaceWith(input);input.focus();
+  });
+  await editMenu('粘贴');
+  await page.waitForFunction(text=>document.querySelector('#native-text-cut-check').value===text,textProbe);
   await editMenu('撤销');
   await page.waitForFunction(()=>document.querySelector('#native-text-cut-check').value==='');
   await editMenu('重做');
@@ -382,6 +387,26 @@ try{
     await fs.mkdir(screenshots,{recursive:true});
     await page.screenshot({path:path.join(screenshots,'windows-modeling.png')});
   }
+  const pending=await page.evaluate(async projectId=>{
+    const projectRoute='/api/projects/'+projectId;
+    const send=async(revision,operations,strokeRequestId)=>{
+      const response=await fetch(projectRoute+'/paint/commands',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({revision,operations,strokeRequestId})});
+      if(!response.ok)throw Error((await response.json()).error);
+      return response.json();
+    };
+    const current=await (await fetch(projectRoute)).json();
+    const start=await send(current.revision,[{op:'add',kind:'fill',patch:{name:'显示进程恢复验收',maskEnabled:true,maskBase:1}}]);
+    const layer=start.paint.layers.find(layer=>layer.name==='显示进程恢复验收').id;
+    const entries=[[.1,.2,.3,.4],[.5,.6,.7,.8]].map((rect,index)=>({
+      requestId:crypto.randomUUID(),attempted:index===0,
+      operation:{op:'stroke',id:layer,target:'mask',stroke:{uv:true,rect,value:0,opacity:1}}
+    }));
+    sessionStorage.setItem('arachne-material-stroke-draft:'+projectId,JSON.stringify({
+      target:[projectId,'surface',layer,'mask'],expected:start.revision,pending:entries
+    }));
+    return {layer,revision:(await send(start.revision,[entries[0].operation],entries[0].requestId)).revision};
+  },id);
   await desktop.evaluate(({dialog,BrowserWindow})=>{
     const show=dialog.showMessageBox;
     globalThis.arachneRecoveryPrompt=new Promise(resolve=>{
@@ -403,6 +428,17 @@ try{
     }catch{return false;}
   },id),'restoring the last saved project after a renderer crash');
   console.log('PASS real Windows renderer crash and recovery in the same window and service');
+  const evaluateWindow=script=>desktop.evaluate(({BrowserWindow},code)=>BrowserWindow.getAllWindows()[0].webContents.executeJavaScript(code),script);
+  await waitFor(()=>evaluateWindow("!!document.querySelector('.material-stroke-recovery:not([hidden])')"),
+    'restoring the unsaved stroke journal');
+  assert.equal(await evaluateWindow('window.arachneNativeHost.prepareToCloseAsync().then(result=>result.state)'),'unsaved');
+  await evaluateWindow("document.querySelector('.material-stroke-recovery button').click()");
+  await waitFor(async()=>{
+    const doc=await read('/api/projects/'+id);
+    return doc.revision===pending.revision+1&&doc.paint.layers.find(layer=>layer.id===pending.layer)?.maskStrokes.length===2;
+  },'recovering only the uncommitted stroke after Windows renderer restart');
+  await waitFor(()=>evaluateWindow("document.querySelector('.material-stroke-recovery').hidden"),'clearing the recovery banner');
+  console.log('PASS Windows restores the pending stroke after a renderer crash without repeating the saved stroke');
   const beforeClose=await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNormalBounds());
   await close();
   const stored=JSON.parse(await fs.readFile(path.join(profile,'desktop.json'),'utf8'));

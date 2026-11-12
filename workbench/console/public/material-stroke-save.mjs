@@ -1,4 +1,5 @@
 import {createImageStrokeQueue} from './image-stroke-queue.mjs';
+import {createStrokeDraftJournal,unavailableStrokeJournal} from './stroke-draft-journal.mjs';
 
 // All viewports in this workbench share one journal. They may look at the
 // model independently, but material strokes advance the same project revision.
@@ -17,7 +18,7 @@ export function createMaterialStrokeSave({workspace,project,readLatest,onSettled
     if(window.confirm('放弃本窗口中待保存的材质笔触？已经写入工程的笔触仍会保留。')&&queue.discard())onSettled(id);
   });
   recovery.append(message,retry,discard);workspace.append(recovery);
-  const storageKey=id=>'arachne-material-stroke-draft:'+id;
+  const journal=createStrokeDraftJournal(id=>'arachne-material-stroke-draft:'+id);
   function syncPreview(force=false){
     const origin=project.origin();if(!origin)return;
     const operations=queue.operations(origin);
@@ -32,26 +33,20 @@ export function createMaterialStrokeSave({workspace,project,readLatest,onSettled
     workspace.dataset.pendingMaterialStrokes=String(queue.size);
     if(queue.failure){
       const layer=project.document?.paint.layers.find(item=>item.id===queue.target?.[2]);
-      message.textContent=`材质笔触 · ${layer?.name??'原图层'} · ${queue.size} 笔待保存。 ${queue.failure.message}`;
+      message.textContent=`材质笔触 · ${layer?.name??'原图层'} · ${queue.size} 笔待保存。 ${queue.failure.message}${journal.unavailable?' '+unavailableStrokeJournal:''}`;
     }
     onChange();
   }
   const queue=createImageStrokeQueue({domain:'material',read:()=>project.document,readLatest,
     write:(operation,origin)=>project.commands([operation],origin),
     onPreview:syncPreview,onStateChange:syncState,onError,
-    onDraftChange:(id,draft)=>{
-      if(!id)return;
-      try{
-        if(draft)sessionStorage.setItem(storageKey(id),JSON.stringify(draft));
-        else sessionStorage.removeItem(storageKey(id));
-      }catch{}
-    }
+    onDraftChange:journal.write
   });
   function syncProject(){
     const id=project.document?.id;
     if(id&&id!==restoredProject){
       restoredProject=id;
-      let draft;try{draft=JSON.parse(sessionStorage.getItem(storageKey(id)));}catch{}
+      const draft=journal.read(id);
       if(queue.restore(id,draft))syncState();
     }
     syncPreview();

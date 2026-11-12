@@ -111,6 +111,14 @@ import WebKit
             guard try await nodes() == baseline else { return false }
             return try await js("return document.getElementById('native-focus-probe').value") as? String == text
         }
+        _ = try await js("""
+            const old=document.getElementById('native-focus-probe'), input=old.cloneNode();
+            input.value=''; old.replaceWith(input); input.focus();
+            """)
+        workbench.perform("paste")
+        try await waitFor("Paste an independent text edit") {
+            try await js("return document.getElementById('native-focus-probe').value") as? String == text
+        }
         let textRevision = try await project()?["revision"] as? Int
         workbench.perform("undo")
         try await waitFor("Undo in the focused text input without changing the graph") {

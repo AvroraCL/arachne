@@ -114,6 +114,8 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
   function retry({rebase=false}={}){
     if(task)return task;
     if(!pending.length)return Promise.resolve(true);
+    // Retry the local checkpoint even when the service remains unavailable.
+    draftChanged();
     return start(async()=>{
       const [id]=target,latest=await readLatest(id);
       if(latest?.id!==id||!Number.isSafeInteger(latest.revision)||latest.revision<expected)throw Error('无法核对工程的最新修订');
