@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 
 from model_glb import Model, checksum, normalize
+from glb_texture_maps import extract_texture_maps
 from native_worker_lock import cache_lock, watch_parent
 from paint_surface import projector_visibility
 
@@ -88,25 +89,32 @@ def register(config):
         material = materials[material_index]['name']
         if material not in eligible:
             raise ValueError('所选材质没有有效 TEXCOORD_0 或 UV 超出 0–1')
-    props = next(p['material'] for p in model.primitives if p['label']==material).get('pbrMetallicRoughness',{})
+    selected = next(p['material'] for p in model.primitives if p['label']==material)
+    props = selected.get('pbrMetallicRoughness',{})
     factor = np.clip(np.asarray(props.get('baseColorFactor',[1,1,1,1]),dtype=float),0,1)
     rgb = np.where(factor[:3]<=.0031308,factor[:3]*12.92,1.055*factor[:3]**(1/2.4)-.055)
     color = '#'+''.join(f'{int(v):02x}' for v in np.rint(rgb*255))
     base = dict(color=color,metallic=float(props.get('metallicFactor',1)),roughness=float(props.get('roughnessFactor',1)))
     if not np.isfinite(list(base.values())[1:]).all() or any(not 0<=v<=1 for v in (base['metallic'],base['roughness'])):
         raise ValueError('GLB 基础材质参数无效')
-    if factor[3]<1:
+    if factor[3]<1 and selected.get('alphaMode','OPAQUE')!='OPAQUE':
         base['alpha'] = float(factor[3])
     original = out/'model.glb'
     model.save(original)
     digest = checksum(original)
     uv_digest = model.uv_digest()
+    texture_output = Path(config['textureOutput']) if config.get('textureOutput') else None
+    maps = extract_texture_maps(model, selected, texture_output) if texture_output else []
     save(out/'metadata.json',dict(source_sha256=digest,input_sha256=checksum(incoming),
          uv_before=uv_digest,uv_after=uv_digest,uv_unchanged=True,
          mesh_count=len(model.primitives),vertex_count=sum(len(p['positions']) for p in model.primitives),
-         material=material,base=base))
+         material=material,base=base,**({'importedMaps':maps} if maps else {})))
     save(out/'topology.json',dict(modelSha256=digest,primitives=model.topology()))
-    Image.new('RGB',(4096,4096),color).save(out/'base.png')
+    if 'color' in maps:
+        with Image.open(texture_output/'color.png') as image:
+            image.resize((4096,4096),Image.Resampling.BILINEAR).save(out/'base.png',compress_level=3)
+    else:
+        Image.new('RGB',(4096,4096),color).save(out/'base.png')
     minimum,maximum = points.min(axis=(0,1)),points.max(axis=(0,1))
     center = (minimum+maximum)/2
     span = max(.001,np.linalg.norm(maximum-minimum)*1.12)

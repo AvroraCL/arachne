@@ -192,7 +192,7 @@ def unpack(file, output):
                     '交付包素材名称或指纹不一致')
             total_size += archive.getinfo(member).file_size
             require(total_size <= 512 * MIB, '交付包的可编辑素材总计不能超过 512 MiB')
-            data = read_checked(archive, member, 24 * MIB, digest)
+            data = read_checked(archive, member, 64 * MIB, digest)
             with (output / filename).open('xb') as destination:
                 destination.write(data)
         (output / 'manifest.json').write_bytes(manifest_data)

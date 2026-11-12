@@ -38,7 +38,7 @@ async function loadModel(input){
     if(maps.emission){
       material.emissiveMap=maps.emission;material.emissive.set(0xffffff);material.emissiveIntensity=1;
     }
-    if(maps.alpha){material.alphaMap=maps.alpha;material.opacity=1;material.alphaTest=0;material.transparent=true;}
+    if(maps.alpha){material.alphaMap=maps.alpha;material.opacity=1;material.transparent=material.alphaTest===0;material.depthWrite=!material.transparent;}
     material.needsUpdate=true;
   }
   return root;

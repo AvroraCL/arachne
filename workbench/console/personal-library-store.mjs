@@ -27,7 +27,7 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
   function resource(state,id){const item=Object.hasOwn(state.items,key(id))&&state.items[id];if(!item)throw failure('个人资源不存在',404);return item;}
   function assetBytes(asset,file){
     if(!asset||!/^[a-f0-9]{64}$/.test(asset.id)||asset.sha256!==asset.id||asset.file!=='paint-'+asset.id+'.png')throw failure('图片素材记录无效');
-    const bytes=fs.readFileSync(file);if(bytes.length>24*1024*1024||bytes.length<24||sha(bytes)!==asset.sha256||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||bytes.readUInt32BE(16)!==asset.width||bytes.readUInt32BE(20)!==asset.height)throw failure('图片素材指纹或尺寸已改变');return bytes;
+    const bytes=fs.readFileSync(file);if(bytes.length>64*1024*1024||bytes.length<24||sha(bytes)!==asset.sha256||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||bytes.readUInt32BE(16)!==asset.width||bytes.readUInt32BE(20)!==asset.height)throw failure('图片素材指纹或尺寸已改变');return bytes;
   }
   function ensure(file,bytes){fs.mkdirSync(path.dirname(file),{recursive:true});if(fs.existsSync(file)){if(sha(fs.readFileSync(file))!==sha(bytes))throw failure('资源文件指纹变化');return;}const tmp=file+'.'+crypto.randomUUID()+'.tmp';try{fs.writeFileSync(tmp,bytes,{flag:'wx'});fs.renameSync(tmp,file);}finally{if(fs.existsSync(tmp))fs.unlinkSync(tmp);}}
   function save({projectId,projectRevision,revision,kind,resourceId,name}){

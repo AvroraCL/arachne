@@ -25,7 +25,8 @@ export function viewportManifest(doc){
   const baked=listJobs(doc.id).find(j=>j.status==='completed'&&j.colorUrl);
   let topUp=[0,0,-1];
   try{const u=JSON.parse(fs.readFileSync(path.join(doc.source.bundle,'cameras.json'),'utf8')).views.top.up;const flip=JSON.parse(fs.readFileSync(path.join(doc.source.bundle,'resolved_config.json'),'utf8')).designs.top.flip_v?-1:1;topUp=[u[0]*flip,u[2]*flip,-u[1]*flip];}catch{}
-  return {status:ready?'ready':state?.status||'idle',error:state?.error,projectId:doc.id,revision:doc.revision,key,modelUrl:`/api/projects/${doc.id}/viewport/files/model.glb?key=${key}`,modelSha256:ready?fingerprint(path.join(dir,'model.glb')):null,metadata:ready?JSON.parse(fs.readFileSync(metadataFile,'utf8')):null,targetMaterial:doc.source.material,topUp,materialUrls:baked?.materialUrls||null,activeChannels:baked?.paintReport?.activeChannels,textureUrl:baked?.colorUrl||`/api/projects/${doc.id}/viewport/base`,textureRevision:baked?.revision??null,textureLabel:baked?`已烘焙贴图 · r${baked.revision}`:'原始 UV 贴图',textureCurrent:Boolean(baked&&baked.revision===doc.revision)};
+  const textureUrl=baked?.colorUrl??(doc.source.format==='glb'?null:`/api/projects/${doc.id}/viewport/base`);
+  return {status:ready?'ready':state?.status||'idle',error:state?.error,projectId:doc.id,revision:doc.revision,key,modelUrl:`/api/projects/${doc.id}/viewport/files/model.glb?key=${key}`,modelSha256:ready?fingerprint(path.join(dir,'model.glb')):null,metadata:ready?JSON.parse(fs.readFileSync(metadataFile,'utf8')):null,targetMaterial:doc.source.material,topUp,materialUrls:baked?.materialUrls||null,activeChannels:baked?.paintReport?.activeChannels,textureUrl,textureRevision:baked?.revision??null,textureLabel:baked?`已烘焙贴图 · r${baked.revision}`:'原始 UV 贴图',textureCurrent:Boolean(baked&&baked.revision===doc.revision)};
 }
 function launch(key,worker,config,logFile,ready,failure,native=false){
   const state={status:'running',error:null,child:null};work.set(key,state);

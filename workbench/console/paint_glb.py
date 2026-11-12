@@ -95,10 +95,12 @@ def paint_material(scene, binary, material, maps, active):
             alpha = channel('alpha', 'L')
             if alpha.getextrema()[0] < 255:
                 color.putalpha(alpha)
-                material['alphaMode'] = 'BLEND'
+                if material.get('alphaMode') != 'MASK':
+                    material['alphaMode'] = 'BLEND'
             else:
                 material.pop('alphaMode', None)
-            material.pop('alphaCutoff', None)
+            if material.get('alphaMode') != 'MASK':
+                material.pop('alphaCutoff', None)
             factor[3] = 1
         pbr['baseColorTexture'] = append_texture(scene, binary, png_bytes(color), 'Base color')
         pbr['baseColorFactor'] = factor

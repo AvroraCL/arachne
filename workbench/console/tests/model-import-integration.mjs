@@ -610,6 +610,94 @@ try{
   console.log('PASS four native geometry templates, distinct UVs, independent projects and cube 4K bake');
   console.log('PASS gradient draw, cancel, angle snapping, endpoint editing, material binding, reload and 4K RGBA PNG');
   console.log('PASS editable gradient mask, brush touch-up, inversion, undo and verified 4K alpha');
+
+  const texturedFile=path.join(data,'贴图 模型.glb'),differentUV=path.join(data,'其他 UV.glb');
+  execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import sys',
+    'from pathlib import Path',
+    'from PIL import Image',
+    'from paint_glb import read_glb, append_texture, png_bytes, write_glb',
+    'scene, binary = read_glb(Path(sys.argv[1]).read_bytes())',
+    'def texture(colors, name):',
+    ' image = Image.new("RGBA",(2,2))',
+    ' image.putdata(colors)',
+    ' return append_texture(scene,binary,png_bytes(image),name)',
+    'material = scene["materials"][0]',
+    'pbr = material["pbrMetallicRoughness"]',
+    'pbr.update(baseColorFactor=[.5,.25,1,.5],metallicFactor=.5,roughnessFactor=.25)',
+    'pbr["baseColorTexture"] = texture([(255,0,0,128),(0,255,0,255),(0,0,255,255),(255,255,255,0)],"color")',
+    'pbr["metallicRoughnessTexture"] = texture([(16,40,200,255),(64,160,60,255)]*2,"orm")',
+    'pbr["metallicRoughnessTexture"]["extensions"] = {"KHR_texture_transform":{"offset":[.5,0]}}',
+    'scene["extensionsUsed"] = ["KHR_texture_transform"]',
+    'scene["samplers"] = [{"magFilter":9728,"minFilter":9728}]',
+    'scene["textures"][1]["sampler"] = 0',
+    'material.update(alphaMode="MASK",alphaCutoff=.35,emissiveFactor=[.25,.5,1])',
+    'material["normalTexture"] = {**texture([(191,128,238,255)]*4,"normal"),"scale":.5}',
+    'material["occlusionTexture"] = {"index":1,"strength":.5}',
+    'material["emissiveTexture"] = texture([(255,0,0,255)]*4,"emission")',
+    'write_glb(sys.argv[2],scene,binary)',
+    'pbr["baseColorTexture"]["texCoord"] = 1',
+    'scene["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_1"] = 1',
+    'write_glb(sys.argv[3],scene,binary)',
+  ].join('\n'),fixture,texturedFile,differentUV],{cwd:root});
+  async function chooseTextured(file){
+    await reopened.getByText('文件',{exact:true}).filter({visible:true}).first().click();
+    await reopened.locator('#new').click();
+    const dialog=reopened.locator('#new-paint-dialog');
+    await dialog.locator('#new-paint-model').setInputFiles(file);
+    await dialog.getByLabel('保留源贴图').waitFor();
+    assert.equal(await dialog.getByLabel('保留源贴图').isChecked(),true);
+    return dialog;
+  }
+  const alternateDialog=await chooseTextured(differentUV);
+  await alternateDialog.locator('#new-paint-submit').click();
+  await alternateDialog.getByText(/源贴图使用其他 UV 通道/).waitFor();
+  await alternateDialog.getByLabel('保留源贴图').uncheck();
+  await alternateDialog.locator('#new-paint-submit').click();
+  await alternateDialog.waitFor({state:'hidden'});
+  const blankId=new URL(reopened.url()).searchParams.get('project');
+  assert.deepEqual((await api('/api/projects/'+blankId)).paint.layers,[]);
+  const texturedDialog=await chooseTextured(texturedFile);
+  await texturedDialog.locator('#new-paint-submit').click();
+  await texturedDialog.waitFor({state:'hidden'});
+  const texturedId=new URL(reopened.url()).searchParams.get('project');
+  const texturedRoute='/api/projects/'+texturedId,texturedPaint=texturedRoute+'/paint';
+  const textured=await api(texturedRoute),sourceLayer=textured.paint.layers[0];
+  assert.equal(sourceLayer.name,'源材质贴图');
+  assert.deepEqual(Object.keys(sourceLayer.maps).sort(),['alpha','ao','color','emission','metallic','normal','roughness']);
+  const fileFor=channel=>path.join(clean,'projects',texturedId,'assets',textured.paint.assets[sourceLayer.maps[channel]].file);
+  const pixels=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import json,sys',
+    'from PIL import Image',
+    'print(json.dumps([Image.open(name).getpixel((0,0)) for name in sys.argv[1:]]))',
+  ].join('\n'),...['color','metallic','roughness','alpha','ao','emission'].map(fileFor)],{encoding:'utf8'}));
+  assert.deepEqual(pixels,[[188,0,0],30,40,64,136,[137,0,0]]);
+  await reopened.locator('[data-area-mode=material]').click();
+  await reopened.getByRole('button',{name:'源材质贴图',exact:true}).waitFor();
+  await reopened.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
+  await reopened.screenshot({path:path.join(data,'imported-source-material.png')});
+  const sourcePreview=await api(texturedPaint+'/preview',{revision:0,requestId:'source-maps'});
+  const bakedSource=await until(async()=>{
+    const result=await api(texturedRoute+'/jobs/'+sourcePreview.id);
+    if(result.status==='failed')throw Error(result.error);
+    return result.status==='completed'&&result;
+  });
+  assert.deepEqual(bakedSource.paintReport.resolution,[4096,4096]);
+  assert.equal(bakedSource.paintReport.uv_unchanged,true);
+  const bakedFiles=['color','alpha'].map(channel=>path.join(data,'source-bake-'+channel+'.png'));
+  for(const [index,url] of [bakedSource.colorUrl,bakedSource.materialUrls.alpha].entries())
+    await fs.writeFile(bakedFiles[index],Buffer.from(await (await fetch(origin+url)).arrayBuffer()));
+  const corners=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import json,sys',
+    'from PIL import Image',
+    'print(json.dumps([[Image.open(file).getpixel(pos) for pos in ((0,0),(4095,4095))] for file in sys.argv[1:]]))',
+  ].join('\n'),...bakedFiles],{encoding:'utf8'}));
+  assert.deepEqual(corners,[[[188,0,0],[188,137,255]],[64,0]]);
+  await api(texturedPaint+'/commands',{revision:0,operations:[{op:'update',id:sourceLayer.id,patch:{visible:false}}]});
+  await api(texturedPaint+'/undo',{revision:1});
+  await reopened.reload();
+  assert.deepEqual((await api(texturedRoute)).paint.layers,[sourceLayer]);
+  console.log('PASS GLB source maps, sRGB factors, transformed ORM, cutout alpha, unsupported UV feedback, 4K bake and layer undo');
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
 }finally{

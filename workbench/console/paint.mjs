@@ -651,8 +651,8 @@ function completePng(bytes){
   }
   return false;
 }
-function describePng(doc,bytes,name){
-  if(bytes.length>24*1024*1024||!completePng(bytes))throw Error('素材须为完整的 PNG，且不超过 24 MiB 和 8192 像素宽高');
+function describePng(doc,bytes,name,limit=24){
+  if(bytes.length>limit*1024*1024||!completePng(bytes))throw Error('素材须为完整的 PNG，且不超过 '+limit+' MiB 和 8192 像素宽高');
   const id=crypto.createHash('sha256').update(bytes).digest('hex'),file='paint-'+id+'.png';
   const existing=asset(doc,id),label=String(name||'PNG').trim().slice(0,100)||'PNG';
   const dimensions={width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20)};
@@ -856,7 +856,7 @@ export async function restorePaint(archive,scratch){
     if(!sha256(id)||item.sha256!==id||typeof item.name!=='string'||!item.name.trim()||item.name.length>100)
       throw Error('交付包素材记录无效');
     const file=path.join(folder,'paint-'+id+'.png');
-    const png=describePng({paint},fs.readFileSync(file),item.name);
+    const png=describePng({paint},fs.readFileSync(file),item.name,64);
     if(png.entry.id!==id)throw Error('交付包素材指纹变化');
     paint.assets[id]=png.entry;
   }

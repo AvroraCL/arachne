@@ -900,7 +900,8 @@ async function renderTexture(){
   $('inspect-channel').disabled=!inspectionUrl;
   const solo=inspectChannel&&!!inspectionUrl;
   $('inspect-channel').setAttribute('aria-pressed',String(solo));
-  const displayUrl=solo?inspectionUrl:url,displayMaps=solo?null:materialUrls;
+  const displayUrl=solo?inspectionUrl:doc.source.format==='glb'&&(mode==='original'||!j)?null:url;
+  const displayMaps=solo?null:materialUrls;
   const key=JSON.stringify([displayUrl,displayMaps,solo]);
   if(key===textureKey||$('viewport').hidden||!viewportReady())return;
   textureKey=key;
@@ -1455,7 +1456,7 @@ async function run(action,errorOutput=null){
 async function projects(){
   return (await api('/api/projects')).filter(project=>project.workflowType==='pbr_paint');
 }
-async function load(id){
+async function load(id,{initialLayer}={}){
   if(maskEditor.isOpen())throw Error('请先保存或取消当前蒙版');
   if(!/^[\w-]{1,100}$/.test(id))throw Object.assign(Error('工程 ID 无效'),{status:400});
   const next=await api('/api/projects/'+encodeURIComponent(id));
@@ -1477,7 +1478,8 @@ async function load(id){
     const stored=JSON.parse(localStorage.getItem('arachne-paint-folders-'+id));
     if(Array.isArray(stored))collapsedFolders=new Set(stored);
   }catch{}
-  setSelection();selectedAsset=null;jobs=[];$('asset-search').value='';setSelectValue($('compare-preview'),'');inspectChannel=false;viewport.setUnlit(false);resetUV();textureKey='';approvedPreviewId=null;
+  setSelection(next.paint.layers.some(layer=>layer.id===initialLayer)?[initialLayer]:[]);
+  selectedAsset=null;jobs=[];$('asset-search').value='';setSelectValue($('compare-preview'),'');inspectChannel=false;viewport.setUnlit(false);resetUV();textureKey='';approvedPreviewId=null;
   updateProjectUrl();
   rememberWorkbenchSession();
   setSelectValue($('source'),'live');surfaceTools.setMode('orbit');
@@ -1577,12 +1579,12 @@ historyPanel=setupPaintHistory({trigger:$('open-history'),read:()=>doc,load:id=>
   restore:(direction,steps,origin)=>run(async()=>{if(doc.id!==origin.id)throw Error('当前工程已切换');await api('/api/projects/'+origin.id+'/paint/'+direction,{revision:origin.revision,steps});approvedPreviewId=null;},$('history-error'))});
 const newPaintDialog=$('new-paint-dialog'),importDialog=$('paint-import-dialog');
 setupProjectFiles({canOpen:canOpenProjectDialog,
-  create:(name,model,error,material,modelTemplate)=>run(async()=>{
-    const options=new URLSearchParams({name,...(material==null?{}:{material})});
+  create:(name,model,error,material,modelTemplate,preserveTextures)=>run(async()=>{
+    const options=new URLSearchParams({name,...(material==null?{}:{material}),...(!preserveTextures?{textures:'blank'}:{})});
     const project=model?await responseJson(await fetch('/api/projects/model-import?'+options,{
       method:'POST',headers:{'Content-Type':'model/gltf-binary'},body:model
     })):await api('/api/projects',{workflowType:'pbr_paint',name,modelTemplate});
-    await load(project.id);
+    await load(project.id,{initialLayer:model?project.paint.layers[0]?.id:undefined});
   },error),
   restore:(archive,error)=>run(async()=>{
     const response=await fetch('/api/projects/paint-import',{method:'POST',

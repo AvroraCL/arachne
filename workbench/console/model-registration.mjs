@@ -6,6 +6,7 @@ import {promisify} from 'node:util';
 import {ROOT,DATA,atomic,forkProject} from './store.mjs';
 import {pythonExecutable} from './python-runtime.mjs';
 import {sha256File} from './file-fingerprint.mjs';
+import {channelSpecs} from './public/paint-channels.mjs';
 
 const execute=promisify(execFile);
 const coreRegistrationFiles=['model.glb','base.png','metadata.json','registration.json'];
@@ -17,11 +18,11 @@ const preservedSurfaceFiles=[
 ];
 export const glbRegistrationFiles=(legacySurface=false)=>legacySurface?[...coreRegistrationFiles,...preservedSurfaceFiles]:coreRegistrationFiles;
 
-export async function registerGlb(input,scratch,{python=pythonExecutable(),material}={}){
+export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput}={}){
   const staging=path.join(scratch,'registration');
   const config=path.join(scratch,'input.json');
   await fs.mkdir(staging);
-  atomic(config,{input,out:staging,material,ownerPid:process.pid});
+  atomic(config,{input,out:staging,material,textureOutput,ownerPid:process.pid});
   try{
     await execute(python,['-X','utf8',path.join(ROOT,'model_surface.py'),'register',config],
       {cwd:ROOT,windowsHide:true,timeout:180000});
@@ -32,9 +33,37 @@ export async function registerGlb(input,scratch,{python=pythonExecutable(),mater
   }
   return staging;
 }
-export async function importGlbProject(input,scratch,name,material){
-  const staging=await registerGlb(input,scratch,{material});
-  return installGlbRegistration(staging,doc=>forkProject(doc.id,doc,name));
+export async function importGlbProject(input,scratch,name,material,{preserveTextures=true}={}){
+  const textureOutput=preserveTextures?path.join(scratch,'paint-maps'):undefined;
+  const staging=await registerGlb(input,scratch,{material,textureOutput});
+  const {importedMaps=[]}=JSON.parse(await fs.readFile(path.join(staging,'metadata.json'),'utf8'));
+  const maps={},images=new Map();
+  for(const channel of importedMaps){
+    if(!Object.hasOwn(channelSpecs,channel))throw Error('源贴图通道无效');
+    const source=path.join(textureOutput,channel+'.png');
+    const stat=await fs.stat(source);
+    if(stat.size>64*1024*1024)throw Error('源贴图转换后超过 64 MiB');
+    let dimensions;
+    const id=await sha256File(source,{inspectHead:bytes=>{dimensions={width:bytes.readUInt32BE(16),height:bytes.readUInt32BE(20)};}});
+    maps[channel]=id;
+    if(!images.has(id))images.set(id,{source,entry:{id,sha256:id,file:'paint-'+id+'.png',
+      name:'源材质_'+channelSpecs[channel].name+'.png',...dimensions}});
+  }
+  return installGlbRegistration(staging,doc=>{
+    if(images.size){
+      doc.paint.assets=Object.fromEntries([...images].map(([id,item])=>[id,item.entry]));
+      doc.paint.layers.push({id:randomUUID(),kind:'fill',name:'源材质贴图',visible:true,opacity:1,blend:'normal',
+        channels:{color:false,metallic:false,roughness:false,...Object.fromEntries(importedMaps.map(key=>[key,true]))},
+        values:{...doc.paint.base},maps,x:.5,y:.5,scale:1,rotation:0,mask:null});
+    }
+    return forkProject(doc.id,doc,name,async destination=>{
+      for(const {entry,source} of images.values()){
+        const file=path.join(destination,entry.file);
+        await fs.copyFile(source,file);
+        if(await sha256File(file)!==entry.sha256)throw Error('复制源贴图时素材指纹变化');
+      }
+    });
+  });
 }
 export async function describeGlbRegistration(folder,id,files=folder){
   const meta=JSON.parse(await fs.readFile(path.join(files,'metadata.json'),'utf8'));

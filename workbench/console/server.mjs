@@ -104,7 +104,7 @@ async function receivePaintArchive(req){
 }
 let importingModel=false;
 const maxModel=128*1024*1024;
-async function receiveModel(req,name,material){
+async function receiveModel(req,name,material,preserveTextures){
   if(Number(req.headers['content-length'])>maxModel)throw Object.assign(Error('GLB 不能超过 128 MiB'),{status:413});
   if(importingModel)throw Object.assign(Error('已有模型正在导入'),{status:429});
   importingModel=true;
@@ -120,7 +120,7 @@ async function receiveModel(req,name,material){
         await upload.writeFile(part);
       }
     }finally{await upload.close();}
-    return await importGlbProject(input,scratch,name,material);
+    return await importGlbProject(input,scratch,name,material,{preserveTextures});
   }finally{
     importingModel=false;
     if(scratch)await fs.promises.rm(scratch,{recursive:true,force:true});
@@ -150,7 +150,9 @@ const server=http.createServer(async(req,res)=>{
       const material=chosen===null?undefined:chosen==='default'?'default':Number(chosen);
       if(chosen!==null&&material!=='default'&&(!/^(0|[1-9]\d*)$/.test(chosen)||!Number.isSafeInteger(material)))
         throw Error('GLB 材质编号无效');
-      send(res,201,await receiveModel(req,name,material));return;
+      const textures=url.searchParams.get('textures')??'preserve';
+      if(!['preserve','blank'].includes(textures))throw Error('请选择有效的源贴图导入方式');
+      send(res,201,await receiveModel(req,name,material,textures==='preserve'));return;
     }
     if(req.method==='POST'&&url.pathname==='/api/projects/paint-import'){
       if(req.headers['content-type']!=='application/zip'){send(res,415,{error:'请选择涂装交付 ZIP'});return;}

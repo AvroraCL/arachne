@@ -144,7 +144,7 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
 
 export function setupProjectFiles({canOpen,create,restore}){
   const byId=id=>document.getElementById(id);
-  const name=byId('new-paint-name'),material=byId('new-paint-material');
+  const name=byId('new-paint-name'),material=byId('new-paint-material'),sourceTextures=byId('new-paint-source-textures');
   const template=byId('new-paint-template'),templateRow=template.closest('label'),materialRow=material.closest('label');
   template.replaceChildren(new Option('示例模型','demo'),...Object.entries(modelTemplates).map(([id,title])=>new Option(title,id)));
   syncSelectMenu(template);
@@ -165,6 +165,8 @@ export function setupProjectFiles({canOpen,create,restore}){
     check:checkGlb,defaultLabel:'导入自有模型',defaultHint:'拖入 GLB，或选择文件',optional:true,
     onFile(file,entries=[]){
       materialRow.hidden=!file;
+      sourceTextures.closest('label').hidden=!file;
+      sourceTextures.checked=true;
       templateRow.hidden=!!file;
       material.replaceChildren(new Option('自动选择','auto'),...entries.map(([id,title])=>new Option(title,id)));
       syncSelectMenu(material);
@@ -175,11 +177,11 @@ export function setupProjectFiles({canOpen,create,restore}){
       if(!value){error.textContent='请输入工程名称';name.focus();return false;}
       const chosen=model&&material.value!=='auto'?material.value:null;
       const modelTemplate=!model&&template.value!=='demo'?template.value:undefined;
-      name.disabled=material.disabled=template.disabled=true;
+      name.disabled=material.disabled=template.disabled=sourceTextures.disabled=true;
       syncSelectMenu(material);syncSelectMenu(template);
-      try{return await create(value,model,error,chosen,modelTemplate);}
+      try{return await create(value,model,error,chosen,modelTemplate,sourceTextures.checked);}
       finally{
-        name.disabled=material.disabled=template.disabled=false;
+        name.disabled=material.disabled=template.disabled=sourceTextures.disabled=false;
         syncSelectMenu(material);syncSelectMenu(template);
       }
     }
