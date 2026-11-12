@@ -79,6 +79,17 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         #if ARACHNE_DEV
         if body["type"] as? String == "diagnostic", let value=body["message"] as? String { fputs("WebKit: \(value)\n",stderr);return }
         #endif
+        if body["type"] as? String == "imageClipboard" {
+            guard let encoded = body["png"] as? String, encoded.utf8.count <= 32*1024*1024,
+                  let png = Data(base64Encoded: encoded), png.count >= 24, png.count <= 24*1024*1024,
+                  Array(png.prefix(8)) == [137,80,78,71,13,10,26,10] else { return }
+            let width = png[16..<20].reduce(0) { ($0 << 8) | Int($1) }
+            let height = png[20..<24].reduce(0) { ($0 << 8) | Int($1) }
+            guard (1...4096).contains(width), (1...4096).contains(height) else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setData(png, forType: .png)
+            return
+        }
         guard body["type"] as? String == "project",
               let id = body["id"] as? String, id.range(of: "^[A-Za-z0-9_-]{1,100}$", options: .regularExpression) != nil,
               let name = body["name"] as? String, name.count <= 200 else { return }
@@ -97,7 +108,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
 
     func perform(_ command: String) {
         // The enum is fixed here, so no user string is interpolated into JS.
-        let allowed = ["newProject", "openProject", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo"]
+        let allowed = ["newProject", "openProject", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo", "cut", "pasteInPlace"]
         guard allowed.contains(command), sameOrigin(webView.url) else { NSSound.beep(); return }
         webView.evaluateJavaScript("window.arachneNativeHost?.command('\(command)') ?? false") { value, error in
             if error != nil || (value as? Bool) != true { NSSound.beep() }

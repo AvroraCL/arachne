@@ -9,7 +9,7 @@ function imageStrokeLabel(stroke){
   if(stroke.flood)return '油漆桶';
   if(stroke.clone)return '仿制图章';
   if(stroke.transformUV)return '自由变换';
-  if(stroke.clearUV)return '清除选区';
+  if(stroke.clearUV)return stroke.cut?'剪切选区':'清除选区';
   if(stroke.rect)return '填充颜色';
   return stroke.erase?'橡皮擦':'画笔';
 }

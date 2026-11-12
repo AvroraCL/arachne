@@ -145,17 +145,23 @@ export function setupPaintAreas(hooks){
   $('open-render-settings').onclick=()=>areas.openEditor('renderSettings',{placement:'sidebar'});
   $('open-render-results').onclick=()=>areas.openEditor('renderResult');
   $('reset-docks').onclick=()=>areas.reset();for(const label of $('window-menu').querySelectorAll('label'))label.hidden=true;
-  const mergedButton=$('copy-merged-image');
+  const imageMenuActions=[
+    [$('cut-image-selection'),'canCut','cutSelection'],
+    [$('copy-merged-image'),'canCopyMerged','copyMerged'],
+    [$('paste-image-in-place'),'canPasteInPlace','pasteInPlace']
+  ];
   function imageEditor(){
     const editors=areas.editors();
     return preferredCanvas?.kind==='image'&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(item=>item.kind==='image');
   }
-  mergedButton.onclick=()=>imageEditor()?.copyMerged?.();
-  mergedButton.closest('details').addEventListener('toggle',event=>{
+  for(const [control,,action] of imageMenuActions)control.onclick=()=>imageEditor()?.[action]?.();
+  imageMenuActions[0][0].closest('details').addEventListener('toggle',event=>{
     if(!event.currentTarget.open)return;
     const editor=imageEditor();
-    mergedButton.hidden=!editor?.copyMerged;
-    mergedButton.disabled=!editor?.canCopyMerged?.();
+    for(const [control,enabled,action] of imageMenuActions){
+      control.hidden=!editor?.[action];
+      control.disabled=!editor?.[enabled]?.();
+    }
   });
   workspace.addEventListener('keydown',event=>{
     if(event.defaultPrevented||compositionKey(event)||event.target.closest('input,textarea,select,[contenteditable]')||areas.active?.legacy&&areas.active.kind==='image')return;
@@ -166,6 +172,10 @@ export function setupPaintAreas(hooks){
   function materialViewport(){const editors=areas.editors();return preferredViewport&&editors.includes(preferredViewport)?preferredViewport:editors.find(e=>e.kind==='viewport');}
   function targetViewport(){const target=materialViewport();return target?.isReady()?target:areas.editors().find(e=>e.kind==='viewport'&&e.isReady());}
   return {project,areas,
+    imageCommand(action){
+      if(project.editorDomain!=='image')return false;
+      return imageEditor()?.[action]?.()??false;
+    },
     travelHistory(direction){
       const editor=project.editorDomain==='image'&&imageEditor();
       if(editor?.travelHistory)return editor.travelHistory(direction);

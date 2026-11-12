@@ -1,4 +1,4 @@
-import {app,BrowserWindow,dialog,ipcMain,Menu,nativeTheme,screen,session,shell} from 'electron';
+import {app,BrowserWindow,clipboard,dialog,ipcMain,Menu,nativeImage,nativeTheme,screen,session,shell} from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -55,7 +55,8 @@ function buildMenus(){
     ]},
     {label:'编辑',submenu:[
       command('撤销','undo','CmdOrCtrl+Z'),command('重做','redo','CmdOrCtrl+Shift+Z'),separator,
-      {label:'剪切',role:'cut'},{label:'复制',role:'copy'},{label:'粘贴',role:'paste'},{label:'全选',role:'selectAll'},
+      command('剪切','cut','CmdOrCtrl+X'),{label:'复制',role:'copy'},{label:'粘贴',role:'paste'},
+      command('原位粘贴','pasteInPlace','CmdOrCtrl+Shift+V'),{label:'全选',role:'selectAll'},
       separator,command('历史记录…','history'),command('搜索命令…','searchCommands','CmdOrCtrl+K'),command('设置…','settings')
     ]},
     {label:'渲染',submenu:[command('渲染设置…','renderSettings'),command('后台任务…','renderTasks')]},
@@ -163,6 +164,18 @@ async function start(){
        !sameOrigin(event.senderFrame?.url)||typeof id!=='string'||!projectId.test(id)||typeof name!=='string')return;
     win.setTitle(name?name.slice(0,160)+' · '+appName:appName);
     if(state.project!==id){state.project=id;saveState();}
+  });
+  ipcMain.handle('arachne:clipboard-image',(event,bytes)=>{
+    if(event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame||
+       !sameOrigin(event.senderFrame?.url)||!(bytes instanceof ArrayBuffer)||bytes.byteLength<24||
+       bytes.byteLength>24*1024*1024)return false;
+    const png=Buffer.from(bytes);
+    if(png.readUInt32BE(0)!==0x89504e47||png.readUInt32BE(4)!==0x0d0a1a0a||
+       ![png.readUInt32BE(16),png.readUInt32BE(20)].every(side=>side>0&&side<=4096))return false;
+    const image=nativeImage.createFromBuffer(png);
+    if(image.isEmpty())return false;
+    clipboard.writeImage(image);
+    return true;
   });
   buildMenus();
   win.once('ready-to-show',()=>{if(maximized)win.maximize();focus();});

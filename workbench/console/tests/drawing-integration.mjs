@@ -1068,6 +1068,71 @@ try{
   assert.deepEqual(redoneGroup.paint.imageDocuments[groupDoc].layers,masked.paint.imageDocuments[groupDoc].layers);
   assert.deepEqual(pageErrors,[]);
   console.log('PASS drawing group multiselect, nested drag, collapse, 4K alpha mask, reopen and undo/redo');
+
+  const cutDoc='cut-source',cutLayer='cut-pixels',cutDestination='cut-destination';
+  const cutSeed=await api(paintRoute+'/commands',{revision:redoneGroup.revision,operations:[
+    {op:'image',action:'create',documentId:cutDoc,patch:{name:'剪切来源'}},
+    {op:'image',action:'create',documentId:cutDestination,patch:{name:'原位粘贴目标'}},
+    {op:'image',action:'addLayer',documentId:cutDoc,layerId:cutLayer,kind:'pixel',patch:{name:'带蒙版的像素层',opacity:.3}},
+    {op:'image',action:'stroke',documentId:cutDoc,layerId:cutLayer,target:'pixels',stroke:{uv:true,rect:[0,0,1,1],color:'#35a4db',opacity:1,erase:false}},
+    {op:'image',action:'createMask',documentId:cutDoc,layerId:cutLayer,reveal:true,rect:[0,0,.5,1]}
+  ]});
+  const imagePicker=editor.locator('select[aria-label="图像文档"]');
+  async function cutRegion(){
+    await imagePicker.selectOption(cutDoc,{force:true});
+    await layersPanel.getByRole('button',{name:'带蒙版的像素层',exact:true}).click();
+    await editor.getByRole('button',{name:'矩形选区',exact:true}).click();
+    await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+    await setBrushOption('选区羽化',0);
+    await editor.getByRole('button',{name:'新建选区',exact:true}).click();
+    await drag([.58,.2],[.8,.6]);
+  }
+  await cutRegion();
+  const clipboardRoute='**/paint/image-clipboard';
+  await page.route(clipboardRoute,async route=>{
+    const response=await route.fetch();
+    assert.equal(response.status(),200);
+    await api(paintRoute+'/commands',{revision:cutSeed.revision,operations:[
+      {op:'image',action:'update',documentId:cutDoc,patch:{name:'另一个客户端修改了文档'}}
+    ]});
+    await route.fulfill({response});
+  },{times:1});
+  await canvas.focus();
+  assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('cut')),true);
+  await until(async()=>{
+    const doc=await api(projectRoute);
+    return doc.revision===cutSeed.revision+1&&await page.evaluate(()=>window.arachneNativeHost.prepareToClose().state!=='editing');
+  },'剪切遇到并发修订');
+  const concurrent=await api(projectRoute);
+  assert.deepEqual(concurrent.paint.imageDocuments[cutDoc].layers,cutSeed.paint.imageDocuments[cutDoc].layers);
+  await page.reload();await canvas.waitFor();
+  await cutRegion();
+  await page.locator('summary').filter({hasText:/^编辑$/}).click();
+  await page.locator('#cut-image-selection').click();
+  const cut=await until(async()=>{
+    const doc=await api(projectRoute);
+    return doc.paint.imageDocuments[cutDoc].layers[0].strokes.at(-1).cut&&doc;
+  },'剪切选区保存');
+  const source=cut.paint.imageDocuments[cutDoc].layers[0];
+  assert.deepEqual(source.maskStrokes,cutSeed.paint.imageDocuments[cutDoc].layers[0].maskStrokes);
+  assert.equal(cut.revision,concurrent.revision+1);
+  await imagePicker.selectOption(cutDestination,{force:true});
+  await canvas.focus();
+  assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('pasteInPlace')),true);
+  const pasted=await until(async()=>{
+    const doc=await api(projectRoute);
+    return doc.paint.imageDocuments[cutDestination].layers.length&&doc;
+  },'原位粘贴到另一文档');
+  const pastedLayer=pasted.paint.imageDocuments[cutDestination].layers[0];
+  assert.ok(Math.abs(pastedLayer.x-.69)<.005&&Math.abs(pastedLayer.y-.4)<.005);
+  assert.deepEqual(rgba(await imagePng('cut-paste.png',pasted.revision,cutDestination),[xy(.65,.35),xy(.5,.35)]),[
+    [4096,4096],[[53,164,219,255],[0,0,0,0]]
+  ]);
+  const undoPaste=await api(paintRoute+'/undo',{revision:pasted.revision});
+  const undoCut=await api(paintRoute+'/undo',{revision:undoPaste.revision});
+  assert.deepEqual(undoCut.paint.imageDocuments[cutDoc].layers,cutSeed.paint.imageDocuments[cutDoc].layers);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS selection cut, revision conflict safety, hidden source pixels, native command and cross-document paste in place');
 }catch(error){
   console.error(logs);
   throw error;

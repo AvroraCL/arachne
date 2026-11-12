@@ -1,6 +1,7 @@
 import {uvShapePayload} from './uv-selection-region.mjs';
 
 const resolution=4096;
+export const clipboardImageLimit=24*1024*1024;
 const listeners=new Set();
 let clipboard=null,request=null;
 
@@ -23,7 +24,23 @@ export async function clipboardPngSize(file){
   return [width,height];
 }
 
-export function copyImagePixels(origin,region,{merged=false}={}){
+function writeDesktopImage(png){
+  const write=window.arachneDesktop?.writeImageClipboard;
+  if(write)return png.then(file=>file.arrayBuffer()).then(bytes=>write(bytes));
+  const mac=window.webkit?.messageHandlers?.arachne;
+  if(!mac)return null;
+  return png.then(file=>new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(reader.error);
+    reader.onload=()=>{
+      try{mac.postMessage({type:'imageClipboard',png:String(reader.result).split(',',2)[1]});resolve();}
+      catch(error){reject(error);}
+    };
+    reader.readAsDataURL(file);
+  }));
+}
+
+export function copyImagePixels(origin,region,{merged=false,cut=false}={}){
   const {clip}=region;
   request?.abort();
   const controller=request=new AbortController();
@@ -32,11 +49,12 @@ export function copyImagePixels(origin,region,{merged=false}={}){
     const response=await fetch('/api/projects/'+origin.id+'/paint/image-clipboard',{
       method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
       body:JSON.stringify({revision:origin.revision,documentId:origin.documentId,
-        ...(merged?{merged}:{layerId:origin.layerId}),rect:clip,...uvShapePayload(region)})
+        ...(merged?{merged}:{layerId:origin.layerId}),...(cut?{cut}:{}),rect:clip,...uvShapePayload(region)})
     });
     if(response.status===204)throw Error('图像已变化，请重新复制');
     if(!response.ok)throw Error((await response.json()).error||'复制图像失败');
     const blob=await response.blob();
+    if(cut&&blob.size>clipboardImageLimit)throw Error('剪切内容超过 24 MiB，请缩小选区后重试');
     if(controller.signal.aborted)throw new DOMException('复制已取消','AbortError');
     const file=new File([blob],'粘贴图像.png',{type:'image/png'});
     const [width,height]=await clipboardPngSize(file);
@@ -46,11 +64,13 @@ export function copyImagePixels(origin,region,{merged=false}={}){
     for(const listener of listeners)listener();
     return clipboard;
   })();
-  if(navigator.clipboard?.write&&typeof ClipboardItem==='function'){
-    const png=copied.then(value=>value.file);
+  const png=copied.then(value=>value.file);
+  const desktop=writeDesktopImage(png);
+  if(desktop)void desktop.catch(()=>{});
+  else if(navigator.clipboard?.write&&typeof ClipboardItem==='function'){
     void png.catch(()=>{});
     try{void navigator.clipboard.write([new ClipboardItem({'image/png':png})]).catch(()=>{});}catch{}
-  }
+  }else void png.catch(()=>{});
   return copied.finally(()=>{if(request===controller)request=null;});
 }
 

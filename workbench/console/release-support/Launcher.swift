@@ -63,9 +63,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         command(file,"工程详情…","projectDetails");file.addItem(.separator());command(file,"导出…","export","e")
         let edit=group("编辑")
         command(edit,"撤销","undo","z");command(edit,"重做","redo","z",[.command,.shift]);edit.addItem(.separator())
-        for (title,selector,key) in [("剪切","cut:","x"),("拷贝","copy:","c"),("粘贴","paste:","v"),("全选","selectAll:","a")] {
+        command(edit,"剪切","cut","x")
+        for (title,selector,key) in [("拷贝","copy:","c"),("粘贴","paste:","v"),("全选","selectAll:","a")] {
             edit.addItem(withTitle:title,action:Selector(selector),keyEquivalent:key)
         }
+        command(edit,"原位粘贴","pasteInPlace","v",[.command,.shift])
         edit.addItem(.separator());command(edit,"历史记录…","history");command(edit,"搜索命令…","searchCommands","k")
         let render=group("渲染");command(render,"渲染设置","renderSettings");command(render,"后台任务…","renderTasks")
         let window=group("窗口");command(window,"工作区布局…","workspaceLayouts");window.addItem(.separator())

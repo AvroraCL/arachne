@@ -2802,7 +2802,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
 });
 // The native host asks before quitting; no project command or direct disk
 // access is exposed to it. Active edits and pending writes must finish first.
-Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,flush:async()=>{
+Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,imageCommand:action=>areaSystem?.imageCommand(action),flush:async()=>{
   if(desktopWorkspace){areaSystem?.areas.save();await desktopWorkspace.flush();}
 },status:()=>{
   if(busy||[...projectWrites.values()].some(count=>count>0))return {state:'saving'};

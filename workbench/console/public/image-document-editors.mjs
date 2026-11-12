@@ -95,7 +95,7 @@ export function createDocumentEditor(ctx,bridge){
     if(destinationOptionsKey!==key){destinationOptionsKey=key;destination.replaceChildren(new Option('新建材质填充层',''),...layers.map(l=>new Option(l.name,l.id)));}
     destination.value=previous||linked?.id||'';syncSelectMenu(destination);
   }
-  const copy=button('复制图像选区',()=>copySelection()),paste=button('粘贴为图像层',pasteSelection);
+  const copy=button('复制图像选区',()=>copySelection()),paste=button('粘贴为图像层',()=>pasteSelection());
   const importInput=el('input');
   importInput.type='file';importInput.accept=drawingImageTypes;importInput.hidden=true;
   importInput.setAttribute('aria-label','选择要导入的图片');
@@ -112,7 +112,7 @@ export function createDocumentEditor(ctx,bridge){
   chromeButton(copy,'copy');chromeButton(paste,'paste');
   copy.title='复制图像选区 · ⌘ / Ctrl + C';paste.title='粘贴为图像层 · ⌘ / Ctrl + V';
   copy.disabled=paste.disabled=importButton.disabled=download.disabled=true;
-  let copying=false,importing=false,exportRequest=null;
+  let copying=false,cutting=false,importing=false,exportRequest=null;
   header.append(picker,create,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const parameters=el('div','document-tool-parameters'),viewOptions=el('div','document-view-options');
@@ -168,7 +168,7 @@ export function createDocumentEditor(ctx,bridge){
   const imageOrigin=()=>({id:project.document?.id,revision:project.document?.revision,imageDocumentId:project.imageContext?.documentId});
   const mapOperation=(op,origin)=>op?surfaceToImageCommand(op,origin?.imageDocumentId||project.imageContext?.documentId):null;
   function draft(op,origin){const mapped=mapOperation(op,origin);live.update(mapped);project.draft(mapped);}
-  const writing=()=>bridge.busy()||!!pendingImageEdit||strokeQueue.saving||importing;
+  const writing=()=>bridge.busy()||!!pendingImageEdit||strokeQueue.saving||importing||cutting;
   function submitEdit(operation,origin,onSaved){
     const task=(async()=>{
       try{
@@ -239,7 +239,7 @@ export function createDocumentEditor(ctx,bridge){
   status.onclick=()=>{if(stage.dataset.previewPhase==='error')live.retryDetail();};status.onkeydown=event=>{if(stage.dataset.previewPhase==='error'&&['Enter',' '].includes(event.key)){event.preventDefault();event.stopPropagation();live.retryDetail();}};
   function brushContext(){
     const layer=editableImageLayer(project),origin=imageOrigin(),maskTarget=project.imageContext?.target==='mask';
-    const busy=!!pendingImageEdit||importing||bridge.busy()&&!strokeQueue.saving||!strokeQueue.accepts(imageSelectionOrigin(project));
+    const busy=!!pendingImageEdit||importing||cutting||bridge.busy()&&!strokeQueue.saving||!strokeQueue.accepts(imageSelectionOrigin(project));
     return {...origin,busy,enabled:false,uvEnabled:!!layer&&!busy,brushColor:bridge.foreground(),
       maskValue:maskTarget&&elements['brush-erase'].checked?maskGray(bridge.colorPair('mask').background):bridge.maskInk(),maskTarget,
       layer:layer?{...layer,kind:layer.kind==='pixel'?'paint':'image',channels:{color:true,metallic:false,roughness:false},
@@ -443,6 +443,26 @@ export function createDocumentEditor(ctx,bridge){
     const layer=editableImageLayer(project);
     return project.imageContext?.target!=='mask'&&!!layer?.visible&&layer.kind!=='adjustment'&&layer.opacity>0;
   }
+  function canCut(){
+    const layer=editableImageLayer(project);
+    return canCopy()&&layer?.kind==='pixel'&&!layer.locked&&!layer.alphaLocked&&!!layer.strokes?.length&&!!selection.clip();
+  }
+  function cutSelection(){
+    if(!canCut())return false;
+    const origin=imageSelectionOrigin(project),region=selection.clip();
+    cutting=true;sync();
+    status.textContent='正在剪切 4K 像素…';
+    void run(async()=>{
+      const copied=await copyImagePixels(origin,region,{cut:true});
+      const current=imageSelectionOrigin(project);
+      if(disposed||current.id!==origin.id||current.revision!==origin.revision||current.documentId!==origin.documentId||
+         current.layerId!==origin.layerId||current.target!==origin.target)
+        throw Error('原图层已变化，请重新剪切');
+      await commandAt(project,origin,{action:'cutPixels',layerId:origin.layerId,rect:region.clip,...uvShapePayload(region)});
+      if(!disposed)status.textContent='已剪切 '+copied.width+' × '+copied.height+' px';
+    }).finally(()=>{cutting=false;if(!disposed)sync();});
+    return true;
+  }
   function syncClipboard(){
     copy.disabled=!canCopy();paste.disabled=!canPaste()||!canInsertImage(project)||!copiedImage();
     copy.setAttribute('aria-busy',String(copying));
@@ -507,17 +527,22 @@ export function createDocumentEditor(ctx,bridge){
       if(!disposed)selectAddedLayer(project,origin,layerId);
     }).finally(()=>{importing=false;if(!disposed)sync();});
   }
-  function pasteSelection(){
+  function pasteSelection(inPlace=false){
     const entry=copiedImage();
     if(!entry||!canPaste()||!canInsertImage(project))return false;
     const c=project.imageContext;
-    const center=entry.projectId===project.document.id&&entry.documentId===c?.documentId?entry.center:undefined;
+    const center=inPlace||entry.projectId===project.document.id&&entry.documentId===c?.documentId?entry.center:undefined;
     importFile(entry.file,imageClipboardPlacement(entry.width,entry.height,center));
     return true;
   }
   const stopClipboard=onImageClipboardChange(syncClipboard);
   host.addEventListener('copy',event=>{
     if(!event.target.closest('input,textarea,[contenteditable]')&&copySelection()){
+      event.preventDefault();event.stopPropagation();
+    }
+  },{signal});
+  host.addEventListener('cut',event=>{
+    if(!event.target.closest('input,textarea,[contenteditable]')&&cutSelection()){
       event.preventDefault();event.stopPropagation();
     }
   },{signal});
@@ -552,7 +577,7 @@ export function createDocumentEditor(ctx,bridge){
     const origin=imageSelectionOrigin(project),name=project.document.paint.assets[dragged.id].name;void run(()=>addImageAsset(project,origin,dragged.id,name,position));
   },{signal});
   function travelHistory(direction){
-    if(drawingGesture()||selection.isDragging()||selection.isTransforming()||nav)return false;
+    if(cutting||drawingGesture()||selection.isDragging()||selection.isTransforming()||nav)return false;
     const id=project.document?.id;
     if(!id)return false;
     void strokeQueue.flush().then(saved=>saved&&project.document?.id===id&&project.travel(direction)).catch(ctx.error);
@@ -588,6 +613,8 @@ export function createDocumentEditor(ctx,bridge){
       if(op)void save(op,imageOrigin());
     }else if(mod&&!event.altKey){
       if(key==='c')handled=copySelection(event.shiftKey);
+      else if(key==='x'&&!event.shiftKey)handled=cutSelection();
+      else if(key==='v'&&event.shiftKey)handled=pasteSelection(true);
       else if(key==='i'&&event.shiftKey)handled=selection.invert();
       else if(key==='i'){
         const layer=editableImageLayer(project);
@@ -687,8 +714,9 @@ export function createDocumentEditor(ctx,bridge){
     ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();syncStrokePreview();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
     canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
+    canCut,cutSelection,canPasteInPlace:()=>canPaste()&&canInsertImage(project)&&!!copiedImage(),pasteInPlace:()=>pasteSelection(true),
     getSelection(origin){return shown&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&
       !selection.isDragging()&&!selection.isTransforming()?selection.clip():null;},
     previewAdjustment(origin,operation){

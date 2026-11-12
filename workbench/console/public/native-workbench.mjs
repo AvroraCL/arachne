@@ -6,7 +6,7 @@ const commands={newProject:'new',openProject:'open-projects',saveProjectCopy:'op
   importArchive:'open-paint-import',migrateModel:'open-glb-migration',searchCommands:'open-command-picker',workspaceLayouts:'open-workspace-layouts',createBackup:'create-paint-backup',downloadBackup:'download-paint-backup',
   export:'open-delivery',history:'open-history',renderTasks:'open-task-monitor',renderSettings:'open-render-settings',settings:'open-settings'};
 
-export function createNativeWorkbench({window,document,status,flush}){
+export function createNativeWorkbench({window,document,status,flush,imageCommand}){
   const composing=trackTextComposition(document);
   function command(name){
     if(composing())return false;
@@ -22,6 +22,12 @@ export function createNativeWorkbench({window,document,status,flush}){
       const control=document.getElementById(name);
       if(!control||control.disabled)return false;
       control.click();return true;
+    }
+    if(name==='cut'||name==='pasteInPlace'){
+      if(focused?.matches?.('input,textarea,[contenteditable="true"]'))
+        return name==='cut'&&document.execCommand('cut');
+      if(document.querySelector('dialog[open]'))return false;
+      return imageCommand?.(name==='cut'?'cutSelection':'pasteInPlace')===true;
     }
     const id=commands[name];
     if(!id||document.querySelector('dialog[open]'))return false;

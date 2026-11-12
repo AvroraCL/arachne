@@ -634,16 +634,25 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
   };
 }
 export function imageClipboardInput(doc,request){
-  const {revision,documentId,layerId,rect,merged=false}=fields(request,['revision','documentId','layerId','rect','merged',...uvShapeFields]);
+  const {revision,documentId,layerId,rect,merged=false,cut=false}=fields(request,['revision','documentId','layerId','rect','merged','cut',...uvShapeFields]);
   if(!validUVRect(rect)||!validUVSelection(request,rect))throw Error('图像复制选区无效');
-  if(typeof merged!=='boolean'||merged&&layerId!==undefined)throw Error('图像复制来源无效');
+  if(typeof merged!=='boolean'||typeof cut!=='boolean'||merged&&(layerId!==undefined||cut))throw Error('图像复制来源无效');
+  let raw;
   if(!merged){
     const documents=doc.paint.imageDocuments??{};
-    const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId);
-    if(!layer||!layerIsVisible(documents[documentId].layers,layer)||!layer.opacity||layer.kind==='adjustment')
+    const image=Object.hasOwn(documents,documentId)?documents[documentId]:null;
+    const layer=image?.layers.find(item=>item.id===layerId);
+    if(!layer||!layerIsVisible(image.layers,layer)||!layer.opacity||layer.kind==='adjustment')
       throw Error('请选择包含像素的可见图像图层');
+    if(cut){
+      if(layer.kind!=='pixel'||layer.alphaLocked)throw Error('请选择可编辑的像素图层并解锁透明像素');
+      requireUnlocked(image.layers,layer);
+      raw={colorSpace:image.colorSpace,layers:[{id:layer.id,kind:'pixel',visible:true,opacity:1,blend:'normal',
+        maskEnabled:false,strokes:layer.strokes??[]}]};
+    }
   }
   const input=imageDocumentInput(doc,{revision,documentId,isolatedImageLayer:merged?undefined:layerId,resolution:4096});
+  if(raw)input.paint.imageDocuments[documentId]=raw;
   return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
 }
 export function imageExportInput(doc,request){

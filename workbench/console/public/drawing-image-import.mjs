@@ -1,7 +1,7 @@
-import {clipboardPngSize} from './image-clipboard.mjs';
+import {clipboardImageLimit,clipboardPngSize} from './image-clipboard.mjs';
 
 export const drawingImageTypes='image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp';
-const maxBytes=24*1024*1024,maxSide=8192;
+const maxBytes=clipboardImageLimit,maxSide=8192;
 const supportedTypes=new Set(['image/png','image/jpeg','image/webp']);
 const pngSignature=[137,80,78,71,13,10,26,10];
 const matches=(bytes,offset,signature)=>signature.every((value,index)=>bytes[offset+index]===value);
