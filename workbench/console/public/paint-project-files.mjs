@@ -1,4 +1,5 @@
 import {syncSelectMenu} from './paint-select.mjs';
+import {modelTemplates} from './model-templates.mjs';
 
 const defaultProjectName='示例模型 · PBR 涂装';
 const MiB=1024*1024;
@@ -144,29 +145,43 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
 export function setupProjectFiles({canOpen,create,restore}){
   const byId=id=>document.getElementById(id);
   const name=byId('new-paint-name'),material=byId('new-paint-material');
-  const materialRow=material.closest('label');
+  const template=byId('new-paint-template'),templateRow=template.closest('label'),materialRow=material.closest('label');
+  template.replaceChildren(new Option('示例模型','demo'),...Object.entries(modelTemplates).map(([id,title])=>new Option(title,id)));
+  syncSelectMenu(template);
   let suggested=defaultProjectName;
+  function suggest(next){
+    if(!name.value.trim()||name.value===suggested)name.value=next;
+    suggested=next;
+  }
+  function templateName(){
+    return template.value==='demo'?defaultProjectName:modelTemplates[template.value]+' · PBR 涂装';
+  }
+  template.onchange=()=>suggest(templateName());
   const newDialog=fileDialog({
     dialog:byId('new-paint-dialog'),input:byId('new-paint-model'),drop:byId('new-paint-model-drop'),
     label:byId('new-paint-model-label'),size:byId('new-paint-model-size'),
     choose:byId('choose-new-paint-model'),clear:byId('clear-new-paint-model'),
     close:byId('new-paint-close'),submit:byId('new-paint-submit'),error:byId('new-paint-error'),
-    check:checkGlb,defaultLabel:'示例模型',defaultHint:'拖入 GLB，或选择文件',optional:true,
+    check:checkGlb,defaultLabel:'导入自有模型',defaultHint:'拖入 GLB，或选择文件',optional:true,
     onFile(file,entries=[]){
       materialRow.hidden=!file;
+      templateRow.hidden=!!file;
       material.replaceChildren(new Option('自动选择','auto'),...entries.map(([id,title])=>new Option(title,id)));
       syncSelectMenu(material);
-      const next=file?.name.replace(/\.glb$/i,'').trim().slice(0,100)||defaultProjectName;
-      if(!name.value.trim()||name.value===suggested)name.value=next;
-      suggested=next;
+      suggest(file?.name.replace(/\.glb$/i,'').trim().slice(0,100)||templateName());
     },
     async commit(model,error){
       const value=name.value.trim();
       if(!value){error.textContent='请输入工程名称';name.focus();return false;}
       const chosen=model&&material.value!=='auto'?material.value:null;
-      name.disabled=material.disabled=true;syncSelectMenu(material);
-      try{return await create(value,model,error,chosen);}
-      finally{name.disabled=material.disabled=false;syncSelectMenu(material);}
+      const modelTemplate=!model&&template.value!=='demo'?template.value:undefined;
+      name.disabled=material.disabled=template.disabled=true;
+      syncSelectMenu(material);syncSelectMenu(template);
+      try{return await create(value,model,error,chosen,modelTemplate);}
+      finally{
+        name.disabled=material.disabled=template.disabled=false;
+        syncSelectMenu(material);syncSelectMenu(template);
+      }
     }
   });
   const importDialog=fileDialog({
@@ -181,6 +196,7 @@ export function setupProjectFiles({canOpen,create,restore}){
     const menu=document.querySelector('.paint-menu[open]');
     if(menu){menu.open=false;menu.querySelector('summary')?.focus();}
     if(which==='glb'){
+      template.value='demo';syncSelectMenu(template);
       name.value=suggested=defaultProjectName;
       newDialog(files);name.select();
     }else importDialog(files);

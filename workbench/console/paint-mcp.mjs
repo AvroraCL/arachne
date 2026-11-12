@@ -1,4 +1,5 @@
 import {paintChannels} from './public/paint-channels.mjs';
+import {modelTemplates} from './public/model-templates.mjs';
 import {APP_VERSION} from './public/app-version.mjs';
 import {nodeTypes,brushNodeTypes} from './public/material-graph.mjs';
 import {cyclesLimits} from './public/cycles-limits.mjs';
@@ -88,7 +89,7 @@ const tools=[
   ['personal_remove','删除个人资源条目，不影响项目副本',{personalRevision:revision,resourceId:id},['personalRevision','resourceId'],true],
   ['history','读取可撤销/重做的历史动作和步数',{projectId:id},['projectId'],false],
   ['get','读取涂装工程、当前修订和诊断任务',{projectId:id},['projectId'],false],
-  ['create','从已登记的 示例模型 创建涂装工程',{name:string,sourceProjectId:id},[],true],
+  ['create','从示例模型、基础几何模板或已登记模型创建涂装工程',{name:string,sourceProjectId:id,modelTemplate:{enum:Object.keys(modelTemplates)}},[],true],
   ['import_png','导入本机 PNG。可用 placement 放置画布图层，或用 nodeId 绑定已有图像节点，二者互斥；素材与目标写入同一修订',{
     ...edit,file:string,name:string,placement:canvasPlacement,nodeId:id,materialId:id
   },['projectId','revision','file'],true],
@@ -153,7 +154,7 @@ async function call(name,args){
   if(name==='paint_personal_list')return request('/api/personal-library');
   if(name==='paint_personal_save')return request('/api/personal-library/save',{projectId:safe(args.projectId),projectRevision:args.revision,revision:args.personalRevision,kind:args.kind,resourceId:safe(args.resourceId)});
   if(name==='paint_personal_rename'||name==='paint_personal_remove')return request('/api/personal-library/'+name.slice('paint_personal_'.length),{revision:args.personalRevision,id:safe(args.resourceId),...(name==='paint_personal_rename'?{name:args.name}:{})});
-  if(name==='paint_create')return request('/api/projects',{workflowType:'pbr_paint',name:args.name,sourceProjectId:args.sourceProjectId});
+  if(name==='paint_create')return request('/api/projects',{workflowType:'pbr_paint',name:args.name,sourceProjectId:args.sourceProjectId,modelTemplate:args.modelTemplate});
   const root='/api/projects/'+safe(args.projectId);
   if(name==='paint_personal_import')return request(root+'/paint/library-import',{revision:args.revision,libraryRevision:args.personalRevision,id:safe(args.resourceId)});
   if(name==='paint_history')return request(root+'/paint/history');

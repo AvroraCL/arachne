@@ -592,10 +592,11 @@
     <header><h2 id="new-paint-title">新建涂装工程</h2><button id="new-paint-close" type="button">关闭</button></header>
     <div class="paint-form-content">
       <label>工程名称<input id="new-paint-name" type="text" maxlength="100" required autofocus></label>
+      <label class="new-paint-template-row">模型模板<select id="new-paint-template" aria-label="模型模板"></select></label>
       <div id="new-paint-model-drop" class="project-file-drop" role="group" aria-label="模型来源">
-        <div><strong id="new-paint-model-label">示例模型</strong><small id="new-paint-model-size">拖入 GLB，或选择文件</small></div>
+        <div><strong id="new-paint-model-label">导入自有模型</strong><small id="new-paint-model-size">拖入 GLB，或选择文件</small></div>
         <button id="choose-new-paint-model" type="button">选择 GLB…</button>
-        <button id="clear-new-paint-model" type="button" hidden>恢复示例</button>
+        <button id="clear-new-paint-model" type="button" hidden>使用模板</button>
         <input id="new-paint-model" type="file" accept=".glb,model/gltf-binary" aria-label="选择 GLB 模型" hidden>
       </div>
       <label class="new-paint-material-row" hidden>涂装材质<select id="new-paint-material" aria-label="涂装材质"></select></label>

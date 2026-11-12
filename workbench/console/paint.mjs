@@ -18,6 +18,8 @@ import {bindingFingerprint,demoProjectId,nativeDemoProjectId} from './demo-sourc
 import {cyclesOptions} from './cycles-options.mjs';
 import {pngSizeIs,exrMatches} from './cycles-output.mjs';
 import {glbRegistrationFiles,installGlbRegistration} from './model-registration.mjs';
+import {primitiveRegistration} from './primitive-model.mjs';
+import {modelTemplates} from './public/model-templates.mjs';
 import {renderPathTrace} from './path-trace-render.mjs';
 import {checkRenderAppearance} from './public/render-appearance.mjs';
 import {checkRenderLighting} from './public/render-lighting.mjs';
@@ -145,7 +147,14 @@ function paintTemplate(doc,paint){
   doc.paint=paint;
   return doc;
 }
-export async function createPaint({sourceProjectId,name='示例模型 · PBR 涂装'}){
+export async function createPaint({sourceProjectId,name,modelTemplate}){
+  const title=typeof name==='string'?name.trim().slice(0,100):'';
+  if(modelTemplate!==undefined){
+    if(sourceProjectId)throw Error('请选择一种模型来源');
+    if(typeof modelTemplate!=='string'||!Object.hasOwn(modelTemplates,modelTemplate))throw Error('不支持的模型模板');
+    const document=await primitiveRegistration(modelTemplate);
+    return forkProject(document.id,document,title||modelTemplates[modelTemplate]+' · PBR 涂装');
+  }
   let doc;
   for(const id of sourceProjectId?[sourceProjectId]:[nativeDemoProjectId,demoProjectId]){
     try{doc=read(id);break;}
@@ -154,7 +163,7 @@ export async function createPaint({sourceProjectId,name='示例模型 · PBR 涂
   if(!doc)throw Error(sourceProjectId?'找不到指定的模型工程':'示例模型尚未生成，请先运行 npm run seed:demo');
   await checkRegisteredSource(doc);
   paintTemplate(doc,{base:{...values},layers:[],assets:{}});
-  return forkProject(doc.id,doc,(typeof name==='string'?name.trim().slice(0,100):'')||'示例模型 · PBR 涂装');
+  return forkProject(doc.id,doc,title||'示例模型 · PBR 涂装');
 }
 export async function savePaintCopy(doc,request){
   const {revision,name}=fields(request,['revision','name']);

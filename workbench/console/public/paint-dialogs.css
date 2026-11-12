@@ -230,4 +230,4 @@
 
 .project-copy-source{margin:0;color:var(--chrome-muted,#aaa);font-size:12px;overflow-wrap:anywhere}
 
-.new-paint-material-row[hidden]{display:none}
+:is(.new-paint-material-row,.new-paint-template-row)[hidden]{display:none}

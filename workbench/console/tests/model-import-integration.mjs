@@ -109,7 +109,7 @@ try{
   await modelInput.setInputFiles({name:'not-a-model.glb',mimeType:'model/gltf-binary',buffer:Buffer.from('invalid')});
   await newDialog.getByText('请选择有效的 GLB 2.0 模型').waitFor();
   assert.equal(await newDialog.locator('#new-paint-submit').isDisabled(),true);
-  await newDialog.getByRole('button',{name:'恢复示例'}).click();
+  await newDialog.getByRole('button',{name:'使用模板'}).click();
   assert.equal(await newDialog.locator('#new-paint-submit').isEnabled(),true);
   await modelName.fill('手工输入的工程名');
   await modelInput.setInputFiles(fixture);
@@ -303,6 +303,39 @@ try{
   await assert.rejects(fs.stat(path.dirname(seed.source.cacheRun)),{code:'ENOENT'});
   assert.ok((await fs.readdir(path.join(clean,'model-geometry'))).length);
   console.log('PASS native example creation and eight-channel 4K bake without Blender or writes to sample sources');
+
+  await reopened.locator('summary').filter({hasText:/^文件$/}).click();
+  await reopened.locator('#new').click();
+  const templateDialog=reopened.locator('#new-paint-dialog');
+  await templateDialog.getByRole('button',{name:'模型模板',exact:true}).click();
+  await templateDialog.getByRole('option',{name:'立方体',exact:true}).click();
+  assert.equal(await templateDialog.locator('#new-paint-name').inputValue(),'立方体 · PBR 涂装');
+  await templateDialog.locator('#new-paint-submit').click();
+  const cubeId=await until(()=>{
+    const id=new URL(reopened.url()).searchParams.get('project');
+    return id!==restoredId&&id;
+  });
+  await reopened.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
+  origin=other;
+  const cubeRoute='/api/projects/'+cubeId;
+  const cube=await api(cubeRoute),cubeView=await api(cubeRoute+'/viewport');
+  assert.equal(cube.source.format,'glb');
+  assert.equal(cubeView.metadata.uv_before,cube.source.uvSha256);
+  assert.equal(cubeView.metadata.vertex_count,24);
+  const templates=await Promise.all(['cube','plane','sphere','cylinder'].map(modelTemplate=>
+    api('/api/projects',{workflowType:'pbr_paint',modelTemplate})));
+  assert.notEqual(templates[0].id,cube.id);
+  assert.deepEqual(templates[0].source,cube.source);
+  assert.equal(new Set(templates.map(item=>item.source.uvSha256)).size,4);
+  const cubePreview=await api(cubeRoute+'/paint/preview',{revision:cube.revision,requestId:'cube-template-4k'});
+  const cubeBake=await until(async()=>{
+    const job=await api(cubeRoute+'/jobs/'+cubePreview.id);
+    if(job.status==='failed')throw Error(job.error);
+    return job.status==='completed'&&job;
+  });
+  assert.equal(cubeBake.paintReport.uv_unchanged,true);
+  assert.equal(Object.keys(cubeBake.paintReport.files).length,8);
+  console.log('PASS four native geometry templates, distinct UVs, independent projects and cube 4K bake');
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
 }finally{
