@@ -8,6 +8,7 @@ import {cyclesRenderPasses} from './public/cycles-render-passes.mjs';
 import {renderTransforms,renderLooks,renderAppearanceLimits} from './public/render-appearance.mjs';
 import {renderLightingPresets,renderLightingLimits,renderLightLimit,renderLightRanges} from './public/render-lighting.mjs';
 import {renderOpticsFields} from './public/render-optics.mjs';
+import {renderBookmarkLimit} from './public/paint-delivery-options.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -111,12 +112,13 @@ const tools=[
   },['projectId','revision','text'],true],
   ['edit',[
     'renderCamera 用 camera 保存工程相机；renderAppearance 用 appearance 保存色彩管理；renderLighting 用 lighting 保存布光；renderPreset 用 preset 保存输出和采样。对应字段传 null 可清除。设置与其他工程命令共用修订与撤销。',
+    'renderBookmark 用 id、action:add/update/remove 和 patch:{name,camera} 管理相机书签，可用 paint_render_batch 按书签出图。',
     'renderVisibility 用 visibility:{源物体名称:boolean} 修改对象渲染显隐，false 从渲染排除；用 paint_render_objects 读取已登记源物体。修改随工程保存，不影响视口小眼睛。',
     'renderOptics 用 optics 修改 Cycles 相机景深，target 对焦相机目标点，distance 使用手动距离。null 恢复源相机。',
     'renderRegion 用 region 设定相机取景框从左上角起的归一化矩形；crop 为 true 时裁切成品，null 清除。',
     'shader 用 graph 替换完整节点材质，graph:null 还原普通涂装。version:1，material:f_16xl，nodes:[{id,type,x,y,params}]，links:[{from:{node,port},to:{node,port}}]。支持 paint/color/value/uv/mapping/image/mix/math/ramp/pbr/output，同类型插口连接，禁止循环。与图层命令共用原子批次及修订。',
     'library 用 library:materials/brushes、id、action:create/update/remove 和 patch:{name,graph} 管理资源。材质图禁用 paint 源节点；笔刷图 material:brush，支持 value/math/brush/output，brush 输出接 output.brush。填充层 patch.materialId 引用材质 ID，null 解除。',
-    '独立图像文档使用 op:image、documentId 和 action:create/update/remove/addLayer/updateLayer/removeLayer/duplicateLayer/moveLayer/stroke/transform/clear/bind。create 的 patch:{name,colorSpace:srgb/linear}，文档固定4096²。addLayer 用 layerId 和 kind:pixel/image，图片层 patch.asset 引用素材。stroke 用 layerId、target:pixels/mask 和二维 stroke；pixels 只保存 color/erase，不接受 PBR channels/values。bind 用 channel 和 materialLayerId，或 newLayerId 新建独立填充层；未绑定图像不影响材质栈。图像与材质命令共用修订及原子撤销。',
+    '独立图像文档使用 op:image、documentId 和 action:create/update/remove/addLayer/updateLayer/removeLayer/duplicateLayer/moveLayer/stroke/transform/clear/bind。create 的 patch:{name,colorSpace:srgb/linear}，文档固定4096²。addLayer 用 layerId 和 kind:pixel/image/gradient，图片层 patch.asset 引用素材。渐变用 patch.gradient:{kind:linear/radial,start:[u,v],end:[u,v],colors:[HEX,HEX],alpha:[0–1,0–1]}，坐标从左上角归一化，可传 clip 与 polygon。updateLayer 用同结构的 maskGradient 写入灰度蒙版，null 移除渐变。stroke 用 layerId、target:pixels/mask 和二维 stroke；pixels 只保存 color/erase。bind 用 channel 和 materialLayerId，或 newLayerId 新建独立填充层。图像与材质命令共用修订及原子撤销。',
     '原子图层命令。add 用 kind/patch，可用 parentId 指定文件夹。group 用 id 或同级 ids 收进新文件夹。arrange 用 id 或同级 ids 与 parentId/anchorId/placement 移动图层，parentId 为 null 时移到根层。remove 可解散文件夹，保留子层。base/update 用 patch，move 用 index，duplicate 用 id。图层顺序从底到顶。',
     'update 的 patch.locked 锁定图层或文件夹。文件夹锁覆盖子层，仍可切换显隐。锁定冲突会拒绝整批命令。',
     '三维贴花 patch.projector 为 {center,normal,up,size,depth,rotation}，坐标使用 Blender 世界坐标，normal 朝投影来源。',
@@ -125,8 +127,8 @@ const tools=[
     '按几何填充蒙版可传 {region,hit,value,opacity}，region 为 triangle、polygon、mesh 或 island，hit 格式同一个三维 stamp。maskBase 为 0–1，maskEnabled 可停用蒙版。maskEffects 按数组顺序应用，支持 invert、levels {black,white,gamma}、height/facing {axis,center,feather,blend}，每项都有 kind/enabled/opacity。',
     'transformUV 用 id 与 transform 移动、旋转、缩放、翻转或复制当前绘制层在选区内的笔触。clearUV 用 id 和 rect 清除选区内已有的材质笔触。两者都可追加 polygon 顶点数组，保留套索外的内容。'
   ].join('\n'),{
-    ...edit,operations:{type:'array',items:{type:'object',properties:{op:{enum:['base','baseChannels','add','update','move','remove','duplicate','stroke','group','arrange','transformUV','clearUV','shader','library','image','renderCamera','renderAppearance','renderLighting','renderPreset','renderVisibility','renderOptics','renderRegion']},camera,appearance:renderAppearance,lighting:renderLighting,preset:renderPreset,optics:renderOptics,region:renderRegion,visibility:{type:'object',minProperties:1,maxProperties:4096,additionalProperties:{type:'boolean'}},graph:{type:['object','null']},library:{enum:['materials','brushes']},action:{enum:['create','update','remove','addLayer','updateLayer','removeLayer','duplicateLayer','moveLayer','stroke','transform','clear','bind']},documentId:id,layerId:id,newLayerId:id,materialLayerId:id,channel:{enum:paintChannels},id,ids:{type:'array',items:id,minItems:1,maxItems:64,uniqueItems:true},
-      kind:{enum:['fill','decal','paint','group','pixel','image']},parentId:{type:['string','null']},anchorId:{type:['string','null']},
+    ...edit,operations:{type:'array',items:{type:'object',properties:{op:{enum:['base','baseChannels','add','update','move','remove','duplicate','stroke','group','arrange','transformUV','clearUV','shader','library','image','renderCamera','renderBookmark','renderAppearance','renderLighting','renderPreset','renderVisibility','renderOptics','renderRegion']},camera,appearance:renderAppearance,lighting:renderLighting,preset:renderPreset,optics:renderOptics,region:renderRegion,visibility:{type:'object',minProperties:1,maxProperties:4096,additionalProperties:{type:'boolean'}},graph:{type:['object','null']},library:{enum:['materials','brushes']},action:{enum:['add','create','update','remove','addLayer','updateLayer','removeLayer','duplicateLayer','moveLayer','stroke','transform','clear','bind','invertMask','removeMask']},documentId:id,layerId:id,newLayerId:id,materialLayerId:id,channel:{enum:paintChannels},id,ids:{type:'array',items:id,minItems:1,maxItems:64,uniqueItems:true},
+      kind:{enum:['fill','decal','paint','group','pixel','image','gradient']},parentId:{type:['string','null']},anchorId:{type:['string','null']},
       placement:{enum:['above','below']},index:{type:'integer'},patch:{type:'object'},
       target:{enum:['material','mask','pixels']},stroke:{type:'object'},transform:uvTransform,rect:uvRect,polygon:uvPolygon},required:['op']},minItems:1}
   },['projectId','revision','operations'],true],
@@ -137,6 +139,9 @@ const tools=[
   ['render_objects','读取已登记场景的原始物体名称和渲染开关。工程覆盖可从 paint_get 获取。',{projectId:id},['projectId'],false],
   ['render','以当前工程修订通过路径追踪导出 8 位 PNG 或 16/32 位浮点 OpenEXR。可指定工程相机，或使用工程保存的渲染预设；使用预设时 settings 只可覆盖本机 device。用 paint_job 查询进度、原片和报告。',
     {...edit,settings:renderSettings,useProjectCamera:{type:'boolean'},useProjectPreset:{type:'boolean'},requestId:id},['projectId','revision'],true],
+  ['render_batch','使用一个冻结修订按相机书签批量出图。settings 传输出尺寸、采样和格式，省略 camera。',
+    {...edit,settings:renderSettings,bookmarkIds:{type:'array',items:id,minItems:1,maxItems:renderBookmarkLimit,uniqueItems:true},requestId:id},
+    ['projectId','revision','bookmarkIds'],true],
   ['render_cancel','取消指定出图任务',{...edit,jobId:id},['projectId','revision','jobId'],true],
   ['render_retry','按原工程快照和原渲染设置重试失败或取消的路径追踪出图',{...edit,jobId:id,requestId:id},['projectId','revision','jobId'],true],
   ['job','查询任务、进度与诊断结果；文件链接相对于本机服务',{projectId:id,jobId:id},['projectId','jobId'],false],
@@ -171,6 +176,7 @@ async function call(name,args){
   const data={revision:args.revision};
   const operation=name.slice('paint_'.length);
   if(operation==='render')return request(root+'/paint/render',{...data,settings:args.settings,useProjectCamera:args.useProjectCamera,useProjectPreset:args.useProjectPreset,requestId:args.requestId??crypto.randomUUID()});
+  if(operation==='render_batch')return request(root+'/paint/render-batch',{...data,settings:args.settings,bookmarkIds:args.bookmarkIds,requestId:args.requestId??crypto.randomUUID()});
   if(operation==='render_cancel')return request(root+'/paint/render-cancel',{...data,jobId:safe(args.jobId)});
   if(operation==='render_retry')return request(root+'/paint/render-retry',{...data,jobId:safe(args.jobId),requestId:args.requestId??crypto.randomUUID()});
   if(operation==='import_png'){

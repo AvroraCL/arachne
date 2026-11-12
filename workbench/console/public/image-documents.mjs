@@ -4,20 +4,21 @@ const record=o=>o&&typeof o==='object'&&!Array.isArray(o),id=s=>typeof s==='stri
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
 const ink=s=>typeof s==='string'&&/^#[a-f\d]{6}$/i.test(s);
-const layerFields=['name','visible','locked','opacity','blend','maskEnabled','maskBase','asset','x','y','scale','rotation','stretch','gradient'];
+const layerFields=['name','visible','locked','opacity','blend','maskEnabled','maskBase','maskGradient','asset','x','y','scale','rotation','stretch','gradient'];
 const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充'};
 const pair=(values,check)=>Array.isArray(values)&&values.length===2&&values.every(check);
-function checkGradient(gradient,checkStroke){
+function checkGradient(gradient,checkStroke,mask=false){
   if(!exact(gradient,['kind','start','end','colors','alpha','clip','polygon'])||
      !['linear','radial'].includes(gradient.kind)||!pair(gradient.start,unit)||!pair(gradient.end,unit)||
      Math.hypot(gradient.start[0]-gradient.end[0],gradient.start[1]-gradient.end[1])<1/4096||
-     !pair(gradient.colors,ink)||!pair(gradient.alpha,unit))
+     !pair(gradient.colors,ink)||!pair(gradient.alpha,unit)||
+     mask&&!gradient.colors.every(color=>/^#([a-f\d]{2})\1\1$/i.test(color)))
     throw Error('渐变方向或颜色无效');
   if(gradient.clip!==undefined||gradient.polygon!==undefined)
     checkStroke({uv:true,rect:gradient.clip,polygon:gradient.polygon,opacity:1,value:1},true);
 }
 export const imageLayerDefaults={visible:true,locked:false,opacity:1,blend:'normal',maskEnabled:false,maskBase:1};
-export const hasImageLayerMask=layer=>!!layer&&(layer.maskEnabled||Array.isArray(layer.maskStrokes));
+export const hasImageLayerMask=layer=>!!layer&&(layer.maskEnabled||Array.isArray(layer.maskStrokes)||!!layer.maskGradient);
 export function imageStrokeToMaterial(s,mask=false){
   if(s.transformUV||s.clearUV)return structuredClone(s);
   const {color,...stroke}=s;return mask?stroke:{...stroke,channels:{color:true,metallic:false,roughness:false},values:{color,metallic:0,roughness:.5}};
@@ -44,6 +45,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
       ids.add(layer.id);
       if(layer.kind==='gradient')checkGradient(layer.gradient,checkStroke);
       else if(layer.gradient!==undefined)throw Error('请选择渐变填充层');
+      if(layer.maskGradient!==undefined)checkGradient(layer.maskGradient,checkStroke,true);
       if(layer.text!==undefined&&(layer.kind!=='image'||!validateText?.(layer.text)))throw Error('图像文字参数无效');
       if(layer.kind==='image'&&(!Object.hasOwn(paint.assets,layer.asset)||![layer.x,layer.y,layer.scale,layer.rotation].every(Number.isFinite)||!unit(layer.x)||!unit(layer.y)||layer.scale<1/4096||layer.scale>4||Math.abs(layer.rotation)>360||!Array.isArray(layer.stretch)||layer.stretch.length!==2||!layer.stretch.every(n=>Number.isFinite(n)&&Math.abs(n)>=.05&&Math.abs(n)<=8)))throw Error('图像层素材或变换无效');
       for(const [field,mask] of [['strokes',false],['maskStrokes',true]]){
@@ -104,16 +106,20 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     // An empty mask still exists after it is disabled.
     if(layer.maskEnabled&&o.patch.maskEnabled===false)layer.maskStrokes??=[];
     Object.assign(layer,o.patch);
+    if(layer.maskGradient===null)delete layer.maskGradient;
   }
   else if(o.action==='invertMask'||o.action==='removeMask'){
     if(!hasImageLayerMask(layer))throw Error('图像图层没有蒙版');
     if(o.action==='invertMask'){
       layer.maskBase=1-layer.maskBase;
+      if(layer.maskGradient)layer.maskGradient.colors=layer.maskGradient.colors.map(color=>
+        '#'+(255-parseInt(color.slice(1,3),16)).toString(16).padStart(2,'0').repeat(3));
       for(const stroke of layer.maskStrokes??[])stroke.value=1-stroke.value;
     }else{
       layer.maskEnabled=false;
       layer.maskBase=1;
       delete layer.maskStrokes;
+      delete layer.maskGradient;
     }
   }
   else if(o.action==='removeLayer')doc.layers.splice(index,1);

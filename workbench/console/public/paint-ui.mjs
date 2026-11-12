@@ -6,6 +6,7 @@ import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {setupProjectWelcome} from './paint-project-welcome.mjs';
 import {setupWorkspaceLayouts} from './paint-workspace-layouts.mjs';
 import {setupCommandPicker} from './paint-command-picker.mjs';
+import {setupRenderCameraBatch} from './render-camera-batch.mjs';
 import {setupProjectPicker} from './paint-project-picker.mjs';
 import {paintChannels,channelSpecs,effectiveValues,baseChannelEnabled} from './paint-channels.mjs';
 import {installPaintTooltips} from './paint-tooltips.mjs';
@@ -60,7 +61,7 @@ applyAppearance(preferences);
 const names={...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),x:'横向中心',y:'纵向中心',scale:'缩放',rotation:'旋转角度'};
 const geometryStatusNodes={status:$('model-geometry-status'),retry:$('model-geometry-retry'),log:$('model-geometry-log')};
 geometryStatusNodes.retry.onclick=()=>run(async()=>{await post('model-prepare');liveView.refresh();});
-let shaderEditor=null,historyPanel=null,libraryUI=null,areaSystem=null,taskMonitor=null;
+let shaderEditor=null,historyPanel=null,libraryUI=null,areaSystem=null,taskMonitor=null,cameraBatch=null;
 let autoTimer=null,inspectChannel=false,inspectMask=false,isolatedLayerId=null;
 let paintTarget='material';
 const colorPreferenceKey='arachne-paint-colors-v1';
@@ -1292,6 +1293,7 @@ function renderJobs(){
   renderPaintBackups();
   paintRenderResults.sync();
   taskMonitor?.sync();
+  cameraBatch?.sync();
   for(const listener of renderResultsListeners)listener();
   void renderTexture();
 }
@@ -2045,6 +2047,12 @@ const paintRenderResults=createPaintRenderResults({
   },
   openSettings:()=>$('open-render-settings').click(),openExport:()=>$('open-delivery').click()
 });
+cameraBatch=setupRenderCameraBatch({
+  read:()=>doc,canOpen:canOpenProjectDialog,
+  settings:()=>captureDeliverySettings({...effectiveDeliveryPreferences(),framing:'auto'}),
+  submit:(id,request,error)=>run(()=>api('/api/projects/'+id+'/paint/render-batch',request),error),
+  onSubmitted:()=>$('open-task-monitor').click()
+});
 const renderResultsBridge={
   read:()=>({doc,jobs}),openJobs:paintRenderResults.open,
   subscribe(listener){renderResultsListeners.add(listener);return ()=>renderResultsListeners.delete(listener);}
@@ -2081,7 +2089,8 @@ const renderSettingsBridge={
     else deliveryViewport().applyCamera(camera);
   },
   subscribe:listener=>{renderSettingsListeners.add(listener);return ()=>renderSettingsListeners.delete(listener);},
-  canUseViewport:visibleDeliveryCamera,openExport:()=>$('open-delivery').click(),openRender:paintRenderResults.open
+  canUseViewport:visibleDeliveryCamera,openExport:()=>$('open-delivery').click(),openRender:paintRenderResults.open,
+  openBatch:cameraBatch.open
 };
 function syncDeliveryControls(){
   const available=visibleDeliveryCamera();

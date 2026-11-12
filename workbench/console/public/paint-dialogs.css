@@ -231,3 +231,25 @@
 .project-copy-source{margin:0;color:var(--chrome-muted,#aaa);font-size:12px;overflow-wrap:anywhere}
 
 :is(.new-paint-material-row,.new-paint-template-row)[hidden]{display:none}
+
+#render-batch-dialog{
+  width:min(450px,calc(100vw - 24px));border:1px solid var(--chrome-line);border-radius:4px;
+  background:#282828;color:var(--chrome-text);box-shadow:0 6px 20px #0007;overflow:hidden
+}
+#render-batch-dialog>form{display:flex;flex-direction:column;max-height:calc(100dvh - 28px)}
+#render-batch-dialog header{flex:none;min-height:38px;padding:4px 10px;background:var(--chrome-header);border-bottom:1px solid var(--chrome-line)}
+#render-batch-dialog h2{font-size:13px;font-weight:600}
+#render-batch-dialog .paint-form-content{overflow:auto;min-height:0;padding:10px;gap:5px}
+#render-batch-summary{margin:0 0 3px;color:var(--chrome-muted,#aaa);font-size:12px}
+#render-batch-cameras{display:grid;gap:1px}
+#render-batch-dialog .paint-form-content label{
+  display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:center;gap:7px;
+  min-height:var(--chrome-control);padding:2px 5px;border-radius:2px;font-size:13px
+}
+#render-batch-dialog .paint-form-content label:hover{background:var(--chrome-item-hover)}
+#render-batch-dialog input[type=checkbox]{width:14px;height:14px;margin:0}
+#render-batch-cameras span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#render-batch-cameras small{color:var(--chrome-muted,#aaa)}
+#render-batch-dialog .paint-form-footer{min-height:44px;flex:none;justify-content:flex-end;padding:7px 10px;border-top-color:var(--chrome-line)}
+#render-batch-error{flex:1;overflow-wrap:anywhere;font-size:12px}
+#submit-render-batch{white-space:nowrap}

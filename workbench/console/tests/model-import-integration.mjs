@@ -423,10 +423,11 @@ try{
   await reopened.getByRole('option',{name:'径向',exact:true}).click();
   await until(async()=>(await ramp()).gradient.kind==='radial');
   await drawing.getByRole('button',{name:'渐变形状',exact:true}).and(drawing.locator('button:enabled')).waitFor();
-  await drawing.locator('.document-gradient-guide').waitFor();
-  const end=gradient.gradient.end;
-  await mouse.move(...point(...end));await mouse.down();
-  await mouse.move(...point(.78,.5),{steps:6});await mouse.up();
+  await drawing.locator('[data-gradient-handle=end]').hover();
+  const radialBox=await documentCanvas.boundingBox();
+  await mouse.down();
+  await drawing.locator('[data-gradient-dragging]').waitFor({timeout:3000});
+  await mouse.move(radialBox.x+radialBox.width*.78,radialBox.y+radialBox.height*.5,{steps:6});await mouse.up();
   const changed=await until(async()=>{const layer=await ramp();return layer.gradient.end[0]>.75&&layer;});
   assert.equal(changed.id,gradient.id);
   assert.deepEqual(changed.gradient.start,gradient.gradient.start);
@@ -457,7 +458,53 @@ try{
     ' assert im.getpixel((4095,4095))[3]==0'
   ].join('\n'),gradientPng],{stdio:'inherit'});
   await reopened.screenshot({path:path.join(data,'gradient-editor.png')});
-  const cubePreview=await api(cubeRoute+'/paint/preview',{revision:cubePainted.revision,requestId:'cube-template-4k'});
+
+  const imageLayers=reopened.locator('.editor-area[data-editor=imageLayers]').first();
+  await imageLayers.getByRole('button',{name:'渐变填充',exact:true}).click();
+  await imageLayers.getByRole('button',{name:'添加蒙版',exact:true}).click();
+  const maskThumb=imageLayers.getByRole('button',{name:'选择蒙版 渐变填充',exact:true});
+  await maskThumb.and(imageLayers.locator('[aria-pressed=true]')).waitFor();
+  await drawing.getByRole('button',{name:'渐变工具',exact:true}).click();
+  const shapeOption=drawing.getByRole('button',{name:'渐变形状',exact:true});
+  await shapeOption.click();
+  await reopened.getByRole('option',{name:'线性',exact:true}).click();
+  await drawing.getByRole('button',{name:'渐变颜色',exact:true}).click();
+  await reopened.getByRole('option',{name:'前景色到背景色',exact:true}).click();
+  const maskBox=await documentCanvas.boundingBox(),maskPoint=(x,y)=>[maskBox.x+x*maskBox.width,maskBox.y+y*maskBox.height];
+  await mouse.move(...maskPoint(.3,.30));await mouse.down();
+  await mouse.move(...maskPoint(.3,.56),{steps:8});await mouse.up();
+  const masked=await until(async()=>{const layer=await ramp();return layer.maskGradient&&layer;});
+  assert.deepEqual(masked.gradient,changed.gradient);
+  assert.deepEqual(masked.maskGradient.colors,['#000000','#ffffff']);
+  await drawing.getByRole('button',{name:'画笔',exact:true}).click();
+  await mouse.move(...maskPoint(.26,.62));await mouse.down();
+  await mouse.move(...maskPoint(.34,.62),{steps:4});await mouse.up();
+  const brushed=await until(async()=>{const layer=await ramp();return layer.maskStrokes?.length===1&&layer;});
+  assert.deepEqual(brushed.maskGradient,masked.maskGradient);
+  const brushAvailable=drawing.getByRole('button',{name:'画笔',exact:true}).and(drawing.locator('button:enabled'));
+  await documentCanvas.focus();await keyboard.press('Control+i');
+  await until(async()=>(await ramp()).maskGradient.colors[0]==='#ffffff');
+  await brushAvailable.waitFor();
+  await documentCanvas.focus();await keyboard.press('Control+z');
+  await until(async()=>(await ramp()).maskGradient.colors[0]==='#000000');
+  assert.deepEqual(await ramp(),brushed);
+  const maskedDoc=await api(cubeRoute),maskedImage=await fetch(origin+cubeRoute+'/paint/image-export',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({revision:maskedDoc.revision,documentId:imageId})
+  });
+  assert.equal(maskedImage.status,200);
+  const maskedPng=path.join(data,'gradient-mask.png');
+  await fs.writeFile(maskedPng,Buffer.from(await maskedImage.arrayBuffer()));
+  execFileSync(pythonExecutable(),['-c',[
+    'import sys',
+    'from PIL import Image',
+    'with Image.open(sys.argv[1]) as im:',
+    ' assert im.size==(4096,4096)',
+    ' assert im.getpixel((1228,1024))[3]==0',
+    ' assert im.getpixel((1228,2458))[3]>160',
+    ' assert im.getpixel((1228,2540))[3]==0'
+  ].join('\n'),maskedPng],{stdio:'inherit'});
+  const cubePreview=await api(cubeRoute+'/paint/preview',{revision:maskedDoc.revision,requestId:'cube-template-4k'});
   const cubeBake=await until(async()=>{
     const job=await api(cubeRoute+'/jobs/'+cubePreview.id);
     if(job.status==='failed')throw Error(job.error);
@@ -465,8 +512,66 @@ try{
   });
   assert.equal(cubeBake.paintReport.uv_unchanged,true);
   assert.equal(Object.keys(cubeBake.paintReport.files).length,8);
+  const cubePaint=cubeRoute+'/paint';
+  const shots=[
+    {id:'top',name:'顶视验收',camera:{projection:'orthographic',eye:[0,5,0],target:[0,0,0],up:[0,0,-1],fov:38,orthoHeight:3.2}},
+    {id:'perspective',name:'透视验收',camera:{projection:'perspective',eye:[3,2,3],target:[0,0,0],up:[0,1,0],fov:38,orthoHeight:4}}
+  ];
+  const batchDoc=await api(cubePaint+'/commands',{revision:maskedDoc.revision,operations:[
+    ...shots.map(({id,name,camera})=>({op:'renderBookmark',action:'add',id,patch:{name,camera}})),
+    {op:'renderPreset',preset:captureRenderPreset(updateDeliveryOptions({},{width:192,height:144,samples:3,maxBounces:3}))}
+  ]});
+  const badBatch=await fetch(origin+cubePaint+'/render-batch',{method:'POST',
+    headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({
+      revision:batchDoc.revision,requestId:'invalid-batch',bookmarkIds:['top','missing'],settings:{width:192,height:144,samples:3}
+    })
+  });
+  assert.equal(badBatch.status,400);
+  assert.ok((await api(cubeRoute+'/jobs')).every(job=>!job.renderBookmark));
+  await reopened.reload();
+  const renderMenu=reopened.getByText('渲染',{exact:true}).filter({visible:true}).first();
+  await renderMenu.click();
+  await reopened.locator('#open-render-batch').click();
+  const batchDialog=reopened.getByRole('dialog',{name:'相机批量出图'});
+  await batchDialog.getByText('192 × 144 · PNG', {exact:false}).waitFor();
+  const allCameras=batchDialog.getByRole('checkbox',{name:'全选相机书签'});
+  await allCameras.uncheck();
+  assert.equal(await batchDialog.getByRole('button',{name:'加入队列',exact:true}).isDisabled(),true);
+  await batchDialog.getByRole('checkbox',{name:'顶视验收',exact:true}).check();
+  await batchDialog.getByRole('checkbox',{name:'透视验收',exact:true}).check();
+  const [batchResponse]=await Promise.all([
+    reopened.waitForResponse(response=>response.url().endsWith('/render-batch')),
+    batchDialog.getByRole('button',{name:'加入队列 · 2',exact:true}).click()
+  ]);
+  assert.equal(batchResponse.status(),202);
+  const batchRequest=batchResponse.request().postDataJSON(),queued=(await batchResponse.json()).jobs;
+  assert.deepEqual(queued.map(job=>job.renderBookmark.name),shots.map(shot=>shot.name));
+  assert.deepEqual((await api(cubePaint+'/render-batch',batchRequest)).jobs.map(job=>job.id),queued.map(job=>job.id));
+  const batchMonitor=reopened.locator('#task-monitor');
+  await batchMonitor.getByRole('button',{name:/顶视验收/}).waitFor();
+  await batchMonitor.getByRole('button',{name:/透视验收/}).waitFor();
+  await api(cubePaint+'/commands',{revision:batchDoc.revision,operations:[{op:'base',patch:{color:'#223355'}}]});
+  const outputs=await Promise.all(queued.map(item=>until(async()=>{
+    const job=await api(cubeRoute+'/jobs/'+item.id);
+    if(job.status==='failed')throw Error(job.error);
+    return job.status==='completed'&&job;
+  })));
+  assert.notEqual(outputs[0].render.pngSha256,outputs[1].render.pngSha256);
+  for(const [index,job] of outputs.entries()){
+    assert.deepEqual(job.render.resolution,[192,144]);
+    assert.deepEqual(job.render.camera,shots[index].camera);
+    assert.deepEqual(job.render.cameraBookmark,{id:shots[index].id,name:shots[index].name});
+    assert.equal(job.render.revision,batchDoc.revision);
+    assert.deepEqual(job.paintReport.files,cubeBake.paintReport.files);
+  }
+  await batchMonitor.getByRole('button',{name:/透视验收/}).click();
+  const shotDownload=batchMonitor.locator('#task-monitor-download');
+  await shotDownload.waitFor();
+  assert.match(await shotDownload.getAttribute('download'),/透视验收.*\.png$/);
+  console.log('PASS two-camera batch render, request retry without duplicates, frozen revision and named output files');
   console.log('PASS four native geometry templates, distinct UVs, independent projects and cube 4K bake');
   console.log('PASS gradient draw, cancel, angle snapping, endpoint editing, material binding, reload and 4K RGBA PNG');
+  console.log('PASS editable gradient mask, brush touch-up, inversion, undo and verified 4K alpha');
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
 }finally{

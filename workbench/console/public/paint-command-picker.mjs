@@ -13,6 +13,7 @@ const commands=[
   {target:'redo',name:'重做',group:'编辑',keys:'redo'},
   {target:'open-history',name:'历史记录',group:'编辑',keys:'history'},
   {target:'open-paint-render',name:'路径追踪出图',group:'渲染',keys:'render path tracing png exr'},
+  {target:'open-render-batch',name:'相机批量出图',group:'渲染',keys:'镜头书签 batch render cameras'},
   {target:'open-render-results',name:'渲染结果',group:'渲染',keys:'render results'},
   {target:'open-task-monitor',name:'后台任务',group:'渲染',keys:'进度 日志 jobs tasks'},
   {target:'preview',name:'生成 4K 预览',group:'渲染',keys:'烘焙贴图 bake preview'},

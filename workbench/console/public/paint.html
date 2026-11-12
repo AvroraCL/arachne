@@ -51,6 +51,7 @@
     </div></details>
     <details class="paint-menu" name="paint-menubar-menu"><summary>渲染</summary><div class="paint-menu-content">
       <button id="open-paint-render" type="button" aria-haspopup="dialog" disabled>路径追踪出图…</button>
+      <button id="open-render-batch" type="button" aria-haspopup="dialog" disabled>相机批量出图…</button>
       <button id="open-render-results" type="button" disabled>渲染结果</button>
       <button id="open-task-monitor" type="button" aria-haspopup="dialog" disabled>后台任务…</button>
       <button id="preview" type="button">生成 4K 预览</button>
@@ -602,6 +603,20 @@
       <label class="new-paint-material-row" hidden>涂装材质<select id="new-paint-material" aria-label="涂装材质"></select></label>
     </div>
     <div class="paint-form-footer"><span id="new-paint-error" role="alert"></span><button id="new-paint-submit" type="submit" class="primary">创建</button></div>
+  </form>
+</dialog>
+<dialog id="render-batch-dialog" class="paint-form-dialog" aria-labelledby="render-batch-title">
+  <form>
+    <header><h2 id="render-batch-title">相机批量出图</h2><button id="close-render-batch" type="button">关闭</button></header>
+    <div class="paint-form-content">
+      <p id="render-batch-summary"></p>
+      <label class="render-batch-all"><input type="checkbox" id="render-batch-all">全选相机书签</label>
+      <div id="render-batch-cameras" role="group" aria-label="相机书签"></div>
+    </div>
+    <div class="paint-form-footer">
+      <span id="render-batch-error" role="alert"></span>
+      <button id="submit-render-batch" type="submit" class="primary">加入队列</button>
+    </div>
   </form>
 </dialog>
 <dialog id="paint-import-dialog" class="paint-form-dialog" aria-labelledby="paint-import-title">

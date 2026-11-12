@@ -95,7 +95,7 @@ export function createDocumentEditor(ctx,bridge){
   options.append(toolName,parameters,viewOptions);
   host.classList.add('document-editor');host.append(options,rail,stage,status);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
   let mode=state.tool||'orbit',selectionShape=Object.hasOwn(selectionNames,state.selectionTool)?state.selectionTool:'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
-  let painter,gradientTool,previewCaption='';
+  let painter,gradientTool,pendingImageEdit=null,previewCaption='';
   function extent(){return Math.max(1,Math.min(stage.clientWidth,stage.clientHeight)-48);}
   function layout(){
     if(!shown)return;
@@ -112,7 +112,26 @@ export function createDocumentEditor(ctx,bridge){
   const imageOrigin=()=>({id:project.document?.id,revision:project.document?.revision,imageDocumentId:project.imageContext?.documentId});
   const mapOperation=(op,origin)=>op?surfaceToImageCommand(op,origin?.imageDocumentId||project.imageContext?.documentId):null;
   function draft(op,origin){const mapped=mapOperation(op,origin);live.update(mapped);project.draft(mapped);}
-  async function save(op,origin){try{const mapped=mapOperation(op,origin);await project.commands([mapped],{id:origin.id||origin.projectId,revision:origin.revision});live.update(null);project.draft(null);return true;}catch(error){live.update(null);project.draft(null);ctx.error(error);return false;}}
+  const writing=()=>bridge.busy()||!!pendingImageEdit;
+  function submitEdit(operation,origin,onSaved){
+    const task=(async()=>{
+      try{
+        await project.commands([operation],origin);
+        if(!disposed)onSaved?.();
+        return true;
+      }catch(error){if(!disposed)ctx.error(error);return false;}
+      finally{if(!disposed){live.update(null);project.draft(null);}}
+    })();
+    pendingImageEdit=task;
+    sync();
+    return task.finally(()=>{
+      if(pendingImageEdit===task)pendingImageEdit=null;
+      if(!disposed)sync();
+    });
+  }
+  function save(op,origin){
+    return submitEdit(mapOperation(op,origin),{id:origin.id||origin.projectId,revision:origin.revision});
+  }
   const live=createLiveView({rgba:true,viewport:{showLivePaint(){}},canvas,guide:el('canvas'),
     context:()=>{const doc=project.document,c=project.imageContext;if(!doc||!currentDocument(project))return null;const prefs=bridge.preferences();return {id:doc.id,revision:doc.revision,documentId:c.documentId,inspectMask:c.inspectMask?c.layerId:null,channel:'color',detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};},
     onStatus:(text,error,detail)=>{if(disposed)return;if(!detail){previewCaption='';status.title=status.textContent=text;return;}const {size=0,revision,phase,message,failedSize}=detail;stage.dataset.previewSize=String(size);stage.dataset.previewRevision=String(revision??'');stage.dataset.previewPhase=phase||'';status.title=message||text;
@@ -141,7 +160,7 @@ export function createDocumentEditor(ctx,bridge){
   }
   status.onclick=()=>{if(stage.dataset.previewPhase==='error')live.retryDetail();};status.onkeydown=event=>{if(stage.dataset.previewPhase==='error'&&['Enter',' '].includes(event.key)){event.preventDefault();event.stopPropagation();live.retryDetail();}};
   painter=createSurfaceTools({viewport:{},host:controls.dummy,uvHost:stage,elements,settingsKey:'arachne-document-brush:'+ctx.areaId,preserveUnavailableMode:true,stickySample:true,sampleAnyLayer:true,isHandHeld:()=>space||!!nav,uvClip:()=>selection?.clip(),onIdle:()=>sync(),
-    context:()=>{const l=currentLayer(project),origin=imageOrigin(),maskTarget=project.imageContext?.target==='mask';return {...origin,enabled:false,uvEnabled:!!l&&!bridge.busy(),brushColor:bridge.foreground(),maskValue:maskTarget&&elements['brush-erase'].checked?maskGray(bridge.colorPair('mask').background):bridge.maskInk(),maskTarget,layer:l?{...l,kind:l.kind==='pixel'?'paint':'image',channels:{color:true,metallic:false,roughness:false},values:{color:bridge.foreground(),metallic:0,roughness:.5}}:null};},
+    context:()=>{const l=currentLayer(project),origin=imageOrigin(),maskTarget=project.imageContext?.target==='mask',busy=writing();return {...origin,busy,enabled:false,uvEnabled:!!l&&!busy,brushColor:bridge.foreground(),maskValue:maskTarget&&elements['brush-erase'].checked?maskGray(bridge.colorPair('mask').background):bridge.maskInk(),maskTarget,layer:l?{...l,kind:l.kind==='pixel'?'paint':'image',channels:{color:true,metallic:false,roughness:false},values:{color:bridge.foreground(),metallic:0,roughness:.5}}:null};},
     preview:draft,commit:(op,origin)=>void save(op,origin),sample:sampleImage,place:()=>{}});
   const brushBinding=createBrushBinding({project,painter});
   selectionControls(elements,parameters,stage);
@@ -202,20 +221,15 @@ export function createDocumentEditor(ctx,bridge){
     context:()=>{
       const origin=imageSelectionOrigin(project),image=currentDocument(project),layer=currentLayer(project);
       const index=layer?image.layers.indexOf(layer)+1:image?.layers.length??0;
-      return {origin,layer,index,colors:bridge.colorPair('paint'),selection:selection.clip(),
-        enabled:!!image&&origin.target==='pixels'&&!bridge.busy()&&!painter.isEditing()&&!selection.isTransforming()&&!nav&&!space};
+      const editable=origin.target==='pixels'||origin.target==='mask'&&hasImageLayerMask(layer)&&!layer.locked;
+      return {origin,layer,index,colors:bridge.colorPair(colorTarget()),selection:selection.clip(),
+        enabled:!!image&&editable&&!writing()&&!painter.isEditing()&&!selection.isTransforming()&&!nav&&!space};
     },
     preview:operation=>{live.update(operation);project.draft(operation);},
-    commit:async(operation,origin,added)=>{
-      try{
-        await project.commands([operation],origin);
-        if(added&&!disposed)selectAddedLayer(project,origin,operation.layerId);
-      }catch(error){if(!disposed)ctx.error(error);}
-      finally{if(!disposed){live.update(null);project.draft(null);}}
-    }
+    commit:(operation,origin,added)=>submitEdit(operation,origin,added?()=>selectAddedLayer(project,origin,operation.layerId):undefined)
   });
   function canPaste(){
-    return !!currentDocument(project)&&!bridge.busy()&&!painter.isEditing()&&!gradientTool.isEditing()&&!selection.isDragging()&&!selection.isTransforming()&&!nav;
+    return !!currentDocument(project)&&!writing()&&!painter.isEditing()&&!gradientTool.isEditing()&&!selection.isDragging()&&!selection.isTransforming()&&!nav;
   }
   function canCopy(){
     const layer=currentLayer(project);
@@ -327,8 +341,17 @@ export function createDocumentEditor(ctx,bridge){
       if(key==='c'&&!event.shiftKey)handled=copySelection();
       else if(key==='i'&&!event.shiftKey){
         const layer=currentLayer(project);
-        handled=project.imageContext?.target==='mask'&&hasImageLayerMask(layer)&&!layer.locked&&!bridge.busy()&&!selection.isTransforming();
-        if(handled){const origin=imageSelectionOrigin(project);void run(()=>commandAt(project,origin,{action:'invertMask',layerId:layer.id}));}
+        handled=project.imageContext?.target==='mask'&&hasImageLayerMask(layer)&&!layer.locked&&
+          (!!pendingImageEdit||!bridge.busy())&&!selection.isTransforming();
+        if(handled){
+          const origin=imageSelectionOrigin(project),previous=pendingImageEdit;
+          void run(async()=>{
+            if((previous&&!await previous)||disposed)return;
+            const current=imageSelectionOrigin(project);
+            if(current.id!==origin.id||current.documentId!==origin.documentId||current.layerId!==origin.layerId||current.target!=='mask')return;
+            await submitEdit({op:'image',action:'invertMask',documentId:current.documentId,layerId:current.layerId},current);
+          });
+        }
       }
       else if(key==='z')void project.travel(event.shiftKey?'redo':'undo').catch(ctx.error);
       else if(key==='a')selection.selectAll(selectionShape);
@@ -386,15 +409,15 @@ export function createDocumentEditor(ctx,bridge){
     }
     const imageKey=JSON.stringify([doc.id,c?.documentId,c?.layerId,c?.target]);if(lastImage!==imageKey){
       const first=lastProject!==doc.id,targetChanged=!first&&lastTarget!==c?.target;
-      let next=mode;if(c?.target==='mask'&&(mode==='paint'||targetChanged||first&&!state.tool))next='mask';else if(c?.target!=='mask'&&mode==='mask')next='paint';
+      let next=mode;if(c?.target==='mask'&&mode!=='gradient'&&(mode==='paint'||targetChanged||first&&!state.tool))next='mask';else if(c?.target!=='mask'&&mode==='mask')next='paint';
       lastImage=imageKey;lastTarget=c?.target;lastProject=doc.id;gradientTool.cancel();painter.cancel({preserveMode:true});selection.stop();setMode(next);if(next==='select')selection.choose(selectionShape,{focus:false});if(imageView.isActive())remember(project);
     }
     const documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}
     const next=JSON.stringify([doc.id,doc.revision]);if(sourceKey!==next){sourceKey=next;syncDestination();}else if(destinationDocument!==c?.documentId)syncDestination();
-    picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||bridge.busy();gradientButton.disabled=!image||bridge.busy()||c?.target==='mask';empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();live.refresh();
+    picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||writing();gradientButton.disabled=!image||writing()||c?.target==='mask'&&!!layer?.locked;empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,gradient:gradientTool.getState(),eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>painter.isEditing()||gradientTool.isEditing()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,gradient:gradientTool.getState(),eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||painter.isEditing()||gradientTool.isEditing()||selection.isDragging()||selection.isTransforming(),
     setVisible(visible){
       if(shown===visible)return;
       shown=visible;live.setVisible(visible);
@@ -842,6 +865,10 @@ export function createImagePanel(type,ctx){
           for(const [label,action] of [['反相蒙版','invertMask'],['删除蒙版','removeMask']]){
             const control=button(label,()=>void run(()=>command(project,{action,layerId:layer.id})));
             control.disabled=disabled;maskActions.append(control);
+          }
+          if(layer.maskGradient){
+            const remove=button('移除渐变',()=>void run(()=>command(project,{action:'updateLayer',layerId:layer.id,patch:{maskGradient:null}})));
+            remove.disabled=disabled;maskActions.append(remove);
           }
           body.append(maskActions);
         }

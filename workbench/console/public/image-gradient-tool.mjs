@@ -45,26 +45,29 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
   const line=document.createElementNS(svgNS,'path');
   const stroke=line.cloneNode(),startNode=document.createElementNS(svgNS,'circle'),endNode=startNode.cloneNode();
   for(const node of [startNode,endNode])node.setAttribute('r','5');
+  startNode.dataset.gradientHandle='start';endNode.dataset.gradientHandle='end';
   stroke.classList.add('gradient-guide-shadow');
   guide.append(stroke,line,startNode,endNode);
   stage.append(guide);
 
   let active=false,gesture=null,frame=0;
   let kind=settings.kind==='radial'?'radial':'linear',fade=settings.fade===true,flip=settings.flip===true;
-  const selected=state=>state.origin.target==='pixels'&&state.layer?.kind==='gradient'?state.layer:null;
+  const isMask=state=>state.origin.target==='mask';
+  const currentGradient=state=>isMask(state)?state.layer?.maskGradient:state.layer?.gradient;
   function style(state,shapeValue=kind,transparent=fade){
     const stops={kind:shapeValue,colors:[state.colors.foreground,transparent?state.colors.foreground:state.colors.background],
       alpha:[1,transparent?0:1]};
     return flip?reversed(stops):stops;
   }
   function operation(origin,layerId,gradient,index){
+    const patch=origin.target==='mask'?{maskGradient:{...gradient},maskEnabled:true}:{gradient:{...gradient}};
     return {op:'image',action:index===undefined?'updateLayer':'addLayer',documentId:origin.documentId,layerId,
-      ...(index===undefined?{}:{kind:'gradient',index}),patch:{gradient:{...gradient}}};
+      ...(index===undefined?{}:{kind:'gradient',index}),patch};
   }
   function updateSelected(change){
-    const state=context(),layer=selected(state);
-    if(!layer||!state.enabled||layer.locked||gesture)return;
-    void commit(operation(state.origin,layer.id,change(layer.gradient)),state.origin,false);
+    const state=context(),gradient=currentGradient(state);
+    if(!gradient||!state.enabled||state.layer.locked||gesture)return;
+    void commit(operation(state.origin,state.layer.id,change(gradient)),state.origin,false);
   }
   shape.onchange=()=>{
     kind=shape.value;
@@ -78,14 +81,14 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
   };
   reverse.onclick=()=>{
     const state=context();
-    if(selected(state))updateSelected(reversed);
+    if(currentGradient(state))updateSelected(reversed);
     else flip=!flip;
     onChange();sync();
   };
 
   function layout(){
-    const state=context(),gradient=gesture?.gradient||selected(state)?.gradient;
-    const visible=active&&state.origin.target==='pixels'&&!!gradient&&!canvas.hidden;
+    const state=context(),gradient=gesture?.gradient||currentGradient(state);
+    const visible=active&&!!gradient&&!canvas.hidden;
     guide.toggleAttribute('hidden',!visible);
     if(!visible)return;
     const rect=canvas.getBoundingClientRect(),box=stage.getBoundingClientRect();
@@ -100,14 +103,14 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
     });
   }
   function sync(){
-    const state=context(),layer=selected(state),gradient=gesture?.gradient||layer?.gradient||style(state);
+    const state=context(),current=currentGradient(state),gradient=gesture?.gradient||current||style(state);
     if(gesture&&!sameOrigin(state.origin,gesture.origin)){cancel();return;}
-    const disabled=!state.enabled||!!layer?.locked||!!gesture;
+    const disabled=!state.enabled||!!((isMask(state)||current)&&state.layer?.locked)||!!gesture;
     shape.disabled=preset.disabled=reverse.disabled=disabled;
     shape.value=gradient.kind;
     preset.value=gradient.alpha.some(alpha=>alpha<1)?'fade':'pair';
     syncSelectMenu(shape);syncSelectMenu(preset);
-    reverse.setAttribute('aria-pressed',String(!layer&&flip));
+    reverse.setAttribute('aria-pressed',String(!current&&flip));
     const colors=gradient.colors.map((color,i)=>color+Math.round(gradient.alpha[i]*255).toString(16).padStart(2,'0'));
     swatch.style.setProperty('--gradient-preview',`linear-gradient(90deg,${colors.join(',')})`);
     layout();
@@ -133,16 +136,16 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
     if(!active||!state.enabled||event.button!==0||gesture)return;
     const box=canvas.getBoundingClientRect(),pointIn=point(event,box);
     if(!box.width||!box.height||pointIn.some(n=>n<0||n>1))return;
-    const layer=selected(state);
+    const previous=currentGradient(state),layer=isMask(state)||previous?state.layer:null;
     if(layer?.locked)return;
-    const gradient=layer?structuredClone(layer.gradient):{...style(state),...state.selection};
+    const gradient=previous?structuredClone(previous):{...style(state),...state.selection};
     let handle='end',anchor=pointIn;
-    if(layer){
-      const nearStart=distance(gradient.start,pointIn)*box.width<=11;
-      const nearEnd=distance(gradient.end,pointIn)*box.width<=11;
-      if(nearStart||nearEnd){
-        handle=nearStart?'start':'end';
-        anchor=gradient[nearStart?'end':'start'];
+    if(previous){
+      const grabbed=event.target.dataset?.gradientHandle;
+      const startDistance=distance(gradient.start,pointIn)*box.width,endDistance=distance(gradient.end,pointIn)*box.width;
+      if(grabbed||Math.min(startDistance,endDistance)<=11){
+        handle=grabbed||(startDistance<=endDistance?'start':'end');
+        anchor=gradient[handle==='start'?'end':'start'];
       }else{
         gradient.start=pointIn;gradient.end=pointIn;
       }
@@ -150,7 +153,8 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
       gradient.start=pointIn;gradient.end=pointIn;
     }
     gesture={origin:state.origin,layerId:layer?.id||crypto.randomUUID(),index:layer?undefined:state.index,
-      before:layer?.gradient,gradient,handle,anchor,pointer:event.pointerId,previewed:false};
+      before:previous,gradient,handle,anchor,pointer:event.pointerId,previewed:false};
+    stage.setAttribute('data-gradient-dragging','');
     stage.focus({preventScroll:true});stage.setPointerCapture(event.pointerId);
     event.preventDefault();event.stopImmediatePropagation();
     sync();
@@ -158,6 +162,7 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
   function finish(write){
     if(!gesture)return false;
     const current=gesture;gesture=null;
+    stage.removeAttribute('data-gradient-dragging');
     cancelAnimationFrame(frame);frame=0;
     if(stage.hasPointerCapture(current.pointer))stage.releasePointerCapture(current.pointer);
     if(write&&usable(current.gradient)&&JSON.stringify(current.before)!==JSON.stringify(current.gradient))

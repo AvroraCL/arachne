@@ -5,7 +5,7 @@ const canvases=new WeakMap();
 let tail=Promise.resolve();
 
 function thumbnailKey(slot,colorSpace,layer,mask){
-  const maskContent=[layer.maskBase,layer.maskStrokes];
+  const maskContent=[layer.maskBase,layer.maskStrokes,layer.maskGradient];
   const content=mask?maskContent:[
     layer.kind,layer.visible,layer.opacity,layer.strokes,layer.gradient,
     layer.kind==='image'?[layer.asset,layer.x,layer.y,layer.scale,layer.rotation,layer.stretch]:null,

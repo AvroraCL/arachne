@@ -1,4 +1,5 @@
 import {cyclesProgressLabel} from './cycles-progress-ui.mjs';
+import {renderDownloadFilename} from './render-output-ui.mjs';
 
 const taskNames={
   'paint-draft':'草稿预览','paint-preview':'4K 烘焙','paint-render':'路径追踪出图',
@@ -42,7 +43,9 @@ export function setupTaskMonitor({project,jobs,busy,canOpen,loadLog,cancel,retry
       const row=document.createElement('li'),button=document.createElement('button');
       const name=document.createElement('span'),revision=document.createElement('small'),time=document.createElement('time'),status=document.createElement('span');
       name.className='task-row-name';status.className='task-row-status';
-      name.textContent=taskNames[job.type]||'工程任务';revision.textContent='r'+job.revision;
+      name.textContent=job.renderBookmark?.name||taskNames[job.type]||'工程任务';
+      name.title=job.renderBookmark?'相机出图 · '+job.renderBookmark.name:name.textContent;
+      revision.textContent='r'+job.revision;
       const created=Date.parse(job.created);
       if(Number.isFinite(created)){time.dateTime=job.created;time.textContent=taskTime.format(created);time.title=new Date(created).toLocaleString('zh-CN');}
       button.type='button';button.dataset.jobId=job.id;button.onclick=()=>select(job.id);
@@ -83,7 +86,7 @@ export function setupTaskMonitor({project,jobs,busy,canOpen,loadLog,cancel,retry
     retryButton.disabled=busy();
     const output=job?.status==='completed'&&(job.packageUrl||job.archiveUrl||job.glbUrl||job.outputUrl||job.renderUrl);
     download.hidden=!output;
-    if(output){download.href=output;download.download=output.split('/').at(-1);}
+    if(output){download.href=output;download.download=job.type==='paint-render'?renderDownloadFilename(job,doc.name):output.split('/').at(-1);}
     else download.removeAttribute('href');
   }
 

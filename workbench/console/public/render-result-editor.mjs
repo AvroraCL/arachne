@@ -12,7 +12,7 @@ const kind=job=>job.type==='paint-export'?'交付':'出图';
 const crop=job=>{const region=job?.render?.region||job?.cycles?.render_region;return region?.crop?[region.frame,region.pixels]:null;};
 const comparable=(a,b)=>!!a&&!!b&&a.id!==b.id&&JSON.stringify(pixels(a))===JSON.stringify(pixels(b))&&
   JSON.stringify(crop(a))===JSON.stringify(crop(b));
-const resultLabel=item=>`r${item.revision} · ${kind(item)} · ${new Date(item.created).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+const resultLabel=item=>`${item.renderBookmark?.name||kind(item)} · r${item.revision} · ${new Date(item.created).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
 
 export function createRenderResultEditor(ctx,source){
   const {host,state,onChange}=ctx,lifecycle=new AbortController(),{signal}=lifecycle;
@@ -206,7 +206,7 @@ export function createRenderResultEditor(ctx,source){
       showRenderDownload(download,job,doc.name);
       meta.textContent=[`r${job.revision}`,`${width} × ${height}`,cyclesFormatLabel(job.render?.fileFormat||job.cycles?.render_effective?.fileFormat),job.render?'路径追踪':job.cycles?.device||job.progress?.device].filter(Boolean).join(' · ');
     }else meta.textContent='';
-    ctx.title.textContent=job?`r${job.revision} · ${job.render?'路径追踪':'Cycles'}`:'';
+    ctx.title.textContent=job?`${job.renderBookmark?.name||'r'+job.revision} · ${job.render?'路径追踪':'Cycles'}`:'';
     setImagePose();
   }
   const observer=new ResizeObserver(setImagePose);observer.observe(stage);

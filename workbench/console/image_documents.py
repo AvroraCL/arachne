@@ -34,8 +34,22 @@ def converted(stroke):
     return {**{k:v for k,v in stroke.items() if k!='color'},'channels':{'color':True},'values':{'color':stroke['color']}}
 
 
-def mask_values(base,mask,ids):
+def mask_values(layer,mask,ids,surface):
+    base=layer.get('maskBase',1)
     result=np.full(len(ids),base,dtype=np.float32)
+    gradient=layer.get('maskGradient')
+    if gradient is not None:
+        clip=gradient.get('clip')
+        if clip is None:
+            valid=slice(None)
+        elif 'polygon' in gradient:
+            valid=surface._polygon_contains(ids,clip,gradient['polygon'])
+        else:
+            valid=surface._inside_uv(*surface._texel_uv(ids),clip)
+        t=gradient_amount(surface,gradient,ids[valid])
+        first,last=(int(ink[1:3],16)/255 for ink in gradient['colors'])
+        a,b=gradient['alpha']
+        result[valid]=(1-t)*(first*a+base*(1-a))+t*(last*b+base*(1-b))
     if mask is not None and len(mask[0]) and len(ids):
         affected,alpha,value=mask
         i=np.searchsorted(affected,ids);found=(i<len(affected))&(affected[np.minimum(i,len(affected)-1)]==ids)
@@ -55,12 +69,20 @@ def image_pixels(layer,assets,size,linear):
     return np.stack([np.asarray(Image.fromarray(raw[:,:,i]).transform((size,size),Image.Transform.AFFINE,affine,resample=Image.Resampling.BILINEAR)) for i in range(4)],axis=-1)[::-1].reshape(-1,4)
 
 
-def gradient_tiles(surface, gradient, color):
-    size = surface.uv_shape[0]
+def gradient_amount(surface,gradient,ids):
     x, y = gradient['start']
     dx, dy = np.asarray(gradient['end']) - (x, y)
     length_squared = dx*dx + dy*dy
-    radial = gradient['kind'] == 'radial'
+    u, v = surface._texel_uv(ids)
+    if gradient['kind'] == 'radial':
+        t = np.sqrt(((u-x)**2 + (v-y)**2)/length_squared)
+    else:
+        t = ((u-x)*dx + (v-y)*dy)/length_squared
+    return np.clip(t,0,1).astype(np.float32)
+
+
+def gradient_tiles(surface, gradient, color):
+    size = surface.uv_shape[0]
     first, last = (np.r_[color(ink)*alpha, alpha].astype(np.float32)
                    for ink, alpha in zip(gradient['colors'], gradient['alpha']))
     rect = gradient.get('clip', (0, 0, 1, 1))
@@ -73,12 +95,7 @@ def gradient_tiles(surface, gradient, color):
         ids = (rows[:, None]*size + cols).ravel()
         if polygon:
             ids = ids[surface._polygon_contains(ids, rect, polygon)]
-        u, v = surface._texel_uv(ids)
-        if radial:
-            t = np.sqrt(((u-x)**2 + (v-y)**2)/length_squared)
-        else:
-            t = ((u-x)*dx + (v-y)*dy)/length_squared
-        t = np.clip(t, 0, 1).astype(np.float32)[:, None]
+        t = gradient_amount(surface,gradient,ids)[:, None]
         yield ids, first + (last-first)*t
 
 
@@ -94,7 +111,7 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
                 mask=surface.mask(layer.get('maskStrokes',[]))
                 for start in range(0,len(result),131072):
                     ids=np.arange(start,min(start+131072,len(result)))
-                    value=mask_values(layer.get('maskBase',1),mask,ids)
+                    value=mask_values(layer,mask,ids,surface)
                     result[ids,:3]=value[:,None] if linear else decode(value[:,None]);result[ids,3]=1
                 break
             continue
@@ -113,7 +130,7 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
         for ids,pixels in ranges:
             opacity=np.full(len(ids),layer['opacity'],dtype=np.float32)
             if layer['maskEnabled']:
-                opacity*=mask_values(layer['maskBase'],mask,ids)
+                opacity*=mask_values(layer,mask,ids,surface)
             src_alpha=np.clip(pixels[:,3]*opacity,0,1);back=result[ids];back_alpha=back[:,3]
             src=np.divide(pixels[:,:3],pixels[:,3:],out=np.zeros_like(pixels[:,:3]),where=pixels[:,3:]>0)
             base=np.divide(back[:,:3],back[:,3:],out=np.zeros_like(back[:,:3]),where=back[:,3:]>0)

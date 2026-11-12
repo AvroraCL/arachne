@@ -563,7 +563,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,inspectMas
 
   const selected=isolatedImageLayer?image.layers.filter(layer=>layer.id===isolatedImageLayer):image.layers;
   const layers=inspectMask
-    ?selected.filter(layer=>layer.id===inspectMask).map(({id,maskBase,maskStrokes})=>({id,maskBase,maskStrokes}))
+    ?selected.filter(layer=>layer.id===inspectMask).map(({id,maskBase,maskStrokes,maskGradient})=>({id,maskBase,maskStrokes,...(maskGradient?{maskGradient}:{})}))
     :selected.filter(layer=>layer.visible&&layer.opacity>0);
   const assetIds=new Set(inspectMask?[]:layers.filter(layer=>layer.kind==='image').map(layer=>layer.asset));
   return {
@@ -1009,6 +1009,7 @@ async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,upda
   if(await sha256File(model.file,{signal})!==model.sha256)throw Error('登记模型在出图过程中变化');
   const render={
     engine:'PATH_TRACING',revision:doc.revision,resolution,frameResolution:[settings.width,settings.height],
+    ...(j.renderBookmark?{cameraBookmark:j.renderBookmark}:{}),
     region,camera:result.camera,samples:result.samples,fileFormat:settings.fileFormat,bitDepth:settings.bitDepth,
     transparent:settings.transparent,...(result.exr?{colorSpace:'scene-linear sRGB',alphaMode:'premultiplied'}:{}),
     lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,visibility:renderVisibility,

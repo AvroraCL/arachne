@@ -175,7 +175,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
 
   function render(){
     const state=context(),{layer,enabled,uvEnabled}=state;
-    const writable=layer&&!layer.locked,canSample=!!layer&&(sampleAnyLayer||(writable&&layer.kind==='paint'));
+    const writable=layer&&!layer.locked&&!state.busy,canSample=!!layer&&!state.busy&&(sampleAnyLayer||(writable&&layer.kind==='paint'));
     const unavailable=(mode==='paint'&&(!writable||layer.kind!=='paint'))||
       (mode==='sample'&&!canSample)||
       (['mask','fill'].includes(mode)&&!writable);

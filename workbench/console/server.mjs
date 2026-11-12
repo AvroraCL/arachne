@@ -20,7 +20,7 @@ import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 const compressLive=promisify(gzip);
 import {ROOT,DATA,list,read,commit,travel,projectHistory,projectDir,projectFileVersion} from './store.mjs';
-import {setBaseUrl,getJob,listJobs,jobUpdates,submit,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes,readJobLog} from './jobs.mjs';
+import {setBaseUrl,getJob,listJobs,jobUpdates,submit,submitRenderBatch,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes,readJobLog} from './jobs.mjs';
 import {workspaceRoot} from './workspace-paths.mjs';
 import {demoProjectId,nativeDemoProjectId} from './demo-source.mjs';
 import {migrateBlendProject,stopBlendMigrations} from './blend-migration.mjs';
@@ -335,6 +335,7 @@ const server=http.createServer(async(req,res)=>{
         const settings=resolvePaintRenderSettings(doc.paint,b);
         send(res,202,submit(id,'paint-render',b.revision,b.requestId,null,null,{settings}));
       }
+      else if(operation==='render-batch')send(res,202,{jobs:submitRenderBatch(doc,b)});
       else if(operation==='render-cancel'){
         if(getJob(id,b.jobId).type!=='paint-render')throw Error('只能取消出图任务');
         send(res,200,await cancel(id,b.jobId));

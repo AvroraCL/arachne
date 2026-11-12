@@ -55,6 +55,7 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     sampling.hidden=progress?.phase!=='sample';
     if(!sampling.hidden){sampling.max=progress.total;sampling.value=progress.sample;}
     const detail=selected?[
+      selected.renderBookmark?.name,
       `r${selected.revision} · ${cyclesProgressLabel(progress)||selected.stage||statusLabels[selected.status]}`,
       selected.render?`路径追踪 · ${selected.render.resolution.join(' × ')} · ${selected.render.samples} 次采样`:selected.cycles?`${selected.cycles.device} · ${selected.cycles.resolution.join(' × ')} · ${selected.cycles.samples} 次采样`:selected.error,
       selected.render?`${cyclesFormatLabel(selected.render.fileFormat)} · ${selected.render.bitDepth} 位${selected.render.fileFormat==='OPEN_EXR'?'浮点':''}`:
@@ -85,7 +86,7 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
         button.type='button';button.dataset.job=job.id;
         button.setAttribute('aria-pressed',String(job.id===selected?.id));
         const label=document.createElement('span'),when=document.createElement('small');
-        label.textContent=`r${job.revision} · ${statusLabels[job.status]||job.status}`;
+        label.textContent=[job.renderBookmark?.name,`r${job.revision}`,statusLabels[job.status]||job.status].filter(Boolean).join(' · ');
         when.textContent=new Date(job.created).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
         button.append(label,when);
         button.onclick=()=>{selectedId=job.id;error.textContent='';sync();};

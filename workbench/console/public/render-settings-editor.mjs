@@ -357,6 +357,9 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   });
   const deleteBookmark=bookmarkButton('删除',origin=>project.commands([{op:'renderBookmark',action:'remove',id:bookmarkId}],origin));
   deleteBookmark.setAttribute('aria-label','删除镜头');
+  const batchBookmarks=el('button','','相机批量出图…');
+  batchBookmarks.type='button';batchBookmarks.onclick=()=>settings.openBatch();
+  bookmarkActions.append(batchBookmarks);
   let bookmarkId=state.cameraBookmark||'',bookmarkListKey='',nameKey='',bookmarkPending=false;
   const listBookmarks=()=>project.document?.paint.renderBookmarks??[];
   const selectedBookmark=()=>listBookmarks().find(entry=>entry.id===bookmarkId);
@@ -401,6 +404,7 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     if(nameKey!==nextNameKey){nameKey=nextNameKey;bookmarkName.value=entry?.name||'';}
     bookmarkDetails.hidden=!entry;
     bookmarkName.disabled=deleteBookmark.disabled=bookmarkPending;
+    batchBookmarks.disabled=bookmarkPending||!entries.length;
     addBookmark.disabled=bookmarkPending||entries.length>=renderBookmarkLimit||!settings.canUseViewport();
     replaceBookmark.disabled=bookmarkPending||!settings.canUseViewport();
     const active=!!entry&&sameDeliveryCamera(entry.camera,settings.projectCamera?.())&&settings.read().framing==='saved';

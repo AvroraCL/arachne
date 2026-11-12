@@ -8,6 +8,7 @@ import {StringDecoder} from 'node:string_decoder';
 import {ROOT,projectDir,read,list,atomic} from './store.mjs';
 import {pathTraceOptions} from './path-trace-render.mjs';
 import {cyclesResource} from './cycles-resource.mjs';
+import {renderBookmarkLimit} from './public/paint-delivery-options.mjs';
 
 const PYTHON=process.env.ARACHNE_PYTHON||'python';
 export const paintExportTypes=['paint-export','paint-texture-export','paint-glb-export'];
@@ -64,6 +65,66 @@ export function runProcess(j,exe,args,{onLine}={}){
   });
 }
 export function mime(name){return ({'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf','.otf':'font/otf','.ttc':'font/collection','.json':'application/json','.html':'text/html','.css':'text/css','.mjs':'text/javascript','.js':'text/javascript','.log':'text/plain','.glb':'model/gltf-binary'})[path.extname(name).toLowerCase()]||'application/octet-stream';}
+function queuedJob(doc,type,requestId,retryOf=null,task=null){
+  return {id:crypto.randomUUID(),projectId:doc.id,type,revision:doc.revision,retryOf,requestId:requestId||null,
+    task:task?{labId:task.labId,taskId:task.taskId,attemptId:task.attemptId}:null,status:'queued',stage:'等待执行',created:new Date().toISOString()};
+}
+function enqueue(doc,items){
+  const created=[];
+  let snapshot=null;
+  fs.mkdirSync(path.join(projectDir(doc.id),'jobs'),{recursive:true});
+  try{
+    for(const job of items){
+      const folder=jobDir(doc.id,job.id);
+      fs.mkdirSync(folder);
+      created.push(folder);
+      const file=path.join(folder,'snapshot.json');
+      if(snapshot){
+        try{fs.linkSync(snapshot,file);}
+        catch(error){
+          if(!['EXDEV','ENOSYS','ENOTSUP','EPERM'].includes(error.code))throw error;
+          fs.copyFileSync(snapshot,file,fs.constants.COPYFILE_EXCL|fs.constants.COPYFILE_FICLONE);
+        }
+      }else{atomic(file,doc);snapshot=file;}
+      update(job,{});
+    }
+  }catch(error){
+    for(const folder of created)fs.rmSync(folder,{recursive:true,force:true});
+    throw error;
+  }
+  queue.push(...items);
+  void drain();
+}
+export function submitRenderBatch(doc,{revision,requestId,bookmarkIds,settings}){
+  if(doc.workflowType!==PAINT)throw Error('请选择涂装工程');
+  if(revision!==doc.revision)throw Object.assign(Error('工程修订已变化'),{status:409,currentRevision:doc.revision});
+  if(typeof requestId!=='string'||!/^[-\w]{1,100}$/.test(requestId)||
+     !Array.isArray(bookmarkIds)||!bookmarkIds.length||bookmarkIds.length>renderBookmarkLimit||
+     bookmarkIds.some(id=>typeof id!=='string')||new Set(bookmarkIds).size!==bookmarkIds.length)
+    throw Error('请选择有效且不重复的相机书签');
+  const bookmarks=new Map((doc.paint.renderBookmarks??[]).map(item=>[item.id,item]));
+  const base=pathTraceOptions(settings??{});
+  if(base.camera)throw Error('批量出图使用相机书签');
+  const oldJobs=new Map(listJobs(doc.id).map(job=>[job.requestId,job]));
+  const next=[];
+  const items=bookmarkIds.map(id=>{
+    const bookmark=bookmarks.get(id);
+    if(!bookmark)throw Error('找不到所选相机书签');
+    const key=requestId+':'+id,paintSettings=pathTraceOptions({...base,camera:bookmark.camera});
+    const renderBookmark={id,name:bookmark.name},prior=oldJobs.get(key);
+    if(prior){
+      if(prior.type!=='paint-render'||prior.revision!==revision||prior.renderBookmark?.id!==id||
+         JSON.stringify(pathTraceOptions(prior.paintSettings))!==JSON.stringify(paintSettings))
+        throw Error('请求编号已用于其他出图设置');
+      return prior;
+    }
+    const job={...queuedJob(doc,'paint-render',key),paintSettings,renderBookmark};
+    next.push(job);
+    return job;
+  });
+  if(next.length)enqueue(doc,next);
+  return items;
+}
 export function submit(pid,type,revision,requestId,task=null,retryOf=null,renderOptions=null){
   const previous=retryOf?getJob(pid,retryOf):null;
   const options=['paint-render','paint-export'].includes(type)?pathTraceOptions:null;
@@ -87,12 +148,12 @@ export function submit(pid,type,revision,requestId,task=null,retryOf=null,render
     if(current.revision!==revision)throw Object.assign(Error('工程修订已变化，请重新确认当前预览'),{status:409,currentRevision:current.revision});
     paintPreviewFolder(doc,getJob(pid,paintPreviewId));
   }
-  const j={id:crypto.randomUUID(),projectId:pid,type,revision,retryOf,requestId:requestId||null,task:task?{labId:task.labId,taskId:task.taskId,attemptId:task.attemptId}:null,status:'queued',stage:'等待执行',created:new Date().toISOString()};
+  const j=queuedJob(doc,type,requestId,retryOf,task);
   if(exportPaint){j.paintPreviewId=paintPreviewId;j.paintConfirmedAt=previous?.paintConfirmedAt??new Date().toISOString();}
   if(paintSettings)j.paintSettings=paintSettings;
-  fs.mkdirSync(jobDir(pid,j.id),{recursive:true});
-  atomic(path.join(jobDir(pid,j.id),'snapshot.json'),doc);
-  update(j,{});queue.push(j);void drain();return j;
+  if(previous?.renderBookmark)j.renderBookmark=previous.renderBookmark;
+  enqueue(doc,[j]);
+  return j;
 }
 export function retryJob(pid,jid,requestId,task=null){const old=getJob(pid,jid);if(!['failed','cancelled','interrupted'].includes(old.status))throw Error('只有失败、取消或中断任务可重试');return submit(pid,old.type,old.revision,requestId,task,jid);}
 async function drain(){if(running||!baseUrl)return;running=true;

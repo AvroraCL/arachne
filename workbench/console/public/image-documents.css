@@ -48,11 +48,13 @@
 .document-image-stage>canvas:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:1px}
 .document-image-stage[data-text-placement]>canvas{cursor:text}
 .document-image-stage[data-gradient-tool]>canvas{cursor:crosshair}
+.document-image-stage[data-gradient-dragging]{cursor:grabbing}
 .document-gradient-guide{position:absolute;inset:0;z-index:3;width:100%;height:100%;overflow:hidden;pointer-events:none}
 .document-gradient-guide[hidden]{display:none}
 .document-gradient-guide path{fill:none;stroke:#f1f1f1;stroke-width:1}
 .document-gradient-guide .gradient-guide-shadow{stroke:#1a1a1a;stroke-width:3;opacity:.65}
-.document-gradient-guide circle{stroke:#f1f1f1;stroke-width:1.5;filter:drop-shadow(0 0 1.5px #000)}
+.document-gradient-guide circle{stroke:#f1f1f1;stroke-width:1.5;filter:drop-shadow(0 0 1.5px #000);pointer-events:auto;cursor:grab}
+.document-image-stage[data-gradient-dragging] :is(.document-gradient-guide circle,canvas){cursor:grabbing}
 .document-gradient-swatch{
   flex:none;width:54px;height:18px;border-radius:2px;border:1px solid #1d1d1d;
   background:var(--gradient-preview),repeating-conic-gradient(#474747 0 25%,#626262 0 50%) 0/8px 8px

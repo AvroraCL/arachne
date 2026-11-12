@@ -36,6 +36,24 @@ test('mask inversion preserves soft brush coverage and deletion resets only the 
  assert.equal(layer.maskBase,1);
  assert.throws(()=>edit(paint,'invertMask',origin),/没有蒙版/);
 });
+test('gradient masks preserve brush strokes and invert the entire mask',()=>{
+ const paint=defaults();edit(paint,'create');edit(paint,'addLayer',{layerId:'pixel',kind:'pixel'});
+ const layer=paint.imageDocuments.doc.layers[0],origin={layerId:'pixel'};
+ const gradient={kind:'linear',start:[.2,.5],end:[.8,.5],colors:['#000000','#cccccc'],alpha:[1,.7]};
+ edit(paint,'updateLayer',{...origin,patch:{maskGradient:gradient,maskEnabled:true,maskBase:.6}});
+ edit(paint,'stroke',{...origin,target:'mask',stroke:{uv:true,rect:[.1,.1,.2,.2],opacity:.5,value:.2}});
+ validateImageDocuments(paint,checks);
+ edit(paint,'invertMask',origin);
+ assert.deepEqual(layer.maskGradient.colors,['#ffffff','#333333']);
+ assert.deepEqual(layer.maskGradient.alpha,[1,.7]);
+ assert.equal(layer.maskBase,.4);
+ assert.equal(layer.maskStrokes[0].value,.8);
+ const doc={id:'gradient-mask',revision:3,paint},isolated=imageDocumentInput(doc,{revision:3,documentId:'doc',inspectMask:'pixel'});
+ assert.deepEqual(isolated.paint.imageDocuments.doc.layers[0].maskGradient,layer.maskGradient);
+ edit(paint,'updateLayer',{...origin,patch:{maskGradient:null}});
+ assert.equal(layer.maskGradient,undefined);
+ assert.equal(layer.maskStrokes.length,1);
+});
 test('editable gradient layers validate endpoints and insertion without changing pixel layers',()=>{
  const paint=defaults();edit(paint,'create');edit(paint,'addLayer',{layerId:'pixel',kind:'pixel'});
  const gradient={kind:'linear',start:[.2,.5],end:[.8,.5],colors:['#d08022','#2d63c0'],alpha:[1,0],clip:[.15,.15,.85,.85]};
@@ -99,6 +117,12 @@ gradient.update(kind='radial',start=[.5,.5],end=[.75,.5],alpha=[1,1],polygon=[[.
 q=composite_document(doc,{},64)
 assert q[32,31,3]==0 and q[30,30,0]>q[30,30,2]
 assert list(q[9,12])==[0,0,255,255]
+mask=dict(kind='linear',start=[.25,.5],end=[.75,.5],colors=['#000000','#ffffff'],alpha=[1,1])
+layer['maskGradient']=mask;layer['maskBase']=1;layer['maskEnabled']=True
+layer['maskStrokes']=[dict(uv=True,rect=[.4,.4,.6,.6],value=0,opacity=1)]
+q=composite_document(doc,{},64,inspect_mask='gradient')
+assert list(q[32,8])==[0,0,0,255] and list(q[32,55])==[255,255,255,255]
+assert q[32,32,0]==0 and abs(int(q[8,32,0])-131)<=1
 from PIL import Image
 from io import BytesIO
 for color_space,key,value in [('linear','gamma',1),('srgb','srgb',0)]:
