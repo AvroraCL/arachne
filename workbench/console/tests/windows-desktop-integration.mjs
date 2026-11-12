@@ -17,6 +17,11 @@ delete env.ELECTRON_RUN_AS_NODE;
 if(process.platform==='win32')delete env.ARACHNE_BLENDER;
 if(withoutBlender)env.ARACHNE_BLENDER=path.join(profile,'missing-blender');
 let desktop;
+const limit=setTimeout(()=>{
+  console.error('Windows desktop verification timed out. Data:',profile);
+  desktop?.process().kill();
+  process.exit(1);
+},9*60*1000).unref();
 async function waitFor(check,label){
   const deadline=Date.now()+120000;
   while(Date.now()<deadline){
@@ -27,11 +32,13 @@ async function waitFor(check,label){
   throw Error('Timed out: '+label);
 }
 async function launch(){
+  console.log('Launching packaged desktop from',path.resolve(executable));
   desktop=await electron.launch({executablePath:path.resolve(executable),env,
     args:[...(appFolder?[path.resolve(appFolder)]:[]),
       ...(process.platform==='win32'?['--use-angle=swiftshader','--enable-unsafe-swiftshader']:[])],
     timeout:60000});
   const page=await desktop.firstWindow({timeout:60000});
+  console.log('Packaged desktop window created');
   await page.waitForURL(/127\.0\.0\.1:\d+\/paint\.html/, {timeout:30000});
   try{await page.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});}
   catch(error){
@@ -70,6 +77,7 @@ try{
   await page.getByRole('button',{name:'材质预览',exact:true}).first().click();
   page.off('request',watchRenderer);
   assert.deepEqual(blenderRequests,[]);
+  console.log('PASS Windows viewport and progressive path tracing');
   assert.equal((await read('/api/cycles-devices')).available,!withoutBlender);
   assert.deepEqual(await page.evaluate(()=>[typeof window.require,typeof window.arachneDesktop.notifyProject]),
     ['undefined','function']);
@@ -88,6 +96,7 @@ try{
   assert.equal(project.source.format,'glb');
   const target=await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getTitle());
   assert.match(target,/桌面验收/);
+  console.log('PASS native File menu and Chinese project name');
   if(!withoutBlender){
     const legacy=(await read('/api/projects')).find(project=>project.id===demoProjectId);
     assert.ok(legacy,'Generate the legacy demo before packaging to verify historical Cycles');
@@ -124,6 +133,7 @@ try{
   assert.equal(createHash('sha256').update(bytes).digest('hex'),rendered.render.sha256);
   const bake=await job('preview',{});
   assert.equal(Object.keys(bake.paintReport.files).length,8);
+  console.log('PASS Windows formal PNG and eight-channel 4K bake');
   if(withoutBlender){
     await desktop.evaluate(({Menu,BrowserWindow})=>{
       const item=Menu.getApplicationMenu().items.find(group=>group.label==='文件')
@@ -156,6 +166,7 @@ try{
     const bytes=await fs.readFile(saved).catch(error=>{if(error.code!=='ENOENT')throw error;});
     return bytes&&createHash('sha256').update(bytes).digest('hex')===archiveDigest;
   },'native ZIP download');
+  console.log('PASS native ZIP save dialog and archive hash');
   // A job submitted from a different project is invisible to the open
   // workbench. The native close guard must still check the shared service.
   const other=await read('/api/projects/'+seedId);
@@ -182,6 +193,7 @@ try{
   const cancelled=await page.request.post(origin+'/api/projects/'+seedId+'/jobs/'+taskId+'/cancel',{headers:{Origin:origin}});
   assert.equal(cancelled.status(),200);
   await waitFor(async()=> (await read('/api/desktop-activity')).state==='ready','renderer cleanup');
+  console.log('PASS native quit checks active jobs in other projects');
   const bounds=await desktop.evaluate(({BrowserWindow,screen})=>{
     const area=screen.getPrimaryDisplay().workArea;
     const win=BrowserWindow.getAllWindows()[0];
@@ -204,9 +216,13 @@ try{
     (withoutBlender?'GLB export without Blender':'Cycles render')+' and service shutdown');
 }catch(error){
   console.error('Desktop verification data:',profile);
+  for(const name of await fs.readdir(path.join(profile,'logs')).catch(()=>[])){
+    const log=await fs.readFile(path.join(profile,'logs',name),'utf8').catch(()=>null);
+    if(log)console.error(log.slice(-8000));
+  }
   if(desktop){
     desktop.process().kill();
     await desktop.close().catch(()=>{});
   }
   throw error;
-}
+}finally{clearTimeout(limit);}
