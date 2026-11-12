@@ -939,6 +939,18 @@ function prepareEditableFiles(doc,out,files){
   atomic(files[manifestPath],manifest);
   return {manifestPath,assetCount:Object.keys(assets).length,geometry};
 }
+function prepareRegistrationFiles(source,files){
+  if(source.format!=='glb')return null;
+  const registration={};
+  for(const name of glbRegistrationFiles(source.preservedSurface)){
+    const file=path.join(path.dirname(source.reviewSource),name),member='registration/'+name;
+    const digest=source.files[file];
+    if(!sha256(digest))throw Error('缺少可恢复的 GLB 登记文件');
+    files[member]=file;
+    registration[member]=digest;
+  }
+  return registration;
+}
 const channelsForReport=report=>channels.filter(k=>Object.hasOwn(report.files,channelSpecs[k].file));
 export function paintPreviewFolder(doc,j){
   if(j?.type!=='paint-preview'||j.status!=='completed'||j.revision!==doc.revision)throw Error('请先生成当前修订的有效预览');
@@ -1110,9 +1122,16 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     const withTextures=j.type==='paint-texture-export';
     const out=path.join(folder,withTextures?'textures':'backup'),files={};
     stage(j,withTextures?'核对 4K 贴图并打包工程':'保存可编辑工程副本');
+    let portable=false;
     try{
       const editable=prepareEditableFiles(doc,out,files);
       const report={format:archiveFormat,revision:doc.revision,editable};
+      const registration=prepareRegistrationFiles(doc.source,files);
+      if(registration){
+        if(!sha256(doc.source.uvSha256))throw Error('缺少登记模型的原 UV 指纹');
+        report.registration={version:1,uvSha256:doc.source.uvSha256,files:registration};
+        portable=true;
+      }
       if(withTextures){
         const preview=getJob(doc.id,j.paintPreviewId);
         const input=await checkPaintPreview(doc,preview,{binding,signal});
@@ -1128,7 +1147,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
         files['projection-report.json']=projection;
         report.bake={previewId:preview.id,resolution:bake.resolution,files:hashes};
       }
-      await run('backup-config',{out,files,report},
+      await run('backup-config',{out,files,report,expected:registration??{}},
         python,['-X','utf8',path.join(ROOT,'paint_archive.py'),'pack']);
       signal?.throwIfAborted();
       if(withTextures&&read(doc.id).revision!==doc.revision)
@@ -1137,7 +1156,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
       fs.rmSync(path.join(out,'project.zip'),{force:true});
       throw error;
     }finally{fs.rmSync(path.join(out,'editable'),{recursive:true,force:true});}
-    update(j,withTextures?{packageUrl:url('textures/project.zip')}:{archiveUrl:url('backup/project.zip')});
+    update(j,{portable,...(withTextures?{packageUrl:url('textures/project.zip')}:{archiveUrl:url('backup/project.zip')})});
     return;
   }
   if(j.type==='paint-preview'||j.type==='paint-draft'||j.type==='paint-render'){
@@ -1206,13 +1225,8 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
         const spec=channelSpecs[key],file='textures/'+spec.file,active=activeChannels.includes(key);
         return [key,{file,sha256:textures[file],colorSpace:spec.srgb?'sRGB':'linear',active,embedded:active&&key!=='height'}];
       }))});
-    const registration=doc.source.format==='glb'?{}:null;
-    if(registration)for(const name of glbRegistrationFiles(doc.source.preservedSurface)){
-      const file=path.join(path.dirname(doc.source.reviewSource),name),member='registration/'+name;
-      const digest=doc.source.files[file];
-      if(!digest)throw Error('缺少可恢复的 GLB 登记文件');
-      files[member]=file;registration[member]=expected[member]=digest;
-    }
+    const registration=prepareRegistrationFiles(doc.source,files);
+    Object.assign(expected,registration);
     const editable=prepareEditableFiles(doc,pending,files);
     const report={format:archiveFormat,revision:doc.revision,editable,bake:{previewId:preview.id,resolution:bake.resolution,files:textures},
       delivery:{version:1,confirmedAt:j.paintConfirmedAt,model:{file:'model.glb',sha256:modelSha256,

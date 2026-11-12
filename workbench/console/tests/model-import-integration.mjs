@@ -676,12 +676,51 @@ try{
   await reopened.getByRole('button',{name:'源材质贴图',exact:true}).waitFor();
   await reopened.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
   await reopened.screenshot({path:path.join(data,'imported-source-material.png')});
+  async function texturedJob(queued){
+    return until(async()=>{
+      const result=await api(texturedRoute+'/jobs/'+queued.id);
+      if(result.status==='failed')throw Error(result.error);
+      return result.status==='completed'&&result;
+    });
+  }
+  async function restorePortable(url,kind){
+    const zip=Buffer.from(await (await fetch(origin+url)).arrayBuffer());
+    const file=path.join(data,kind+'.zip');
+    await fs.writeFile(file,zip);
+    execFileSync(pythonExecutable(),['-X','utf8','-c',[
+      'import hashlib,json,sys,zipfile',
+      'with zipfile.ZipFile(sys.argv[1]) as z:',
+      ' report=json.loads(z.read("project-report.json"))',
+      ' assert report["registration"]["uvSha256"]==sys.argv[2]',
+      ' assert set(report["registration"]["files"])=={"registration/"+name for name in ("model.glb","base.png","metadata.json","registration.json")}',
+      ' assert ("bake" in report)==(sys.argv[3]=="portable-textures")',
+      ' assert "render.png" not in z.namelist()',
+      ' for member,expected in report["fileSha256"].items():',
+      '  assert hashlib.sha256(z.read(member)).hexdigest()==expected',
+    ].join('\n'),file,textured.source.uvSha256,kind]);
+    const destination=await start(path.join(data,kind));
+    assert.deepEqual(await (await fetch(destination+'/api/projects')).json(),[]);
+    const response=await fetch(destination+'/api/projects/paint-import',{
+      method:'POST',headers:{'Content-Type':'application/zip'},body:zip
+    });
+    const imported=await response.json();
+    assert.equal(response.status,201,JSON.stringify(imported));
+    assert.deepEqual(imported.paint,textured.paint);
+    assert.equal(imported.source.uvSha256,textured.source.uvSha256);
+    assert.equal(imported.source.files[imported.source.reviewSource],textured.source.files[textured.source.reviewSource]);
+    return {destination,imported};
+  }
+  const backup=await texturedJob(await api(texturedPaint+'/backup',{revision:0,requestId:'portable-backup'}));
+  assert.equal(backup.portable,true);
+  const portable=await restorePortable(backup.archiveUrl,'portable-backup');
+  const portableView=await browser.newPage();
+  await portableView.goto(portable.destination+'/?project='+portable.imported.id);
+  await portableView.locator('[data-area-mode=material]').click();
+  await portableView.getByRole('button',{name:'源材质贴图',exact:true}).waitFor();
+  await portableView.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
+  await portableView.close();
   const sourcePreview=await api(texturedPaint+'/preview',{revision:0,requestId:'source-maps'});
-  const bakedSource=await until(async()=>{
-    const result=await api(texturedRoute+'/jobs/'+sourcePreview.id);
-    if(result.status==='failed')throw Error(result.error);
-    return result.status==='completed'&&result;
-  });
+  const bakedSource=await texturedJob(sourcePreview);
   assert.deepEqual(bakedSource.paintReport.resolution,[4096,4096]);
   assert.equal(bakedSource.paintReport.uv_unchanged,true);
   const bakedFiles=['color','alpha'].map(channel=>path.join(data,'source-bake-'+channel+'.png'));
@@ -693,6 +732,12 @@ try{
     'print(json.dumps([[Image.open(file).getpixel(pos) for pos in ((0,0),(4095,4095))] for file in sys.argv[1:]]))',
   ].join('\n'),...bakedFiles],{encoding:'utf8'}));
   assert.deepEqual(corners,[[[188,0,0],[188,137,255]],[64,0]]);
+  const texturePackage=await texturedJob(await api(texturedPaint+'/export-textures',{
+    revision:0,previewId:bakedSource.id,confirmed:true,requestId:'portable-textures'
+  }));
+  assert.equal(texturePackage.portable,true);
+  await restorePortable(texturePackage.packageUrl,'portable-textures');
+  console.log('PASS editable backup without bake and texture ZIP restore in separate empty profiles, with hashes and native UV');
   await api(texturedPaint+'/commands',{revision:0,operations:[{op:'update',id:sourceLayer.id,patch:{visible:false}}]});
   await api(texturedPaint+'/undo',{revision:1});
   await reopened.reload();

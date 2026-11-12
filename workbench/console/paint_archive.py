@@ -115,22 +115,16 @@ def check_project_textures(archive, report, hashes):
         read_checked(archive, name, 72 * MIB, digest)
 
 
-def unpack_registration(archive, report, output):
-    delivery = report['delivery']
-    require(delivery['version'] == 1 and 'bake' in report, '原生交付包格式无效')
-    entries = delivery.get('registration')
-    if entries is None:
-        return
+def unpack_registration(archive, report, output, entries, uv_digest):
     from model_glb import Model
     from PIL import Image
 
     hashes = report['fileSha256']
-    model_report = delivery['model']
     geometry = report['editable']['geometry']
     preserved = set(entries) == set(REGISTRATION_LIMITS) | set(PRESERVED_SURFACE_LIMITS)
     limits = {**REGISTRATION_LIMITS,**PRESERVED_SURFACE_LIMITS} if preserved else REGISTRATION_LIMITS
     require(set(entries) == set(limits) and
-            entries['registration/model.glb'] == geometry['modelSha256'] == model_report['sourceGlbSha256'],
+            entries['registration/model.glb'] == geometry['modelSha256'],
             '原生交付包的登记文件不一致')
     folder = output / 'registration'
     folder.mkdir()
@@ -151,7 +145,7 @@ def unpack_registration(archive, report, output):
                 '迁移后的原绘制表面指纹不一致')
     model = Model(folder/'model.glb')
     require(meta['source_sha256'] == geometry['modelSha256'] and meta['material'] == geometry['material'] and
-            meta['uv_unchanged'] is True and meta['uv_before'] == meta['uv_after'] == model_report['uvSha256'] ==
+            meta['uv_unchanged'] is True and meta['uv_before'] == meta['uv_after'] == uv_digest ==
             model.uv_digest() and any(p['label']==meta['material'] and p['uv'] is not None for p in model.primitives),
             '包内登记模型的材质或原 UV 不一致')
     with Image.open(folder/'base.png') as image:
@@ -179,8 +173,20 @@ def unpack(file, output):
         check_metadata(manifest, report, report_name)
         if report_name == PROJECT and 'bake' in report:
             check_project_textures(archive, report, hashes)
-        if report_name == PROJECT and 'delivery' in report:
-            unpack_registration(archive, report, output)
+        if report_name == PROJECT:
+            if 'delivery' in report:
+                delivery = report['delivery']
+                require(delivery['version'] == 1 and 'bake' in report and 'registration' not in report,
+                        '原生交付包格式无效')
+                if 'registration' in delivery:
+                    require(delivery['model']['sourceGlbSha256'] == manifest['geometry']['modelSha256'],
+                            '原生交付包的登记模型指纹不一致')
+                    unpack_registration(archive, report, output, delivery['registration'], delivery['model']['uvSha256'])
+            elif 'registration' in report:
+                registration = report['registration']
+                require(set(registration) == {'version', 'uvSha256', 'files'} and registration['version'] == 1,
+                        '工程副本的登记清单无效')
+                unpack_registration(archive, report, output, registration['files'], registration['uvSha256'])
         assets = manifest['paint']['assets']
         require(isinstance(assets, dict) and len(assets) == report['editable']['assetCount'])
         total_size = 0
@@ -203,7 +209,8 @@ def pack_project(config):
     hashes = {}
     expected = config.get('expected',{})
     total_assets = 0
-    with ZipFile(Path(config['out']) / 'project.zip', 'x', ZIP_DEFLATED, compresslevel=3) as archive:
+    output = Path(config['out']) / 'project.zip'
+    with ZipFile(output, 'x', ZIP_DEFLATED, compresslevel=3) as archive:
         for name, source in config['files'].items():
             data = Path(source).read_bytes()
             digest = hashes[name] = hashlib.sha256(data).hexdigest()
@@ -212,6 +219,7 @@ def pack_project(config):
             if name in report.get('bake', {}).get('files', {}):
                 require(digest == report['bake']['files'][name], '打包时贴图指纹变化')
             if name.startswith('editable/assets/'):
+                require(0 < len(data) <= 64 * MIB, '工程副本包含超过 64 MiB 的素材')
                 total_assets += len(data)
                 require(total_assets <= 512 * MIB, '工程副本的可编辑素材总计不能超过 512 MiB')
                 require(name == f'editable/assets/paint-{digest}.png', '打包时涂装素材指纹变化')
@@ -222,6 +230,7 @@ def pack_project(config):
         require(set(expected) <= set(hashes), '交付包缺少文件')
         report_data = json.dumps(report, ensure_ascii=False, indent=2)
         archive.writestr(PROJECT, report_data)
+    require(output.stat().st_size <= 1024 * MIB, '涂装 ZIP 超过 1 GiB，无法恢复')
     if config.get('writeReport'):
         (Path(config['out']) / PROJECT).write_text(report_data, encoding='utf-8')
 

@@ -1313,6 +1313,7 @@ function renderPaintBackups(){
     download.href=latest.archiveUrl;
     download.download=safeName+'-r'+latest.revision+'.zip';
     download.textContent='下载工程副本 · r'+latest.revision;
+    download.title=latest.portable?'含原模型、图层和素材，可在另一台电脑恢复':'恢复时需要本机原登记模型';
   }
   const failed=backups[0]&&['failed','cancelled','interrupted'].includes(backups[0].status)?backups[0]:null;
   log.hidden=!failed;
@@ -1321,7 +1322,7 @@ function renderPaintBackups(){
   if(!pending||['queued','running'].includes(pending.status))return;
   pendingBackupId=null;
   $('status').textContent=pending.status==='completed'
-    ? '工程副本 r'+pending.revision+' 已生成，可在文件菜单下载'
+    ? (pending.portable?'可移植工程副本 r':'工程副本 r')+pending.revision+' 已生成，可在文件菜单下载'
     : pending.error||pending.stage;
 }
 function renderDelivery(j,active,last){
