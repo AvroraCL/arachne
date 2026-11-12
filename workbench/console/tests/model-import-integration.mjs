@@ -14,6 +14,7 @@ import {pythonExecutable} from '../python-runtime.mjs';
 import {nativeDemoProjectId} from '../demo-source.mjs';
 import {nativeModelSteps} from '../model-binding.mjs';
 import {captureRenderPreset,updateDeliveryOptions} from '../public/paint-delivery-options.mjs';
+import {renderOpticsDefaults} from '../public/render-optics.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const data=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-glb-import-'));
@@ -587,6 +588,25 @@ try{
   await shotDownload.waitFor();
   assert.match(await shotDownload.getAttribute('download'),/透视验收.*\.png$/);
   console.log('PASS two-camera batch render, request retry without duplicates, frozen revision and named output files');
+  await batchMonitor.getByRole('button',{name:'关闭',exact:true}).click();
+  const beforeLens=await api(cubeRoute);
+  const optics={...renderOpticsDefaults,focusMode:'distance',focusDistance:4,fStop:2.1,blades:5};
+  const lensDoc=await api(cubePaint+'/commands',{revision:beforeLens.revision,operations:[
+    {op:'renderCamera',camera:shots[1].camera},{op:'renderOptics',optics}
+  ]});
+  await reopened.reload();
+  await reopened.locator('[data-area-mode=modeling]').click();
+  const renderSide=reopened.locator('.editor-area[data-editor=renderSettings]').first();
+  await renderSide.getByRole('tab',{name:'输出属性',exact:true}).click();
+  await renderSide.getByRole('button',{name:'查看相机',exact:true}).click();
+  await reopened.getByRole('button',{name:'渲染预览',exact:true}).first().click();
+  const depthOfField=reopened.locator('.editor-viewport[data-render-depth-of-field][data-render-phase=ready]').first();
+  await depthOfField.waitFor({timeout:90000});
+  await depthOfField.screenshot({path:path.join(data,'camera-depth-of-field.png')});
+  await api(cubePaint+'/commands',{revision:lensDoc.revision,operations:[{op:'renderOptics',optics:{...optics,enabled:false}}]});
+  await depthOfField.waitFor({state:'hidden',timeout:30000});
+  await reopened.locator('.editor-viewport[data-render-phase=ready]:not([data-render-depth-of-field])').first().waitFor({timeout:90000});
+  console.log('PASS project camera depth of field in progressive viewport and live disable');
   console.log('PASS four native geometry templates, distinct UVs, independent projects and cube 4K bake');
   console.log('PASS gradient draw, cancel, angle snapping, endpoint editing, material binding, reload and 4K RGBA PNG');
   console.log('PASS editable gradient mask, brush touch-up, inversion, undo and verified 4K alpha');

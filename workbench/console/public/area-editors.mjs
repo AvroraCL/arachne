@@ -341,7 +341,9 @@ export function registerAreaEditors(registry,bridge){
       const suspended=enabled&&(!!bridge.materialPreview().inspection||modeler.isDragging()||painter.isEditing()||marquee.isDragging());
       const rig=enabled&&display.projectLighting?{
         lighting:doc.paint.renderLighting||null,appearance:doc.paint.renderAppearance||null,
-        transparent:bridge.renderSettings?.read().transparent===true
+        transparent:bridge.renderSettings?.read().transparent===true,
+        ...(projectCameraView&&doc.paint.renderCamera&&doc.paint.renderOptics?.enabled?
+          {optics:doc.paint.renderOptics,focusTarget:doc.paint.renderCamera.target}:{})
       }:null;
       if(enabled)view.dataset.renderLighting=rig?'project':'viewport';else delete view.dataset.renderLighting;
       viewport.setRenderPreview({enabled,paused:cyclesPaused,suspended,interacting:navigating||wheelTimer!==null,

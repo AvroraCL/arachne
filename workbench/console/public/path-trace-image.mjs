@@ -6,6 +6,7 @@ import {createPathTracingEngine} from './path-tracing-engine.mjs';
 import {renderLightingDefaults} from './render-lighting.mjs';
 import {renderAppearanceDefaults} from './render-appearance.mjs';
 import {projectTone,projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
+import {applyProjectLens} from './path-trace-camera.mjs';
 
 async function loadModel(input){
   const gltf=await new GLTFLoader().loadAsync('/input/model.glb');
@@ -58,13 +59,7 @@ function makeCamera(settings,center,radius,optics,PhysicalCamera){
   camera.position.copy(eye);
   camera.up.fromArray(view.up);
   camera.lookAt(...view.target);
-  if(optics?.enabled&&camera.isPerspectiveCamera){
-    camera.fStop=optics.fStop;
-    camera.focusDistance=optics.focusMode==='target'?eye.distanceTo(new THREE.Vector3(...view.target)):optics.focusDistance;
-    camera.apertureBlades=optics.blades;
-    camera.apertureRotation=THREE.MathUtils.degToRad(optics.rotation);
-    camera.anamorphicRatio=optics.ratio;
-  }else if(camera.isPerspectiveCamera)camera.bokehSize=0;
+  applyProjectLens(camera,optics,view.target);
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   return {camera,view};

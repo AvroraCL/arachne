@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import {createPathTracingEngine} from './path-tracing-engine.mjs';
 import {projectTone,projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
 import {renderLightingDefaults} from './render-lighting.mjs';
+import {applyProjectLens} from './path-trace-camera.mjs';
 
 const off={phase:'off',text:'',retry:false};
 
 export function createViewportPathTracer({renderer,host,request,accumulate=request,onStatus}){
   let options={enabled:false},status=off,engine=null,loading=false,failed=false,disposed=false;
   let scene=null,sceneRoot=null,library=null,environment=null,environmentKey='',ground=null,lights=[],meshSignature='',materialSignature='',lightingSignature='',renderTone=null;
-  let previousCamera=null;
+  let previousCamera=null,lensCamera=null,lensKey='',previousLensKey='';
   const cameraWorld=new THREE.Matrix4(),cameraProjection=new THREE.Matrix4();
 
   function publish(phase,text='',samples=0){
@@ -31,9 +32,9 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
     environment?.dispose();
     ground?.geometry.dispose();
     ground?.material.dispose();
-    engine=scene=sceneRoot=library=environment=ground=renderTone=previousCamera=null;
+    engine=scene=sceneRoot=library=environment=ground=renderTone=previousCamera=lensCamera=null;
     lights=[];
-    meshSignature=materialSignature=lightingSignature=environmentKey='';
+    meshSignature=materialSignature=lightingSignature=environmentKey=previousLensKey='';
   }
 
   function fail(error){
@@ -143,7 +144,7 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
         scene.add(surface);
       }
       if(showGround)scene.add(ground);
-      engine.setScene(scene,camera);
+      engine.setScene(scene,tracingCamera(camera));
       meshSignature=nextMesh;
     }else{
       if(lightingChanged){
@@ -159,10 +160,22 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
   }
 
   function syncCamera(camera,rebuild=false){
-    if(!rebuild&&camera===previousCamera&&cameraWorld.equals(camera.matrixWorld)&&cameraProjection.equals(camera.projectionMatrix))return;
+    if(!rebuild&&camera===previousCamera&&lensKey===previousLensKey&&cameraWorld.equals(camera.matrixWorld)&&cameraProjection.equals(camera.projectionMatrix))return;
     previousCamera=camera;
+    previousLensKey=lensKey;
     cameraWorld.copy(camera.matrixWorld);cameraProjection.copy(camera.projectionMatrix);
-    if(!rebuild)engine.setCamera(camera);
+    if(!rebuild)engine.setCamera(tracingCamera(camera));
+  }
+
+  function tracingCamera(camera){
+    const {optics,focusTarget}=options.project||{};
+    const useLens=!!(optics?.enabled&&camera.isPerspectiveCamera);
+    host.toggleAttribute('data-render-depth-of-field',useLens);
+    if(!useLens)return camera;
+    lensCamera??=new library.PhysicalCamera();
+    lensCamera.copy(camera,false);
+    applyProjectLens(lensCamera,optics,focusTarget);
+    return lensCamera;
   }
 
   function present(){
@@ -177,7 +190,9 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
     setOptions(next,retry=false){
       const previous=options;
       options=next;
+      lensKey=next.project?.optics?.enabled?JSON.stringify([next.project.optics,next.project.focusTarget]):'';
       if(!next.enabled){
+        host.removeAttribute('data-render-depth-of-field');
         if(previous.enabled){release();failed=false;publish('off');request();}
         return;
       }
