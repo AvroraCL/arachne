@@ -2,6 +2,7 @@ import {headerControls} from './area-chrome.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {layerLockOwner,layerParent,materialLayerRows} from './paint-layer-tree.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
+import {compositionKey} from './text-input.mjs';
 
 function element(tag,className,text){
   const node=document.createElement(tag);
@@ -110,7 +111,7 @@ export function createMaterialLayerEditor(ctx,bridge){
     view.label.hidden=true;
     input.onblur=()=>finishRename(true);
     input.onkeydown=event=>{
-      if(event.isComposing||!['Enter','Escape'].includes(event.key))return;
+      if(compositionKey(event)||!['Enter','Escape'].includes(event.key))return;
       event.preventDefault();
       event.stopPropagation();
       finishRename(event.key==='Enter',true);

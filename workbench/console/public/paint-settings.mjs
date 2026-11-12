@@ -1,4 +1,5 @@
 import {APP_VERSION} from './app-version.mjs';
+import {compositionKey} from './text-input.mjs';
 import {preferenceDefaults,brushDefaults,normalizeSettingsBundle,saveSettingsBundle} from './paint-preferences.mjs';
 import {sceneOptions} from './scene-options.mjs';
 import {setSelectValue,enhanceSelectMenu} from './paint-select.mjs';
@@ -76,7 +77,7 @@ export function setupPaintSettings({snapshot,apply,canOpen,save=raw=>saveSetting
   dialog.addEventListener('close',()=>{message('');if(focusBefore?.isConnected)focusBefore.focus({preventScroll:true});});
   dialog.addEventListener('cancel',event=>{if(saving)event.preventDefault();else message('');});
   document.addEventListener('keydown',event=>{
-    if((event.metaKey||event.ctrlKey)&&event.key===','){
+    if(!compositionKey(event)&&(event.metaKey||event.ctrlKey)&&event.key===','){
       event.preventDefault();event.stopImmediatePropagation();void open();
     }
   },true);

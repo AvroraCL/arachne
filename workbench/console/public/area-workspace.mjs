@@ -1,6 +1,7 @@
 import {editorNames,workspacePreset,validateLayout,leaves,findNode,replaceNode,area,split,splitArea,changeEditor,joinAreas,joinable,adjacentAreas,swapAreas,migrateLayerEditors,workspaceNames,workspaceLayoutFile,parseWorkspaceLayoutFile} from './workspace-state.mjs';
 import {areaIcons,areaCaptions,chromeMenu,openChromeMenu} from './area-chrome.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
+import {compositionKey} from './text-input.mjs';
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 const directions={left:'左侧',right:'右侧',top:'上方',bottom:'下方'};
 const splitExtent=(element,axis)=>axis==='x'?element.clientWidth:element.clientHeight;
@@ -295,6 +296,7 @@ export function createAreaWorkspace({host,registry,project,initial='material',re
   host.addEventListener('pointermove',event=>{hoverPoint=[event.clientX,event.clientY];},{capture:true,signal});
   host.addEventListener('pointerleave',()=>{hoverPoint=null;},{signal});
   window.addEventListener('keydown',event=>{
+    if(compositionKey(event))return;
     if(event.key==='Escape'&&gesture){event.preventDefault();event.stopPropagation();cancelGesture();return;}
     if(event.code!=='Space'||!event.ctrlKey||event.altKey||event.metaKey||event.shiftKey)return;
     if(event.target.closest?.('input,textarea,select,[contenteditable]')||document.querySelector('dialog[open],.custom-select-menu,:popover-open:not(.paint-tooltip)'))return;

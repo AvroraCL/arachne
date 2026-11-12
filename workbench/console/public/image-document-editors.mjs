@@ -1,4 +1,5 @@
 import {copyImagePixels,copiedImage,onImageClipboardChange,imageClipboardPlacement} from './image-clipboard.mjs';
+import {compositionKey} from './text-input.mjs';
 import {drawingImageTypes,acceptsDrawingImage,prepareDrawingImage} from './drawing-image-import.mjs';
 import {headerControls,chromeButton,createContextActions} from './area-chrome.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
@@ -537,7 +538,7 @@ export function createDocumentEditor(ctx,bridge){
     return true;
   }
   function handleKey(event){
-    if(event.defaultPrevented||event.isComposing||event.target.closest('input,textarea,select,.custom-select,[contenteditable]'))return false;
+    if(event.defaultPrevented||compositionKey(event)||event.target.closest('input,textarea,select,.custom-select,[contenteditable]'))return false;
     const key=event.key.toLowerCase(),mod=event.ctrlKey||event.metaKey;
     if((key===' '||key==='enter')&&event.target.closest('button,summary'))return false;
     if(selection.isTracing()){
@@ -719,6 +720,7 @@ export function createImagePanel(type,ctx){
     };
     input.onblur=()=>{if(input.hasAttribute('data-document-dirty')){cancel();key='';sync();}};
     input.onkeydown=event=>{
+      if(compositionKey(event))return;
       if(event.key==='Enter'){event.preventDefault();input.blur();}
       else if(event.key==='Escape'){
         event.preventDefault();cancelled=true;
@@ -738,7 +740,7 @@ export function createImagePanel(type,ctx){
   function filterChanged(){sync();ctx.onChange?.();}
   const toggle=type==='layers'?button('',()=>{filterOpen=!filterOpen;if(!filterOpen)resetFilter();filterChanged();if(filterOpen)search.focus();},'筛选图像图层'):null;
   if(toggle){chromeButton(toggle,'search','筛选图像图层');tools.append(toggle);filters.append(search,kind,filterCount);host.insertBefore(filters,body);enhanceSelectMenu(kind);}
-  search.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();filterOpen=false;resetFilter();filterChanged();toggle?.focus();}};
+  search.onkeydown=event=>{if(event.key==='Escape'&&!compositionKey(event)){event.preventDefault();event.stopPropagation();filterOpen=false;resetFilter();filterChanged();toggle?.focus();}};
   const rowsHost=el('div'),message=el('p','document-muted');
   const actions=el('div','document-layer-actions'),primaryActions=el('div','document-layer-primary-actions');
   let footerStack=[];
@@ -837,7 +839,7 @@ export function createImagePanel(type,ctx){
     input.oninput=()=>{input.dataset.documentDirty='';};
     input.onblur=()=>finishRename({commit:true});
     input.onkeydown=event=>{
-      if(!['Enter','Escape'].includes(event.key)||event.isComposing)return;
+      if(!['Enter','Escape'].includes(event.key)||compositionKey(event))return;
       event.preventDefault();
       event.stopPropagation();
       finishRename({commit:event.key==='Enter',focus:true});
@@ -1036,7 +1038,8 @@ export function createImagePanel(type,ctx){
     bindReorder(view);
     row.oncontextmenu=event=>openLayerMenu(event,view);
     select.onkeydown=event=>{
-      if(event.key==='F2'&&!event.isComposing){
+      if(compositionKey(event))return;
+      if(event.key==='F2'){
         event.preventDefault();
         event.stopPropagation();
         startRename(view);

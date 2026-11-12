@@ -987,8 +987,29 @@ try{
   await page.keyboard.up('Alt');
   assert.ok(Number(await option('像素半径').inputValue())>radiusBeforeTip);
   assert.equal((await api(projectRoute)).revision,polygonClear.revision);
+  await layersPanel.getByRole('button',{name:'多边形底稿',exact:true}).press('F2');
+  const rename=layersPanel.getByRole('textbox',{name:'图像图层名称',exact:true});
+  await rename.fill('飞机涂装');
+  const ime=await rename.evaluate(input=>{
+    input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+    const save=window.arachneNativeHost.command('save');
+    const quit=window.arachneNativeHost.prepareToClose().state;
+    input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));
+    for(const key of ['Escape','Enter']){
+      const event=new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});
+      Object.defineProperty(event,'keyCode',{value:229});
+      input.dispatchEvent(event);
+    }
+    return {save,quit,focused:input===document.activeElement};
+  });
+  assert.deepEqual(ime,{save:false,quit:'editing',focused:true});
+  assert.equal((await api(projectRoute)).revision,polygonClear.revision);
+  await rename.press('Enter');
+  await layersPanel.getByRole('button',{name:'飞机涂装',exact:true}).waitFor();
+  assert.equal((await api(projectRoute)).revision,polygonClear.revision+1);
   assert.deepEqual(pageErrors,[]);
   console.log('PASS drawing history, native-menu undo, compact tool rail, brush tip HUD and Escape rollback');
+  console.log('PASS Chinese layer rename after IME confirmation and native save/quit guard during composition');
 }catch(error){
   console.error(logs);
   throw error;

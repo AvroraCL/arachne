@@ -1,4 +1,5 @@
 import {createSearchPicker,searchTerms} from './search-picker.mjs';
+import {compositionKey} from './text-input.mjs';
 
 const commands=[
   {target:'new',name:'新建工程',group:'文件',keys:'create project'},
@@ -70,7 +71,7 @@ export function setupCommandPicker({canOpen}){
   input.oninput=render;
   document.getElementById('close-command-picker').onclick=()=>dialog.close();
   document.addEventListener('keydown',event=>{
-    if(event.defaultPrevented||event.isComposing||event.repeat||event.altKey||event.shiftKey)return;
+    if(event.defaultPrevented||compositionKey(event)||event.repeat||event.altKey||event.shiftKey)return;
     const primary=event.metaKey||event.ctrlKey;
     if(((primary&&event.key.toLowerCase()==='k')||(!primary&&event.key==='F3'))&&show()){
       event.preventDefault();event.stopPropagation();

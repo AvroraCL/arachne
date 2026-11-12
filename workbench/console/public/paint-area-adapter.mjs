@@ -1,4 +1,5 @@
 import {leaseHeader,leaseLibraryHeader,chromeButton} from './area-chrome.mjs';
+import {compositionKey} from './text-input.mjs';
 import {enhanceSelectMenu} from './paint-select.mjs';
 import {createPaintColors,maskGray} from './paint-colors.mjs';
 import {createProjectState} from './project-state.mjs';
@@ -157,7 +158,7 @@ export function setupPaintAreas(hooks){
     mergedButton.disabled=!editor?.canCopyMerged?.();
   });
   workspace.addEventListener('keydown',event=>{
-    if(event.defaultPrevented||event.target.closest('input,textarea,select,[contenteditable]')||areas.active?.legacy&&areas.active.kind==='image')return;
+    if(event.defaultPrevented||compositionKey(event)||event.target.closest('input,textarea,select,[contenteditable]')||areas.active?.legacy&&areas.active.kind==='image')return;
     if(project.editorDomain==='image'&&imageEditor()?.handleKey?.(event))return;
     if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.stopPropagation();void project.travel(event.shiftKey?'redo':'undo').catch(error=>hooks.error(error.message));}
   });

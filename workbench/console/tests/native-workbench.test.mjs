@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createNativeWorkbench,notifyNativeProject} from '../public/native-workbench.mjs';
+import {compositionKey} from '../public/text-input.mjs';
 
 function fixture(flush){
-  const calls=[],controls=new Map();let modal=false,focused=null,state='ready';
+  const calls=[],controls=new Map(),listeners=new Map();let modal=false,focused=null,state='ready';
   for(const id of ['new','open-projects','open-paint-import','open-glb-migration','open-command-picker','open-workspace-layouts','open-delivery','undo','redo'])
     controls.set(id,{disabled:false,hidden:false,click(){calls.push(id);}});
-  const document={get activeElement(){return focused;},querySelector:()=>modal?{}:null,getElementById:id=>controls.get(id),execCommand:name=>(calls.push('text-'+name),true)};
+  const document={get activeElement(){return focused;},querySelector:()=>modal?{}:null,getElementById:id=>controls.get(id),execCommand:name=>(calls.push('text-'+name),true),
+    addEventListener:(name,listener)=>listeners.set(name,listener)};
   const bridge=createNativeWorkbench({window:{},document,status:()=>({state}),flush});
-  return {bridge,calls,controls,focus:value=>focused=value,modal:value=>modal=value,state:value=>state=value};
+  return {bridge,calls,controls,focus:value=>focused=value,modal:value=>modal=value,state:value=>state=value,
+    event:(name,target=focused)=>listeners.get(name)({target})};
 }
 
 test('native menu invokes only known, enabled workbench commands and respects dialogs',()=>{
@@ -59,4 +62,20 @@ test('native shutdown waits for the last workspace save and preserves editing gu
   assert.equal(started,true);assert.equal(returned,false);
   finish();
   assert.deepEqual(await result,{state:'ready'});
+});
+
+test('native commands keep a composing field focused until the IME confirms or cancels',async()=>{
+  const f=fixture();
+  const field={matches:()=>true,validity:{valid:true},blur(){f.calls.push('blur');}};
+  f.focus(field);f.event('compositionstart');
+  assert.equal(f.bridge.command('save'),false);
+  assert.equal(f.bridge.command('undo'),false);
+  assert.equal(f.bridge.command('openProject'),false);
+  assert.deepEqual(await f.bridge.prepareToCloseAsync(),{state:'editing'});
+  assert.deepEqual(f.calls,[]);
+  f.event('compositionend');
+  assert.equal(f.bridge.command('save'),true);
+  assert.deepEqual(f.calls,['blur']);
+  assert.equal(compositionKey({key:'Enter',isComposing:false,keyCode:229}),true);
+  assert.equal(compositionKey({key:'Enter',isComposing:false,keyCode:13}),false);
 });

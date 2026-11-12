@@ -1,3 +1,5 @@
+import {compositionKey} from './text-input.mjs';
+
 export function searchTerms(value){
   return value.normalize('NFKC').toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
 }
@@ -44,7 +46,7 @@ export function createSearchPicker({input,list,message,onSelect,onActive=()=>{}}
   }
 
   input.addEventListener('keydown',event=>{
-    if(event.isComposing||event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||!rows.length)return;
+    if(compositionKey(event)||event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||!rows.length)return;
     if(event.key==='Enter'){
       event.preventDefault();
       if(active>=0)onSelect(rows[active].dataset.value);

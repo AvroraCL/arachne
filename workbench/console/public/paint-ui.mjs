@@ -1,4 +1,5 @@
 import {connectDesktopWorkspace} from './paint-desktop-workspace.mjs';
+import {compositionKey} from './text-input.mjs';
 import {connectDesktopSettings} from './paint-desktop-settings.mjs';
 import {setupProjectFiles} from './paint-project-files.mjs';
 import {setupTaskMonitor} from './paint-task-monitor.mjs';
@@ -1007,7 +1008,7 @@ function startLayerRename(id){
   }
   input.onblur=()=>finish(true,false);
   input.onkeydown=event=>{
-    if(event.key!=='Enter'&&event.key!=='Escape')return;
+    if(compositionKey(event)||!['Enter','Escape'].includes(event.key))return;
     event.preventDefault();
     finish(event.key==='Enter',true);
   };
@@ -1195,7 +1196,7 @@ function setLayerSearch(open,interactive=true){
 layerSearchToggle.onclick=()=>setLayerSearch(layerSearch.hidden);
 layerSearch.oninput=renderLayers;
 layerSearch.onkeydown=event=>{
-  if(event.key==='Escape'){event.preventDefault();setLayerSearch(false);}
+  if(event.key==='Escape'&&!compositionKey(event)){event.preventDefault();setLayerSearch(false);}
 };
 function render(keepLayerRows=false){
   renderProjectState();
@@ -1539,7 +1540,7 @@ $('open-projects').onclick=projectPicker;
 setupCommandPicker({canOpen:canOpenProjectDialog});
 setupPaintColorPicker();
 document.addEventListener('keydown',event=>{
-  if(event.defaultPrevented||event.repeat||event.isComposing)return;
+  if(event.defaultPrevented||event.repeat||compositionKey(event))return;
   const picker=event.key==='Escape'&&document.querySelector('.workbench-picker[open]');
   if(picker){
     event.preventDefault();event.stopPropagation();
@@ -1781,6 +1782,7 @@ function navigateViewport(event){
   event.preventDefault();
 }
 document.addEventListener('keydown',event=>{
+  if(compositionKey(event))return;
   if(areaSystem&&!areaSystem.legacyKeyboard(event))return;
   if(!doc||historyPanel?.isOpen()||assetViewer.isOpen||paintTextEditor.isOpen||newPaintDialog.open||importDialog.open||$('mask-editor').open||$('delivery-dialog').open||$('settings-dialog').open||projectDialog.open||event.defaultPrevented||
      event.target.closest?.('input,textarea,select,.custom-select,[contenteditable]'))return;

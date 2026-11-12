@@ -1,3 +1,5 @@
+import {trackTextComposition} from './text-input.mjs';
+
 // A narrow, one-way interface for desktop hosts. Project mutations still go
 // through the same buttons, keyboard handlers and revision checks as the Web UI.
 const commands={newProject:'new',openProject:'open-projects',saveProjectCopy:'open-project-copy',projectDetails:'open-project-details',
@@ -5,7 +7,9 @@ const commands={newProject:'new',openProject:'open-projects',saveProjectCopy:'op
   export:'open-delivery',history:'open-history',renderTasks:'open-task-monitor',renderSettings:'open-render-settings',settings:'open-settings'};
 
 export function createNativeWorkbench({window,document,status,flush}){
+  const composing=trackTextComposition(document);
   function command(name){
+    if(composing())return false;
     const focused=document.activeElement;
     if(name==='save'){
       if(document.querySelector('dialog[open]'))return false;
@@ -26,6 +30,7 @@ export function createNativeWorkbench({window,document,status,flush}){
     element.click();return true;
   }
   function prepareToClose(){
+    if(composing())return {state:'editing'};
     if(document.querySelector('dialog[open]'))return status();
     const focused=document.activeElement;
     if(focused?.matches?.('input,textarea,[contenteditable="true"]')){
