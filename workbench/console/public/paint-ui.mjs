@@ -224,9 +224,11 @@ const route=()=>'/api/projects/'+doc.id+'/paint';
 function renderProjectState(){
   const name=$('project-name'),status=$('project-save-state');
   name.textContent=doc?.name||'未打开工程';name.title=doc?.name||'';
-  const pending=projectWrites.get(doc?.id),failure=projectSaveErrors.get(doc?.id);
-  const state=!doc?'empty':pending?'saving':failure?'error':'saved';
-  status.dataset.state=state;status.textContent={empty:'',saving:'正在保存…',error:'保存失败',saved:'已保存'}[state];
+  const strokes=areaSystem?.strokeSaveStatus()||[];
+  const pending=projectWrites.get(doc?.id)||strokes.some(item=>item.saving)||desktopWorkspace?.saving;
+  const failure=strokes.find(item=>item.failure)?.failure.message||projectSaveErrors.get(doc?.id)||desktopWorkspace?.failure?.message;
+  const state=!doc?'empty':pending?'saving':failure?'error':'saved',label={empty:'',saving:'正在保存…',error:'保存失败',saved:'已保存'}[state];
+  status.dataset.state=state;if(status.textContent!==label)status.textContent=label;
   status.title=failure||'工程修改自动保存在本机';
   $('open-project-details').disabled=$('open-project-copy').disabled=!doc;
   $('project-detail-name').textContent=doc?.name||'未打开工程';
@@ -239,7 +241,8 @@ async function api(url,data){
   const id=write?.[1];
   if(id){projectWrites.set(id,(projectWrites.get(id)||0)+1);renderProjectState();}
   try{
-    const response=await fetch(url,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const response=await fetch(url,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),
+      ...(data?.strokeRequestId?{signal:AbortSignal.timeout(15000)}:{})});
     const result=await responseJson(response);if(id)projectSaveErrors.delete(id);return result;
   }catch(error){if(id)projectSaveErrors.set(id,error.message);throw error;}
   finally{if(id){projectWrites.set(id,projectWrites.get(id)-1);renderProjectState();}}
@@ -1470,11 +1473,11 @@ function renderDelivery(j,active,last){
 function deliveryLink(text,url){
   const node=link(text,url);node.target='_blank';return node;
 }
-async function refresh(){
+async function refresh({signal}={}){
   if(!doc)return;
   const {revision}=doc,generation=projectGeneration,sequence=++refreshSequence;
   const headers=snapshotTag?.revision===revision?{'If-None-Match':snapshotTag.value}:{};
-  const response=await fetch(route()+'?knownRevision='+revision,{headers,cache:'no-store'});
+  const response=await fetch(route()+'?knownRevision='+revision,{headers,cache:'no-store',signal});
   if(generation!==projectGeneration||sequence<appliedRefresh)return;
   if(response.status===304){appliedRefresh=sequence;await refreshGeometry();return;}
   const {document,jobs:next}=await responseJson(response);
@@ -1526,6 +1529,7 @@ async function projects(){
   return (await api('/api/projects')).filter(project=>project.workflowType==='pbr_paint');
 }
 async function load(id,{initialLayer}={}){
+  if(areaSystem?.strokeSaveStatus().some(item=>item.pending))throw Error('请先保存或放弃待保存的笔触，再切换工程');
   if(maskEditor.isOpen())throw Error('请先保存或取消当前蒙版');
   if(!/^[\w-]{1,100}$/.test(id))throw Object.assign(Error('工程 ID 无效'),{status:400});
   const next=await api('/api/projects/'+encodeURIComponent(id));
@@ -1556,6 +1560,9 @@ async function load(id,{initialLayer}={}){
   showView(view);
 }
 function canOpenProjectDialog(){
+  if(areaSystem?.strokeSaveStatus().some(item=>item.pending)){
+    $('status').textContent='请先保存或放弃待保存的笔触';return false;
+  }
   return !busy&&!modeler.isDragging()&&!modelMarquee&&!surfaceTools.isEditing()&&
     !uvSelection.isDragging()&&!uvSelection.isTransforming()&&!areaSystem?.isEditing()&&!document.querySelector('dialog[open]');
 }
@@ -1617,6 +1624,9 @@ document.addEventListener('keydown',event=>{
   }
   if(event.altKey||!(event.metaKey||event.ctrlKey))return;
   const key=event.key.toLowerCase();
+  if(key==='s'&&!event.shiftKey&&window.arachneNativeHost?.command('save')){
+    event.preventDefault();event.stopPropagation();return;
+  }
   const opened=event.shiftKey&&key==='s'?openProjectCopy():!event.shiftKey&&key==='o'&&projectPicker();
   if(opened){event.preventDefault();event.stopPropagation();}
 },true);
@@ -2829,6 +2839,16 @@ document.querySelector('.canvas-document-icon').innerHTML=workspaceIcons.image;
 document.querySelectorAll('select').forEach(enhanceSelectMenu);
 
 areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferences.startupArea==='last',legacyCameraProject:restoreWorkbenchSession().projectId,desktopWorkspace,run,api,pngData,importAsset,importProjectMaps,busy:()=>busy,
+  readStrokeProject:async id=>{
+    if(doc?.id!==id)throw Error('请在原工程中恢复笔触');
+    await refresh({signal:AbortSignal.timeout(10000)});
+    if(doc?.id!==id)throw Error('工程已切换');
+    return doc;
+  },
+  strokeSaveSettled:id=>{
+    projectSaveErrors.delete(id);$('status').textContent='';renderProjectState();
+  },
+  saveStateChanged:renderProjectState,
   renderSettings:renderSettingsBridge,renderResults:renderResultsBridge,
   materialInspection:()=>{const mask=doc&&inspectedMask();return mask?{kind:'mask',id:mask.id,projectId:doc.id}:doc&&isolatedLayerId?{kind:'layer',id:isolatedLayerId,projectId:doc.id}:null;},
   clearMaterialInspection,clearLayerIsolation,
@@ -2857,10 +2877,18 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
 });
 // The native host asks before quitting; no project command or direct disk
 // access is exposed to it. Active edits and pending writes must finish first.
-Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,imageCommand:action=>areaSystem?.imageCommand(action),flush:async()=>{
-  if(desktopWorkspace){areaSystem?.areas.save();await desktopWorkspace.flush();}
+async function saveWorkbench(){
+  await areaSystem?.retryStrokeSaves();
+  if(desktopWorkspace){areaSystem?.areas.save();if(desktopWorkspace.failure)await desktopWorkspace.retry();}
+}
+Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,imageCommand:action=>areaSystem?.imageCommand(action),
+  save:()=>void saveWorkbench(),flush:async()=>{
+  if(desktopWorkspace){areaSystem?.areas.save();return desktopWorkspace.flush();}
 },status:()=>{
+  const strokes=areaSystem?.strokeSaveStatus()||[];
   if(busy||[...projectWrites.values()].some(count=>count>0))return {state:'saving'};
+  if(strokes.some(item=>item.saving))return {state:'saving'};
+  if(strokes.some(item=>item.failure)||desktopWorkspace?.failure)return {state:'unsaved'};
   if([...projectSaveErrors.values()].some(Boolean))return {state:'error'};
   if(document.querySelector('dialog[open]:not(#task-monitor),.workspace-range-field[data-dragging],.workspace-range-field[data-editing],[data-document-dirty]')||
      propertyDraft||layerRename||modelMarquee||modeler.isDragging()||surfaceTools.isEditing()||uvSelection.isDragging()||uvSelection.isTransforming()||
@@ -2868,6 +2896,11 @@ Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({w
   if(jobs.some(job=>['queued','running'].includes(job.status)))return {state:'jobs'};
   return {state:'ready'};
 }})});
+$('save-workbench').onclick=()=>window.arachneNativeHost.command('save');
+window.addEventListener('beforeunload',event=>{
+  if(!areaSystem?.strokeSaveStatus().some(item=>item.pending)&&!desktopWorkspace?.failure&&!desktopWorkspace?.saving)return;
+  event.preventDefault();event.returnValue='';
+});
 
 $('uv-wipe').oninput=()=>{
   $('uv-wipe-overlay').style.clipPath=`inset(0 0 0 ${$('uv-wipe').value}%)`;

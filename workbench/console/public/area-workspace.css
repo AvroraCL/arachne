@@ -91,6 +91,9 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .area-split-preview[data-axis=y]::after{content:'';position:absolute;top:var(--split-position);width:100%;border-top:2px solid #ccc}
 .area-notice{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);padding:6px 12px;background:#383838;border:1px solid #555;color:#ddd;border-radius:5px;z-index:200;font-size:13px;pointer-events:none}
 .area-notice:empty{display:none}
+.area-layout-save{position:absolute;z-index:201;bottom:8px;left:8px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;max-width:calc(100% - 16px);padding:6px 8px;background:#302a24;border:1px solid #66513e;border-radius:5px;font-size:12px}
+.area-layout-save[hidden]{display:none}
+.area-layout-save output{color:#f1d2ae}
 .editor-toolbar{display:flex;flex-wrap:wrap;align-items:center;flex:none;gap:7px;padding:5px 9px;border-bottom:1px solid var(--area-line);background:#2c2c2c;font-size:13px}
 .editor-toolbar[hidden]{display:none}
 .editor-toolbar :is(button,input,select){font-size:13px;min-height:28px;padding:3px 7px;border-radius:4px}

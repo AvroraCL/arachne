@@ -96,6 +96,9 @@
 .document-image-stage{grid-row:2;grid-column:2;min-width:0;min-height:0;outline:0;background:#242424}
 .document-image-stage canvas{background:repeating-conic-gradient(#454545 0 25%,#363636 0 50%) 0/16px 16px;box-shadow:0 0 0 1px #151515}
 .document-image-stage>canvas:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:1px}
+.document-save-recovery{position:absolute;inset:auto 10px 10px;z-index:5;display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 8px;background:#302a24;border:1px solid #66513e;border-radius:5px;font-size:12px}
+.document-save-recovery[hidden]{display:none}
+.document-save-recovery output{flex:1 1 190px;color:#f1d2ae}
 .document-image-stage[data-text-placement]>canvas{cursor:text}
 .document-image-stage:is([data-gradient-tool],[data-fill-tool],[data-shape-tool])>canvas{cursor:crosshair}
 .document-image-stage[data-gradient-dragging]{cursor:grabbing}

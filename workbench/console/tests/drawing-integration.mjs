@@ -838,8 +838,50 @@ try{
   await editor.locator('.document-image-stage[data-preview-size="4096"][data-preview-revision="'+rapidlyRedone.revision+'"]').waitFor();
   console.log('PASS rapid consecutive strokes under delayed writes, merged live draft, independent undo/redo and automatic 4K');
 
+  let releaseWrite,attempted;
+  const waitForPaint=new Promise(resolve=>{releaseWrite=resolve;});
+  const loseResponse=async route=>{
+    const request=route.request().postDataJSON();
+    if(attempted||!request?.strokeRequestId){await route.continue();return;}
+    attempted=request;
+    await waitForPaint;
+    const committed=await route.fetch();
+    assert.equal(committed.status(),200);
+    await route.abort('failed');
+  };
+  await page.route('**/paint/commands',loseResponse);
+  const recoveredPositions=[[.25,.66],[.5,.66],[.75,.66]];
+  for(const position of recoveredPositions)await page.mouse.click(...await point(position));
+  await until(()=>attempted,'截取第一笔保存请求');
+  await until(async()=>Number(await editor.locator('.document-image-stage').getAttribute('data-pending-strokes'))===3,'三笔保留在同一队列');
+  releaseWrite();
+  const retryStroke=editor.getByRole('button',{name:'重试保存笔触',exact:true});
+  await retryStroke.waitFor();
+  assert.equal(await page.locator('#project-save-state').textContent(),'保存失败');
+  assert.equal(await page.evaluate(async()=> (await window.arachneNativeHost.prepareToCloseAsync()).state),'unsaved');
+  assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('openProject')),true);
+  assert.equal(await page.locator('#open-project-dialog[open]').count(),0);
+  const acknowledged=await api(paintRoute+'/commands',attempted);
+  assert.equal(acknowledged.revision,rapidlyRedone.revision+1);
+  assert.equal(rapidStrokes(acknowledged).length,6);
+  await page.screenshot({path:path.join(data,'stroke-save-recovery.png')});
+  await page.reload();
+  await retryStroke.waitFor();
+  await editor.getByRole('alert').filter({hasText:'从此窗口恢复了待保存笔触'}).waitFor();
+  assert.equal(await editor.locator('.document-image-stage').getAttribute('data-pending-strokes'),'3');
+  await retryStroke.click();
+  const recovered=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision===rapidlyRedone.revision+3&&rapidStrokes(current)?.length===8&&current;
+  },'恢复响应丢失的笔触与后续两笔');
+  await until(async()=>await page.locator('#project-save-state').textContent()==='已保存','恢复后保存状态');
+  assert.deepEqual(rgba(await imagePng('recovered-strokes.png',recovered.revision,rapidDoc),
+    recoveredPositions.map(([x,y])=>xy(x,y)))[1].map(pixel=>pixel[3]),[255,255,255]);
+  await page.unroute('**/paint/commands',loseResponse);
+  console.log('PASS lost stroke response, reload recovery, duplicate command protection, blocked project switch and quit, exact recovered 4K pixels');
+
   const shapesDoc='shape-document';
-  const shapesSeed=await api(paintRoute+'/commands',{revision:rapidlyRedone.revision,operations:[
+  const shapesSeed=await api(paintRoute+'/commands',{revision:recovered.revision,operations:[
     {op:'image',action:'create',documentId:shapesDoc,patch:{name:'形状层验收'}}
   ]});
   await page.reload();
@@ -1268,6 +1310,37 @@ try{
   assert.deepEqual(undoCut.paint.imageDocuments[cutDoc].layers,cutSeed.paint.imageDocuments[cutDoc].layers);
   assert.deepEqual(pageErrors,[]);
   console.log('PASS selection cut, revision conflict safety, hidden source pixels, native command and cross-document paste in place');
+
+  const desktopPage=await browser.newPage();
+  await desktopPage.addInitScript(()=>{window.arachneDesktop={notifyProject(){}};});
+  await desktopPage.goto(origin+'/?project='+project.id);
+  const layoutRoute='/api/desktop-layout';
+  const baseline=await until(async()=>{
+    const result=await api(layoutRoute);
+    return result.layout&&result;
+  },'桌面初始布局');
+  const nextArea=baseline.layout.activeWorkspace==='drawing'?'modeling':'drawing';
+  const dropLayoutResponse=async route=>{
+    if(route.request().method()!=='POST'){await route.continue();return;}
+    const response=await route.fetch();
+    assert.equal(response.status(),200);
+    await route.abort('failed');
+  };
+  await desktopPage.route('**'+layoutRoute,dropLayoutResponse);
+  await desktopPage.locator('[data-area-mode='+nextArea+']').click();
+  const retryLayout=desktopPage.getByRole('button',{name:'重试保存布局',exact:true});
+  await retryLayout.waitFor();
+  assert.equal(await desktopPage.evaluate(async()=> (await window.arachneNativeHost.prepareToCloseAsync()).state),'unsaved');
+  const published=await api(layoutRoute);
+  assert.equal(published.layout.activeWorkspace,nextArea);
+  assert.equal(published.revision,baseline.revision+1);
+  await desktopPage.unroute('**'+layoutRoute,dropLayoutResponse);
+  await retryLayout.click();
+  await retryLayout.waitFor({state:'hidden'});
+  await until(async()=>await desktopPage.evaluate(async()=> (await window.arachneNativeHost.prepareToCloseAsync()).state==='ready'),'布局恢复后允许退出');
+  assert.equal((await api(layoutRoute)).revision,published.revision);
+  await desktopPage.close();
+  console.log('PASS desktop layout lost response blocks quit; retry confirms server revision without another write');
 }catch(error){
   console.error(logs);
   throw error;

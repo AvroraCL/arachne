@@ -6,7 +6,7 @@ const commands={newProject:'new',openProject:'open-projects',saveProjectCopy:'op
   importArchive:'open-paint-import',migrateModel:'open-glb-migration',searchCommands:'open-command-picker',workspaceLayouts:'open-workspace-layouts',createBackup:'create-paint-backup',downloadBackup:'download-paint-backup',
   export:'open-delivery',history:'open-history',renderTasks:'open-task-monitor',renderSettings:'open-render-settings',settings:'open-settings'};
 
-export function createNativeWorkbench({window,document,status,flush,imageCommand}){
+export function createNativeWorkbench({window,document,status,flush,imageCommand,save}){
   const composing=trackTextComposition(document);
   function command(name,{nativeEdit=false}={}){
     if(composing())return false;
@@ -14,6 +14,7 @@ export function createNativeWorkbench({window,document,status,flush,imageCommand
     if(name==='save'){
       if(document.querySelector('dialog[open]'))return false;
       if(focused?.matches?.('input,textarea,[contenteditable="true"]'))focused.blur();
+      save?.();
       return true; // Project writes are automatic; blur commits an active field.
     }
     if(name==='undo'||name==='redo'){
@@ -55,7 +56,7 @@ export function createNativeWorkbench({window,document,status,flush,imageCommand
   async function prepareToCloseAsync(){
     const before=prepareToClose();
     if(!['ready','jobs'].includes(before.state))return before;
-    await flush?.();
+    if(await flush?.()===false)return {state:'unsaved'};
     return status();
   }
   return Object.freeze({command,status,prepareToClose,prepareToCloseAsync});

@@ -95,12 +95,12 @@ async function canClose(win){
       status=['ready','saving','jobs'].includes(activity)?activity:'unavailable';
     }catch{status='unavailable';}
   }
-  if(downloads.size)status='downloads';
+  if(downloads.size&&!['saving','editing','unsaved'].includes(status))status='downloads';
   if(status==='ready')return true;
-  const block=['saving','editing'].includes(status);
+  const block=['saving','editing','unsaved'].includes(status);
   const detail={
     saving:'正在保存或导入工程，请等待当前操作完成。',error:'工程最近一次保存失败。',editing:'请先确认或取消当前编辑。',
-    jobs:'退出会中断由此应用启动的后台任务。',downloads:'文件正在下载。'
+    jobs:'退出会中断由此应用启动的后台任务。',downloads:'文件正在下载。',unsaved:'请先在工作台恢复待保存的笔触或布局。'
   }[status]||'无法检查保存或任务状态。退出可能丢失未保存的修改。';
   const {response}=await dialog.showMessageBox(win,{type:'warning',message:block?'请先完成当前操作':'退出阿拉克涅？',detail,
     buttons:block?['继续工作']:['继续工作','退出'],defaultId:0,cancelId:0,noLink:true});

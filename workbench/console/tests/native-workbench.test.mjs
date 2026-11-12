@@ -64,6 +64,11 @@ test('native shutdown waits for the last workspace save and preserves editing gu
   assert.deepEqual(await result,{state:'ready'});
 });
 
+test('an unsuccessful layout flush blocks native shutdown',async()=>{
+  const f=fixture(async()=>false);
+  assert.deepEqual(await f.bridge.prepareToCloseAsync(),{state:'unsaved'});
+});
+
 test('native commands keep a composing field focused until the IME confirms or cancels',async()=>{
   const f=fixture();
   const field={matches:()=>true,validity:{valid:true},blur(){f.calls.push('blur');}};

@@ -201,13 +201,14 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         switch state {
         case "saving":alert.messageText="正在保存或导入工程";alert.informativeText="请等待当前操作完成后再退出。"
         case "editing":alert.messageText="仍有操作未完成";alert.informativeText="请先确认或取消当前编辑，再退出。"
+        case "unsaved":alert.messageText="有内容待保存";alert.informativeText="请先在工作台恢复待保存的笔触或布局。"
         case "error":alert.messageText="工程保存失败";alert.informativeText="退出可能丢失未保存的修改。"
         case "jobs":alert.messageText="后台任务正在运行";alert.informativeText="退出会中断由此应用启动的后台任务。"
         case "downloads":alert.messageText="文件正在下载";alert.informativeText="退出会中断下载。"
         default:alert.messageText="无法检查保存或任务状态";alert.informativeText="退出可能丢失未保存的修改或中断任务。"
         }
         alert.addButton(withTitle:"返回工作台")
-        if !["saving","editing"].contains(state) { alert.addButton(withTitle:"仍要退出") }
+        if !["saving","editing","unsaved"].contains(state) { alert.addButton(withTitle:"仍要退出") }
         return alert.runModal() == .alertSecondButtonReturn
     }
 

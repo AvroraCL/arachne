@@ -27,7 +27,8 @@ export function setupPaintAreas(hooks){
     if(ok!==true)throw failure||Error('操作未完成，请结束当前编辑后重试');return value;
   };
   const project=createProjectState({
-    write:(operations,origin)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/commands',{revision:origin.revision,operations})),
+    write:(operations,origin)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/commands',{revision:origin.revision,operations,
+      ...(origin.strokeRequestId?{strokeRequestId:origin.strokeRequestId}:{})})),
     travel:async(direction,origin)=>{const until=Date.now()+30000;while(hooks.busy()&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,25));const doc=hooks.read();if(doc?.id!==origin?.id)throw Error('工程已切换，撤销未执行');return write(()=>hooks.api('/api/projects/'+doc.id+'/paint/'+direction,{revision:doc.revision}));},
     draft:op=>{activePreview().update(op);hooks.draft(op);},
     selectLayer:id=>{if(applying)return;applying=true;try{hooks.selectLayer(id);}finally{applying=false;}},
@@ -77,7 +78,8 @@ export function setupPaintAreas(hooks){
     setForeground:value=>changeImageColors(()=>imagePalette.set('paint','foreground',value)),setColor:(target,slot,value)=>changeImageColors(()=>imagePalette.set(target,slot,value)),
     colorKey:(key,target)=>changeImageColors(()=>key==='x'?imagePalette.swap(target):imagePalette.reset(target))};
   const registry=createEditorRegistry({decorate:ctx=>{ctx.root.querySelectorAll('select').forEach(select=>{enhanceSelectMenu(select);if(select.hidden)select.closest('.custom-select').hidden=true;});for(const input of ctx.root.querySelectorAll('input[type=number]')){input.dataset.scrubNumber='';input.dataset.scrubSpeed??=input.max==='1'?'.01':'1';}}});
-  const bridge={imageColors,legacyCameraProject:hooks.legacyCameraProject,renderSettings:hooks.renderSettings,renderResults:hooks.renderResults,openMaterial:layerId=>{if(areas.switchWorkspace('material')){project.selectLayer(layerId);project.setEditorDomain('material');}},renderProperties:hooks.renderProperties,propertyKey:hooks.propertyKey,propertyTarget:hooks.propertyTarget,parking,busy:hooks.busy,foreground:hooks.foreground,setForeground:hooks.setForeground,maskInk:hooks.maskInk,setMaskInk:hooks.setMaskInk,colorKey:hooks.colorKey,colorPair:hooks.colorPair,setColor:hooks.setColor,preferences:hooks.preferences,viewAsset:hooks.viewAsset,
+  const bridge={imageColors,readStrokeProject:hooks.readStrokeProject,strokeSaveSettled:hooks.strokeSaveSettled,
+    saveStateChanged:hooks.saveStateChanged,legacyCameraProject:hooks.legacyCameraProject,renderSettings:hooks.renderSettings,renderResults:hooks.renderResults,openMaterial:layerId=>{if(areas.switchWorkspace('material')){project.selectLayer(layerId);project.setEditorDomain('material');}},renderProperties:hooks.renderProperties,propertyKey:hooks.propertyKey,propertyTarget:hooks.propertyTarget,parking,busy:hooks.busy,foreground:hooks.foreground,setForeground:hooks.setForeground,maskInk:hooks.maskInk,setMaskInk:hooks.setMaskInk,colorKey:hooks.colorKey,colorPair:hooks.colorPair,setColor:hooks.setColor,preferences:hooks.preferences,viewAsset:hooks.viewAsset,
     importPersonal:async(item,libraryRevision)=>{const origin=project.origin();if(!origin)throw Error('请先打开工程');const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id}));if(project.document?.id!==origin.id)throw Error('资源已导入原工程，请打开原工程查看');project.publish(result.document);return result;},
     createSelection:createUVSelection,openImageText:hooks.openImageText,
     imageSelection(origin){
@@ -136,6 +138,7 @@ export function setupPaintAreas(hooks){
   };
   registerAreaEditors(registry,bridge);
   const areas=createAreaWorkspace({host:workspace,registry,project,initial:hooks.initial,restoreActive:hooks.restoreActive!==false,desktopWorkspace:hooks.desktopWorkspace,
+    onSaveState:hooks.saveStateChanged,
     canChange:()=>!hooks.busy()&&!document.querySelector('dialog[open]')&&!hooks.imageEditing(),
     onVisibleEditors:editors=>{visibleEditors=editors;updateMaterialDemand();},
     onActivate:instance=>{if(instance?.domain)project.setEditorDomain(instance.domain);if(instance?.kind==='viewport'){preferredViewport=instance;project.setEditorDomain('material');}if(['viewport','image','uv'].includes(instance?.kind))preferredCanvas=instance;syncWorkspaceButtons();hooks.cameraChanged?.();},onWorkspace:()=>{project.setEditorDomain(areas.name==='drawing'?'image':'material');syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name);hooks.remember();}
@@ -201,7 +204,9 @@ export function setupPaintAreas(hooks){
     resourceChanged(options){if(applying)return;const t=hooks.resource();project.selectedResource(t?{library:t.library,id:t.id}:null,undefined,options);},
     preferencesChanged(){activePreview().preferencesChanged();for(const editor of areas.editors())editor.preferencesChanged?.();},
     imageActivate(){hooks.activateImage();syncWorkspaceButtons();},
-    isEditing:()=>hooks.imageEditing()||areas.active?.isEditing?.(),
+    isEditing:()=>hooks.imageEditing()||areas.editors().some(editor=>editor.isEditing?.()),
+    strokeSaveStatus:()=>areas.editors().flatMap(editor=>editor.strokeSaveStatus?[editor.strokeSaveStatus()]:[]),
+    async retryStrokeSaves(){for(const editor of areas.editors())if(editor.strokeSaveStatus?.().failure)await editor.retryStrokeSave();},
     deliveryViewport:()=>targetViewport()?.viewport,
     showRenderCamera:camera=>targetViewport()?.showRenderCamera(camera)??false,
     drawRenderRegion:camera=>targetViewport()?.drawRenderRegion(camera)??false,

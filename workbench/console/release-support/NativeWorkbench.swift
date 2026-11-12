@@ -231,13 +231,14 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
     }
 
     func prepareToQuit(_ completion: @escaping (String) -> Void) {
-        if !downloads.isEmpty { completion("downloads"); return }
-        guard !rendererStopped, sameOrigin(webView.url) else { completion("unavailable"); return }
+        guard !rendererStopped, sameOrigin(webView.url) else {
+            completion(downloads.isEmpty ? "unavailable" : "downloads"); return
+        }
         var completed = false
         func finish(_ state: String) {
             guard !completed else { return }
             completed = true
-            completion(state)
+            completion(!downloads.isEmpty && !["saving", "editing", "unsaved"].contains(state) ? "downloads" : state)
         }
         let timeout = DispatchWorkItem { finish("unavailable") }
         DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: timeout)
@@ -248,7 +249,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
                     "const host=window.arachneNativeHost; return host?.prepareToCloseAsync ? await host.prepareToCloseAsync() : host?.prepareToClose() ?? null",
                     arguments: [:], in: nil, contentWorld: .page)
                 guard let status = value as? [String: Any], let state = status["state"] as? String,
-                      ["ready", "saving", "editing", "error", "jobs"].contains(state) else {
+                      ["ready", "saving", "editing", "error", "unsaved", "jobs"].contains(state) else {
                     finish("unavailable"); return
                 }
                 finish(state)

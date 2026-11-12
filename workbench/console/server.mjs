@@ -363,6 +363,11 @@ const server=http.createServer(async(req,res)=>{
       if(req.method!=='POST'){send(res,405,{error:'方法不支持'});return;}
       const b=await body(req);
       doc=read(id);
+      if(operation==='commands'){
+        const changesRenderVisibility=b.revision===doc.revision&&Array.isArray(b.operations)&&b.operations.length<=128&&b.operations.some(op=>op?.op==='renderVisibility');
+        const sourceVisibility=changesRenderVisibility?(renderSceneObjects(doc)).visibility:undefined;
+        send(res,200,editPaint(changesRenderVisibility?read(id):doc,b,sourceVisibility));return;
+      }
       if(operation==='render-session'){
         updateCyclesSession(doc,b,()=>listJobs(id));send(res,202,{accepted:true});return;
       }
@@ -423,12 +428,7 @@ const server=http.createServer(async(req,res)=>{
       if(operation==='library-import'){send(res,200,personalLibrary.importResource({projectId:id,projectRevision:b.revision,revision:b.libraryRevision,id:b.id,placement:b.placement}));return;}
       if(operation==='model-prepare'){void preparePaintGeometry(doc).catch(()=>{});send(res,202,modelGeometryStatus(doc));return;}
       if(operation==='model'){send(res,200,saveProjectModel(doc,b));return;}
-      if(operation==='commands'){
-        const changesRenderVisibility=Array.isArray(b.operations)&&b.operations.length<=128&&b.operations.some(op=>op?.op==='renderVisibility');
-        const sourceVisibility=changesRenderVisibility?(renderSceneObjects(doc)).visibility:undefined;
-        send(res,200,editPaint(changesRenderVisibility?read(id):doc,b,sourceVisibility));
-      }
-      else if(operation==='assets')send(res,201,importPaint(doc,b));
+      if(operation==='assets')send(res,201,importPaint(doc,b));
       else if(operation==='text')send(res,201,await savePaintText(doc,b));
       else if(['undo','redo'].includes(operation))send(res,200,travel(id,b.revision,operation,b.steps));
       else if(operation==='preview'||operation==='draft')send(res,202,submit(id,operation==='draft'?'paint-draft':'paint-preview',b.revision,b.requestId));

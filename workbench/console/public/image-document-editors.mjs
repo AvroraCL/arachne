@@ -242,7 +242,7 @@ export function createDocumentEditor(ctx,bridge){
     canvas.style.width=canvas.style.height=size+'px';
     canvas.style.transform=`translate(-50%,-50%) translate(${pan[0]}px,${pan[1]}px) scale(${zoom})`;
     if(previewCaption){
-      const pending=strokeQueue?.size>1?` · 保存中 ${strokeQueue.size} 笔`:'';
+      const pending=strokeQueue?.size>0?` · ${strokeQueue.failure?'待恢复':'保存中'} ${strokeQueue.size} 笔`:'';
       const label=`${(size*zoom/4096*100).toFixed(1)}%　文档 4096 × 4096　${project.imageContext?.inspectMask?'蒙版 · ':''}${previewCaption}${pending}`;
       if(status.textContent!==label)status.textContent=label;
     }
@@ -252,7 +252,7 @@ export function createDocumentEditor(ctx,bridge){
   const imageOrigin=()=>({id:project.document?.id,revision:project.document?.revision,imageDocumentId:project.imageContext?.documentId});
   const mapOperation=(op,origin)=>op?surfaceToImageCommand(op,origin?.imageDocumentId||project.imageContext?.documentId):null;
   function draft(op,origin){const mapped=mapOperation(op,origin);live.update(mapped);project.draft(mapped);}
-  const writing=()=>bridge.busy()||!!pendingImageEdit||strokeQueue.saving||importing||cutting;
+  const writing=()=>bridge.busy()||!!pendingImageEdit||strokeQueue.size>0||importing||cutting;
   function submitEdit(operation,origin,onSaved){
     const task=(async()=>{
       try{
@@ -291,13 +291,43 @@ export function createDocumentEditor(ctx,bridge){
     live.update(operation);
     project.draft(operation);
   }
-  const strokeQueue=createImageStrokeQueue({read:()=>project.document,
+  const recovery=el('div','document-save-recovery'),saveMessage=el('output');
+  saveMessage.setAttribute('role','alert');
+  const retryStroke=button('重试保存笔触',()=>retryStrokeSave());
+  const rebaseStroke=button('按最新修订保存',()=>{
+    if(window.confirm('把待保存的笔触应用到当前工程的最新修订？'))retryStrokeSave({rebase:true});
+  });
+  const discardStroke=button('放弃待保存笔触',()=>{
+    const id=project.document?.id;
+    if(window.confirm('放弃留在本窗口中的待保存笔触？已经写入工程的笔触仍会保留。')&&strokeQueue.discard())
+      bridge.strokeSaveSettled(id);
+  });
+  recovery.hidden=true;recovery.append(saveMessage,retryStroke,rebaseStroke,discardStroke);stage.append(recovery);
+  async function retryStrokeSave(options){
+    if(drawingGesture())return;
+    const id=project.document?.id;
+    if(await strokeQueue.retry(options))bridge.strokeSaveSettled(id);
+  }
+  function syncStrokeSave(){
+    const failure=strokeQueue.failure;
+    recovery.hidden=!failure;
+    if(failure)saveMessage.textContent=`${strokeQueue.size} 笔待保存。 ${failure.message}`;
+    rebaseStroke.hidden=!strokeQueue.canRebase;
+    retryStroke.disabled=rebaseStroke.disabled=discardStroke.disabled=drawingGesture();
+    bridge.saveStateChanged();
+  }
+  const strokeDraftKey=id=>`arachne-image-stroke-draft:${id}:${ctx.workspaceName}:${ctx.areaId}`;
+  const strokeQueue=createImageStrokeQueue({read:()=>project.document,readLatest:bridge.readStrokeProject,
     write:(operation,origin)=>project.commands([operation],origin),
-    onPreview:syncStrokePreview,onStateChange:()=>sync(),
-    onError:error=>{
-      if(disposed)return;
-      painter.cancel({preserveMode:true});
-      ctx.error(error);
+    onPreview:syncStrokePreview,onStateChange:()=>{sync();syncStrokeSave();},
+    onError:error=>{if(!disposed)ctx.error(error);},
+    onDraftChange:(id,entry)=>{
+      if(!id)return;
+      try{
+        const key=strokeDraftKey(id);
+        if(entry)sessionStorage.setItem(key,JSON.stringify(entry));
+        else sessionStorage.removeItem(key);
+      }catch{}
     }
   });
   function showSampleNotice(text='',pending=false){
@@ -329,7 +359,7 @@ export function createDocumentEditor(ctx,bridge){
       layer:layer?{...layer,kind:layer.kind==='pixel'?'paint':'image',channels:{color:true,metallic:false,roughness:false},
         values:{color:bridge.foreground(),metallic:0,roughness:.5}}:null};
   }
-  painter=createSurfaceTools({viewport:{},host:controls.dummy,uvHost:stage,elements,settingsKey:'arachne-document-brush:'+ctx.areaId,preserveUnavailableMode:true,stickySample:true,sampleAnyLayer:true,isHandHeld:()=>space||!!nav,uvClip:()=>selection?.clip(),onIdle:()=>sync(),
+  painter=createSurfaceTools({viewport:{},host:controls.dummy,uvHost:stage,elements,settingsKey:'arachne-document-brush:'+ctx.areaId,preserveUnavailableMode:true,stickySample:true,sampleAnyLayer:true,isHandHeld:()=>space||!!nav,uvClip:()=>selection?.clip(),onIdle:()=>{sync();syncStrokeSave();},
     context:brushContext,cloneTool:()=>cloneTool,
     preview:(op,origin)=>strokeQueue.preview(mapOperation(op,origin),origin),
     commit:(op,origin)=>strokeQueue.submit(mapOperation(op,origin),origin),sample:sampleImage,place:()=>{}});
@@ -785,7 +815,18 @@ export function createDocumentEditor(ctx,bridge){
   function sync(reselect=false){
     if(disposed||!shown||!project.document)return;const doc=project.document;
     brushBinding.sync(reselect);
-    if(restoredProject!==doc.id){restoredProject=doc.id;let saved;try{saved=JSON.parse(localStorage.getItem('arachne-image-selection:'+doc.id));}catch{}if(!project.imageContext&&saved?.documentId)project.selectImage(saved);}
+    if(restoredProject!==doc.id){
+      restoredProject=doc.id;
+      let saved,draft;
+      try{saved=JSON.parse(localStorage.getItem('arachne-image-selection:'+doc.id));}catch{}
+      try{draft=JSON.parse(sessionStorage.getItem(strokeDraftKey(doc.id)));}catch{}
+      if(strokeQueue.restore(doc.id,draft)){
+        const [,documentId,layerId,target]=draft.target;
+        if(doc.paint.imageDocuments?.[documentId]?.layers.some(item=>item.id===layerId))saved={documentId,layerId,target};
+        queueMicrotask(()=>{if(!disposed)syncStrokeSave();});
+      }
+      if(saved?.documentId&&(!project.imageContext||strokeQueue.failure))project.selectImage(saved);
+    }
     let image=currentDocument(project);if(!image){const documentId=Object.keys(doc.paint.imageDocuments??{})[0]||null;if(project.imageContext?.documentId!==documentId){project.selectImage({documentId,layerId:null,target:'pixels'});return;}image=currentDocument(project);}
     const c=project.imageContext,layer=currentLayer(project);
     if(image&&image.layers.length&&!layer){
@@ -811,7 +852,8 @@ export function createDocumentEditor(ctx,bridge){
     ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();syncStrokePreview();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
+    strokeSaveStatus:()=>({pending:strokeQueue.size,saving:strokeQueue.saving,failure:strokeQueue.failure}),retryStrokeSave,
     canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
     canCut,cutSelection,pasteSystemImage,canPasteInPlace:()=>canPaste()&&canInsertImage(project)&&!!copiedImage(),pasteInPlace:()=>pasteSelection(true),
     getSelection(origin){return shown&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&

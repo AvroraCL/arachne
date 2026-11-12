@@ -77,11 +77,14 @@ export function projectHistory(id){return listProjectHistory(projectDir(id),read
 export function travel(id,expected,direction,steps=1){
   const p=read(id);if(expected!==p.revision){const e=Error('版本已改变');e.status=409;throw e;}
   const result=restoreProjectHistory(projectDir(id),p,direction,steps);if(!result)return p;
-  const restored=result.restored;restored.revision=p.revision+1;restored.updated=new Date().toISOString();validate(restored);
+  const restored=result.restored;restored.revision=p.revision+1;restored.updated=new Date().toISOString();
+  if(p.strokeSaveReceipts)restored.strokeSaveReceipts=p.strokeSaveReceipts;
+  validate(restored);
   saveRevision(id,restored,result.index,{summary:direction,...(steps>1?{steps}:{})});return restored;
 }
 export async function forkProject(sourceId,snapshot,name,prepareAssets){
   const sourceDir=projectDir(sourceId);const id=crypto.randomUUID(),dir=projectDir(id),doc=clone(snapshot);
+  delete doc.strokeSaveReceipts;
   doc.id=id;doc.name=name;doc.revision=0;doc.updated=new Date().toISOString();doc.source=resolveSource(doc.source);
   validate(doc);const assets=Object.values(doc.assets).map(a=>({a,file:path.join(sourceDir,'assets',path.basename(a.file))}));
   for(const {a,file} of assets)if(hash(file)!==a.sha256)throw Error('基线素材不完整或已改变');

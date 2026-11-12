@@ -32,6 +32,7 @@
     <details class="paint-menu" name="paint-menubar-menu"><summary>文件</summary><div class="paint-menu-content">
       <button id="new" type="button">新建工程</button>
       <button id="open-projects" type="button" aria-haspopup="dialog">打开工程…</button>
+      <button id="save-workbench" type="button">保存工程 <kbd aria-hidden="true">⌘ / Ctrl + S</kbd></button>
       <button id="open-paint-import" type="button" aria-haspopup="dialog">打开涂装 ZIP…</button>
       <button id="open-glb-migration" type="button" aria-haspopup="dialog" hidden>迁移为 GLB 工程…</button>
       <button id="open-project-copy" type="button" aria-haspopup="dialog" disabled>另存为工程…</button>
@@ -82,7 +83,7 @@
       <span></span>
     </button>
     <strong id="project-name">未打开工程</strong>
-    <output id="project-save-state" aria-label="工程保存状态"></output>
+    <output id="project-save-state" aria-label="工程保存状态" aria-live="polite"></output>
   </div>
 </header>
 <main id="workspace" data-work-area="drawing" hidden>

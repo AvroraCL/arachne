@@ -1,6 +1,6 @@
 import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers} from './public/image-documents.mjs';
 import {isolateImageLayer} from './public/image-layer-tree.mjs';
-import {imageStrokeQueueLimit} from './public/image-stroke-queue.mjs';
+import {imageStrokeQueueLimit,strokeReceiptLimit} from './public/image-stroke-queue.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels,channelBlendChoices} from './public/paint-channels.mjs';
 import {checkedTexturePreset,textureExportPresets} from './public/texture-export-presets.mjs';
@@ -537,9 +537,26 @@ function applyOperations(next,operations,sourceVisibility){
   p.layers=layerTreeOrder(p.layers);
   return next;
 }
-export function editPaint(doc,{revision,operations},sourceVisibility){
+export function editPaint(doc,{revision,operations,strokeRequestId},sourceVisibility){
+  let receipt;
+  if(strokeRequestId!==undefined){
+    if(typeof strokeRequestId!=='string'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(strokeRequestId)||
+       !Array.isArray(operations)||operations.length!==1||operations[0]?.op!=='image'||operations[0]?.action!=='stroke')
+      throw Error('笔触保存编号无效');
+    const digest=crypto.createHash('sha256').update(JSON.stringify(operations)).digest('hex');
+    const saved=doc.strokeSaveReceipts?.find(item=>item.id===strokeRequestId);
+    if(saved){
+      if(saved.revision!==revision+1||saved.digest!==digest)throw Object.assign(Error('笔触保存编号已被使用'),{status:409,currentRevision:doc.revision});
+      return doc;
+    }
+    receipt={id:strokeRequestId,revision:revision+1,digest};
+  }
   if(doc.revision!==revision)throw revisionError(doc);
-  return commit(doc.id,revision,next=>applyOperations(next,operations,sourceVisibility),Array.isArray(operations)?operations.map(o=>({
+  return commit(doc.id,revision,next=>{
+    const edited=applyOperations(next,operations,sourceVisibility);
+    if(receipt)edited.strokeSaveReceipts=[...(next.strokeSaveReceipts||[]),receipt].slice(-strokeReceiptLimit);
+    return edited;
+  },Array.isArray(operations)?operations.map(o=>({
     op:o?.op,id:o?.id,...(Array.isArray(o?.ids)?{ids:o.ids}:{})
   })):[]);
 }

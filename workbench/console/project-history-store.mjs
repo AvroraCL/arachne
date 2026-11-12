@@ -30,7 +30,7 @@ function readIndex(folder){
 }
 
 function saveSnapshot(folder,project){
-  const {revision,updated,...content}=project;
+  const {revision,updated,strokeSaveReceipts,...content}=project;
   const json=JSON.stringify(content),hash=digest(json),file=snapshotFile(folder,hash);
   if(fs.existsSync(file))return hash;
   fs.mkdirSync(snapshotFolder(folder),{recursive:true});
