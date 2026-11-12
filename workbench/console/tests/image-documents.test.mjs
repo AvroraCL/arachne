@@ -36,6 +36,22 @@ test('mask inversion preserves soft brush coverage and deletion resets only the 
  assert.equal(layer.maskBase,1);
  assert.throws(()=>edit(paint,'invertMask',origin),/没有蒙版/);
 });
+test('editable gradient layers validate endpoints and insertion without changing pixel layers',()=>{
+ const paint=defaults();edit(paint,'create');edit(paint,'addLayer',{layerId:'pixel',kind:'pixel'});
+ const gradient={kind:'linear',start:[.2,.5],end:[.8,.5],colors:['#d08022','#2d63c0'],alpha:[1,0],clip:[.15,.15,.85,.85]};
+ edit(paint,'addLayer',{layerId:'ramp',kind:'gradient',index:0,patch:{gradient}});
+ validateImageDocuments(paint,checks);
+ assert.deepEqual(paint.imageDocuments.doc.layers.map(layer=>layer.id),['ramp','pixel']);
+ const updated={...gradient,kind:'radial',alpha:[0,1]};
+ edit(paint,'updateLayer',{layerId:'ramp',patch:{gradient:updated}});
+ validateImageDocuments(paint,checks);
+ assert.deepEqual(paint.imageDocuments.doc.layers[0].gradient,updated);
+ assert.throws(()=>edit(paint,'stroke',{layerId:'ramp',target:'pixels',stroke:{}}),/像素层/);
+ const doc={id:'rgba-gradient',revision:3,paint};
+ const invalid={op:'image',action:'updateLayer',documentId:'doc',layerId:'ramp',patch:{gradient:{...updated,end:updated.start}}};
+ assert.throws(()=>imageDocumentInput(doc,{revision:3,documentId:'doc',operation:invalid}),/渐变方向/);
+ assert.deepEqual(paint.imageDocuments.doc.layers[0].gradient,updated);
+});
 test('RGBA live input includes only the layers and assets required for the requested pixels',()=>{
  const paint=defaults(),visibleAsset='1'.repeat(64),hiddenAsset='2'.repeat(64),otherAsset='3'.repeat(64);
  for(const id of [visibleAsset,hiddenAsset,otherAsset])paint.assets[id]={file:'paint-'+id+'.png'};
@@ -74,6 +90,15 @@ assert np.max(np.abs(p[32,32,:3].astype(int)-[188,0,188]))<=1 and p[32,32,3]==25
 assert list(p[0,0,:3])==[0,0,255] and abs(int(p[0,0,3])-128)<=1
 base['maskEnabled']=False;base['strokes'].append(dict(transformUV=dict(rect=[0,0,1,1],offset=[.5,0],scale=[1,1],angle=0,copy=False,interpolation='nearest')));doc['layers']=[base];p=composite_document(doc,{},64)
 assert p[32,16,3]==0 and p[32,48,3]==255
+gradient=dict(kind='linear',start=[.25,.5],end=[.75,.5],colors=['#ff0000','#0000ff'],alpha=[1,0],clip=[.1,.1,.9,.9])
+layer=dict(id='gradient',kind='gradient',visible=True,opacity=1,blend='normal',maskEnabled=False,gradient=gradient)
+doc['layers']=[layer];p=composite_document(doc,{},64)
+assert list(p[32,12])==[255,0,0,255] and p[32,52,3]==0 and p[0,12,3]==0
+assert list(p[32,31,:3])==[255,0,0] and abs(int(p[32,31,3])-131)<=1
+gradient.update(kind='radial',start=[.5,.5],end=[.75,.5],alpha=[1,1],polygon=[[.1,.1],[.9,.1],[.1,.9]])
+q=composite_document(doc,{},64)
+assert q[32,31,3]==0 and q[30,30,0]>q[30,30,2]
+assert list(q[9,12])==[0,0,255,255]
 from PIL import Image
 from io import BytesIO
 for color_space,key,value in [('linear','gamma',1),('srgb','srgb',0)]:

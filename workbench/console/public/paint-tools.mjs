@@ -185,7 +185,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     uvHost.toggleAttribute('data-brushing',uvEnabled&&!!layer?.visible&&!unavailable&&(brushMode()||mode==='sample'));
     host.dataset.tool=mode;
     for(const tool of ['orbit','paint','mask','fill','sample'])$('surface-'+tool).setAttribute('aria-pressed',String(mode===tool));
-    if(uvHost.hasAttribute('data-text-placement')||
+    if(uvHost.matches('[data-text-placement],[data-gradient-tool]')||
        uvHost.dataset.selectionTool&&uvHost.dataset.selectionTool!=='none')$('surface-orbit').setAttribute('aria-pressed','false');
     $('surface-paint').disabled=!writable||layer.kind!=='paint'&&!state.maskTarget;
     const erasing=brushMode()&&$('brush-erase').checked;

@@ -327,7 +327,72 @@ try{
   assert.notEqual(templates[0].id,cube.id);
   assert.deepEqual(templates[0].source,cube.source);
   assert.equal(new Set(templates.map(item=>item.source.uvSha256)).size,4);
-  const cubePreview=await api(cubeRoute+'/paint/preview',{revision:cube.revision,requestId:'cube-template-4k'});
+
+  await reopened.locator('[data-area-mode=drawing]').click();
+  const drawing=reopened.locator('.editor-area[data-editor=image]').first();
+  await drawing.getByRole('button',{name:'新建贴图',exact:true}).click();
+  const documentCanvas=drawing.locator('canvas[aria-label="图像文档画布"]');
+  await documentCanvas.waitFor();
+  await drawing.getByRole('button',{name:'渐变工具',exact:true}).click();
+  await drawing.getByRole('button',{name:'渐变颜色',exact:true}).click();
+  await reopened.getByRole('option',{name:'前景色到透明',exact:true}).click();
+  await drawing.getByLabel('图像前景色',{exact:true}).fill('#d97732');
+  const box=await documentCanvas.boundingBox(),point=(x,y)=>[box.x+x*box.width,box.y+y*box.height];
+  const {mouse,keyboard}=reopened;
+  const beforeGradient=await api(cubeRoute);
+  await mouse.move(...point(.22,.5));await mouse.down();
+  await mouse.move(...point(.68,.5),{steps:8});
+  await keyboard.press('Escape');await mouse.up();
+  assert.deepEqual(await api(cubeRoute),beforeGradient);
+  await mouse.move(...point(.22,.5));await mouse.down();
+  await keyboard.down('Shift');
+  await mouse.move(...point(.68,.54),{steps:8});
+  await mouse.up();await keyboard.up('Shift');
+  const ramp=async()=>Object.values((await api(cubeRoute)).paint.imageDocuments)[0].layers.find(layer=>layer.kind==='gradient');
+  const gradient=await until(ramp);
+  assert.equal(gradient.gradient.kind,'linear');
+  assert.ok(Math.abs(gradient.gradient.start[1]-gradient.gradient.end[1])<.0001);
+  assert.deepEqual(gradient.gradient.colors,['#d97732','#d97732']);
+  assert.deepEqual(gradient.gradient.alpha,[1,0]);
+  await drawing.getByRole('button',{name:'渐变形状',exact:true}).click();
+  await reopened.getByRole('option',{name:'径向',exact:true}).click();
+  await until(async()=>(await ramp()).gradient.kind==='radial');
+  await drawing.getByRole('button',{name:'渐变形状',exact:true}).and(drawing.locator('button:enabled')).waitFor();
+  await drawing.locator('.document-gradient-guide').waitFor();
+  const end=gradient.gradient.end;
+  await mouse.move(...point(...end));await mouse.down();
+  await mouse.move(...point(.78,.5),{steps:6});await mouse.up();
+  const changed=await until(async()=>{const layer=await ramp();return layer.gradient.end[0]>.75&&layer;});
+  assert.equal(changed.id,gradient.id);
+  assert.deepEqual(changed.gradient.start,gradient.gradient.start);
+  await drawing.getByRole('button',{name:'应用至材质',exact:true}).click();
+  const cubePainted=await until(async()=>{
+    const state=await api(cubeRoute);
+    return state.paint.layers.some(layer=>layer.documentMaps?.color)&&state;
+  });
+  const imageId=cubePainted.paint.layers.find(layer=>layer.documentMaps?.color).documentMaps.color;
+  await reopened.reload();
+  await reopened.locator('[data-area-mode=drawing]').click();
+  await drawing.getByRole('button',{name:'渐变工具',exact:true}).waitFor();
+  assert.deepEqual(await ramp(),changed);
+  const imageResponse=await fetch(origin+cubeRoute+'/paint/image-export',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({revision:cubePainted.revision,documentId:imageId})
+  });
+  assert.equal(imageResponse.status,200);
+  const gradientPng=path.join(data,'gradient.png');
+  await fs.writeFile(gradientPng,Buffer.from(await imageResponse.arrayBuffer()));
+  execFileSync(pythonExecutable(),['-c',[
+    'import sys',
+    'from PIL import Image',
+    'with Image.open(sys.argv[1]) as im:',
+    ' assert im.size==(4096,4096)',
+    ' assert im.getpixel((901,2048))[:3]==(217,119,50)',
+    ' assert im.getpixel((901,2048))[3]>250',
+    ' assert im.getpixel((4095,4095))[3]==0'
+  ].join('\n'),gradientPng],{stdio:'inherit'});
+  await reopened.screenshot({path:path.join(data,'gradient-editor.png')});
+  const cubePreview=await api(cubeRoute+'/paint/preview',{revision:cubePainted.revision,requestId:'cube-template-4k'});
   const cubeBake=await until(async()=>{
     const job=await api(cubeRoute+'/jobs/'+cubePreview.id);
     if(job.status==='failed')throw Error(job.error);
@@ -336,6 +401,7 @@ try{
   assert.equal(cubeBake.paintReport.uv_unchanged,true);
   assert.equal(Object.keys(cubeBake.paintReport.files).length,8);
   console.log('PASS four native geometry templates, distinct UVs, independent projects and cube 4K bake');
+  console.log('PASS gradient draw, cancel, angle snapping, endpoint editing, material binding, reload and 4K RGBA PNG');
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
 }finally{

@@ -55,6 +55,33 @@ def image_pixels(layer,assets,size,linear):
     return np.stack([np.asarray(Image.fromarray(raw[:,:,i]).transform((size,size),Image.Transform.AFFINE,affine,resample=Image.Resampling.BILINEAR)) for i in range(4)],axis=-1)[::-1].reshape(-1,4)
 
 
+def gradient_tiles(surface, gradient, color):
+    size = surface.uv_shape[0]
+    x, y = gradient['start']
+    dx, dy = np.asarray(gradient['end']) - (x, y)
+    length_squared = dx*dx + dy*dy
+    radial = gradient['kind'] == 'radial'
+    first, last = (np.r_[color(ink)*alpha, alpha].astype(np.float32)
+                   for ink, alpha in zip(gradient['colors'], gradient['alpha']))
+    rect = gradient.get('clip', (0, 0, 1, 1))
+    polygon = gradient.get('polygon')
+    row0, row1, col0, col1 = surface._uv_pixel_rect(rect)
+    cols = np.arange(col0, col1)
+    rows_per_tile = max(1, 131072 // max(1, len(cols)))
+    for start in range(row0, row1, rows_per_tile):
+        rows = np.arange(start, min(start+rows_per_tile, row1))
+        ids = (rows[:, None]*size + cols).ravel()
+        if polygon:
+            ids = ids[surface._polygon_contains(ids, rect, polygon)]
+        u, v = surface._texel_uv(ids)
+        if radial:
+            t = np.sqrt(((u-x)**2 + (v-y)**2)/length_squared)
+        else:
+            t = ((u-x)*dx + (v-y)*dy)/length_squared
+        t = np.clip(t, 0, 1).astype(np.float32)[:, None]
+        yield ids, first + (last-first)*t
+
+
 def composite_document(document,assets,size=4096,inspect_mask=None):
     surface=ImageSurface(size);result=np.zeros((size*size,4),dtype=np.float32)
     linear=document['colorSpace']=='linear'
@@ -76,6 +103,8 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
             ids,paint=surface.paint([converted(s) for s in layer.get('strokes',[])],{'color':True},color)
             if 'color' not in paint:continue
             alpha,premult=paint['color'];pixels=np.column_stack((premult,alpha));ranges=[(ids,pixels)]
+        elif layer['kind']=='gradient':
+            ranges=gradient_tiles(surface,layer['gradient'],color)
         else:
             image_data=image_pixels(layer,assets,size,linear)
             ranges=((np.arange(start,min(start+131072,len(result))),image_data[start:start+131072]) for start in range(0,len(result),131072))
