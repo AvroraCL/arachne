@@ -18,6 +18,29 @@ $uninstaller = Join-Path $app 'Uninstall.exe'
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) '阿拉克涅\阿拉克涅.lnk'
 New-Item -ItemType Directory -Path $root | Out-Null
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+
+public static class ShortcutPath {
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellLinkW {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file, int capacity, IntPtr data, uint flags);
+    }
+    public static string Read(string link) {
+        var instance = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046")));
+        try {
+            ((IPersistFile)instance).Load(link, 0);
+            var target = new StringBuilder(260);
+            ((IShellLinkW)instance).GetPath(target, target.Capacity, IntPtr.Zero, 0);
+            return target.ToString();
+        } finally { Marshal.FinalReleaseComObject(instance); }
+    }
+}
+'@
+
 function Install-Arachne {
     # NSIS consumes the remainder of the command line as the unquoted path.
     $result = Start-Process -FilePath $Installer -ArgumentList "/S /D=$app" -Wait -PassThru
@@ -39,8 +62,8 @@ try {
         throw 'The Windows uninstall entry does not preserve the Chinese product name'
     }
     if (!(Test-Path -LiteralPath $shortcut)) { throw 'The Start menu shortcut is missing' }
-    $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
-    if ($target -ne $executable) { throw 'The Start menu shortcut points to a different executable' }
+    $target = [ShortcutPath]::Read($shortcut)
+    if ($target -ne $executable) { throw "The Start menu shortcut points to '$target', expected '$executable'" }
     Write-Host 'PASS installer, Chinese install location, executable hash and Start menu shortcut'
 
     $env:ARACHNE_DESKTOP_TEST_PROFILE = $profile
