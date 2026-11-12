@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {area,split,leaves,validateLayout,workspacePreset,splitArea,changeEditor,joinAreas,joinable,adjacentAreas,swapAreas,areaRects,migrateLayerEditors,workspaceLayoutFile,parseWorkspaceLayoutFile} from '../public/workspace-state.mjs';
 import {createProjectState} from '../public/project-state.mjs';import {createEditorRegistry} from '../public/editor-registry.mjs';
+import {createViewportProjectViews} from '../public/viewport-project-views.mjs';
 test('workspace presets are layouts only and every area can switch independently',()=>{
   for(const name of ['modeling','material','drawing']){const tree=workspacePreset(name);validateLayout(tree);for(const a of leaves(tree)){const changed=changeEditor(tree,a.id,'console');assert.equal(leaves(changed).find(n=>n.id===a.id).editor,'console');assert.equal(leaves(tree).find(n=>n.id===a.id).editor,a.editor);}}
 });
@@ -98,4 +99,18 @@ test('material and image panels have fixed editor identities and safe one-time l
   const state=createProjectState({write(){},travel(){},draft(){},selectLayer(){},selectResource(){}});
   state.publish({id:'project',revision:0,paint:{}});state.selectLayer('material-layer');state.selectImage({documentId:'document',layerId:'pixel-layer',target:'mask'});
   state.setEditorDomain('material');state.setEditorDomain('image');assert.equal(state.layerId,'material-layer');assert.equal(state.imageContext.layerId,'pixel-layer');assert.equal(state.document.revision,0);
+});
+test('viewports restore a camera only for its project and keep recent views across layout reloads',()=>{
+  const camera={projection:'perspective',eye:[5,3,6],target:[0,0,0],up:[0,1,0],fov:38,orthoHeight:3};
+  const views=createViewportProjectViews({camera,cameraFrame:true,projectCameraView:true},'legacy-project');
+  assert.deepEqual(views.read('legacy-project'),{camera,cameraFrame:true,projectCameraView:true});
+  assert.equal(views.read('new-project'),undefined);
+  const second={...camera,projection:'orthographic',eye:[0,5,0]};
+  views.remember('new-project',{camera:second,cyclesPaused:true});
+  assert.deepEqual(views.read('new-project'),{camera:second,cyclesPaused:true});
+  const reopened=createViewportProjectViews({projectViews:views.snapshot()},'legacy-project');
+  assert.deepEqual(reopened.read('legacy-project'),views.read('legacy-project'));
+  for(let i=0;i<9;i++)reopened.remember('project-'+i,{camera});
+  assert.equal(Object.keys(reopened.snapshot()).length,8);
+  assert.equal(reopened.read('legacy-project'),undefined);
 });

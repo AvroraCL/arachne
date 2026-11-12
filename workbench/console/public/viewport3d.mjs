@@ -326,7 +326,34 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       onMaterials(next.metadata.materials);if(unlit)shade(true);await applyTexture(resolvedTexture(next),token);if(token!==sequence)return;if(previousCamera)applyCamera(previousCamera);else fit();host.dataset.state='ready';
     }catch(e){if(token!==sequence)return;host.dataset.state='error';state('三维视口：'+e.message,'error');}
   }
-  function fit(direction=new THREE.Vector3(1,.75,1),bounds=null,upVector=new THREE.Vector3(0,1,0)){if(!camera||!model)return;axisMotion=null;camera.up.copy(upVector);direction.normalize();const aspect=Math.max(host.clientWidth/Math.max(host.clientHeight,1),.2),tangent=Math.tan(THREE.MathUtils.degToRad(38/2));const right=new THREE.Vector3().crossVectors(camera.up,direction).normalize(),up=new THREE.Vector3().crossVectors(direction,right).normalize(),box=bounds||new THREE.Box3().setFromObject(previewModel||model);box.getCenter(center);host.dataset.frameMode=bounds?'selection':'all';let distance=0,half=0;for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z]){const p=new THREE.Vector3(x,y,z).sub(center),extent=Math.max(Math.abs(p.dot(right))/aspect,Math.abs(p.dot(up)));distance=Math.max(distance,p.dot(direction)+extent/tangent);half=Math.max(half,extent);}camera.position.copy(center).addScaledVector(direction,distance*1.08);camera.zoom=1;camera.userData.half=half*1.08;bindControls();size();request();}
+  function fit(direction=new THREE.Vector3(1,.75,1),bounds=null,upVector=new THREE.Vector3(0,1,0)){
+    if(!camera||!model)return;
+    const box=bounds||new THREE.Box3().setFromObject(previewModel||model);
+    if(box.isEmpty())return;
+    axisMotion=null;
+    camera.up.copy(upVector);
+    direction.normalize();
+    const aspect=Math.max(.01,host.clientWidth/Math.max(host.clientHeight,1));
+    const tangent=Math.tan(THREE.MathUtils.degToRad((camera.fov||38)/2));
+    const right=new THREE.Vector3().crossVectors(camera.up,direction).normalize();
+    const up=new THREE.Vector3().crossVectors(direction,right).normalize();
+    const corner=new THREE.Vector3(),margin=1.12;
+    box.getCenter(center);
+    host.dataset.frameMode=bounds?'selection':'all';
+    let distance=0,half=0;
+    for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z]){
+      corner.set(x,y,z).sub(center);
+      const extent=Math.max(Math.abs(corner.dot(right))/aspect,Math.abs(corner.dot(up)))*margin;
+      distance=Math.max(distance,corner.dot(direction)+extent/tangent);
+      half=Math.max(half,extent);
+    }
+    camera.position.copy(center).addScaledVector(direction,Math.max(distance,.001));
+    camera.zoom=1;
+    camera.userData.half=Math.max(half,.001);
+    bindControls();
+    size();
+    request();
+  }
   function frameAll(){if(camera&&model)fit(camera.position.clone().sub(controls.target),null,camera.up.clone());}
   function focusSelected(){if(!model||!selected)return frameAll();const box=new THREE.Box3();let found=false;model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.userData.sourceMaterial===selected)){box.expandByObject(o);found=true;}});if(found)fit(camera.position.clone().sub(controls.target),box,camera.up.clone());else frameAll();}
   function direction(view){

@@ -209,6 +209,22 @@ try{
   assert.equal(recipe.layerCount,2);
   assert.equal(Object.keys(recipe.assets).length,3);
   assert.deepEqual((await api(packRoute)).paint,grouped.paint);
+  async function savedView(id){
+    return packedPage.evaluate(projectId=>{
+      const state=JSON.parse(localStorage.getItem('arachne-area-workspaces-v1')||'{}');
+      const area=state.material?.first?.first;
+      return area?.states?.viewport?.projectViews?.[projectId]??null;
+    },id);
+  }
+  const sourceView=packedPage.locator('.editor-viewport[data-state=ready]').first();
+  await sourceView.waitFor();
+  const initialView=await until(()=>savedView(packProject.id),'initial project camera');
+  await sourceView.locator('canvas').first().hover();
+  for(let i=0;i<8;i++)await packedPage.mouse.wheel(0,-600);
+  const zoomed=await until(async()=>{
+    const view=await savedView(packProject.id);
+    return view&&JSON.stringify(view.camera.eye)!==JSON.stringify(initialView.camera.eye)&&view;
+  },'zoomed project camera saved');
 
   const newProject=await api('/api/projects',{workflowType:'pbr_paint',modelTemplate:'cube',name:'智能材质副本验收'});
   const newRoute='/api/projects/'+newProject.id;
@@ -231,6 +247,10 @@ try{
   assert.deepEqual(applied.paint.imageDocuments[appliedFill.documentMaps.color],overlayEdited.paint.imageDocuments[overlayId]);
   await packedPage.locator('[data-layer-id="'+appliedWear.id+'"] .layer-select').waitFor();
   await packedPage.locator('.editor-viewport[data-state=ready]').first().waitFor();
+  const freshView=await until(()=>savedView(newProject.id),'new project framed independently');
+  assert.notDeepEqual(freshView.camera.eye,zoomed.camera.eye);
+  await packedPage.locator('.editor-viewport[data-rendered-paint-revision="'+applied.revision+'"]').first().waitFor();
+  await packedPage.locator('.editor-preview-status').filter({hasText:'实时材质'}).first().waitFor();
   await packedPage.screenshot({path:path.join(data,'smart-material-workbench.png')});
 
   const smartBake=await job(newRoute,'preview',{revision:applied.revision,requestId:'smart-material-cube-4k'});
@@ -293,6 +313,16 @@ try{
   assert.equal(rejected.status,400);
   assert.deepEqual((await api(newRoute)).paint,locked.paint);
   console.log('PASS dragging smart materials into a folder with atomic placement and lock checks');
+
+  await packedPage.goto(origin+'/?project='+packProject.id);
+  await packedPage.locator('[data-area-mode=material]').click();
+  await sourceView.waitFor();
+  await packedPage.evaluate(()=>window.dispatchEvent(new Event('pagehide')));
+  const returnedView=await savedView(packProject.id);
+  assert.equal(returnedView.camera.projection,zoomed.camera.projection);
+  for(const key of ['eye','target','up'])
+    returnedView.camera[key].forEach((value,index)=>assert.ok(Math.abs(value-zoomed.camera[key][index])<1e-7));
+  console.log('PASS independent camera framing and camera restoration across projects');
 
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
 }finally{

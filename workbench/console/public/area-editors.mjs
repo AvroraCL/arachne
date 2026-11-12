@@ -19,6 +19,7 @@ import {defaultLibraryMaterial,defaultBrushGraph} from './paint-library.mjs';
 import {createBrushBinding} from './paint-brush-binding.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {navigationCommand} from './viewport-navigation.mjs';
+import {createViewportProjectViews} from './viewport-project-views.mjs';
 import {layerIsVisible,layerLockOwner} from './paint-layer-tree.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {outlineBranches,outlineNameMatches,outlineRows} from './scene-outline.mjs';
@@ -49,12 +50,13 @@ function syncInspectionControl(control,inspection,doc){
   control.textContent=inspection.kind==='mask'?'退出蒙版查看':'退出图层独显';
   control.title=doc?.paint.layers.find(layer=>layer.id===inspection.id)?.name||control.textContent;
 }
-function materialPreviewText(frame,inspection,preview){
+function materialPreviewText(frame,inspection,preview,revision){
   const request=frame?.request,size=request?.size;
   const actual=size?`${size} × ${size}${size===4096?' · 4K':''}`:'等待实时预览';
   const pending=inspection&&(inspection.kind==='mask'?request?.inspectMask:request?.isolatedLayer)!==inspection.id;
   const label=pending?'正在准备临时预览…':request?.inspectMask?'蒙版 · ':request?.isolatedLayer?'独显 · ':'';
-  const state=preview?.error||preview?.phase==='error'?' · 更新失败':preview?.phase==='retrying'?' · 预览暂不可用，正在重试…':preview?.phase==='refining'?' · 正在提升到 4K…':'';
+  const state=preview?.error||preview?.phase==='error'?' · 更新失败':preview?.phase==='retrying'?' · 正在重试…':preview?.phase==='refining'?' · 正在提升到 4K…':
+    request&&request.revision!==revision?' · 上一修订':'';
   return (pending?label:label+actual)+state;
 }
 
@@ -64,9 +66,14 @@ export function registerAreaEditors(registry,bridge){
   registry.register('viewport',ctx=>{
     const {host,project,state,onChange}=ctx,lifecycle=new AbortController(),signal=lifecycle.signal;
     let mode=state.mode||'object',disposed=false,shown=true,loading=null,projectId=null,revision=-1,frame=null,modelState=null,lastScene=null,placement=null,lastPointer=null,layerGeneration=0,modeGeneration=0;
-    let picking=false,sampledBrush=null,pickerMessage='',navigating=false,wheelTimer=null,display;
-    let cameraFrame=state.cameraFrame===true,returnCamera=state.returnCamera||null,cyclesPaused=state.cyclesPaused===true;
-    let projectCameraView=cameraFrame&&state.projectCameraView===true,projectCameraKey='';
+    let picking=false,sampledBrush=null,pickerMessage='',navigating=false,wheelTimer=null,display,textureMessage='';
+    const projectViews=createViewportProjectViews(state,bridge.legacyCameraProject);
+    let cameraFrame=false,returnCamera=null,cyclesPaused=false,projectCameraView=false,projectCameraKey='';
+    function rememberView(){
+      if(projectId&&view.dataset.state==='ready')projectViews.remember(projectId,{
+        camera:viewport.readCamera(),cameraFrame,returnCamera,projectCameraView,cyclesPaused
+      });
+    }
     const inModeling=()=>mode==='object'||mode==='edit';
     const toolbar=el('div','editor-toolbar'),view=el('div','editor-viewport'),axis=el('div','vp-axis'),status=el('output','editor-message');axis.dataset.axisSpace='blender';view.append(axis);
     const stage=el('div','editor-viewport-stage'),frameCaption=el('span','camera-frame-caption');
@@ -167,7 +174,9 @@ export function registerAreaEditors(registry,bridge){
     previewBar.append(status,pickerStatus,resolution,retry,exitInspection);host.append(numeric,controls.bar,stage,previewBar);headerControls(ctx,toolbar);for(const b of toolbar.querySelectorAll('button')){const icon={'适应':'fit','正交':'orthographic'}[b.textContent];if(icon)chromeButton(b,icon);}
     const viewport=createViewport({host:view,animateAxes:true,localUI:true,onRenderPreviewStatus:syncPreviewStatus,onStatus:(text,kind)=>{
       // Background texture updates must not erase selection or transform feedback.
-      if(kind==='error'||view.dataset.state!=='ready'||!['object','edit'].includes(mode))status.textContent=text;
+      textureMessage=text;
+      if(kind==='error'||view.dataset.state!=='ready')status.textContent=text;
+      else if(!inModeling()&&!placement)status.textContent=frame?'实时材质':text;
     },onModelingPick:event=>{if(mode==='object'||mode==='edit'){modeler.pick(event);return true;}return false;}});
     const regionGesture=createRenderRegionGesture({host:view,signal,read:()=>project.document?.paint.renderRegion,
       origin:project.origin,commit:(region,origin)=>project.commands([{op:'renderRegion',region}],origin),
@@ -243,7 +252,7 @@ export function registerAreaEditors(registry,bridge){
       apply.disabled=!next.hasTransformTarget||next.dragging;selectButton.disabled=boxSelect.disabled=!canBoxSelect();
       meshButton.disabled=next.dragging||next.topologyState==='loading';
       view.toggleAttribute('data-local-view',next.localActive);
-      showModelStatus();
+      if(inModeling())showModelStatus();
       syncRenderPreview();
       if(next.sceneItems.length){lastScene=next;if(!project.scene||project.scene.owner===ctx.areaId)publishScene();}
     },{signal,read:()=>project.document,save:(modeling,rev,id)=>bridge.saveModel(modeling,{id,revision:rev}),travel:direction=>project.travel(direction)});
@@ -367,7 +376,10 @@ export function registerAreaEditors(registry,bridge){
       syncCyclesControl();
       const {inspection,status:preview}=bridge.materialPreview(),cycles=viewport.renderPreviewState();
       const rendered=display.mode==='cycles'&&cycles?.phase!=='off'&&cycles;
-      resolution.textContent=rendered?cycles.text:materialPreviewText(frame,inspection,preview);
+      const textured=!['solid','wire'].includes(display.mode);
+      resolution.textContent=rendered?cycles.text:textured?materialPreviewText(frame,inspection,preview,project.document?.revision):'';
+      if(!inModeling()&&!placement&&view.dataset.state==='ready')
+        status.textContent=rendered?'路径追踪':textured&&frame?'实时材质':textured?textureMessage:'';
       resolution.title=rendered?cycles.text:preview?.message||'';
       retry.hidden=rendered?!cycles.retry:!(preview?.error||preview?.phase==='error');
     }
@@ -460,7 +472,12 @@ export function registerAreaEditors(registry,bridge){
       const doc=project.document;if(disposed||!doc)return;
       createPaintLayer.disabled=!bridge.canAddMaterialLayer();
       if(projectId!==doc.id){
-        marquee.cancel();
+        rememberView();
+        const savedView=projectViews.read(doc.id);
+        cameraFrame=savedView?.cameraFrame===true;returnCamera=savedView?.returnCamera||null;
+        projectCameraView=cameraFrame&&savedView?.projectCameraView===true;
+        projectCameraKey='';cyclesPaused=savedView?.cyclesPaused===true;
+        marquee.cancel();regionGesture.cancel();focusGesture.cancel();placement=null;
         projectId=doc.id;lastScene=null;frame=null;revision=-1;navigating=false;delete view.dataset.materialInspection;modeler.close();
         const task=loading=viewport.loadProject(doc);
         syncRenderPreview();
@@ -468,7 +485,7 @@ export function registerAreaEditors(registry,bridge){
           await task;
           if(disposed||task!==loading||doc.id!==project.document?.id||view.dataset.state!=='ready')return;
           viewport.setActive(shown);
-          if(state.camera)viewport.applyCamera(state.camera);else if(state.direction)viewport.direction(state.direction);
+          if(savedView?.camera)viewport.applyCamera(savedView.camera);else if(state.direction)viewport.direction(state.direction);
           syncProjectCamera();
           syncCameraFrame();
           display.refresh();displayModeChanged();revision=doc.revision;
@@ -582,8 +599,8 @@ export function registerAreaEditors(registry,bridge){
     setMode(mode);viewportControllers.set(ctx.areaId,publishScene);
     viewport.setActive(true);void sync().catch(ctx.error);
     return {kind:'viewport',viewport,showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
-      getState:()=>({mode,element:component.value,tool:tool.value,orientation:orientation.value,pivot:transformPivot.value,...display.getState(),
-        camera:view.dataset.state==='ready'?viewport.readCamera():state.camera,cameraFrame,returnCamera,projectCameraView,cyclesPaused}),
+      getState(){rememberView();return {mode,element:component.value,tool:tool.value,orientation:orientation.value,pivot:transformPivot.value,
+        ...display.getState(),projectViews:projectViews.snapshot()};},
       isEditing:()=>smoothing.isOpen()||modeler.isDragging()||painter.isEditing()||marquee.isDragging()||regionGesture.editing()||focusGesture.editing(),
       setVisible(visible){
         if(shown===visible)return;
@@ -711,7 +728,7 @@ function createImageEditor(ctx,bridge,uv){
   function extent(){return Math.max(1,Math.min(stage.clientWidth,stage.clientHeight)-32);}
   function updateStatus(size=extent()){
     const {inspection,status:preview}=uv?bridge.materialPreview():{};
-    status.textContent=`${Math.round(size*zoom/4096*1000)/10}% · ${materialPreviewText(frame,inspection,preview)}`;
+    status.textContent=`${Math.round(size*zoom/4096*1000)/10}% · ${materialPreviewText(frame,inspection,preview,project.document?.revision)}`;
   }
   function layout(){
     if(!shown)return;

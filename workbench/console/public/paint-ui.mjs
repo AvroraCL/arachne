@@ -2803,7 +2803,7 @@ decorateWorkspaceButtons(document,{
 document.querySelector('.canvas-document-icon').innerHTML=workspaceIcons.image;
 document.querySelectorAll('select').forEach(enhanceSelectMenu);
 
-areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferences.startupArea==='last',desktopWorkspace,run,api,pngData,importAsset,importProjectPngs,busy:()=>busy,
+areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferences.startupArea==='last',legacyCameraProject:restoreWorkbenchSession().projectId,desktopWorkspace,run,api,pngData,importAsset,importProjectPngs,busy:()=>busy,
   renderSettings:renderSettingsBridge,renderResults:renderResultsBridge,
   materialInspection:()=>{const mask=doc&&inspectedMask();return mask?{kind:'mask',id:mask.id,projectId:doc.id}:doc&&isolatedLayerId?{kind:'layer',id:isolatedLayerId,projectId:doc.id}:null;},
   clearMaterialInspection,clearLayerIsolation,
