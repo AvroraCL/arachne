@@ -619,6 +619,19 @@ export function createDocumentEditor(ctx,bridge){
     importFile(entry.file,imageClipboardPlacement(entry.width,entry.height,center));
     return true;
   }
+  function pasteSystemImage(){
+    const read=window.arachneDesktop?.readImageClipboard;
+    if(!read||!canPaste()||!canInsertImage(project))return false;
+    const target=imageSelectionOrigin(project);
+    void run(async()=>{
+      const bytes=await read(),current=imageSelectionOrigin(project);
+      if(disposed||!imageView.isActive()||target.id!==current.id||target.documentId!==current.documentId||
+         target.layerId!==current.layerId||target.target!==current.target)return;
+      if(bytes)importFile(new File([bytes],'粘贴图像.png',{type:'image/png'}),undefined,true);
+      else pasteSelection();
+    });
+    return true;
+  }
   const stopClipboard=onImageClipboardChange(syncClipboard);
   host.addEventListener('copy',event=>{
     if(!event.target.closest('input,textarea,[contenteditable]')&&copySelection()){
@@ -800,7 +813,7 @@ export function createDocumentEditor(ctx,bridge){
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
   return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
     canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
-    canCut,cutSelection,canPasteInPlace:()=>canPaste()&&canInsertImage(project)&&!!copiedImage(),pasteInPlace:()=>pasteSelection(true),
+    canCut,cutSelection,pasteSystemImage,canPasteInPlace:()=>canPaste()&&canInsertImage(project)&&!!copiedImage(),pasteInPlace:()=>pasteSelection(true),
     getSelection(origin){return shown&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&
       !selection.isDragging()&&!selection.isTransforming()?selection.clip():null;},
     previewAdjustment(origin,operation){

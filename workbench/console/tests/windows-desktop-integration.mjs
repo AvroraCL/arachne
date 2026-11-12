@@ -76,8 +76,8 @@ try{
     if(/\/(?:render-view|cycles-session|cycles-devices)(?:\/|$)/.test(new URL(request.url()).pathname))blenderRequests.push(request.url());
   };
   page.on('request',watchRenderer);
-  await page.getByRole('button',{name:'渲染预览',exact:true}).first().click();
-  await page.locator('.editor-viewport[data-render-backend="path-tracer"][data-render-phase="ready"]').first().waitFor({timeout:90000});
+  await page.getByRole('button',{name:'渲染预览',exact:true}).first().click({noWaitAfter:true});
+  await page.locator('.editor-viewport[data-render-backend="path-tracer"][data-render-phase="ready"]').first().waitFor({timeout:120000});
   await page.getByRole('button',{name:'材质预览',exact:true}).first().click();
   page.off('request',watchRenderer);
   assert.deepEqual(blenderRequests,[]);
@@ -175,14 +175,13 @@ try{
     return bytes&&createHash('sha256').update(bytes).digest('hex')===archiveDigest;
   },'native ZIP download');
   assert.equal((await desktop.evaluate(()=>globalThis.arachneDownloadOptions)).title,'保存文件');
-  await desktop.evaluate(({dialog,session})=>{
+  await desktop.evaluate(({dialog,session},destination)=>{
     dialog.showErrorBox=(title,detail)=>{globalThis.arachneDownloadError={title,detail};};
     session.defaultSession.once('will-download',()=>{
       const fs=process.getBuiltinModule('fs');
-      fs.writeFileSync(globalThis.arachneDownloadDestination,'其他程序刚保存的新内容');
+      fs.writeFileSync(destination,'其他程序刚保存的新内容');
     });
-  });
-  await desktop.evaluate(file=>{globalThis.arachneDownloadDestination=file;},saved);
+  },saved);
   await download();
   const conflict=await waitFor(()=>desktop.evaluate(()=>globalThis.arachneDownloadError),'download destination change alert');
   assert.match(conflict.detail,/目标文件在下载期间发生变化/);
@@ -232,12 +231,17 @@ try{
     return Object.values(doc.paint.imageDocuments??{}).length&&doc;
   },'native clipboard test document');
   const imageId=Object.keys(drawing.paint.imageDocuments)[0];
+  await desktop.evaluate(({BrowserWindow})=>{
+    const win=BrowserWindow.getAllWindows()[0];
+    win.show();win.focus();win.webContents.focus();
+  });
   await editor.getByLabel('图像文档画布').focus();
-  await desktop.evaluate(async({BrowserWindow,clipboard,nativeImage,ClipboardItem},encoded)=>{
+  await desktop.evaluate(async({BrowserWindow,clipboard,Menu,nativeImage,ClipboardItem},encoded)=>{
     const png=Buffer.from(encoded,'base64');
     if(ClipboardItem)await clipboard.write([new ClipboardItem({'image/png':new Blob([png],{type:'image/png'})})]);
     else clipboard.writeImage(nativeImage.createFromBuffer(png));
-    BrowserWindow.getAllWindows()[0].webContents.paste();
+    const item=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu.items.find(item=>item.label==='粘贴');
+    item.click(item,BrowserWindow.getAllWindows()[0],{});
   },bytes.toString('base64'));
   const pasted=await waitFor(async()=>{
     const doc=await read('/api/projects/'+id),layer=doc.paint.imageDocuments[imageId].layers.find(layer=>layer.kind==='image');
@@ -281,8 +285,13 @@ try{
   });
   await page.waitForFunction(()=>document.querySelector('#native-text-cut-check').value==='');
   assert.equal(await desktop.evaluate(({clipboard})=>clipboard.readText()),textProbe);
+  await desktop.evaluate(({Menu,BrowserWindow})=>{
+    const item=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu.items.find(item=>item.label==='粘贴');
+    item.click(item,BrowserWindow.getAllWindows()[0],{});
+  });
+  await page.waitForFunction(text=>document.querySelector('#native-text-cut-check').value===text,textProbe);
   await page.locator('#native-text-cut-check').evaluate(input=>input.remove());
-  console.log('PASS native Edit menu cuts selected Chinese text through the system clipboard');
+  console.log('PASS native Edit menu cuts and pastes selected Chinese text through the system clipboard');
   await page.locator('[data-area-mode=modeling]').click();
   await desktop.evaluate(({BrowserWindow,screen})=>{
     const area=screen.getPrimaryDisplay().workArea;

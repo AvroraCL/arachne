@@ -13,6 +13,7 @@ const stateFile=path.join(userRoot,'desktop.json');
 const icon=path.join(import.meta.dirname,'arachne.ico');
 const controller=new AbortController();
 const downloads=new Set();
+const clipboardImageLimit=24*1024*1024;
 let service,starting,main,origin,checkingClose=false,closing=false,quitStarted=false,quitReady=false;
 let state={},windowSaveTimer;
 
@@ -47,7 +48,9 @@ function buildMenus(){
     const contents=main&&!main.isDestroyed()&&main.webContents;
     if(contents&&sameOrigin(contents.getURL()))
       void contents.executeJavaScript('window.arachneNativeHost?.command('+JSON.stringify(name)+',{nativeEdit:true})').then(result=>{
-        if(name==='cut'&&result==='native-text'&&!contents.isDestroyed()&&sameOrigin(contents.getURL()))contents.cut();
+        if(result!=='native-text'||contents.isDestroyed()||!sameOrigin(contents.getURL()))return;
+        if(name==='cut')contents.cut();
+        if(name==='paste')contents.paste();
       }).catch(console.error);
   }});
   const separator={type:'separator'};
@@ -61,7 +64,7 @@ function buildMenus(){
     ]},
     {label:'编辑',submenu:[
       command('撤销','undo','CmdOrCtrl+Z'),command('重做','redo','CmdOrCtrl+Shift+Z'),separator,
-      command('剪切','cut','CmdOrCtrl+X'),{label:'复制',role:'copy'},{label:'粘贴',role:'paste'},
+      command('剪切','cut','CmdOrCtrl+X'),{label:'复制',role:'copy'},command('粘贴','paste','CmdOrCtrl+V'),
       command('合并复制','copyMerged','CmdOrCtrl+Shift+C'),
       command('原位粘贴','pasteInPlace','CmdOrCtrl+Shift+V'),{label:'全选',role:'selectAll'},
       separator,command('历史记录…','history'),command('搜索命令…','searchCommands','CmdOrCtrl+K'),command('设置…','settings')
@@ -218,10 +221,9 @@ async function start(){
     win.setTitle(name?name.slice(0,160)+' · '+appName:appName);
     if(state.project!==id){state.project=id;saveState();}
   });
+  const trustedClipboard=event=>event.sender===win.webContents&&event.senderFrame===win.webContents.mainFrame&&sameOrigin(event.senderFrame?.url);
   ipcMain.handle('arachne:clipboard-image',async(event,bytes)=>{
-    if(event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame||
-       !sameOrigin(event.senderFrame?.url)||!(bytes instanceof ArrayBuffer)||bytes.byteLength<24||
-       bytes.byteLength>24*1024*1024)return false;
+    if(!trustedClipboard(event)||!(bytes instanceof ArrayBuffer)||bytes.byteLength<24||bytes.byteLength>clipboardImageLimit)return false;
     const png=Buffer.from(bytes);
     if(png.readUInt32BE(0)!==0x89504e47||png.readUInt32BE(4)!==0x0d0a1a0a||
        ![png.readUInt32BE(16),png.readUInt32BE(20)].every(side=>side>0&&side<=4096))return false;
@@ -230,6 +232,26 @@ async function start(){
     if(ClipboardItem)await clipboard.write([new ClipboardItem({'image/png':new Blob([png],{type:'image/png'})})]);
     else clipboard.writeImage(image);
     return true;
+  });
+  ipcMain.handle('arachne:read-clipboard-image',async event=>{
+    if(!trustedClipboard(event)||!win.isFocused())return null;
+    let png;
+    if(ClipboardItem){
+      const item=(await clipboard.read()).find(item=>item.types.includes('image/png'));
+      if(item){
+        const blob=await item.getType('image/png');
+        if(blob.size>clipboardImageLimit)throw Error('剪贴板图片超过 24 MiB');
+        png=await blob.arrayBuffer();
+      }
+    }
+    if(!png){
+      const image=clipboard.readImage();
+      if(image.isEmpty())return null;
+      if(Object.values(image.getSize()).some(side=>side>8192))throw Error('剪贴板图片边长超过 8192 像素');
+      png=new Uint8Array(image.toPNG()).buffer;
+    }
+    if(png.byteLength>clipboardImageLimit)throw Error('剪贴板图片超过 24 MiB');
+    return png;
   });
   buildMenus();
   win.once('ready-to-show',()=>{if(maximized)win.maximize();focus();});

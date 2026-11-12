@@ -23,6 +23,11 @@ export function createNativeWorkbench({window,document,status,flush,imageCommand
       if(!control||control.disabled)return false;
       control.click();return true;
     }
+    if(name==='paste'){
+      if(!nativeEdit)return false;
+      if(focused?.matches?.('input,textarea,[contenteditable="true"]')||document.querySelector('dialog[open]'))return 'native-text';
+      return imageCommand?.('pasteSystemImage')===true?true:'native-text';
+    }
     if(['cut','copyMerged','pasteInPlace'].includes(name)){
       if(focused?.matches?.('input,textarea,[contenteditable="true"]')){
         if(name!=='cut')return false;

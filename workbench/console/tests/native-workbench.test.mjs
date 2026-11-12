@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {createNativeWorkbench,notifyNativeProject} from '../public/native-workbench.mjs';
 import {compositionKey} from '../public/text-input.mjs';
 
-function fixture(flush){
+function fixture(flush,imageCommand){
   const calls=[],controls=new Map(),listeners=new Map();let modal=false,focused=null,state='ready';
   for(const id of ['new','open-projects','open-paint-import','open-glb-migration','open-command-picker','open-workspace-layouts','open-delivery','undo','redo'])
     controls.set(id,{disabled:false,hidden:false,click(){calls.push(id);}});
   const document={get activeElement(){return focused;},querySelector:()=>modal?{}:null,getElementById:id=>controls.get(id),execCommand:name=>(calls.push('text-'+name),true),
     addEventListener:(name,listener)=>listeners.set(name,listener)};
-  const bridge=createNativeWorkbench({window:{},document,status:()=>({state}),flush});
+  const bridge=createNativeWorkbench({window:{},document,status:()=>({state}),flush,imageCommand});
   return {bridge,calls,controls,focus:value=>focused=value,modal:value=>modal=value,state:value=>state=value,
     event:(name,target=focused)=>listeners.get(name)({target})};
 }
@@ -88,4 +88,18 @@ test('native cut delegates selected text to the system and keeps paste-in-place 
   assert.equal(f.bridge.command('cut',{nativeEdit:true}),'native-text');
   assert.equal(f.bridge.command('pasteInPlace',{nativeEdit:true}),false);
   assert.deepEqual(f.calls,[]);
+});
+
+test('native paste reads the image only in the active drawing editor and respects text focus',()=>{
+  let attempted=0,handles=true;
+  const f=fixture(undefined,command=>{assert.equal(command,'pasteSystemImage');attempted++;return handles;});
+  assert.equal(f.bridge.command('paste',{nativeEdit:true}),true);
+  handles=false;
+  assert.equal(f.bridge.command('paste',{nativeEdit:true}),'native-text');
+  f.focus({matches:()=>true});
+  assert.equal(f.bridge.command('paste',{nativeEdit:true}),'native-text');
+  f.event('compositionstart');
+  assert.equal(f.bridge.command('paste',{nativeEdit:true}),false);
+  f.event('compositionend');
+  assert.equal(attempted,2);
 });
