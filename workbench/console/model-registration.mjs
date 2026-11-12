@@ -33,6 +33,22 @@ export async function registerGlb(input,scratch,{python=pythonExecutable(),mater
   }
   return staging;
 }
+export async function importObjProject(input,scratch,name,{material,attachments,upAxis,preserveTextures}){
+  const output=path.join(scratch,'converted.glb'),config=path.join(scratch,'obj.json');
+  atomic(config,{obj:input,out:output,material,attachments,upAxis,preserveTextures,ownerPid:process.pid});
+  let converted;
+  try{
+    const {stdout}=await execute(pythonExecutable(),['-X','utf8',path.join(ROOT,'obj_model.py'),config],
+      {cwd:ROOT,windowsHide:true,timeout:180000});
+    converted=JSON.parse(stdout);
+  }catch(error){
+    const reason=error.stderr?.trim();
+    if(reason&&!/[\r\n]/.test(reason))throw Error(reason.slice(0,400));
+    throw Error('OBJ 转换失败，请检查模型、MTL 和贴图');
+  }
+  if((await fs.stat(output)).size>128*1024*1024)throw Error('转换后的模型超过 128 MiB');
+  return importGlbProject(output,scratch,name,converted.material??undefined,{preserveTextures});
+}
 export async function importGlbProject(input,scratch,name,material,{preserveTextures=true}={}){
   const textureOutput=preserveTextures?path.join(scratch,'paint-maps'):undefined;
   const staging=await registerGlb(input,scratch,{material,textureOutput});

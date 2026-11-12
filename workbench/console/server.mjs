@@ -1,6 +1,6 @@
 import {readDesktopWorkspace,writeDesktopWorkspace} from './desktop-workspaces.mjs';
 import {readDesktopSettings,writeDesktopSettings} from './desktop-settings.mjs';
-import {importGlbProject} from './model-registration.mjs';
+import {importGlbProject,importObjProject} from './model-registration.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
@@ -17,6 +17,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {StringDecoder} from 'node:string_decoder';
 import {gzip} from 'node:zlib';
+import {Readable} from 'node:stream';
 import {promisify} from 'node:util';
 const compressLive=promisify(gzip);
 import {ROOT,DATA,list,read,commit,travel,projectHistory,projectDir,projectFileVersion} from './store.mjs';
@@ -104,27 +105,61 @@ async function receivePaintArchive(req){
 }
 let importingModel=false;
 const maxModel=128*1024*1024;
-async function receiveModel(req,name,material,preserveTextures){
-  if(Number(req.headers['content-length'])>maxModel)throw Object.assign(Error('GLB 不能超过 128 MiB'),{status:413});
+async function withModelImport(req,limit,message,receive){
+  if(Number(req.headers['content-length'])>limit)throw Object.assign(Error(message),{status:413});
   if(importingModel)throw Object.assign(Error('已有模型正在导入'),{status:429});
   importingModel=true;
   let scratch;
+  async function* parts(){
+    let size=0;
+    for await(const part of req.iterator({destroyOnReturn:false})){
+      size+=part.length;
+      if(size>limit)throw Object.assign(Error(message),{status:413});
+      yield part;
+    }
+  }
   try{
     scratch=await fs.promises.mkdtemp(path.join(DATA,'.model-import-'));
+    return await receive(scratch,parts());
+  }finally{
+    try{if(scratch)await fs.promises.rm(scratch,{recursive:true,force:true});}
+    finally{importingModel=false;}
+  }
+}
+function receiveGlb(req,name,material,preserveTextures){
+  return withModelImport(req,maxModel,'GLB 不能超过 128 MiB',async(scratch,parts)=>{
     const input=path.join(scratch,'incoming.glb'),upload=await fs.promises.open(input,'wx');
     try{
-      let size=0;
-      for await(const part of req.iterator({destroyOnReturn:false})){
-        size+=part.length;
-        if(size>maxModel)throw Object.assign(Error('GLB 不能超过 128 MiB'),{status:413});
-        await upload.writeFile(part);
-      }
+      for await(const part of parts)await upload.writeFile(part);
     }finally{await upload.close();}
-    return await importGlbProject(input,scratch,name,material,{preserveTextures});
-  }finally{
-    importingModel=false;
-    if(scratch)await fs.promises.rm(scratch,{recursive:true,force:true});
-  }
+    return importGlbProject(input,scratch,name,material,{preserveTextures});
+  });
+}
+function receiveObj(req,name,material,upAxis,preserveTextures){
+  return withModelImport(req,maxModel+64*1024,'OBJ 和配套文件合计不能超过 128 MiB',async(scratch,parts)=>{
+    const response=new Response(Readable.toWeb(Readable.from(parts)),{headers:{'Content-Type':req.headers['content-type']}});
+    let form;
+    try{form=await response.formData();}
+    catch(error){if(error.status===413||error.cause?.status===413)throw Object.assign(Error('OBJ 和配套文件合计不能超过 128 MiB'),{status:413});
+      throw Error('OBJ 上传数据不完整，请重新选择文件');}
+    const models=form.getAll('model'),model=models[0],files=form.getAll('attachment');
+    if(models.length!==1||!(model instanceof File)||!/\.obj$/i.test(model.name))throw Error('请选择一个 OBJ 模型');
+    if(files.length>24||files.some(file=>!(file instanceof File)||!/\.(?:mtl|png|jpe?g|webp)$/i.test(file.name)||file.name.length>250))
+      throw Error('最多选择 24 个 MTL、PNG、JPEG 或 WebP 配套文件');
+    if(files.reduce((size,file)=>size+file.size,model.size)>maxModel)
+      throw Object.assign(Error('OBJ 和配套文件合计不能超过 128 MiB'),{status:413});
+    const seen=new Set();
+    const attachments=files.map((file,index)=>{
+      const key=file.name.normalize('NFC').toLowerCase();
+      if(seen.has(key))throw Error('配套文件中有重名项：'+file.name);
+      seen.add(key);
+      return {name:file.name,path:path.join(scratch,'attachment-'+index)};
+    });
+    const input=path.join(scratch,'incoming.obj');
+    await fs.promises.writeFile(input,model.stream(),{flag:'wx'});
+    for(const [index,file] of files.entries())await fs.promises.writeFile(attachments[index].path,file.stream(),{flag:'wx'});
+    return importObjProject(input,scratch,name,{material,attachments,upAxis,preserveTextures});
+  });
 }
 function file(res,p){if(!fs.existsSync(p)||!fs.statSync(p).isFile()){send(res,404,{error:'文件不存在'});return;}res.writeHead(200,{'Content-Type':mime(p),'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'});fs.createReadStream(p).pipe(res);}
 async function verifyExportPreview(res,doc,previewId){
@@ -152,7 +187,19 @@ const server=http.createServer(async(req,res)=>{
         throw Error('GLB 材质编号无效');
       const textures=url.searchParams.get('textures')??'preserve';
       if(!['preserve','blank'].includes(textures))throw Error('请选择有效的源贴图导入方式');
-      send(res,201,await receiveModel(req,name,material,textures==='preserve'));return;
+      send(res,201,await receiveGlb(req,name,material,textures==='preserve'));return;
+    }
+    if(req.method==='POST'&&url.pathname==='/api/projects/obj-import'){
+      if(!String(req.headers['content-type']).startsWith('multipart/form-data;')){
+        send(res,415,{error:'请选择 OBJ 及配套文件'});return;
+      }
+      const name=url.searchParams.get('name')?.trim()||'导入模型 · PBR 涂装';
+      if(name.length>100)throw Error('工程名称不能超过 100 字');
+      const material=url.searchParams.get('material')??undefined;
+      if(material!==undefined&&(!material.trim()||material.length>250))throw Error('OBJ 材质名称无效');
+      const upAxis=url.searchParams.get('up')??'y',textures=url.searchParams.get('textures')??'preserve';
+      if(!['y','z'].includes(upAxis)||!['preserve','blank'].includes(textures))throw Error('请选择有效的 OBJ 导入设置');
+      send(res,201,await receiveObj(req,name,material,upAxis,textures==='preserve'));return;
     }
     if(req.method==='POST'&&url.pathname==='/api/projects/paint-import'){
       if(req.headers['content-type']!=='application/zip'){send(res,415,{error:'请选择涂装交付 ZIP'});return;}

@@ -1590,11 +1590,20 @@ historyPanel=setupPaintHistory({trigger:$('open-history'),read:()=>doc,load:id=>
   restore:(direction,steps,origin)=>run(async()=>{if(doc.id!==origin.id)throw Error('当前工程已切换');await api('/api/projects/'+origin.id+'/paint/'+direction,{revision:origin.revision,steps});approvedPreviewId=null;},$('history-error'))});
 const newPaintDialog=$('new-paint-dialog'),importDialog=$('paint-import-dialog');
 setupProjectFiles({canOpen:canOpenProjectDialog,
-  create:(name,model,error,material,modelTemplate,preserveTextures)=>run(async()=>{
+  create:(name,model,error,material,modelTemplate,preserveTextures,upAxis)=>run(async()=>{
     const options=new URLSearchParams({name,...(material==null?{}:{material}),...(!preserveTextures?{textures:'blank'}:{})});
-    const project=model?await responseJson(await fetch('/api/projects/model-import?'+options,{
-      method:'POST',headers:{'Content-Type':'model/gltf-binary'},body:model
-    })):await api('/api/projects',{workflowType:'pbr_paint',name,modelTemplate});
+    let project;
+    if(model?.format==='obj'){
+      const files=new FormData();
+      files.append('model',model.file);
+      for(const file of model.attachments)files.append('attachment',file);
+      options.set('up',upAxis);
+      project=await responseJson(await fetch('/api/projects/obj-import?'+options,{method:'POST',body:files}));
+    }else if(model){
+      project=await responseJson(await fetch('/api/projects/model-import?'+options,{
+        method:'POST',headers:{'Content-Type':'model/gltf-binary'},body:model.file
+      }));
+    }else project=await api('/api/projects',{workflowType:'pbr_paint',name,modelTemplate});
     await load(project.id,{initialLayer:model?project.paint.layers[0]?.id:undefined});
   },error),
   restore:(archive,error)=>run(async()=>{

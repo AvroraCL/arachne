@@ -52,6 +52,59 @@ async function checkArchive(file){
     throw Error('请选择有效的涂装 ZIP');
 }
 
+const modelExtension=/\.(glb|obj)$/i;
+const sidecarExtension=/\.(mtl|png|jpe?g|webp)$/i;
+
+async function objMaterials(file){
+  const probe=await file.slice(0,256*1024).arrayBuffer();
+  let encoding='utf-8';
+  try{new TextDecoder(encoding,{fatal:true}).decode(probe,{stream:probe.byteLength<file.size});}
+  catch{encoding='gb18030';}
+  const materials=new Set();
+  let pending='',continued='',material='默认材质';
+  const read=line=>{
+    const value=continued+line.split('#',1)[0].trim();
+    if(value.length>65536)throw Error('OBJ 中有过长的指令');
+    if(value.endsWith('\\')){continued=value.slice(0,-1)+' ';return;}
+    continued='';
+    const match=/^(usemtl|f)\s+(.+)$/.exec(value);
+    if(!match)return;
+    if(match[1]==='usemtl')material=match[2].replace(/^"|"$/g,'')||'默认材质';
+    else if(/\s/.test(match[2])&&match[2].trim().split(/\s+/).every(corner=>/^[^/]+\/[^/]+/.test(corner)))
+      materials.add(material);
+  };
+  const reader=file.stream().pipeThrough(new TextDecoderStream(encoding,{fatal:true})).getReader();
+  try{
+    for(let chunk=await reader.read();!chunk.done;chunk=await reader.read()){
+      const lines=(pending+chunk.value).split('\n');
+      pending=lines.pop();
+      if(pending.length>65536)throw Error('OBJ 中有过长的指令');
+      for(const line of lines)read(line);
+    }
+    if(pending)read(pending);
+  }finally{await reader.cancel().catch(()=>{});}
+  if(!materials.size)throw Error('OBJ 网格没有可用的 UV，请先展开 UV');
+  return [...materials].map(name=>[name,name]);
+}
+
+async function checkModel(files){
+  const models=files.filter(file=>modelExtension.test(file.name));
+  if(models.length!==1)throw Error('请选择一个 GLB 或 OBJ 模型');
+  const [file]=models;
+  if(/\.glb$/i.test(file.name)){
+    if(files.length!==1)throw Error('GLB 请单独选择，模型已包含配套文件');
+    return {file,format:'glb',entries:await checkGlb(file),attachments:[],size:file.size};
+  }
+  const attachments=files.filter(item=>item!==file);
+  if(attachments.length>24||attachments.some(item=>!sidecarExtension.test(item.name)))
+    throw Error('OBJ 可同时选择最多 24 个 MTL、PNG、JPEG 或 WebP 文件');
+  if(new Set(attachments.map(item=>item.name.normalize('NFC').toLowerCase())).size!==attachments.length)
+    throw Error('配套文件不能重名');
+  const size=files.reduce((bytes,item)=>bytes+item.size,0);
+  if(size>128*MiB)throw Error('OBJ 和配套文件合计不能超过 128 MiB');
+  return {file,format:'obj',entries:await objMaterials(file),attachments,size};
+}
+
 function fileSize(bytes){
   if(bytes<1024)return bytes+' B';
   if(bytes<MiB)return (bytes/1024).toFixed(1)+' KiB';
@@ -86,9 +139,11 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
     choose.disabled=working;
     if(clear){clear.hidden=!selected&&!invalid;clear.disabled=working;}
     submit.disabled=pending||invalid||!optional&&!selected;
-    label.textContent=selected?.name||defaultLabel;
-    label.title=selected?.name||'';
-    size.textContent=validating?'正在检查文件…':selected?fileSize(selected.size):defaultHint;
+    label.textContent=selected?.file.name||defaultLabel;
+    label.title=selected?.file.name||'';
+    size.textContent=validating?'正在检查文件…':selected?
+      [fileSize(selected.size),selected.attachments?.length?selected.attachments.length+' 个配套文件':''].filter(Boolean).join(' · '):defaultHint;
+    size.title=selected?.attachments?.map(file=>file.name).join('\n')||'';
     drop.setAttribute('aria-busy',String(pending));
   }
 
@@ -101,16 +156,11 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
   async function receive(files){
     if(!files.length||working||!dialog.open)return;
     const token=++request;
-    if(files.length!==1){
-      validating=false;invalid=true;
-      error.textContent='一次请选择一个文件';sync();return;
-    }
-    const [file]=files;
     validating=true;invalid=false;error.textContent='';sync();
     try{
-      const info=await check(file);
+      const next=await check(files);
       if(token!==request||!dialog.open)return;
-      selected=file;onFile?.(file,info);
+      selected=next;onFile?.(next);
     }catch(failure){
       if(token===request&&dialog.open){selected=null;onFile?.(null);invalid=true;error.textContent=failure.message;}
     }finally{
@@ -146,6 +196,7 @@ export function setupProjectFiles({canOpen,create,restore}){
   const byId=id=>document.getElementById(id);
   const name=byId('new-paint-name'),material=byId('new-paint-material'),sourceTextures=byId('new-paint-source-textures');
   const template=byId('new-paint-template'),templateRow=template.closest('label'),materialRow=material.closest('label');
+  const upAxis=byId('new-paint-up-axis'),upAxisRow=upAxis.closest('label'),objHint=byId('new-paint-obj-hint');
   template.replaceChildren(new Option('示例模型','demo'),...Object.entries(modelTemplates).map(([id,title])=>new Option(title,id)));
   syncSelectMenu(template);
   let suggested=defaultProjectName;
@@ -162,27 +213,29 @@ export function setupProjectFiles({canOpen,create,restore}){
     label:byId('new-paint-model-label'),size:byId('new-paint-model-size'),
     choose:byId('choose-new-paint-model'),clear:byId('clear-new-paint-model'),
     close:byId('new-paint-close'),submit:byId('new-paint-submit'),error:byId('new-paint-error'),
-    check:checkGlb,defaultLabel:'导入自有模型',defaultHint:'拖入 GLB，或选择文件',optional:true,
-    onFile(file,entries=[]){
-      materialRow.hidden=!file;
-      sourceTextures.closest('label').hidden=!file;
+    check:checkModel,defaultLabel:'导入自有模型',defaultHint:'拖入 GLB 或 OBJ 及配套文件',optional:true,
+    onFile(model){
+      materialRow.hidden=!model;
+      upAxisRow.hidden=objHint.hidden=model?.format!=='obj';
+      sourceTextures.closest('label').hidden=!model;
       sourceTextures.checked=true;
-      templateRow.hidden=!!file;
-      material.replaceChildren(new Option('自动选择','auto'),...entries.map(([id,title])=>new Option(title,id)));
+      upAxis.value='y';syncSelectMenu(upAxis);
+      templateRow.hidden=!!model;
+      material.replaceChildren(new Option('自动选择',''),...(model?.entries||[]).map(([id,title])=>new Option(title,id)));
       syncSelectMenu(material);
-      suggest(file?.name.replace(/\.glb$/i,'').trim().slice(0,100)||templateName());
+      suggest(model?.file.name.replace(modelExtension,'').trim().slice(0,100)||templateName());
     },
     async commit(model,error){
       const value=name.value.trim();
       if(!value){error.textContent='请输入工程名称';name.focus();return false;}
-      const chosen=model&&material.value!=='auto'?material.value:null;
+      const chosen=model&&material.value!==''?material.value:null;
       const modelTemplate=!model&&template.value!=='demo'?template.value:undefined;
-      name.disabled=material.disabled=template.disabled=sourceTextures.disabled=true;
-      syncSelectMenu(material);syncSelectMenu(template);
-      try{return await create(value,model,error,chosen,modelTemplate,sourceTextures.checked);}
+      name.disabled=material.disabled=template.disabled=sourceTextures.disabled=upAxis.disabled=true;
+      syncSelectMenu(material);syncSelectMenu(template);syncSelectMenu(upAxis);
+      try{return await create(value,model,error,chosen,modelTemplate,sourceTextures.checked,upAxis.value);}
       finally{
-        name.disabled=material.disabled=template.disabled=sourceTextures.disabled=false;
-        syncSelectMenu(material);syncSelectMenu(template);
+        name.disabled=material.disabled=template.disabled=sourceTextures.disabled=upAxis.disabled=false;
+        syncSelectMenu(material);syncSelectMenu(template);syncSelectMenu(upAxis);
       }
     }
   });
@@ -190,27 +243,33 @@ export function setupProjectFiles({canOpen,create,restore}){
     dialog:byId('paint-import-dialog'),input:byId('paint-import-file'),drop:byId('paint-import-drop'),
     label:byId('paint-import-label'),size:byId('paint-import-size'),choose:byId('choose-paint-import'),
     close:byId('paint-import-close'),submit:byId('paint-import-submit'),error:byId('paint-import-error'),
-    check:checkArchive,defaultLabel:'拖入涂装 ZIP',defaultHint:'工程副本或交付包',commit:restore
+    async check(files){
+      if(files.length!==1)throw Error('一次请选择一个涂装 ZIP');
+      const [file]=files;
+      await checkArchive(file);
+      return {file,size:file.size};
+    },
+    defaultLabel:'拖入涂装 ZIP',defaultHint:'工程副本或交付包',commit:(archive,error)=>restore(archive.file,error)
   });
 
   function show(which,files){
     if(!canOpen())return;
     const menu=document.querySelector('.paint-menu[open]');
     if(menu){menu.open=false;menu.querySelector('summary')?.focus();}
-    if(which==='glb'){
+    if(which==='model'){
       template.value='demo';syncSelectMenu(template);
       name.value=suggested=defaultProjectName;
       newDialog(files);name.select();
     }else importDialog(files);
   }
 
-  byId('new').onclick=()=>show('glb');
+  byId('new').onclick=()=>show('model');
   byId('open-paint-import').onclick=()=>show('zip');
   const welcome=byId('empty'),error=byId('welcome-error');
   acceptFileDrop(welcome,canOpen,files=>{
-    if(files.length!==1){error.textContent='一次请拖入一个文件';return;}
-    const type=/\.(glb|zip)$/i.exec(files[0].name)?.[1]?.toLowerCase();
-    if(!type){error.textContent='请拖入 GLB 模型或涂装 ZIP';return;}
+    const type=files.some(file=>modelExtension.test(file.name))?'model':
+      files.some(file=>/\.zip$/i.test(file.name))?'zip':'';
+    if(!type){error.textContent='请拖入 GLB、OBJ 或涂装 ZIP';return;}
     error.textContent='';show(type,files);
   });
 }

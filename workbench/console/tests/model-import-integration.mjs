@@ -790,6 +790,94 @@ try{
   await api(texturedPaint+'/undo',{revision:mixed.revision});
   assert.deepEqual((await api(texturedRoute)).paint.layers.at(-1).channelBlend,{roughness:'multiply'});
   console.log('PASS per-channel material opacity, linear roughness blending, normal detail, guarded inputs and undo');
+
+  const objFiles=path.join(data,'OBJ 测试 文件');
+  await fs.mkdir(objFiles);
+  const objFile=path.join(objFiles,'凹形机翼.obj'),mtlFile=path.join(objFiles,'表面 材质.mtl');
+  const objColor=path.join(objFiles,'表面 色彩.png'),objRoughness=path.join(objFiles,'粗糙度 图.png');
+  await fs.writeFile(objFile,[
+    'mtllib 表面 材质.mtl','o 凹形机翼','s 1',
+    'v -1 -1 0','v 1 -1 0','v 1 1 0','v 0 0 0','v -1 1 0',
+    'vt 0 0','vt 1 0','vt 1 1','vt .5 .5','vt 0 1',
+    'usemtl 机翼表面','f -5/-5 -4/-4 -3/-3 -2/-2 -1/-1',
+    'o 支架','usemtl 支架材料','v -1 -1 -1','v 1 -1 -1','v 0 0 -1',
+    'f -3/1 -2/2 -1/4',''
+  ].join('\n'));
+  await fs.writeFile(mtlFile,[
+    'newmtl 机翼表面','Kd 1 1 1','map_Kd 表面 色彩.png','map_Pr 粗糙度 图.png',
+    'newmtl 支架材料','Kd .2 .3 .4','Pr .65',''
+  ].join('\n'));
+  execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import sys',
+    'from PIL import Image',
+    'image = Image.new("RGBA",(2,2))',
+    'image.putdata([(192,32,10,255),(192,32,10,255),(12,36,128,64),(12,36,128,64)])',
+    'image.save(sys.argv[1]); Image.new("L",(2,2),90).save(sys.argv[2])'
+  ].join('\n'),objColor,objRoughness]);
+  const countBeforeObj=(await api('/api/projects')).length;
+  const objDialog=await chooseTextured(objFile);
+  await objDialog.locator('#new-paint-submit').click();
+  await objDialog.getByText(/缺少 MTL/).waitFor();
+  assert.equal((await api('/api/projects')).length,countBeforeObj);
+  await objDialog.locator('#new-paint-model').setInputFiles([objFile,mtlFile,objColor,objRoughness]);
+  await objDialog.getByText(/3 个配套文件/).waitFor();
+  await objDialog.getByRole('button',{name:'向上轴',exact:true}).click();
+  await objDialog.getByRole('option',{name:'Z 向上',exact:true}).click();
+  await objDialog.getByRole('button',{name:'涂装材质',exact:true}).click();
+  await objDialog.getByRole('option',{name:'机翼表面',exact:true}).click();
+  await reopened.screenshot({path:path.join(data,'obj-import-options.png')});
+  await objDialog.locator('#new-paint-submit').click();
+  await objDialog.waitFor({state:'hidden'});
+  const objId=new URL(reopened.url()).searchParams.get('project'),objRoute='/api/projects/'+objId,objPaint=objRoute+'/paint';
+  const objDoc=await api(objRoute),objManifest=await api(objRoute+'/viewport');
+  assert.equal(objDoc.name,'凹形机翼');
+  assert.equal(objDoc.source.format,'glb');
+  assert.equal(objDoc.source.material,'机翼表面');
+  assert.equal(objDoc.source.uvSha256,objManifest.metadata.uv_before);
+  assert.deepEqual(Object.keys(objDoc.paint.layers[0].maps).sort(),['alpha','color','metallic','roughness']);
+  const objGlb=Buffer.from(await (await fetch(origin+objManifest.modelUrl)).arrayBuffer());
+  const objJsonSize=objGlb.readUInt32LE(12);
+  const objGltf=JSON.parse(objGlb.subarray(20,20+objJsonSize).toString());
+  const readFloats=(accessorIndex)=>{
+    const accessor=objGltf.accessors[accessorIndex],view=objGltf.bufferViews[accessor.bufferView];
+    return Array.from({length:view.byteLength/4},(_,index)=>objGlb.readFloatLE(28+objJsonSize+(view.byteOffset||0)+index*4));
+  };
+  const primitive=objGltf.meshes[0].primitives[0];
+  assert.equal(objGltf.accessors[primitive.indices].count,9);
+  assert.deepEqual(readFloats(primitive.attributes.TEXCOORD_0),[0,1,1,1,1,0,.5,.5,0,0]);
+  assert.deepEqual(readFloats(primitive.attributes.POSITION).slice(0,3),[-1,0,1]);
+  const objTopologyState=await api(objRoute+'/viewport/topology',{});
+  const objTopology=await api(objTopologyState.url);
+  assert.deepEqual(objTopology.primitives['0:0'].polygons,[0,0,0]);
+  const objSteps=[{matrix:[1,0,0,0,0,1,0,0,0,0,1,0,0,.25,0,1],targets:[{id:0}]}];
+  const movedObj=await api(objPaint+'/model',{revision:objDoc.revision,modeling:{
+    version:1,binding:objManifest.key,modelSha256:objManifest.modelSha256,steps:objSteps,
+    nativeSteps:nativeModelSteps(objGltf,objSteps,objTopology)
+  }});
+  await reopened.reload();
+  await reopened.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
+  await reopened.screenshot({path:path.join(data,'obj-material-viewport.png')});
+  assert.deepEqual((await api(objRoute)).modeling,movedObj.modeling);
+  const objQueued=await api(objPaint+'/preview',{revision:movedObj.revision,requestId:'obj-original-uv'});
+  const objBake=await until(async()=>{
+    const job=await api(objRoute+'/jobs/'+objQueued.id);
+    if(job.status==='failed')throw Error(await (await fetch(origin+objRoute+'/jobs/'+job.id+'/files/run.log')).text());
+    return job.status==='completed'&&job;
+  });
+  assert.equal(objBake.paintReport.uv_unchanged,true);
+  assert.deepEqual(objBake.paintReport.resolution,[4096,4096]);
+  const objFilesToCheck=[objBake.colorUrl,objBake.materialUrls.alpha,objBake.materialUrls.roughness];
+  const objMaps=[];
+  for(const [index,url] of objFilesToCheck.entries()){
+    const file=path.join(data,'obj-bake-'+index+'.png');
+    await fs.writeFile(file,Buffer.from(await (await fetch(origin+url)).arrayBuffer()));objMaps.push(file);
+  }
+  const objPixels=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',
+    'import json,sys;from PIL import Image;print(json.dumps([[Image.open(f).getpixel(p) for p in ((0,0),(0,4095))] for f in sys.argv[1:]]))',
+    ...objMaps],{encoding:'utf8'}));
+  assert.deepEqual(objPixels,[[[192,32,10],[12,36,128]],[255,64],[90,90]]);
+  console.log('PASS OBJ with Chinese sidecar paths, concave face, original UV orientation, model edit, reopen and 4K bake');
+
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
 }finally{
