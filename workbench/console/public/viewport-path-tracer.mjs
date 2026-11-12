@@ -5,9 +5,11 @@ import {renderLightingDefaults} from './render-lighting.mjs';
 
 const off={phase:'off',text:'',retry:false};
 
-export function createViewportPathTracer({renderer,host,request,onStatus}){
+export function createViewportPathTracer({renderer,host,request,accumulate=request,onStatus}){
   let options={enabled:false},status=off,engine=null,loading=false,failed=false,disposed=false;
-  let scene=null,library=null,environment=null,environmentKey='',ground=null,lights=[],meshSignature='',materialSignature='',lightingSignature='',cameraSignature='',renderTone=null;
+  let scene=null,sceneRoot=null,library=null,environment=null,environmentKey='',ground=null,lights=[],meshSignature='',materialSignature='',lightingSignature='',renderTone=null;
+  let previousCamera=null;
+  const cameraWorld=new THREE.Matrix4(),cameraProjection=new THREE.Matrix4();
 
   function publish(phase,text='',samples=0){
     if(status.phase===phase&&status.text===text)return;
@@ -29,9 +31,9 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
     environment?.dispose();
     ground?.geometry.dispose();
     ground?.material.dispose();
-    engine=scene=library=environment=ground=renderTone=null;
+    engine=scene=sceneRoot=library=environment=ground=renderTone=previousCamera=null;
     lights=[];
-    meshSignature=materialSignature=lightingSignature=cameraSignature=environmentKey='';
+    meshSignature=materialSignature=lightingSignature=environmentKey='';
   }
 
   function fail(error){
@@ -131,8 +133,8 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
       setupLighting(settings,bounds,sourceLights,imported,project);
       lightingSignature=nextLighting;
     }
-    const nextCamera=JSON.stringify([camera.id,camera.matrixWorld.elements,camera.projectionMatrix.elements]);
-    if(nextMesh!==meshSignature){
+    const rebuild=nextMesh!==meshSignature;
+    if(rebuild){
       for(const child of [...scene.children])if(child.isMesh)child.removeFromParent();
       for(const mesh of meshes){
         const surface=new THREE.Mesh(mesh.geometry,mesh.material);
@@ -150,11 +152,17 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
         engine.updateLights();
       }
       if(nextMaterial!==materialSignature)engine.updateMaterials();
-      if(nextCamera!==cameraSignature)engine.setCamera(camera);
     }
     materialSignature=nextMaterial;
-    cameraSignature=nextCamera;
+    syncCamera(camera,rebuild);
     return true;
+  }
+
+  function syncCamera(camera,rebuild=false){
+    if(!rebuild&&camera===previousCamera&&cameraWorld.equals(camera.matrixWorld)&&cameraProjection.equals(camera.projectionMatrix))return;
+    previousCamera=camera;
+    cameraWorld.copy(camera.matrixWorld);cameraProjection.copy(camera.projectionMatrix);
+    if(!rebuild)engine.setCamera(camera);
   }
 
   function present(){
@@ -178,7 +186,7 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
          previous.interacting!==next.interacting||previous.suspended!==next.suspended||
          previous.samples!==next.samples||JSON.stringify(previous.project)!==JSON.stringify(next.project))request();
     },
-    render(root,camera,bounds,settings,sourceLights){
+    render(root,camera,bounds,settings,sourceLights,sceneChanged=true){
       if(!options.enabled||!root||failed)return false;
       if(options.paused&&!options.suspended){
         const samples=Math.floor(engine?.samples||0);
@@ -196,17 +204,21 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
         const size=renderer.getDrawingBufferSize(new THREE.Vector2());
         engine.renderScale=Math.min(settings.resolution,960/Math.max(size.x,size.y));
         engine.bounces=settings.bounces;
-        if(!syncScene(root,camera,bounds,settings,sourceLights)){
-          publish('waiting','路径追踪 · 没有可见物体');
-          return false;
-        }
+        if(sceneChanged||sceneRoot!==root){
+          if(!syncScene(root,camera,bounds,settings,sourceLights)){
+            sceneRoot=null;
+            publish('waiting','路径追踪 · 没有可见物体');
+            return false;
+          }
+          sceneRoot=root;
+        }else syncCamera(camera);
         const target=options.samples??settings.samples;
         renderTone=options.project?projectTone(options.project.appearance||undefined):null;
         engine.pausePathTracing=engine.samples>=target;
         present();
         const samples=Math.floor(engine.samples);
         publish(samples>=target?'ready':'sampling',`路径追踪 · ${samples} / ${target} 采样`,samples);
-        if(engine.samples<target)request();
+        if(engine.samples<target)accumulate();
         return samples>=1;
       }catch(error){fail(error);return false;}
     },

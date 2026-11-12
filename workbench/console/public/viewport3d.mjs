@@ -15,7 +15,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 // This module displays registered UV color only; it never pretends the 2D board is already baked.
 export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect=()=>{},onRenderPreviewStatus=()=>{},onModelingPick,animateAxes=false,localUI=false}){
   let resizeObserver;let disposed=false,sceneCursor=null,cursorMark=null;
-  let renderer,scene,camera,controls,model,previewModel,manifest,doc,sequence=0,active=false,pending=false;
+  let renderer,scene,camera,controls,model,previewModel,manifest,doc,sequence=0,active=false,pending=false,sceneChanged=true;
   let scalarTextures={},texture,maskPreview=null,textureOverride=null,textureSequence=0,wireframe=false,unlit=false,orthographic=false,solo=false,selected=null;
   let livePaint=null,paintFrame=null,axisMotion=null,liveUsageKey='';
   let radius=1,center=new THREE.Vector3(),topUp=new THREE.Vector3(0,0,-1),frameCount=0;
@@ -105,18 +105,18 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       scene.background=background;renderer.autoClear=autoClear;
     }
   }
-  function renderObserved(){
+  function renderObserved(scanScene=true){
     if(!pathTracer?.enabled()){renderScene();drawOutline();return;}
     const root=previewModel||model,hidden=[];
     const visibility=doc?.paint?.renderVisibility,defaults=manifest?.metadata?.render_visibility;
-    root?.traverseVisible(object=>{
+    if(visibility||defaults)root?.traverseVisible(object=>{
       const name=object.userData.modelingLabel||object.name;
       if((Object.hasOwn(visibility||{},name)?visibility[name]:defaults?.[name])===false){
         object.visible=false;hidden.push(object);
       }
     });
     try{
-      const traced=pathTracer.render(root,camera,modelBounds,displaySettings,scene.children.filter(object=>object.isDirectionalLight));
+      const traced=pathTracer.render(root,camera,modelBounds,displaySettings,scene.children.filter(object=>object.isDirectionalLight),scanScene);
       if(!traced)renderScene();
       else if(pathTracer.state().phase==='paused')return;
       else drawTracedGrid();
@@ -125,17 +125,21 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   }
   function setRenderPreview(options,retry){
     if(options.enabled&&renderer&&!pathTracer)
-      pathTracer=createViewportPathTracer({renderer,host,request,onStatus:onRenderPreviewStatus});
+      pathTracer=createViewportPathTracer({renderer,host,request,accumulate:()=>scheduleFrame(false),onStatus:onRenderPreviewStatus});
     pathTracer?.setOptions(options,retry);
   }
-  function request(){
+  function request(){scheduleFrame(true);}
+  function scheduleFrame(scanScene){
+    sceneChanged||=scanScene;
     if(!renderer||pending||!active)return;
     pending=true;
     requestAnimationFrame(now=>{
       pending=false;
       if(!active||host.clientWidth<2||host.clientHeight<2)return;
       if(axisMotion)advanceAxisMotion(now);else controls.update();
-      updateDepthRange();notifyCamera();renderObserved();
+      updateDepthRange();notifyCamera();
+      const rescan=sceneChanged;sceneChanged=false;
+      renderObserved(rescan);
       if(livePaint&&paintFrame){
         host.dataset.renderedPaintRevision=String(paintFrame.revision??'');
         host.dataset.renderedPaintResolution=String(paintFrame.size);
