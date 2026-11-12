@@ -759,6 +759,45 @@ try{
   await page.goto(base+'/?project='+copySource.id);
   assert.deepEqual(errors,[]);
   console.log('PASS separate Save As copy with source revision guard, byte-identical assets and independent edits');
+  const pngMaps=JSON.parse(execFileSync(python,['-c',[
+    'import base64, io, json',
+    'from PIL import Image',
+    'pixels=[("BaseColor",(28,126,212,255)),("Roughness",(72,72,72,255)),("NormalGL",(128,128,255,255)),("Opacity",(255,255,255,160)),("AO",(72,72,72,255))]',
+    'output={}',
+    'for name,rgba in pixels:',
+    ' buf=io.BytesIO();Image.new("RGBA",(16,16),rgba).save(buf,format="PNG")',
+    ' output[name]=base64.b64encode(buf.getvalue()).decode()',
+    'print(json.dumps(output))'
+  ].join('\n')],{encoding:'utf8'}));
+  await page.reload();
+  await page.locator('[data-area-mode=material]').click();
+  const mapShelf=page.locator('.editor-area[data-editor=library]').first();
+  await mapShelf.getByRole('button',{name:'从贴图创建材质',exact:true}).click();
+  const mapDialog=page.getByRole('dialog',{name:'从贴图创建材质',exact:true});
+  const inputFiles=Object.entries(pngMaps).map(([channel,data])=>({
+    name:'Panel_'+channel+'.png',mimeType:'image/png',buffer:Buffer.from(data,'base64')
+  }));
+  inputFiles.splice(2,0,{name:'invalid.png',mimeType:'image/png',buffer:Buffer.from('invalid')});
+  await mapDialog.getByLabel('导入材质贴图').setInputFiles(inputFiles);
+  await mapDialog.getByRole('alert').filter({hasText:'已导入 5 / 6 张'}).waitFor();
+  assert.equal(await mapDialog.getByLabel('材质名称').inputValue(),'Panel');
+  await mapDialog.getByRole('button',{name:'不透明度来源',exact:true}).click();
+  await page.getByRole('option',{name:'Alpha 通道',exact:true}).click();
+  await mapDialog.getByLabel('材质名称').fill('面板贴图材质');
+  await mapDialog.getByRole('button',{name:'创建材质',exact:true}).click();
+  await mapDialog.waitFor({state:'hidden'});
+  const materialDoc=await api(project(libraryTarget.id));
+  const [mapId,mapped]=Object.entries(materialDoc.paint.materials).find(([,item])=>item.name==='面板贴图材质');
+  const imageNodes=mapped.graph.nodes.filter(node=>node.type==='image');
+  assert.deepEqual(imageNodes.map(node=>node.params.colorSpace),['srgb','linear','linear','linear','linear']);
+  assert.equal(mapped.graph.links.find(link=>link.to.port==='alpha').from.port,'alpha');
+  assert.equal(imageNodes.find(node=>node.id==='map-roughness').params.asset,imageNodes.find(node=>node.id==='map-ao').params.asset);
+  const materialTile=mapShelf.getByRole('button',{name:'面板贴图材质',exact:true});
+  assert.equal(await materialTile.getAttribute('aria-pressed'),'true');
+  await materialTile.dblclick();
+  await waitFor(async()=>(await api(project(libraryTarget.id))).paint.layers.some(layer=>layer.materialId===mapId),'应用贴图材质');
+  console.log('PASS PBR map grouping, typed node links and applying the generated material');
+
 
 
 

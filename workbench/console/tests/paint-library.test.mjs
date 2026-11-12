@@ -1,3 +1,4 @@
+import {groupMaterialMaps,mappedLibraryMaterial} from '../public/paint-library-maps.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {defaultLibraryMaterial,defaultBrushGraph,compileLibraryMaterial,evaluateBrushGraph,validateLibraries,libraryOperation} from '../public/paint-library.mjs';
@@ -29,4 +30,23 @@ test('resources validate missing graphs, protect referenced deletion and avoid i
   assert.throws(()=>libraryOperation(paint,{op:'library',library:'brushes',id:'constructor',action:'update',patch:{name:'x'}}));
   assert.throws(()=>libraryOperation(paint,{op:'library',library:'brushes',id:'bad',action:'create',patch:{name:'Invalid'}}));
   assert.throws(()=>validateLibraries({materials:[],assets:{}}));
+});
+
+test('PBR map grouping keeps distinct names and asks for ambiguous channels',()=>{
+  const assets={
+    a:{name:'Panel_BaseColor.png'},b:{name:'Panel Roughness 4K.png'},c:{name:'Panel_NormalGL.png'},
+    d:{name:'Panel_Roughness_8K.png'},e:{name:'Other_AO.png'},f:{name:'Panel_NormalDX.png'}
+  };
+  const panel=groupMaterialMaps(assets).find(group=>group.name==='Panel');
+  assert.deepEqual(panel.maps,{color:'a',roughness:null,normal:'c'});
+  assert.deepEqual(groupMaterialMaps(assets).find(group=>group.name==='Other').maps,{ao:'e'});
+  const stored=Object.fromEntries(Object.entries(assets).map(([id,asset])=>[id.repeat(64),asset]));
+  const graph=mappedLibraryMaterial({color:'a'.repeat(64),roughness:'b'.repeat(64),normal:'c'.repeat(64),alpha:'e'.repeat(64)},stored,{alphaOutput:'alpha'});
+  assert.deepEqual(graph.nodes.filter(node=>node.type==='image').map(({id,params})=>[id,params.colorSpace]),[
+    ['map-color','srgb'],['map-roughness','linear'],['map-normal','linear'],['map-alpha','linear']
+  ]);
+  assert.equal(graph.links.find(link=>link.to.port==='alpha').from.port,'alpha');
+  assert.equal(graph.links.find(link=>link.to.port==='roughness').from.port,'value');
+  assert.throws(()=>mappedLibraryMaterial({},assets),/至少选择/);
+  assert.throws(()=>mappedLibraryMaterial({color:'missing'},assets),/不存在/);
 });

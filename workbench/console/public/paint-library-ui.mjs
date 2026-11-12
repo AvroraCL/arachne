@@ -1,3 +1,5 @@
+import {createMaterialMapDialog} from './material-map-dialog.mjs';
+import {chromeButton} from './area-chrome.mjs';
 import {defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph} from './paint-library.mjs';
 import {createPersonalShelf} from './personal-library-client.mjs';
 import {enhanceSelectMenu,setSelectValue} from './paint-select.mjs';
@@ -5,7 +7,7 @@ import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mj
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
-export function createPaintLibrary({host,read,write,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,selectedImage=()=>null,importResource,onImportedImage}){
+export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,selectedImage=()=>null,importResource,onImportedImage}){
   let kind='materials',picked=null,project=null,brushKey='',gridKey='',nodesOpen=true,selectionGeneration=0;
   let scope='project';try{scope=localStorage.getItem('arachne-library-scope')==='personal'?'personal':'project';}catch{}
   const bar=el('div','library-bar'),tabs=el('div','library-tabs'),tools=el('div','library-actions'),grid=el('div','library-grid');
@@ -17,6 +19,15 @@ export function createPaintLibrary({host,read,write,canEdit,selectedLayer,brushS
     const b=button(name,()=>{if(!canEdit())return;selectionGeneration++;kind=id;picked=null;gridKey='';remember();sync();changed();});b.dataset.library=id;b.setAttribute('role','tab');tabs.append(b);
   }
   const create=button('＋ 新建',()=>mutate('create'));
+  const mapDialog=createMaterialMapDialog({
+    read,origin:()=>{const doc=read();return doc&&{id:doc.id,revision:doc.revision};},upload:uploadMaps,
+    save:async(patch,origin)=>{
+      const id=crypto.randomUUID(),selection=selectionGeneration;
+      await saveMap([{op:'library',library:'materials',id,action:'create',patch}],origin);
+      if(read()?.id===origin.id&&selection===selectionGeneration)select('materials',id);
+    }
+  });
+  const fromMaps=chromeButton(button('从贴图创建材质',()=>mapDialog.open()),'image');
   const capture=button('保存当前',()=>mutate('capture'));capture.title='将当前图层材质值或笔刷参数保存为独立资源';
   const duplicate=button('复制',()=>mutate('duplicate'));
   const rename=button('重命名',()=>{const item=current();if(!item||!canEdit())return;name.value=item.name;dialog.showModal();name.select();});
@@ -26,7 +37,7 @@ export function createPaintLibrary({host,read,write,canEdit,selectedLayer,brushS
   const output=button('工程输出',()=>{if(!canEdit())return;picked=null;nodesOpen=false;remember();sync();changed();});output.title='查看合成后的工程输出节点';
   const scopeSelect=el('select');scopeSelect.setAttribute('aria-label','资源库范围');scopeSelect.append(new Option('当前项目','project'),new Option('个人','personal'));scopeSelect.value=scope;
   const savePersonal=button('保存到个人库',()=>void personal.save(kind,kind==='images'?selectedImage():picked));
-  tools.append(create,capture,duplicate,rename,remove,apply,nodes,output,savePersonal);bar.append(tabs,scopeSelect,search,tools);host.append(bar,grid);enhanceSelectMenu(scopeSelect);scopeSelect.closest('.custom-select').classList.add('library-scope');
+  tools.append(create,fromMaps,capture,duplicate,rename,remove,apply,nodes,output,savePersonal);bar.append(tabs,scopeSelect,search,tools);host.append(bar,grid);enhanceSelectMenu(scopeSelect);scopeSelect.closest('.custom-select').classList.add('library-scope');
   scopeSelect.onchange=()=>{if(!canEdit()){setSelectValue(scopeSelect,scope);return;}selectionGeneration++;scope=scopeSelect.value;try{localStorage.setItem('arachne-library-scope',scope);}catch{}sync();changed();};
   const personal=createPersonalShelf({
     host,read,canEdit,
@@ -76,7 +87,7 @@ export function createPaintLibrary({host,read,write,canEdit,selectedLayer,brushS
     const referenced=kind==='materials'&&doc.paint.layers.some(layer=>layer.materialId===picked);
     remove.disabled||=referenced;remove.title=referenced?'材质仍被填充层引用，请先解除引用':'删除资源';
     for(const b of [create,capture,duplicate,rename,remove,nodes,output])b.hidden=images;
-    apply.hidden=kind!=='materials';apply.disabled||=!picked;nodes.disabled||=!item;nodes.setAttribute('aria-pressed',String(nodesOpen));
+    apply.hidden=fromMaps.hidden=kind!=='materials';apply.disabled||=!picked;nodes.disabled||=!item;nodes.setAttribute('aria-pressed',String(nodesOpen));
     if(isPersonal)for(const b of tools.querySelectorAll('button'))b.hidden=true;
     else savePersonal.hidden=false;
     savePersonal.disabled=!canEdit()||personal.working||!(images?selectedImage():item);

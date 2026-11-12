@@ -44,3 +44,17 @@
 .shader-parameter-row input[type=checkbox]{appearance:auto;width:16px!important;min-height:16px!important;height:16px!important;justify-self:end;accent-color:#b9b9b9}
 
 .library-tile:focus-visible>.library-name{background:var(--chrome-item-hover,#3b3b3b);color:#eee}
+
+.material-map-dialog{width:min(465px,calc(100vw - 24px));border-color:#444}
+.material-map-dialog form{display:flex;flex-direction:column;max-height:calc(100dvh - 32px)}
+.material-map-dialog header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #393939}
+.material-map-dialog header strong{margin-right:auto}
+.material-map-dialog .paint-form-content{gap:5px;min-height:0;overflow:auto}
+.material-map-dialog .material-map-row{grid-template-columns:108px minmax(0,1fr);align-items:center;gap:6px}
+.material-map-dialog .material-map-row[hidden]{display:none}
+.material-map-row .custom-select,.material-map-row input{min-width:0;width:100%}
+.material-map-row .custom-select-button{width:100%;min-height:27px;text-align:left}
+.material-map-row input{min-height:27px;padding:3px 7px}
+.material-map-dialog .paint-form-footer{flex:none;min-height:42px;align-items:center;padding:7px 12px}
+.material-map-error{flex:1;max-height:72px;margin:0;overflow:auto;overflow-wrap:anywhere;font-size:12px;line-height:1.45}
+.material-map-dialog footer button{flex:none;margin-left:auto}

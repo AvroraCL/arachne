@@ -13,6 +13,7 @@ import {createViewportMarquee} from './paint-model-marquee.mjs';
 import {createViewportDisplayControls} from './viewport-display-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
 import {createShaderEditor} from './paint-shader-editor.mjs';
+import {createMaterialMapDialog} from './material-map-dialog.mjs';
 import {defaultLibraryMaterial,defaultBrushGraph} from './paint-library.mjs';
 import {createBrushBinding} from './paint-brush-binding.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
@@ -768,6 +769,19 @@ function createLibraryEditor(ctx,bridge){
     if(project.document?.id===origin?.id&&scope==='project'&&kind===library&&view===viewGeneration&&selection===selectionGeneration&&Object.hasOwn(project.document.paint[library]||{},id))project.selectResource({library,id});
     else status.textContent='资源已新建，保留当前选择。';
   });toolbar.append(createResource);
+  const mapDialog=createMaterialMapDialog({
+    read:()=>project.document,origin:()=>project.origin(),upload:bridge.importProjectPngs,
+    save:async(patch,origin)=>{
+      const id=crypto.randomUUID(),view=viewGeneration,selection=selectionGeneration;
+      await project.commands([{op:'library',library:'materials',id,action:'create',patch}],origin);
+      if(!disposed&&project.document?.id===origin.id&&scope==='project'&&kind==='materials'&&
+        view===viewGeneration&&selection===selectionGeneration){
+        search.value=query='';key='';project.selectResource({library:'materials',id});ctx.onChange();
+      }
+    }
+  });
+  const fromMaps=chromeButton(button('从贴图创建材质',()=>mapDialog.open()),'image');
+  toolbar.append(fromMaps);
   savePersonal=button('保存到个人库',()=>void personal.save(kind==='assets'?'images':kind,kind==='assets'?pickedAsset:project.resource?.library===kind?project.resource.id:null));toolbar.append(savePersonal);
   const selectedMaterial=()=>project.resource?.library==='materials'?project.resource.id:null;
   function applyMaterial(id){
@@ -789,6 +803,8 @@ function createLibraryEditor(ctx,bridge){
     personal.set({kind:image?'images':kind,query,active:!projectScope});
     body.hidden=!projectScope;
     createResource.hidden=savePersonal.hidden=!projectScope;
+    fromMaps.hidden=!projectScope||kind!=='materials';
+    fromMaps.disabled=bridge.busy();
     savePersonal.disabled=bridge.busy()||!(image?pickedAsset:project.resource?.library===kind);
     fill.hidden=!projectScope||kind!=='materials';fill.disabled=bridge.busy()||!selectedMaterial();
     preview.hidden=!projectScope||!image;preview.disabled=!pickedAsset;
@@ -829,7 +845,7 @@ function createLibraryEditor(ctx,bridge){
     const selected=image?pickedAsset:project.resource?.library===kind?project.resource.id:null;
     for(const tile of body.querySelectorAll('.library-tile'))tile.setAttribute('aria-pressed',String(tile.dataset.resourceId===selected));
   }
-  const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,scroll:body.scrollTop}),dispose(){disposed=true;unsub();personal?.dispose();}};
+  const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,scroll:body.scrollTop}),dispose(){disposed=true;unsub();mapDialog.dispose();personal.dispose();}};
 }
 function createSceneEditor(ctx){
   const {host,project,state}=ctx,toolbar=el('div','editor-toolbar editor-scene-tools'),search=el('input'),searchField=el('div','editor-scene-search'),list=el('div','editor-scroll editor-list editor-scene-list'),status=el('output','editor-scene-status');
