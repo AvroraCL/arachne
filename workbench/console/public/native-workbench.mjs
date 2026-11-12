@@ -8,7 +8,7 @@ const commands={newProject:'new',openProject:'open-projects',saveProjectCopy:'op
 
 export function createNativeWorkbench({window,document,status,flush,imageCommand}){
   const composing=trackTextComposition(document);
-  function command(name){
+  function command(name,{nativeEdit=false}={}){
     if(composing())return false;
     const focused=document.activeElement;
     if(name==='save'){
@@ -24,8 +24,10 @@ export function createNativeWorkbench({window,document,status,flush,imageCommand
       control.click();return true;
     }
     if(name==='cut'||name==='pasteInPlace'){
-      if(focused?.matches?.('input,textarea,[contenteditable="true"]'))
-        return name==='cut'&&document.execCommand('cut');
+      if(focused?.matches?.('input,textarea,[contenteditable="true"]')){
+        if(name!=='cut')return false;
+        return nativeEdit?'native-text':document.execCommand('cut');
+      }
       if(document.querySelector('dialog[open]'))return false;
       return imageCommand?.(name==='cut'?'cutSelection':'pasteInPlace')===true;
     }

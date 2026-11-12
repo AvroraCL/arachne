@@ -1,4 +1,5 @@
 import {app,BrowserWindow,clipboard,dialog,ipcMain,Menu,nativeImage,nativeTheme,screen,session,shell} from 'electron';
+import {createRequire} from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -6,6 +7,7 @@ import {startRelease,userRoot} from '../workspace/workbench/console/scripts/rele
 import {restoreWindowState} from './window-state.mjs';
 
 const appName='阿拉克涅',projectId=/^[\w-]{1,100}$/;
+const {ClipboardItem}=createRequire(import.meta.url)('electron');
 const stateFile=path.join(userRoot,'desktop.json');
 const icon=path.join(import.meta.dirname,'arachne.ico');
 const controller=new AbortController();
@@ -41,8 +43,11 @@ function rememberWindow(win){
 
 function buildMenus(){
   const command=(label,name,accelerator)=>({label,accelerator,click:()=>{
-    if(main&&!main.isDestroyed()&&sameOrigin(main.webContents.getURL()))
-      void main.webContents.executeJavaScript('window.arachneNativeHost?.command('+JSON.stringify(name)+')').catch(console.error);
+    const contents=main&&!main.isDestroyed()&&main.webContents;
+    if(contents&&sameOrigin(contents.getURL()))
+      void contents.executeJavaScript('window.arachneNativeHost?.command('+JSON.stringify(name)+',{nativeEdit:true})').then(result=>{
+        if(name==='cut'&&result==='native-text'&&!contents.isDestroyed()&&sameOrigin(contents.getURL()))contents.cut();
+      }).catch(console.error);
   }});
   const separator={type:'separator'};
   const menu=[
@@ -145,6 +150,24 @@ async function start(){
     backgroundColor:'#202124',show:false,webPreferences:{preload:path.join(import.meta.dirname,'preload.cjs'),
       contextIsolation:true,sandbox:true,nodeIntegration:false,webviewTag:false,navigateOnDragDrop:false}});
   win.on('page-title-updated',event=>event.preventDefault());
+  let recoveringRenderer=false;
+  win.webContents.on('render-process-gone',(_event,details)=>{
+    if(closing||quitStarted||recoveringRenderer||win.isDestroyed()||details.reason==='clean-exit')return;
+    recoveringRenderer=true;
+    console.error('工作台显示进程已停止',details.reason,details.exitCode);
+    void (async()=>{
+      const {response}=await dialog.showMessageBox(win,{type:'warning',message:'工作台显示进程已停止',
+        detail:'重新载入后会打开工程的最新保存版本。',buttons:['重新载入','关闭窗口'],defaultId:0,cancelId:1,noLink:true});
+      if(win.isDestroyed()||closing)return;
+      if(response!==0){win.close();return;}
+      const current=win.webContents.getURL();
+      const recovery=new URL(sameOrigin(current)?current:target.href);
+      if(projectId.test(state.project||''))recovery.searchParams.set('project',state.project);
+      await win.loadURL(recovery.href);
+    })().catch(error=>{
+      if(!win.isDestroyed()&&!closing)dialog.showErrorBox('工作台无法重新载入',error.message);
+    }).finally(()=>recoveringRenderer=false);
+  });
   win.on('close',event=>{
     if(closing)return;
     event.preventDefault();
@@ -165,7 +188,7 @@ async function start(){
     win.setTitle(name?name.slice(0,160)+' · '+appName:appName);
     if(state.project!==id){state.project=id;saveState();}
   });
-  ipcMain.handle('arachne:clipboard-image',(event,bytes)=>{
+  ipcMain.handle('arachne:clipboard-image',async(event,bytes)=>{
     if(event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame||
        !sameOrigin(event.senderFrame?.url)||!(bytes instanceof ArrayBuffer)||bytes.byteLength<24||
        bytes.byteLength>24*1024*1024)return false;
@@ -174,7 +197,8 @@ async function start(){
        ![png.readUInt32BE(16),png.readUInt32BE(20)].every(side=>side>0&&side<=4096))return false;
     const image=nativeImage.createFromBuffer(png);
     if(image.isEmpty())return false;
-    clipboard.writeImage(image);
+    if(ClipboardItem)await clipboard.write([new ClipboardItem({'image/png':new Blob([png],{type:'image/png'})})]);
+    else clipboard.writeImage(image);
     return true;
   });
   buildMenus();

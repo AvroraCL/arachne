@@ -208,8 +208,10 @@ try{
   },'native clipboard test document');
   const imageId=Object.keys(drawing.paint.imageDocuments)[0];
   await editor.getByLabel('图像文档画布').focus();
-  await desktop.evaluate(({BrowserWindow,clipboard,nativeImage},encoded)=>{
-    clipboard.writeImage(nativeImage.createFromBuffer(Buffer.from(encoded,'base64')));
+  await desktop.evaluate(async({BrowserWindow,clipboard,nativeImage,ClipboardItem},encoded)=>{
+    const png=Buffer.from(encoded,'base64');
+    if(ClipboardItem)await clipboard.write([new ClipboardItem({'image/png':new Blob([png],{type:'image/png'})})]);
+    else clipboard.writeImage(nativeImage.createFromBuffer(png));
     BrowserWindow.getAllWindows()[0].webContents.paste();
   },bytes.toString('base64'));
   const pasted=await waitFor(async()=>{
@@ -222,12 +224,33 @@ try{
   await desktop.evaluate(({clipboard})=>clipboard.clear());
   await clipboardCanvas.focus();
   await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.copy());
-  const copiedSize=await waitFor(async()=>desktop.evaluate(({clipboard})=>{
-    const image=clipboard.readImage();
+  const copiedSize=await waitFor(async()=>desktop.evaluate(async({clipboard,nativeImage,ClipboardItem})=>{
+    let image;
+    if(ClipboardItem){
+      const png=(await clipboard.read()).find(item=>item.types.includes('image/png'));
+      if(!png)return null;
+      const blob=await png.getType('image/png');
+      image=nativeImage.createFromBuffer(Buffer.from(await blob.arrayBuffer()));
+    }else image=clipboard.readImage();
     return image.isEmpty()?null:image.getSize();
   }),'copying the document to the Windows clipboard');
   assert.deepEqual(copiedSize,{width:4096,height:4096});
   console.log('PASS 125% Windows desktop scale and native clipboard image paste and copy');
+  const textProbe='中文剪切验收';
+  await page.evaluate(text=>{
+    const input=document.createElement('input');
+    input.id='native-text-cut-check';
+    input.value=text;
+    document.body.append(input);input.select();
+  },textProbe);
+  await desktop.evaluate(({Menu,BrowserWindow})=>{
+    const item=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu.items.find(item=>item.label==='剪切');
+    item.click(item,BrowserWindow.getAllWindows()[0],{});
+  });
+  await page.waitForFunction(()=>document.querySelector('#native-text-cut-check').value==='');
+  assert.equal(await desktop.evaluate(({clipboard})=>clipboard.readText()),textProbe);
+  await page.locator('#native-text-cut-check').evaluate(input=>input.remove());
+  console.log('PASS native Edit menu cuts selected Chinese text through the system clipboard');
   await page.locator('[data-area-mode=modeling]').click();
   const bounds=await desktop.evaluate(({BrowserWindow,screen})=>{
     const area=screen.getPrimaryDisplay().workArea;
@@ -239,6 +262,27 @@ try{
     await fs.mkdir(screenshots,{recursive:true});
     await page.screenshot({path:path.join(screenshots,'windows-modeling.png')});
   }
+  await desktop.evaluate(({dialog,BrowserWindow})=>{
+    const show=dialog.showMessageBox;
+    globalThis.arachneRecoveryPrompt=new Promise(resolve=>{
+      dialog.showMessageBox=async (_win,options)=>{
+        dialog.showMessageBox=show;
+        resolve(options.message);
+        return {response:0};
+      };
+    });
+    setTimeout(()=>BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer(),0);
+  });
+  assert.match(await Promise.race([desktop.evaluate(()=>globalThis.arachneRecoveryPrompt),delay(15000,'',{ref:false})]),/显示进程已停止/);
+  await waitFor(async()=>desktop.evaluate(async ({BrowserWindow},expected)=>{
+    const contents=BrowserWindow.getAllWindows()[0].webContents;
+    if(contents.isCrashed())return false;
+    try{
+      return await contents.executeJavaScript(`new URL(location.href).searchParams.get('project')===${JSON.stringify(expected)}
+        &&!!document.querySelector('.editor-viewport[data-state=ready]')`);
+    }catch{return false;}
+  },id),'restoring the last saved project after a renderer crash');
+  console.log('PASS real Windows renderer crash and recovery in the same window and service');
   await close();
   assert.equal(await fetch(origin+'/api/health',{signal:AbortSignal.timeout(1000)}).then(()=>true,()=>false),false);
   page=await launch();

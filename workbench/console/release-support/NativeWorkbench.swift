@@ -13,6 +13,9 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
     let window: NSWindow
     private let webView: WKWebView
     private let origin: URL
+    private var recoveryURL: URL
+    private var rendererStopped = false
+    private var recoveryPromptOpen = false
     private var childWindows: [NSWindow] = []
     private var downloads: Set<ObjectIdentifier> = []
     private var downloadTargets: [ObjectIdentifier: DownloadTarget] = [:]
@@ -20,6 +23,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
 
     init(url: URL) {
         origin = url
+        recoveryURL = url
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -39,18 +43,67 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         webView.uiDelegate = self
         window.delegate = self
         window.title = "阿拉克涅"
-        window.minSize = NSSize(width: 900, height: 600)
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = webView
         window.isReleasedWhenClosed = false
         if !window.setFrameUsingName("ArachneWorkbench") { window.center() }
+        fitWindowToScreen()
         window.setFrameAutosaveName("ArachneWorkbench")
         webView.load(URLRequest(url: url))
     }
 
     func show() {
+        fitWindowToScreen()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        offerRendererRecovery()
+    }
+
+    static func visibleWindowFrame(_ saved: NSRect, displays: [NSRect], primary: NSRect) -> NSRect {
+        func overlap(_ display: NSRect) -> CGFloat {
+            let intersection = saved.intersection(display)
+            return intersection.isNull ? 0 : intersection.width * intersection.height
+        }
+        let matching = displays.max { overlap($0) < overlap($1) }
+        let hasDisplay = matching.map { overlap($0) > 0 } ?? false
+        let display = hasDisplay ? (matching ?? primary) : primary
+        let width = min(max(900, saved.width), display.width)
+        let height = min(max(600, saved.height), display.height)
+        let x = hasDisplay ? max(display.minX, min(saved.minX, display.maxX - width)) : display.midX - width / 2
+        let y = hasDisplay ? max(display.minY, min(saved.minY, display.maxY - height)) : display.midY - height / 2
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func fitWindowToScreen() {
+        guard !window.styleMask.contains(.fullScreen),
+              let primary = NSScreen.screens.first?.visibleFrame else { return }
+        let frame = Self.visibleWindowFrame(window.frame, displays: NSScreen.screens.map(\.visibleFrame), primary: primary)
+        window.minSize = NSSize(width: min(900, frame.width), height: min(600, frame.height))
+        if frame != window.frame { window.setFrame(frame, display: window.isVisible) }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard webView === self.webView else { return }
+        rendererStopped = true
+        offerRendererRecovery()
+    }
+
+    private func offerRendererRecovery() {
+        guard rendererStopped, window.isVisible, !recoveryPromptOpen else { return }
+        recoveryPromptOpen = true
+        let alert = NSAlert()
+        alert.messageText = "工作台显示进程已停止"
+        alert.informativeText = "重新载入后会打开工程的最新保存版本。"
+        alert.addButton(withTitle: "重新载入")
+        alert.addButton(withTitle: "暂时隐藏")
+        alert.beginSheetModal(for: window) { [weak self] result in
+            guard let self else { return }
+            recoveryPromptOpen = false
+            if result == .alertFirstButtonReturn {
+                rendererStopped = false
+                webView.load(URLRequest(url: recoveryURL))
+            } else { window.orderOut(nil) }
+        }
     }
 
     // Closing a window hides it, as on macOS; it does not discard an edit or
@@ -94,6 +147,12 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
               let id = body["id"] as? String, id.range(of: "^[A-Za-z0-9_-]{1,100}$", options: .regularExpression) != nil,
               let name = body["name"] as? String, name.count <= 200 else { return }
         window.title = name.isEmpty ? "阿拉克涅" : "\(name) — 阿拉克涅"
+        if var components = URLComponents(url: webView.url ?? origin, resolvingAgainstBaseURL: false) {
+            var items = (components.queryItems ?? []).filter { $0.name != "project" }
+            items.append(URLQueryItem(name: "project", value: id))
+            components.queryItems = items
+            if let url = components.url, sameOrigin(url) { recoveryURL = url }
+        }
         onProject?(id, name)
     }
 
@@ -110,7 +169,9 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         // The enum is fixed here, so no user string is interpolated into JS.
         let allowed = ["newProject", "openProject", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo", "cut", "pasteInPlace"]
         guard allowed.contains(command), sameOrigin(webView.url) else { NSSound.beep(); return }
-        webView.evaluateJavaScript("window.arachneNativeHost?.command('\(command)') ?? false") { value, error in
+        webView.evaluateJavaScript("window.arachneNativeHost?.command('\(command)', {nativeEdit:true}) ?? false") { value, error in
+            if command == "cut", value as? String == "native-text",
+               NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil) { return }
             if error != nil || (value as? Bool) != true { NSSound.beep() }
         }
     }
@@ -226,10 +287,6 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         let target = downloadTargets.removeValue(forKey: key)
         let location = target.map { "\n未完成的文件：\($0.temporary.path)" } ?? ""
         alert("下载未完成", error.localizedDescription + location)
-    }
-
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        alert("工作台内容进程已停止", "请重新打开阿拉克涅。已完成的工程修改保存在本机。")
     }
 
     private func alert(_ title: String, _ detail: String) {

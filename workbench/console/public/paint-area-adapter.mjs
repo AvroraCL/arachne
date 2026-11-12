@@ -154,10 +154,12 @@ export function setupPaintAreas(hooks){
     const editors=areas.editors();
     return preferredCanvas?.kind==='image'&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(item=>item.kind==='image');
   }
-  for(const [control,,action] of imageMenuActions)control.onclick=()=>imageEditor()?.[action]?.();
+  for(const [control,,action] of imageMenuActions)control.onclick=()=>{
+    if(project.editorDomain==='image')imageEditor()?.[action]?.();
+  };
   imageMenuActions[0][0].closest('details').addEventListener('toggle',event=>{
     if(!event.currentTarget.open)return;
-    const editor=imageEditor();
+    const editor=project.editorDomain==='image'?imageEditor():null;
     for(const [control,enabled,action] of imageMenuActions){
       control.hidden=!editor?.[action];
       control.disabled=!editor?.[enabled]?.();

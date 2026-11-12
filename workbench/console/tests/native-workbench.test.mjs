@@ -70,6 +70,7 @@ test('native commands keep a composing field focused until the IME confirms or c
   f.focus(field);f.event('compositionstart');
   assert.equal(f.bridge.command('save'),false);
   assert.equal(f.bridge.command('undo'),false);
+  assert.equal(f.bridge.command('cut',{nativeEdit:true}),false);
   assert.equal(f.bridge.command('openProject'),false);
   assert.deepEqual(await f.bridge.prepareToCloseAsync(),{state:'editing'});
   assert.deepEqual(f.calls,[]);
@@ -78,4 +79,13 @@ test('native commands keep a composing field focused until the IME confirms or c
   assert.deepEqual(f.calls,['blur']);
   assert.equal(compositionKey({key:'Enter',isComposing:false,keyCode:229}),true);
   assert.equal(compositionKey({key:'Enter',isComposing:false,keyCode:13}),false);
+});
+
+test('native cut delegates selected text to the system and keeps paste-in-place canvas-only',()=>{
+  const f=fixture();
+  assert.equal(f.bridge.command('cut',{nativeEdit:true}),false);
+  f.focus({matches:()=>true});
+  assert.equal(f.bridge.command('cut',{nativeEdit:true}),'native-text');
+  assert.equal(f.bridge.command('pasteInPlace',{nativeEdit:true}),false);
+  assert.deepEqual(f.calls,[]);
 });
