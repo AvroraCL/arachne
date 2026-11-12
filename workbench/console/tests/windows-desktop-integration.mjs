@@ -6,6 +6,7 @@ import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {_electron as electron} from 'playwright-core';
 import {demoProjectId} from '../demo-source.mjs';
+import {restoreWindowState} from '../release-support/windows/window-state.mjs';
 
 const [executable,appFolder]=process.argv.slice(2);
 if(!executable)throw Error('Specify the packaged desktop executable');
@@ -252,11 +253,13 @@ try{
   await page.locator('#native-text-cut-check').evaluate(input=>input.remove());
   console.log('PASS native Edit menu cuts selected Chinese text through the system clipboard');
   await page.locator('[data-area-mode=modeling]').click();
-  const bounds=await desktop.evaluate(({BrowserWindow,screen})=>{
+  await desktop.evaluate(({BrowserWindow,screen})=>{
     const area=screen.getPrimaryDisplay().workArea;
     const win=BrowserWindow.getAllWindows()[0];
-    win.setBounds({x:area.x+12,y:area.y+12,width:Math.min(area.width-24,1060),height:Math.min(area.height-24,680)});
-    return win.getBounds();
+    const [minimumWidth,minimumHeight]=win.getMinimumSize();
+    const width=Math.min(area.width,Math.max(minimumWidth,Math.min(area.width-24,1060)));
+    const height=Math.min(area.height,Math.max(minimumHeight,Math.min(area.height-24,680)));
+    win.setBounds({x:area.x+Math.min(12,area.width-width),y:area.y+Math.min(12,area.height-height),width,height});
   });
   if(screenshots){
     await fs.mkdir(screenshots,{recursive:true});
@@ -283,14 +286,23 @@ try{
     }catch{return false;}
   },id),'restoring the last saved project after a renderer crash');
   console.log('PASS real Windows renderer crash and recovery in the same window and service');
+  const beforeClose=await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNormalBounds());
   await close();
+  const stored=JSON.parse(await fs.readFile(path.join(profile,'desktop.json'),'utf8'));
+  assert.deepEqual(stored.window.bounds,beforeClose);
   assert.equal(await fetch(origin+'/api/health',{signal:AbortSignal.timeout(1000)}).then(()=>true,()=>false),false);
   page=await launch();
   assert.equal(new URL(page.url()).searchParams.get('project'),id);
   const resumed=await read('/api/projects/'+id);
   assert.equal(resumed.name,name);
   assert.deepEqual(resumed.paint.imageDocuments[imageId],pasted.doc.paint.imageDocuments[imageId]);
-  assert.deepEqual(await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNormalBounds()),bounds);
+  const windowState=await desktop.evaluate(({BrowserWindow,screen})=>({
+    bounds:BrowserWindow.getAllWindows()[0].getNormalBounds(),
+    displays:screen.getAllDisplays().map(display=>display.workArea),primary:screen.getPrimaryDisplay().workArea
+  }));
+  const expected=restoreWindowState(stored.window,windowState.displays,windowState.primary).bounds;
+  for(const key of Object.keys(expected))
+    assert.ok(Math.abs(windowState.bounds[key]-expected[key])<=1,key+' differs after 125% DIP rounding');
   await close();
   if(!suppliedProfile)await fs.rm(profile,{recursive:true,force:true,maxRetries:4,retryDelay:250});
   console.log('PASS desktop GPU path tracing, formal PNG, project and window reopen, Chinese path, 4K bake, native ZIP save, '+
