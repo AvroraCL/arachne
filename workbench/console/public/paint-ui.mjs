@@ -2,6 +2,7 @@ import {connectDesktopWorkspace} from './paint-desktop-workspace.mjs';
 import {compositionKey} from './text-input.mjs';
 import {connectDesktopSettings} from './paint-desktop-settings.mjs';
 import {setupProjectFiles} from './paint-project-files.mjs';
+import {textureExportPresets} from './texture-export-presets.mjs';
 import {setupTaskMonitor} from './paint-task-monitor.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {setupProjectWelcome} from './paint-project-welcome.mjs';
@@ -1334,6 +1335,9 @@ function renderDelivery(j,active,last){
   $('export-textures').disabled=!ready||!!active;
   $('export-glb').disabled=!ready||!!active;
   $('export-glb').title='导出建模结果和内嵌 4K PBR 贴图';
+  const preset=$('delivery-texture-preset');
+  preset.disabled=isPaintExport(active);
+  syncSelectMenu(preset);
   for(const control of [...Object.values(deliveryControls),$('delivery-format')]){
     control.disabled=active?.type==='paint-export';syncSelectMenu(control);
   }
@@ -1382,8 +1386,11 @@ function renderDelivery(j,active,last){
     const entries=[];
     if(model)entries.push(Object.assign(link('模型 GLB · r'+model.revision,model.glbUrl),
       {download:'Arachne-r'+model.revision+'.glb'}));
-    if(textures)entries.push(Object.assign(link('工程与贴图 ZIP · r'+textures.revision,textures.packageUrl),
-      {download:'Arachne-r'+textures.revision+'-textures.zip'}));
+    if(textures){
+      const packed=textureExportPresets[textures.texturePreset]?.files;
+      entries.push(Object.assign(link('工程与贴图 ZIP · r'+textures.revision+(packed?' · '+textureExportPresets[textures.texturePreset].label:''),
+        textures.packageUrl),{download:'Arachne-r'+textures.revision+'-'+(packed?textures.texturePreset:'textures')+'.zip'}));
+    }
     if(delivered){
       const name=`Arachne-r${delivered.revision}`;
       entries.push(Object.assign(link('交付 ZIP · r'+delivered.revision,delivered.packageUrl),{download:name+'.zip'}));
@@ -1905,6 +1912,21 @@ document.addEventListener('keyup',event=>{if(event.code==='Space')releaseUVHand(
 window.addEventListener('blur',releaseUVHand);
 const deliveryPreferenceKey='arachne-paint-delivery-v1';
 const deliveryControls={framing:$('delivery-framing'),size:$('delivery-size'),quality:$('delivery-quality')};
+const texturePresetKey='arachne-texture-output',texturePresetControl=$('delivery-texture-preset');
+texturePresetControl.replaceChildren(...Object.entries(textureExportPresets).map(([value,{label}])=>new Option(label,value)));
+function syncTexturePreset(value=texturePresetControl.value){
+  const preset=Object.hasOwn(textureExportPresets,value)?value:'separate';
+  setSelectValue(texturePresetControl,preset);
+  $('delivery-texture-hint').textContent=textureExportPresets[preset].hint;
+}
+let savedTexturePreset;
+try{savedTexturePreset=localStorage.getItem(texturePresetKey);}catch{}
+syncTexturePreset(savedTexturePreset??'separate');
+texturePresetControl.onchange=()=>{
+  syncTexturePreset();
+  try{localStorage.setItem(texturePresetKey,texturePresetControl.value);}catch{}
+  $('delivery-error').textContent='';
+};
 function readLocalDeliveryPreferences(){
   try{return JSON.parse(localStorage.getItem(deliveryPreferenceKey));}catch{return null;}
 }
@@ -1960,6 +1982,7 @@ window.addEventListener('storage',event=>{
   if(event.key===viewportSamplingKey||event.key===null)setViewportSampling(readViewportSampling(),false);
   if(event.key===deliveryPreferenceKey||event.key===null)
     changeDeliveryPreferences(()=>renderPreferences.setLocal(readLocalDeliveryPreferences()),{persist:false});
+  if(event.key===texturePresetKey||event.key===null)syncTexturePreset(event.newValue??'separate');
 });
 function deliveryViewport(){return areaSystem?.deliveryViewport()||viewport;}
 function visibleDeliveryCamera(){return areaSystem?!!areaSystem.deliveryViewport():workArea==='material'&&!$('viewport').hidden&&viewportReady();}
@@ -2134,7 +2157,7 @@ $('cancel').onclick=()=>run(()=>{
 });
 $('export-textures').onclick=()=>run(async()=>{
   const previewId=current()?.id;
-  if(previewId)await post('export-textures',{confirmed:true,previewId,requestId:crypto.randomUUID()});
+  if(previewId)await post('export-textures',{confirmed:true,previewId,texturePreset:texturePresetControl.value,requestId:crypto.randomUUID()});
 },$('delivery-error'));
 $('export-glb').onclick=()=>run(async()=>{
   const previewId=current()?.id;
@@ -2142,7 +2165,8 @@ $('export-glb').onclick=()=>run(async()=>{
 },$('delivery-error'));
 $('delivery').onclick=()=>run(async()=>{
   if(!approvedPreviewId||approvedPreviewId!==current()?.id||!approvedRenderSettings)return;
-  await post('export',{confirmed:true,previewId:approvedPreviewId,requestId:crypto.randomUUID(),settings:approvedRenderSettings});
+  await post('export',{confirmed:true,previewId:approvedPreviewId,texturePreset:texturePresetControl.value,
+    requestId:crypto.randomUUID(),settings:approvedRenderSettings});
   approvedPreviewId=null;
 });
 $('approved').onchange=()=>{

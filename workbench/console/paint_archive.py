@@ -113,6 +113,21 @@ def check_project_textures(archive, report, hashes):
         require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest) and hashes[name] == digest,
                 '工程贴图指纹无效')
         read_checked(archive, name, 72 * MIB, digest)
+    if 'textureOutput' in report:
+        output = report['textureOutput']
+        preset = output.get('preset')
+        require(output.get('version') == 1 and preset in ('unreal-orm','unity-hdrp') and
+                output.get('resolution') == bake['resolution'] and 1 <= len(output['files']) <= 8,
+                '贴图输出预设清单无效')
+        prefix = f'presets/{preset}/'
+        require(set(output['files']) == {name for name in archive.namelist() if name.startswith(prefix)},
+                '贴图输出预设缺少文件')
+        for name, item in output['files'].items():
+            digest = item.get('sha256')
+            require(name.startswith(prefix) and re.fullmatch(r'[A-Za-z_]+\.png', name.removeprefix(prefix)) and
+                    isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}',digest) and
+                    digest == hashes[name] and item.get('colorSpace') in ('linear','sRGB'), '贴图预设文件指纹无效')
+            read_checked(archive, name, 72 * MIB, digest)
 
 
 def unpack_registration(archive, report, output, entries, uv_digest):
@@ -207,7 +222,8 @@ def unpack(file, output):
 def pack_project(config):
     report = config['report']
     hashes = {}
-    expected = config.get('expected',{})
+    expected = {**config.get('expected',{}),
+                **{name: item['sha256'] for name,item in report.get('textureOutput',{}).get('files',{}).items()}}
     total_assets = 0
     output = Path(config['out']) / 'project.zip'
     with ZipFile(output, 'x', ZIP_DEFLATED, compresslevel=3) as archive:

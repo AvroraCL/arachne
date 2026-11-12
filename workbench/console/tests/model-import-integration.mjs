@@ -231,6 +231,8 @@ try{
   await page.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
   await page.getByText('文件',{exact:true}).filter({visible:true}).first().click();
   await page.locator('#open-delivery').click();
+  await page.getByRole('button',{name:'贴图输出预设',exact:true}).click();
+  await page.getByRole('option',{name:'Unreal · ORM',exact:true}).click();
   assert.equal(await page.locator('#delivery').isDisabled(),true);
   await page.locator('#delivery-preview-button').click();
   await page.locator('#approved').check({timeout:120000});
@@ -238,6 +240,7 @@ try{
   await page.getByRole('option',{name:'OpenEXR · 32 位浮点',exact:true}).click();
   assert.equal(await page.locator('#approved').isChecked(),false);
   await page.locator('#approved').check();
+  await page.screenshot({path:path.join(data,'texture-export-presets.png')});
   await page.locator('#delivery').click();
   const delivery=await until(async()=>{
     const job=(await api(route+'/jobs')).find(item=>item.type==='paint-export');
@@ -247,6 +250,7 @@ try{
   assert.deepEqual(delivery.render.camera,camera);
   assert.equal(delivery.render.engine,'PATH_TRACING');
   assert.equal(delivery.blendUrl,undefined);
+  assert.equal(delivery.texturePreset,'unreal-orm');
   const zip=path.join(data,'delivery.zip');
   const [archive]=await Promise.all([page.waitForEvent('download'),page.getByRole('link',{name:'交付 ZIP · r'+doc.revision}).click()]);
   await archive.saveAs(zip);
@@ -268,6 +272,17 @@ try{
     '    texture.load()',
     ' mat=json.loads(z.read("materials.json"))',
     ' assert len(mat["channels"])==8 and {c["file"]:c["sha256"] for c in mat["channels"].values()}==r["bake"]["files"]',
+    ' output=r["textureOutput"]; assert output["preset"]=="unreal-orm" and output["resolution"]==[4096,4096]',
+    ' assert all(r["fileSha256"][name]==item["sha256"] for name,item in output["files"].items())',
+    ' def png(name): return Image.open(io.BytesIO(z.read(name)))',
+    ' uv=(1100,2100)',
+    ' def original(key): return png(mat["channels"][key]["file"]).getpixel(uv)',
+    ' orm=png("presets/unreal-orm/ORM.png")',
+    ' assert orm.mode=="RGB" and orm.info["gamma"]==1 and orm.getpixel(uv)==tuple(original(key) for key in ("ao","roughness","metallic"))',
+    ' color=png("presets/unreal-orm/BaseColor.png")',
+    ' assert color.mode=="RGBA" and color.info["srgb"]==0 and color.getpixel(uv)==(*original("color"),original("alpha"))',
+    ' normal=png("presets/unreal-orm/Normal_DirectX.png"); r0,g0,b0=original("normal")',
+    ' assert normal.getpixel(uv)==(r0,255-g0,b0)',
     ' model=Model(z.extract("model.glb",sys.argv[3]))',
     ' assert model.uv_digest()==mat["uvSha256"]',
     ' assert model.primitives[0]["positions"][0,1]==0.25',
@@ -733,10 +748,33 @@ try{
   ].join('\n'),...bakedFiles],{encoding:'utf8'}));
   assert.deepEqual(corners,[[[188,0,0],[188,137,255]],[64,0]]);
   const texturePackage=await texturedJob(await api(texturedPaint+'/export-textures',{
-    revision:0,previewId:bakedSource.id,confirmed:true,requestId:'portable-textures'
+    revision:0,previewId:bakedSource.id,confirmed:true,texturePreset:'unity-hdrp',requestId:'portable-textures'
   }));
   assert.equal(texturePackage.portable,true);
+  assert.equal(texturePackage.texturePreset,'unity-hdrp');
+  const reusedRequest=await fetch(origin+texturedPaint+'/export-textures',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({
+      revision:0,previewId:bakedSource.id,confirmed:true,texturePreset:'unreal-orm',requestId:'portable-textures'
+    })
+  });
+  assert.equal(reusedRequest.status,400);
+  assert.match((await reusedRequest.json()).error,/其他贴图输出预设/);
   await restorePortable(texturePackage.packageUrl,'portable-textures');
+  execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import hashlib,io,json,sys,zipfile',
+    'from PIL import Image',
+    'with zipfile.ZipFile(sys.argv[1]) as z:',
+    ' r=json.loads(z.read("project-report.json"))',
+    ' data=z.read("presets/unity-hdrp/MaskMap.png")',
+    ' assert r["textureOutput"]["preset"]=="unity-hdrp"',
+    ' assert hashlib.sha256(data).hexdigest()==r["textureOutput"]["files"]["presets/unity-hdrp/MaskMap.png"]["sha256"]',
+    ' def raw(key): return Image.open(io.BytesIO(z.read("textures/f_16xl_"+key+".png"))).getpixel((0,0))',
+    ' mask=Image.open(io.BytesIO(data))',
+    ' assert mask.mode=="RGBA" and mask.size==(4096,4096) and mask.info["gamma"]==1',
+    ' assert mask.getpixel((0,0))==(raw("metallic"),raw("ao"),0,255-raw("roughness"))',
+    ' assert z.read("presets/unity-hdrp/Normal_OpenGL.png")==z.read("textures/f_16xl_normal.png")'
+  ].join('\n'),path.join(data,'portable-textures.zip')],{cwd:root});
+  console.log('PASS Unreal ORM and Unity HDRP packed exports, linear channels, normal conventions, alpha, SHA-256 and independent restore');
   console.log('PASS editable backup without bake and texture ZIP restore in separate empty profiles, with hashes and native UV');
   await api(texturedPaint+'/commands',{revision:0,operations:[{op:'update',id:sourceLayer.id,patch:{visible:false}}]});
   await api(texturedPaint+'/undo',{revision:1});

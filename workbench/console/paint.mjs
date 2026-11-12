@@ -3,6 +3,7 @@ import {isolateImageLayer} from './public/image-layer-tree.mjs';
 import {imageStrokeQueueLimit} from './public/image-stroke-queue.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels,channelBlendChoices} from './public/paint-channels.mjs';
+import {checkedTexturePreset,textureExportPresets} from './public/texture-export-presets.mjs';
 import {validateLibraries,libraryOperation,compileLibraryMaterial} from './public/paint-library.mjs';
 import {compileMaterialGraph} from './public/material-graph.mjs';
 import {pinSurfaceInputs,validateSurfaceBindings} from './paint-surface-bindings.mjs';
@@ -1109,6 +1110,25 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     const file=path.join(folder,name+'.json');atomic(file,cfg);
     await runProcess(j,exe,[...args,file]);
   };
+  async function packTexturePreset(bake,input,out,archiveFiles){
+    const preset=checkedTexturePreset(j.texturePreset),recipes=textureExportPresets[preset].files;
+    if(!recipes)return null;
+    if(paintChannels.some(key=>!bake.files[channelSpecs[key].file]))
+      throw Error('此输出预设需要八通道贴图，请重新生成 4K 预览');
+    stage(j,'生成 '+textureExportPresets[preset].label+' 贴图');
+    const sources=Object.fromEntries(paintChannels.map(key=>[key,path.join(input,channelSpecs[key].file)]));
+    const directory=path.join(out,'packed');
+    await run('texture-pack-config',{out:directory,sources,resolution:bake.resolution,files:recipes},
+      python,['-X','utf8',path.join(ROOT,'paint_texture_pack.py')]);
+    const files={};
+    for(const {name,colorSpace,bands,copy} of recipes){
+      const file=path.join(directory,name),member='presets/'+preset+'/'+name;
+      archiveFiles[member]=file;
+      const sha256=await sha256File(file,{signal});
+      files[member]={sha256,colorSpace,...(bands?{bands}:{source:copy})};
+    }
+    return {version:1,preset,resolution:bake.resolution,files};
+  }
   if(j.type==='paint-glb-export'){
     const preview=getJob(doc.id,j.paintPreviewId);
     const input=await checkPaintPreview(doc,preview,{binding,signal});
@@ -1151,6 +1171,8 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
         atomic(projection,bake);
         files['projection-report.json']=projection;
         report.bake={previewId:preview.id,resolution:bake.resolution,files:hashes};
+        const packed=await packTexturePreset(bake,input,out,files);
+        if(packed)report.textureOutput=packed;
       }
       await run('backup-config',{out,files,report,expected:registration??{}},
         python,['-X','utf8',path.join(ROOT,'paint_archive.py'),'pack']);
@@ -1160,7 +1182,10 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     }catch(error){
       fs.rmSync(path.join(out,'project.zip'),{force:true});
       throw error;
-    }finally{fs.rmSync(path.join(out,'editable'),{recursive:true,force:true});}
+    }finally{
+      fs.rmSync(path.join(out,'editable'),{recursive:true,force:true});
+      fs.rmSync(path.join(out,'packed'),{recursive:true,force:true});
+    }
     update(j,{portable,...(withTextures?{packageUrl:url('textures/project.zip')}:{archiveUrl:url('backup/project.zip')})});
     return;
   }
@@ -1233,7 +1258,9 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     const registration=prepareRegistrationFiles(doc.source,files);
     Object.assign(expected,registration);
     const editable=prepareEditableFiles(doc,pending,files);
+    const packed=await packTexturePreset(bake,input,pending,files);
     const report={format:archiveFormat,revision:doc.revision,editable,bake:{previewId:preview.id,resolution:bake.resolution,files:textures},
+      ...(packed?{textureOutput:packed}:{}),
       delivery:{version:1,confirmedAt:j.paintConfirmedAt,model:{file:'model.glb',sha256:modelSha256,
         sourceGlbSha256:model.sha256,uvSha256:model.uvSha256},material:'materials.json',render:{
         file:render.exrSha256?'render.exr':'render.png',preview:'render.png',report:'render-report.json',engine:render.engine,resolution:render.resolution,
@@ -1242,6 +1269,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     await run('package-config',{out:pending,files,report,expected,writeReport:true},python,['-X','utf8',path.join(ROOT,'paint_archive.py'),'pack']);
     signal?.throwIfAborted();
     await fsp.rm(path.join(pending,'editable'),{recursive:true,force:true});
+    await fsp.rm(path.join(pending,'packed'),{recursive:true,force:true});
     signal?.throwIfAborted();
     if(read(doc.id).revision!==doc.revision)throw Error('工程已变化，请预览并确认当前修订');
     fs.renameSync(pending,out);

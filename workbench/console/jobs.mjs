@@ -9,6 +9,7 @@ import {ROOT,projectDir,read,list,atomic} from './store.mjs';
 import {pathTraceOptions} from './path-trace-render.mjs';
 import {cyclesResource} from './cycles-resource.mjs';
 import {renderBookmarkLimit} from './public/paint-delivery-options.mjs';
+import {checkedTexturePreset} from './public/texture-export-presets.mjs';
 
 const PYTHON=process.env.ARACHNE_PYTHON||'python';
 export const paintExportTypes=['paint-export','paint-texture-export','paint-glb-export'];
@@ -131,6 +132,8 @@ export function submit(pid,type,revision,requestId,task=null,retryOf=null,render
   const options=['paint-render','paint-export'].includes(type)?pathTraceOptions:null;
   const paintSettings=options?.(previous?.paintSettings??renderOptions?.settings??{})??null;
   const exportPaint=paintExportTypes.includes(type);
+  const texturePreset=['paint-export','paint-texture-export'].includes(type)
+    ?checkedTexturePreset(previous?previous.texturePreset:renderOptions?.texturePreset):null;
   const paintPreviewId=exportPaint?(previous?.paintPreviewId??renderOptions?.previewId):null;
   if(exportPaint&&(!paintPreviewId||previous&&!previous.paintConfirmedAt))throw Error('缺少已确认的 4K 预览');
   if(paintSettings?.textureJobId)throw Error('工程渲染使用冻结修订的贴图');
@@ -138,6 +141,8 @@ export function submit(pid,type,revision,requestId,task=null,retryOf=null,render
   const prior=requestId&&listJobs(pid).find(j=>j.requestId===requestId);
   if(prior&&paintSettings&&JSON.stringify(options(prior.paintSettings??{}))!==JSON.stringify(paintSettings))throw Error('请求编号已用于其他渲染设置');
   if(prior&&exportPaint&&prior.paintPreviewId!==paintPreviewId)throw Error('请求编号已用于其他 4K 预览');
+  if(prior&&texturePreset&&checkedTexturePreset(prior.texturePreset)!==texturePreset)
+    throw Error('请求编号已用于其他贴图输出预设');
   if(prior){
     if(prior.revision!==revision||prior.type!==type||(prior.retryOf||null)!==retryOf)throw Error('请求编号已用于其他任务');
     return prior;
@@ -152,6 +157,7 @@ export function submit(pid,type,revision,requestId,task=null,retryOf=null,render
   const j=queuedJob(doc,type,requestId,retryOf,task);
   if(exportPaint){j.paintPreviewId=paintPreviewId;j.paintConfirmedAt=previous?.paintConfirmedAt??new Date().toISOString();}
   if(paintSettings)j.paintSettings=paintSettings;
+  if(texturePreset)j.texturePreset=texturePreset;
   if(previous?.renderBookmark)j.renderBookmark=previous.renderBookmark;
   enqueue(doc,[j]);
   return j;
