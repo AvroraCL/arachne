@@ -218,7 +218,16 @@ try{
   },'Windows image clipboard');
   assert.equal(pasted.doc.paint.assets[pasted.layer.asset].width,256);
   assert.equal(pasted.doc.paint.assets[pasted.layer.asset].height,192);
-  console.log('PASS 125% Windows desktop scale and native image clipboard');
+  const clipboardCanvas=editor.getByLabel('图像文档画布');
+  await desktop.evaluate(({clipboard})=>clipboard.clear());
+  await clipboardCanvas.focus();
+  await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.copy());
+  const copiedSize=await waitFor(async()=>desktop.evaluate(({clipboard})=>{
+    const image=clipboard.readImage();
+    return image.isEmpty()?null:image.getSize();
+  }),'copying the document to the Windows clipboard');
+  assert.deepEqual(copiedSize,{width:4096,height:4096});
+  console.log('PASS 125% Windows desktop scale and native clipboard image paste and copy');
   await page.locator('[data-area-mode=modeling]').click();
   const bounds=await desktop.evaluate(({BrowserWindow,screen})=>{
     const area=screen.getPrimaryDisplay().workArea;
