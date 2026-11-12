@@ -483,7 +483,7 @@ def live_pixels(cfg):
         if cfg.get('isolatedImageLayer'):doc={**doc,'layers':[l for l in doc['layers'] if l['id']==cfg['isolatedImageLayer']]}
         pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
         if cfg.get('clipboardRegion'):
-            return clipboard_png(pixels,cfg['clipboardRegion'])
+            return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'])
         if cfg.get('imagePng'):
             return png_bytes(pixels,doc['colorSpace'])
         return pixels.tobytes()

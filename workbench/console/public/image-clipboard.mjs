@@ -21,7 +21,7 @@ export async function clipboardPngSize(file){
   return [width,height];
 }
 
-export function copyImagePixels(origin,region){
+export function copyImagePixels(origin,region,{merged=false}={}){
   const {clip}=region;
   request?.abort();
   const controller=request=new AbortController();
@@ -29,7 +29,8 @@ export function copyImagePixels(origin,region){
   const copied=(async()=>{
     const response=await fetch('/api/projects/'+origin.id+'/paint/image-clipboard',{
       method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-      body:JSON.stringify({revision:origin.revision,documentId:origin.documentId,layerId:origin.layerId,rect:clip,...uvShapePayload(region)})
+      body:JSON.stringify({revision:origin.revision,documentId:origin.documentId,
+        ...(merged?{merged}:{layerId:origin.layerId}),rect:clip,...uvShapePayload(region)})
     });
     if(response.status===204)throw Error('图像已变化，请重新复制');
     if(!response.ok)throw Error((await response.json()).error||'复制图像失败');

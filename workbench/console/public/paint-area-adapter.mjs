@@ -20,6 +20,7 @@ export function setupPaintAreas(hooks){
   for(const child of [...workspace.children])parking.append(child);workspace.append(parking);
   let applying=false,lastProject=null,preferredViewport=null,preferredCanvas=null;
   let materialVisible=false,materialDetail=false,visibleEditors=[],inspection=null,inspectionFrame=null,inspectionStatus=null;
+  let adjustmentPreview=null;
   const write=async(action)=>{
     let value,failure;const ok=await hooks.run(async()=>{try{value=await action();}catch(error){failure=error;throw error;}});
     if(ok!==true)throw failure||Error('操作未完成，请结束当前编辑后重试');return value;
@@ -83,6 +84,18 @@ export function setupPaintAreas(hooks){
       const editor=preferredCanvas?.kind==='image'&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(item=>item.kind==='image');
       return editor?.getSelection?.(origin)||null;
     },
+    imageAdjustment(owner,origin,operation){
+      if(operation){
+        if(project.document?.id!==origin.id||project.document.revision!==origin.revision)return;
+        adjustmentPreview={owner,origin};
+      }else{
+        if(adjustmentPreview?.owner!==owner)return;
+        origin=adjustmentPreview.origin;
+        adjustmentPreview=null;
+      }
+      for(const editor of areas.editors())editor.previewAdjustment?.(origin,operation);
+      project.draft(operation);
+    },
     layerSelection:hooks.layerSelection,selectMaterialLayer:hooks.selectMaterialLayer,openMaterialLayerMenu:hooks.openMaterialLayerMenu,bindMaterialLayerDrag:hooks.bindMaterialLayerDrag,cameraChanged:hooks.cameraChanged,viewportDisplayChanged:updateMaterialDemand,
     materialPreview:()=>({inspection,frame:inspectionFrame||project.frame,status:inspection?inspectionStatus:project.previewStatus}),
     clearMaterialInspection:hooks.clearMaterialInspection,toggleMaterialIsolation:hooks.toggleMaterialIsolation,
@@ -131,9 +144,21 @@ export function setupPaintAreas(hooks){
   $('open-render-settings').onclick=()=>areas.openEditor('renderSettings',{placement:'sidebar'});
   $('open-render-results').onclick=()=>areas.openEditor('renderResult');
   $('reset-docks').onclick=()=>areas.reset();for(const label of $('window-menu').querySelectorAll('label'))label.hidden=true;
+  const mergedButton=$('copy-merged-image');
+  function imageEditor(){
+    const editors=areas.editors();
+    return preferredCanvas?.kind==='image'&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(item=>item.kind==='image');
+  }
+  mergedButton.onclick=()=>imageEditor()?.copyMerged?.();
+  mergedButton.closest('details').addEventListener('toggle',event=>{
+    if(!event.currentTarget.open)return;
+    const editor=imageEditor();
+    mergedButton.hidden=!editor?.copyMerged;
+    mergedButton.disabled=!editor?.canCopyMerged?.();
+  });
   workspace.addEventListener('keydown',event=>{
     if(event.defaultPrevented||event.target.closest('input,textarea,select,[contenteditable]')||areas.active?.legacy&&areas.active.kind==='image')return;
-    if(project.editorDomain==='image'){const target=preferredCanvas?.kind==='image'&&areas.editors().includes(preferredCanvas)?preferredCanvas:areas.editors().find(e=>e.kind==='image');if(target?.handleKey?.(event))return;}
+    if(project.editorDomain==='image'&&imageEditor()?.handleKey?.(event))return;
     if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.stopPropagation();void project.travel(event.shiftKey?'redo':'undo').catch(error=>hooks.error(error.message));}
   });
   syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name,false);

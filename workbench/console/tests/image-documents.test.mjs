@@ -3,8 +3,27 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand,hasImageLayerMask,imageDocumentLimit} from '../public/image-documents.mjs';
 import {imageDocumentInput} from '../paint.mjs';
+import {newImageAdjustment,checkImageAdjustment,imageBlendModes} from '../public/image-adjustments.mjs';
 const defaults=()=>({layers:[],assets:{}}),options={requireUnlocked:()=>{}},checks={checkStroke:s=>{assert.equal(s.uv,true);assert.ok(s.rect||s.stamps);},checkedUVTransform:t=>assert.ok(t.rect)};
 const edit=(paint,action,extra={})=>imageDocumentOperation(paint,{op:'image',documentId:'doc',action,...extra},options);
+test('image adjustments have independent masks and validate exact parameters without altering pixel layers',()=>{
+ const paint=defaults();
+ edit(paint,'create');
+ edit(paint,'addLayer',{layerId:'pixels',kind:'pixel'});
+ const levels={...newImageAdjustment('levels'),inputBlack:16,inputWhite:218,gamma:1.25,channel:'blue'};
+ edit(paint,'addLayer',{layerId:'levels',kind:'adjustment',patch:{adjustment:levels,blend:'softLight'}});
+ validateImageDocuments(paint,checks);
+ const [pixels,layer]=paint.imageDocuments.doc.layers;
+ assert.deepEqual(layer.adjustment,levels);
+ assert.equal(layer.maskEnabled,true);
+ assert.equal(layer.maskBase,1);
+ assert.equal(pixels.adjustment,undefined);
+ assert.throws(()=>checkImageAdjustment({...levels,inputWhite:16}),/黑场/);
+ assert.throws(()=>checkImageAdjustment({...levels,invalid:4}),/参数无效/);
+ assert.throws(()=>checkImageAdjustment({...levels,gamma:0}),/中间调/);
+ assert.throws(()=>edit(paint,'stroke',{layerId:'levels',target:'pixels',stroke:{}}),/像素层/);
+ assert.equal(new Set(imageBlendModes).size,16);
+});
 test('image documents and pixel layers are independent of material layers, binding is explicit and deletion protected',()=>{
  const paint=defaults();edit(paint,'create',{patch:{name:'独立贴图'}});edit(paint,'addLayer',{layerId:'pixel',kind:'pixel'});assert.equal(paint.layers.length,0);assert.equal(paint.imageDocuments.doc.layers[0].kind,'pixel');
  edit(paint,'bind',{channel:'roughness',newLayerId:'material'});assert.equal(paint.layers.length,1);assert.deepEqual(paint.layers[0].documentMaps,{roughness:'doc'});assert.equal(paint.layers[0].channels.roughness,true);assert.throws(()=>edit(paint,'remove'),/仍被材质/);

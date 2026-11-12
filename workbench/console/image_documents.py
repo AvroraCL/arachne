@@ -10,6 +10,7 @@ from collections import OrderedDict
 import numpy as np
 from PIL import Image, PngImagePlugin
 from paint_surface import Surface
+from image_adjustments import adjust_rgb, blend_rgb, neutral_adjustment
 
 
 def decode(c):
@@ -55,8 +56,10 @@ def mask_values(layer,mask,ids,surface):
 def image_pixels(layer,assets,size,linear):
     with Image.open(assets[layer['asset']]) as im:
         raw=np.asarray(im.convert('RGBA'),dtype=np.float32)/255
+        source_linear=im.info.get('gamma') == 1 and 'srgb' not in im.info
+        source_srgb='srgb' in im.info
     h,w=raw.shape[:2]
-    if not linear:raw[:,:,:3]=decode(raw[:,:,:3])
+    if not source_linear and (not linear or source_srgb):raw[:,:,:3]=decode(raw[:,:,:3])
     raw[:,:,:3]*=raw[:,:,3:]
     angle=np.radians(layer['rotation']);c,s=np.cos(angle),np.sin(angle)
     k=max(w,h)/size/layer['scale'];sx,sy=layer['stretch'];cx,cy=layer['x']*size,layer['y']*size
@@ -94,6 +97,31 @@ def gradient_tiles(surface, gradient, color):
         yield ids, first + (last-first)*t
 
 
+def apply_adjustment(result, layer, surface, linear):
+    params, mode = layer['adjustment'], layer['blend']
+    if mode == 'normal' and neutral_adjustment(params):
+        return
+    masked = layer['maskEnabled']
+    mask = surface.mask(layer.get('maskStrokes', [])) if masked else None
+    for start in range(0, len(result), 131072):
+        tile = result[start:start+131072]
+        ids = np.flatnonzero(tile[:, 3] > 0) + start
+        if not len(ids):
+            continue
+        back = result[ids]
+        alpha = back[:, 3:]
+        base = back[:, :3] / alpha
+        encoded = not linear and params['type'] != 'exposure'
+        adjusted = adjust_rgb(encode(base) if encoded else base, params)
+        if encoded:
+            adjusted = decode(adjusted)
+        mixed = blend_rgb(base, adjusted, mode) * alpha
+        opacity = layer['opacity']
+        if masked:
+            opacity = opacity * mask_values(layer, mask, ids, surface)[:, None]
+        result[ids, :3] = back[:, :3] + (mixed - back[:, :3]) * opacity
+
+
 def composite_document(document,assets,size=4096,inspect_mask=None):
     surface=ImageSurface(size);result=np.zeros((size*size,4),dtype=np.float32)
     linear=document['colorSpace']=='linear'
@@ -111,6 +139,9 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
                 break
             continue
         if not layer['visible'] or not layer['opacity']:continue
+        if layer['kind']=='adjustment':
+            apply_adjustment(result,layer,surface,linear)
+            continue
         if layer['kind']=='pixel':
             ids,paint=surface.paint([converted(s) for s in layer.get('strokes',[])],{'color':True},color)
             if 'color' not in paint:continue
@@ -129,8 +160,7 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
             src_alpha=np.clip(pixels[:,3]*opacity,0,1);back=result[ids];back_alpha=back[:,3]
             src=np.divide(pixels[:,:3],pixels[:,3:],out=np.zeros_like(pixels[:,:3]),where=pixels[:,3:]>0)
             base=np.divide(back[:,:3],back[:,3:],out=np.zeros_like(back[:,:3]),where=back[:,3:]>0)
-            mode=layer['blend']
-            mixed=base*src if mode=='multiply' else base+src-base*src if mode=='screen' else np.where(base<=.5,2*base*src,1-2*(1-base)*(1-src)) if mode=='overlay' else src
+            mixed=blend_rgb(base,src,layer['blend'])
             result[ids,:3]=back[:,:3]*(1-src_alpha[:,None])+src_alpha[:,None]*((1-back_alpha[:,None])*src+back_alpha[:,None]*mixed)
             result[ids,3]=src_alpha+back_alpha*(1-src_alpha)
     # Encode in tiles to keep the 4K working set bounded.
@@ -143,7 +173,7 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
     return out.reshape(size,size,4)[::-1]
 
 
-def clipboard_png(pixels, region):
+def clipboard_png(pixels, region, color_space):
     height, width = pixels.shape[:2]
     surface = ImageSurface(width)
     rect = region['rect']
@@ -153,7 +183,7 @@ def clipboard_png(pixels, region):
         cropped[~surface._selection_tile(rect, region)[::-1]] = 0
     if not cropped.size or not cropped[:, :, 3].any():
         raise ValueError('选区内没有可复制的像素')
-    return png_bytes(cropped)
+    return png_bytes(cropped, color_space)
 
 
 def png_bytes(pixels, color_space=None):

@@ -40,6 +40,7 @@ export const workspaceIcons = {
   marqueeAdd: svg('<rect x="2.5" y="2.5" width="10" height="10" rx=".4"/><rect x="7.5" y="7.5" width="10" height="10" rx=".4"/><path d="M13 12.5v4m-2-2h4"/>'),
   marqueeSubtract: svg('<rect x="2.5" y="2.5" width="10" height="10" rx=".4"/><rect x="7.5" y="7.5" width="10" height="10" rx=".4"/><path d="M11 14.5h4"/>'),
   marqueeIntersect: svg('<rect x="2.5" y="2.5" width="10" height="10" rx=".4"/><rect x="7.5" y="7.5" width="10" height="10" rx=".4"/><rect x="7.5" y="7.5" width="5" height="5" fill="currentColor" stroke="none"/>'),
+  adjustment: svg('<circle cx="10" cy="10" r="6.8"/><path d="M10 3.2a6.8 6.8 0 0 1 0 13.6Z" fill="currentColor" stroke="none"/>'),
   ellipseMarquee: svg('<circle cx="10" cy="10" r="7" stroke-dasharray="2 2"/>'),
   lasso: svg('<path d="M5.5 13.5C2 12.3 2 8.3 4.4 6.3c2.9-2.5 9.5-2.7 12.2.2 2.1 2.3.4 5.5-3.4 6.7-2.8.9-6.8.3-7.5 1.9-.9 1.8 1.8 2.4 2.6 1 .5-.9-.2-2.2-1.4-2.7"/>'),
   transform: svg('<path d="M3 7V3h4m6 0h4v4m0 6v4h-4m-6 0H3v-4m7-6v6M7 10h6"/>'),

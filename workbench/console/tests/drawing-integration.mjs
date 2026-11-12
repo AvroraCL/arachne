@@ -76,9 +76,9 @@ try{
     await page.mouse.move(...await point(end),{steps:7});
     await page.mouse.up();
   }
-  async function imagePng(filename,revision){
+  async function imagePng(filename,revision,id=documentId){
     const response=await fetch(origin+paintRoute+'/image-export',{method:'POST',
-      headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({revision,documentId})});
+      headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({revision,documentId:id})});
     assert.equal(response.status,200,response.ok?'':await response.text());
     const file=path.join(data,filename);
     await fs.writeFile(file,Buffer.from(await response.arrayBuffer()));
@@ -205,8 +205,89 @@ try{
   await canvas.focus();
   await page.keyboard.press('Control+Shift+i');
   assert.equal((await shape.getAttribute('d')).match(/M/g).length,3);
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS compound marquee, holes, intersect, inverse, reselect, 4K clipboard and clear across layers');
+
+  const adjustmentDoc='adjustment-document',adjustmentPixels='adjustment-pixels';
+  const before=await api(projectRoute);
+  await api(paintRoute+'/commands',{revision:before.revision,operations:[
+    {op:'image',action:'create',documentId:adjustmentDoc,patch:{name:'调整验收'}},
+    {op:'image',action:'addLayer',documentId:adjustmentDoc,layerId:adjustmentPixels,kind:'pixel',patch:{name:'半透明底稿'}},
+    {op:'image',action:'stroke',documentId:adjustmentDoc,layerId:adjustmentPixels,target:'pixels',
+      stroke:{uv:true,rect:[.1,.1,.9,.75],opacity:.5,color:'#326496',erase:false}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(adjustmentDoc,{force:true});
+  await page.getByRole('button',{name:'半透明底稿',exact:true}).click();
+  await editor.getByRole('button',{name:'矩形选区',exact:true}).click();
+  await editor.getByRole('button',{name:'新建选区',exact:true}).click();
+  await drag([0,.1],[.5,.9]);
+  await page.getByRole('button',{name:'新建调整图层',exact:true}).click();
+  await page.getByRole('menuitem',{name:'亮度／对比度',exact:true}).click();
+  const currentAdjustment=current=>current.paint.imageDocuments[adjustmentDoc].layers.find(layer=>layer.kind==='adjustment');
+  const adjustmentCreated=await until(async()=>{
+    const current=await api(projectRoute);
+    return currentAdjustment(current)&&current;
+  },'新建带选区蒙版的调整层');
+  const adjustment=currentAdjustment(adjustmentCreated);
+  assert.equal(adjustment.maskBase,0);
+  assert.equal(adjustment.maskStrokes.length,1);
+  const brightness=page.locator('input.workspace-number-input[aria-label="亮度"]');
+  await brightness.waitFor();
+  const field=brightness.locator('..'),fieldBox=await field.boundingBox();
+  await page.mouse.move(fieldBox.x+fieldBox.width/2,fieldBox.y+fieldBox.height/2);
+  await page.mouse.down();
+  const draft=page.waitForResponse(response=>{
+    const request=response.request();
+    return response.url().endsWith('/paint/image-live')&&request.postDataJSON()?.operation?.patch?.adjustment?.brightness>0;
+  });
+  await page.mouse.move(fieldBox.x+fieldBox.width/2+40,fieldBox.y+fieldBox.height/2,{steps:4});
+  assert.equal((await draft).status(),200);
+  assert.equal((await api(projectRoute)).revision,adjustmentCreated.revision);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  assert.equal(await brightness.inputValue(),'0');
+  assert.equal((await api(projectRoute)).revision,adjustmentCreated.revision);
+  await field.dblclick();
+  const entry=field.getByRole('spinbutton',{name:'输入数值'});
+  await entry.fill('40');
+  await entry.press('Enter');
+  const adjusted=await until(async()=>{
+    const current=await api(projectRoute);
+    return currentAdjustment(current).adjustment.brightness===40&&current;
+  },'调整数值提交');
+  await canvas.focus();
+  await page.keyboard.press('Control+d');
+  await overlay.waitFor({state:'hidden'});
+  const png=await imagePng('masked-adjustment.png',adjusted.revision,adjustmentDoc);
+  const samples=[[1024,1024],[3072,1024],[1024,3700]];
+  const [,pixels]=rgba(png,samples);
+  assert.ok(pixels[0][0]>50&&pixels[0][1]>100&&pixels[0][2]>150);
+  assert.deepEqual(pixels.slice(1),[[50,100,150,128],[0,0,0,0]]);
+  assert.equal(pixels[0][3],128);
+  await page.screenshot({path:path.join(data,'adjustment-properties.png')});
+
+  const [merged]=await Promise.all([
+    page.waitForResponse(response=>response.url().endsWith('/paint/image-clipboard')&&response.request().postDataJSON()?.merged===true),
+    page.keyboard.press('Control+Shift+c')
+  ]);
+  assert.equal(merged.status(),200);
+  await page.waitForFunction(async id=>{
+    const {copiedImage}=await import('/image-clipboard.mjs');
+    return copiedImage()?.documentId===id;
+  },adjustmentDoc);
+  const mergedFile=path.join(data,'merged-adjustment.png');
+  const mergedBytes=await page.evaluate(async()=>{
+    const {copiedImage}=await import('/image-clipboard.mjs');
+    return Array.from(new Uint8Array(await copiedImage().file.arrayBuffer()));
+  });
+  await fs.writeFile(mergedFile,Buffer.from(mergedBytes));
+  assert.deepEqual(rgba(mergedFile,samples),[[4096,4096],pixels]);
+  await page.reload();
+  await canvas.waitFor();
+  assert.equal(currentAdjustment(await api(projectRoute)).adjustment.brightness,40);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS masked adjustment, live scrub and Escape, double-click edit, preserved alpha, merged copy and reopen');
 }catch(error){
   console.error(logs);
   throw error;

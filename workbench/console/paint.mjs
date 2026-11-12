@@ -509,7 +509,7 @@ function paintBinding(doc){const model=modelFingerprint(doc);return model?crypto
 let compositorFingerprint;
 export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
   compositorFingerprint??=crypto.createHash('sha256').update(JSON.stringify([
-    'paint_worker.py','paint_channels.py','paint_surface.py','material_graph.py','image_documents.py','project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
+    'paint_worker.py','paint_channels.py','paint_surface.py','material_graph.py','image_documents.py','image_adjustments.py','project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
     '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
   ].map(file=>hash(path.join(ROOT,file))))).digest('hex');
   const {objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,...content}=doc.paint;
@@ -591,12 +591,15 @@ export function imageDocumentInput(doc,{revision,documentId,operation,inspectMas
   };
 }
 export function imageClipboardInput(doc,request){
-  const {revision,documentId,layerId,rect}=fields(request,['revision','documentId','layerId','rect',...uvShapeFields]);
+  const {revision,documentId,layerId,rect,merged=false}=fields(request,['revision','documentId','layerId','rect','merged',...uvShapeFields]);
   if(!validUVRect(rect)||!validUVSelection(request,rect))throw Error('图像复制选区无效');
-  const documents=doc.paint.imageDocuments??{};
-  const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId);
-  if(!layer||!layer.visible||!layer.opacity)throw Error('请选择可见的图像图层');
-  const input=imageDocumentInput(doc,{revision,documentId,isolatedImageLayer:layerId,resolution:4096});
+  if(typeof merged!=='boolean'||merged&&layerId!==undefined)throw Error('图像复制来源无效');
+  if(!merged){
+    const documents=doc.paint.imageDocuments??{};
+    const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId);
+    if(!layer||!layer.visible||!layer.opacity||layer.kind==='adjustment')throw Error('请选择包含像素的可见图像图层');
+  }
+  const input=imageDocumentInput(doc,{revision,documentId,isolatedImageLayer:merged?undefined:layerId,resolution:4096});
   return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
 }
 export function imageExportInput(doc,request){

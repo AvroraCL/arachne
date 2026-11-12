@@ -1,12 +1,13 @@
 // Independent RGBA image documents. Material layers reference their composite by ID.
 import {paintChannels} from './paint-channels.mjs';
 import {uvShapeFields,uvShapePayload} from './uv-selection-region.mjs';
+import {checkImageAdjustment,imageBlendModes} from './image-adjustments.mjs';
 const record=o=>o&&typeof o==='object'&&!Array.isArray(o),id=s=>typeof s==='string'&&/^[\w-]{1,100}$/.test(s),unit=n=>Number.isFinite(n)&&n>=0&&n<=1;
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
 const ink=s=>typeof s==='string'&&/^#[a-f\d]{6}$/i.test(s);
-const layerFields=['name','visible','locked','opacity','blend','maskEnabled','maskBase','maskGradient','asset','x','y','scale','rotation','stretch','gradient'];
-const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充'};
+const layerFields=['name','visible','locked','opacity','blend','maskEnabled','maskBase','maskGradient','asset','x','y','scale','rotation','stretch','gradient','adjustment'];
+const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层'};
 const pair=(values,check)=>Array.isArray(values)&&values.length===2&&values.every(check);
 function checkGradient(gradient,checkStroke,mask=false){
   if(!exact(gradient,['kind','start','end','colors','alpha','clip',...uvShapeFields])||
@@ -49,10 +50,12 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
     if(!id(key)||!exact(doc,['name','width','height','colorSpace','layers'])||!label(doc.name)||doc.width!==4096||doc.height!==4096||!['srgb','linear'].includes(doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>64)throw Error('图像文档无效');
     const ids=new Set();
     for(const layer of doc.layers){
-      if(!exact(layer,['id','kind',...layerFields,'strokes','maskStrokes','text'])||!id(layer.id)||ids.has(layer.id)||typeof layer.kind!=='string'||!Object.hasOwn(layerNames,layer.kind)||!label(layer.name)||typeof layer.visible!=='boolean'||typeof layer.locked!=='boolean'||!unit(layer.opacity)||!['normal','multiply','screen','overlay'].includes(layer.blend)||typeof layer.maskEnabled!=='boolean'||!unit(layer.maskBase))throw Error('图像图层无效');
+      if(!exact(layer,['id','kind',...layerFields,'strokes','maskStrokes','text'])||!id(layer.id)||ids.has(layer.id)||typeof layer.kind!=='string'||!Object.hasOwn(layerNames,layer.kind)||!label(layer.name)||typeof layer.visible!=='boolean'||typeof layer.locked!=='boolean'||!unit(layer.opacity)||!imageBlendModes.includes(layer.blend)||typeof layer.maskEnabled!=='boolean'||!unit(layer.maskBase))throw Error('图像图层无效');
       ids.add(layer.id);
       if(layer.kind==='gradient')checkGradient(layer.gradient,checkStroke);
       else if(layer.gradient!==undefined)throw Error('请选择渐变填充层');
+      if(layer.kind==='adjustment')checkImageAdjustment(layer.adjustment);
+      else if(layer.adjustment!==undefined)throw Error('请选择调整图层');
       if(layer.maskGradient!==undefined)checkGradient(layer.maskGradient,checkStroke,true);
       if(layer.text!==undefined&&(layer.kind!=='image'||!validateText?.(layer.text)))throw Error('图像文字参数无效');
       if(layer.kind==='image'&&(!Object.hasOwn(paint.assets,layer.asset)||![layer.x,layer.y,layer.scale,layer.rotation].every(Number.isFinite)||!unit(layer.x)||!unit(layer.y)||layer.scale<1/4096||layer.scale>4||Math.abs(layer.rotation)>360||!Array.isArray(layer.stretch)||layer.stretch.length!==2||!layer.stretch.every(n=>Number.isFinite(n)&&Math.abs(n)>=.05&&Math.abs(n)<=8)))throw Error('图像层素材或变换无效');
@@ -117,7 +120,8 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     const index=o.index??doc.layers.length;
     if(!id(o.layerId)||doc.layers.some(l=>l.id===o.layerId)||typeof o.kind!=='string'||!Object.hasOwn(layerNames,o.kind)||!exact(o.patch??{},layerFields)||
        !Number.isInteger(index)||index<0||index>doc.layers.length)throw Error('图像图层参数无效');
-    doc.layers.splice(index,0,{id:o.layerId,kind:o.kind,name:layerNames[o.kind],...imageLayerDefaults,...(o.kind==='image'?{x:.5,y:.5,scale:1,rotation:0,stretch:[1,1]}:{}),...o.patch});return;
+    const defaults=o.kind==='image'?{x:.5,y:.5,scale:1,rotation:0,stretch:[1,1]}:o.kind==='adjustment'?{maskEnabled:true}:{};
+    doc.layers.splice(index,0,{id:o.layerId,kind:o.kind,name:layerNames[o.kind],...imageLayerDefaults,...defaults,...o.patch});return;
   }
   const index=doc.layers.findIndex(l=>l.id===o.layerId),layer=doc.layers[index];if(!layer)throw Error('图像图层不存在');
   if(layer.locked&&!(o.action==='updateLayer'&&Object.keys(o.patch??{}).every(k=>['locked','visible'].includes(k))))throw Object.assign(Error('图像图层已锁定'),{status:423});
