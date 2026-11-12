@@ -866,6 +866,72 @@ try{
   assert.deepEqual((await api(texturedRoute)).paint.layers.at(-1).channelBlend,{roughness:'multiply'});
   console.log('PASS per-channel material opacity, linear roughness blending, normal detail, guarded inputs and undo');
 
+  const sidecarFolder=path.join(data,'glTF 配套 文件');
+  await fs.mkdir(sidecarFolder);
+  const sidecarModel=path.join(sidecarFolder,'机翼 外部贴图.gltf');
+  const bufferName='顶点 数据.bin',uvName='UV 数据.bin',imageName='涂装 色彩.png';
+  const sidecarPaths=[bufferName,uvName,imageName].map(name=>path.join(sidecarFolder,name));
+  const texturedBytes=await fs.readFile(texturedFile),texturedJsonLength=texturedBytes.readUInt32LE(12);
+  const sidecarScene=JSON.parse(texturedBytes.subarray(20,20+texturedJsonLength).toString());
+  const texturedBin=texturedBytes.subarray(28+texturedJsonLength);
+  const originalDataLength=sidecarScene.buffers[0].byteLength,vertexLength=sidecarScene.bufferViews[0].byteLength;
+  const colorImage=sidecarScene.images[0],colorView=sidecarScene.bufferViews[colorImage.bufferView];
+  await Promise.all([
+    fs.writeFile(sidecarPaths[0],texturedBin.subarray(0,vertexLength)),
+    fs.writeFile(sidecarPaths[1],texturedBin.subarray(vertexLength,originalDataLength)),
+    fs.writeFile(sidecarPaths[2],texturedBin.subarray(colorView.byteOffset,colorView.byteOffset+colorView.byteLength))
+  ]);
+  sidecarScene.buffers=[{byteLength:vertexLength,uri:encodeURIComponent(bufferName)},
+    {byteLength:originalDataLength-vertexLength,uri:'data/'+encodeURIComponent(uvName)}];
+  for(const view of sidecarScene.bufferViews.slice(1)){
+    view.buffer=1;
+    view.byteOffset-=vertexLength;
+  }
+  delete colorImage.bufferView;
+  colorImage.uri='images/'+encodeURIComponent(imageName);
+  await fs.writeFile(sidecarModel,JSON.stringify(sidecarScene));
+  const droppedGltf=await reopened.evaluateHandle(({name,bytes})=>{
+    const transfer=new DataTransfer();
+    transfer.items.add(new File([bytes],name,{type:'model/gltf+json'}));
+    return transfer;
+  },{name:path.basename(sidecarModel),bytes:JSON.stringify(sidecarScene)});
+  await reopened.locator('.editor-viewport').first().dispatchEvent('drop',{dataTransfer:droppedGltf});
+  await droppedGltf.dispose();
+  const gltfDialog=reopened.locator('#new-paint-dialog');
+  const gltfInput=gltfDialog.locator('#new-paint-model');
+  await gltfDialog.getByText('缺少 glTF 配套文件：'+bufferName).waitFor();
+  assert.equal(await gltfDialog.getByRole('button',{name:'添加文件…',exact:true}).isVisible(),true);
+  await gltfInput.setInputFiles(sidecarPaths.slice(0,2));
+  await gltfDialog.getByText('缺少 glTF 配套文件：'+imageName).waitFor();
+  assert.equal(await gltfDialog.locator('#new-paint-submit').isDisabled(),true);
+  await gltfInput.setInputFiles(sidecarPaths[2]);
+  await gltfDialog.getByText('机翼 外部贴图.gltf',{exact:true}).waitFor();
+  await until(()=>gltfDialog.locator('#new-paint-submit').isEnabled());
+  await reopened.screenshot({path:path.join(data,'gltf-model-import.png')});
+  await gltfDialog.locator('#new-paint-submit').click();
+  await gltfDialog.waitFor({state:'hidden',timeout:90000});
+  const gltfId=new URL(reopened.url()).searchParams.get('project');
+  const gltfRoute='/api/projects/'+gltfId,sidecarProject=await api(gltfRoute);
+  assert.equal(sidecarProject.source.uvSha256,textured.source.uvSha256);
+  for(const [channel,asset] of Object.entries(sourceLayer.maps)){
+    const imported=sidecarProject.paint.layers[0].maps[channel];
+    assert.equal(sidecarProject.paint.assets[imported].sha256,textured.paint.assets[asset].sha256);
+  }
+  await fs.rm(sidecarFolder,{recursive:true});
+  await reopened.reload();
+  const gltfBake=await api(gltfRoute+'/paint/preview',{revision:0,requestId:'separate-gltf'});
+  const gltfResult=await until(async()=>{
+    const job=await api(gltfRoute+'/jobs/'+gltfBake.id);
+    if(job.status==='failed')throw Error(job.error);
+    return job.status==='completed'&&job;
+  });
+  assert.deepEqual(Object.keys(gltfResult.materialUrls).sort(),Object.keys(bakedSource.materialUrls).sort());
+  for(const [channel,url] of Object.entries(gltfResult.materialUrls)){
+    const [a,b]=await Promise.all([url,bakedSource.materialUrls[channel]].map(source=>fetch(origin+source).then(response=>response.arrayBuffer())));
+    assert.equal(digest(Buffer.from(a)),digest(Buffer.from(b)));
+  }
+  console.log('PASS glTF with multiple buffers, escaped Chinese sidecar paths, missing-file feedback and matching UV and 4K maps after source removal');
+
   const objFiles=path.join(data,'OBJ 测试 文件');
   await fs.mkdir(objFiles);
   const objFile=path.join(objFiles,'凹形机翼.obj'),mtlFile=path.join(objFiles,'表面 材质.mtl');

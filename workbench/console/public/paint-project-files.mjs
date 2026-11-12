@@ -1,5 +1,6 @@
 import {syncSelectMenu} from './paint-select.mjs';
 import {modelTemplates} from './model-templates.mjs';
+import {parseGltf,resolveGltfFiles} from './gltf-files.mjs';
 
 const defaultProjectName='示例模型 · PBR 涂装';
 const MiB=1024*1024;
@@ -52,8 +53,8 @@ async function checkArchive(file){
     throw Error('请选择有效的涂装 ZIP');
 }
 
-const modelExtension=/\.(glb|obj)$/i;
-const sidecarExtension=/\.(mtl|png|jpe?g|webp)$/i;
+const modelExtension=/\.(glb|gltf|obj)$/i;
+const fileNameKey=name=>name.normalize('NFC').toLowerCase();
 
 async function objMaterials(file){
   const probe=await file.slice(0,256*1024).arrayBuffer();
@@ -89,20 +90,26 @@ async function objMaterials(file){
 
 async function checkModel(files){
   const models=files.filter(file=>modelExtension.test(file.name));
-  if(models.length!==1)throw Error('请选择一个 GLB 或 OBJ 模型');
+  if(models.length!==1)throw Error('请选择一个 GLB、glTF 或 OBJ 模型');
   const [file]=models;
   if(/\.glb$/i.test(file.name)){
     if(files.length!==1)throw Error('GLB 请单独选择，模型已包含配套文件');
     return {file,format:'glb',entries:await checkGlb(file),attachments:[],size:file.size};
   }
+  const format=/\.gltf$/i.test(file.name)?'gltf':'obj',label=format==='obj'?'OBJ':'glTF';
+  const sidecarExtension=format==='obj'?/\.(mtl|png|jpe?g|webp)$/i:/\.(bin|png|jpe?g|webp)$/i;
   const attachments=files.filter(item=>item!==file);
   if(attachments.length>24||attachments.some(item=>!sidecarExtension.test(item.name)))
-    throw Error('OBJ 可同时选择最多 24 个 MTL、PNG、JPEG 或 WebP 文件');
-  if(new Set(attachments.map(item=>item.name.normalize('NFC').toLowerCase())).size!==attachments.length)
+    throw Error(label+' 可同时选择最多 24 个 '+(format==='obj'?'MTL':'BIN')+'、PNG、JPEG 或 WebP 文件');
+  if(new Set(attachments.map(item=>fileNameKey(item.name))).size!==attachments.length)
     throw Error('配套文件不能重名');
   const size=files.reduce((bytes,item)=>bytes+item.size,0);
-  if(size>128*MiB)throw Error('OBJ 和配套文件合计不能超过 128 MiB');
-  return {file,format:'obj',entries:await objMaterials(file),attachments,size};
+  if(size>128*MiB)throw Error(label+' 和配套文件合计不能超过 128 MiB');
+  if(format==='obj')return {file,format,entries:await objMaterials(file),attachments,size};
+  const model=parseGltf(await file.text()),entries=paintableMaterials(model);
+  if(!entries.length)throw Error('模型中没有使用 TEXCOORD_0 的三角网格');
+  resolveGltfFiles(model,attachments);
+  return {file,format,entries,attachments,size};
 }
 
 function fileSize(bytes){
@@ -132,15 +139,18 @@ function acceptFileDrop(host,enabled,receive){
 }
 
 function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,error,check,defaultLabel,defaultHint,optional,onFile,commit}){
-  let selected=null,request=0,validating=false,working=false,invalid=false;
+  let selected=null,request=0,validating=false,working=false,invalid=false,staged=[];
+  const chooseLabel=choose.textContent;
   function sync(){
     const pending=working||validating;
     close.disabled=working;
     choose.disabled=working;
     if(clear){clear.hidden=!selected&&!invalid;clear.disabled=working;}
     submit.disabled=pending||invalid||!optional&&!selected;
-    label.textContent=selected?.file.name||defaultLabel;
-    label.title=selected?.file.name||'';
+    const file=selected?.file||(!validating&&staged.find(item=>modelExtension.test(item.name)));
+    label.textContent=file?.name||defaultLabel;
+    label.title=file?.name||'';
+    if(optional)choose.textContent=file&&!/\.glb$/i.test(file.name)?'添加文件…':chooseLabel;
     size.textContent=validating?'正在检查文件…':selected?
       [fileSize(selected.size),selected.attachments?.length?selected.attachments.length+' 个配套文件':''].filter(Boolean).join(' · '):defaultHint;
     size.title=selected?.attachments?.map(file=>file.name).join('\n')||'';
@@ -148,7 +158,7 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
   }
 
   function reset(){
-    request++;selected=null;input.value='';
+    request++;selected=null;staged=[];input.value='';
     validating=false;invalid=false;error.textContent='';
     onFile?.(null);sync();
   }
@@ -156,6 +166,13 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
   async function receive(files){
     if(!files.length||working||!dialog.open)return;
     const token=++request;
+    if(optional){
+      const adding=staged.some(file=>modelExtension.test(file.name)&&!/\.glb$/i.test(file.name))&&
+        !files.some(file=>modelExtension.test(file.name));
+      const keys=new Set(files.map(file=>fileNameKey(file.name)));
+      staged=adding?[...staged.filter(file=>!keys.has(fileNameKey(file.name))),...files]:files;
+      files=staged;
+    }
     validating=true;invalid=false;error.textContent='';sync();
     try{
       const next=await check(files);
@@ -174,7 +191,7 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
   close.onclick=()=>dialog.close();
   dialog.addEventListener('cancel',event=>{if(working)event.preventDefault();});
   dialog.addEventListener('close',()=>{
-    if(!dialog.open){request++;selected=null;input.value='';drop.removeAttribute('data-file-drop');}
+    if(!dialog.open){request++;selected=null;staged=[];input.value='';drop.removeAttribute('data-file-drop');}
   });
   acceptFileDrop(drop,()=>dialog.open&&!working,files=>void receive(files));
   dialog.querySelector('form').onsubmit=async event=>{
@@ -192,11 +209,11 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
   };
 }
 
-export function setupProjectFiles({canOpen,create,restore}){
+export function setupProjectFiles({canOpen,create,restore,notice}){
   const byId=id=>document.getElementById(id);
   const name=byId('new-paint-name'),material=byId('new-paint-material'),sourceTextures=byId('new-paint-source-textures');
   const template=byId('new-paint-template'),templateRow=template.closest('label'),materialRow=material.closest('label');
-  const upAxis=byId('new-paint-up-axis'),upAxisRow=upAxis.closest('label'),objHint=byId('new-paint-obj-hint');
+  const upAxis=byId('new-paint-up-axis'),upAxisRow=upAxis.closest('label'),modelHint=byId('new-paint-sidecar-hint');
   template.replaceChildren(new Option('示例模型','demo'),...Object.entries(modelTemplates).map(([id,title])=>new Option(title,id)));
   syncSelectMenu(template);
   let suggested=defaultProjectName;
@@ -213,10 +230,12 @@ export function setupProjectFiles({canOpen,create,restore}){
     label:byId('new-paint-model-label'),size:byId('new-paint-model-size'),
     choose:byId('choose-new-paint-model'),clear:byId('clear-new-paint-model'),
     close:byId('new-paint-close'),submit:byId('new-paint-submit'),error:byId('new-paint-error'),
-    check:checkModel,defaultLabel:'导入自有模型',defaultHint:'拖入 GLB 或 OBJ 及配套文件',optional:true,
+    check:checkModel,defaultLabel:'导入自有模型',defaultHint:'拖入 GLB、glTF 或 OBJ 及配套文件',optional:true,
     onFile(model){
       materialRow.hidden=!model;
-      upAxisRow.hidden=objHint.hidden=model?.format!=='obj';
+      upAxisRow.hidden=model?.format!=='obj';
+      modelHint.hidden=!model||model.format==='glb';
+      modelHint.textContent=model?.format==='obj'?'可同时选择 OBJ、MTL 和引用的图片。':'请一并选择 glTF 引用的 BIN 和图片。';
       sourceTextures.closest('label').hidden=!model;
       sourceTextures.checked=true;
       upAxis.value='y';syncSelectMenu(upAxis);
@@ -265,11 +284,24 @@ export function setupProjectFiles({canOpen,create,restore}){
 
   byId('new').onclick=()=>show('model');
   byId('open-paint-import').onclick=()=>show('zip');
-  const welcome=byId('empty'),error=byId('welcome-error');
+  const welcome=byId('empty'),error=byId('welcome-error'),workspace=byId('workspace');
+  const importType=files=>files.some(file=>modelExtension.test(file.name))?'model':
+    files.some(file=>/\.zip$/i.test(file.name))?'zip':'';
   acceptFileDrop(welcome,canOpen,files=>{
-    const type=files.some(file=>modelExtension.test(file.name))?'model':
-      files.some(file=>/\.zip$/i.test(file.name))?'zip':'';
-    if(!type){error.textContent='请拖入 GLB、OBJ 或涂装 ZIP';return;}
+    const type=importType(files);
+    if(!type){error.textContent='请拖入 GLB、glTF、OBJ 或涂装 ZIP';return;}
     error.textContent='';show(type,files);
   });
+  workspace.addEventListener('dragover',event=>{
+    if(!event.defaultPrevented&&event.dataTransfer?.types.includes('Files')){
+      event.preventDefault();event.dataTransfer.dropEffect=canOpen()?'copy':'none';
+    }
+  });
+  workspace.addEventListener('drop',event=>{
+    const files=[...(event.dataTransfer?.files||[])],type=importType(files);
+    if(!type)return;
+    event.preventDefault();event.stopPropagation();
+    if(!canOpen()){notice?.('请结束当前操作后再导入工程或模型');return;}
+    show(type,files);
+  },{capture:true});
 }

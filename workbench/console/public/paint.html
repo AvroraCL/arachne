@@ -353,7 +353,7 @@
         <button id="welcome-open" type="button">打开工程…</button>
         <button id="welcome-import" type="button">打开涂装 ZIP…</button>
       </div>
-      <small>可拖入 GLB、OBJ 或涂装 ZIP</small>
+      <small>可拖入 GLB、glTF、OBJ 或涂装 ZIP</small>
     </header>
     <p id="welcome-error" role="alert"></p>
     <div id="welcome-recent" hidden>
@@ -603,15 +603,15 @@
       <label>工程名称<input id="new-paint-name" type="text" maxlength="100" required autofocus></label>
       <label class="new-paint-template-row">模型模板<select id="new-paint-template" aria-label="模型模板"></select></label>
       <div id="new-paint-model-drop" class="project-file-drop" role="group" aria-label="模型来源">
-        <div><strong id="new-paint-model-label">导入自有模型</strong><small id="new-paint-model-size">拖入 GLB 或 OBJ 及配套文件</small></div>
+        <div><strong id="new-paint-model-label">导入自有模型</strong><small id="new-paint-model-size">拖入 GLB、glTF 或 OBJ 及配套文件</small></div>
         <button id="choose-new-paint-model" type="button">选择模型…</button>
         <button id="clear-new-paint-model" type="button" hidden>使用模板</button>
-        <input id="new-paint-model" type="file" accept=".glb,.obj,.mtl,.png,.jpg,.jpeg,.webp" aria-label="选择模型与配套文件" multiple hidden>
+        <input id="new-paint-model" type="file" accept=".glb,.gltf,.obj,.bin,.mtl,.png,.jpg,.jpeg,.webp" aria-label="选择模型与配套文件" multiple hidden>
       </div>
       <label class="new-paint-material-row" hidden>涂装材质<select id="new-paint-material" aria-label="涂装材质"></select></label>
       <label class="new-paint-material-row" hidden>向上轴<select id="new-paint-up-axis" aria-label="向上轴"><option value="y">Y 向上</option><option value="z">Z 向上</option></select></label>
       <label class="new-paint-material-row" hidden>保留源贴图<input id="new-paint-source-textures" type="checkbox" checked title="将源贴图导入为可编辑填充层"></label>
-      <p class="project-copy-source" id="new-paint-obj-hint" hidden>可同时选择 OBJ、MTL 和引用的图片。</p>
+      <p class="project-copy-source" id="new-paint-sidecar-hint" hidden></p>
     </div>
     <div class="paint-form-footer"><span id="new-paint-error" role="alert"></span><button id="new-paint-submit" type="submit" class="primary">创建</button></div>
   </form>

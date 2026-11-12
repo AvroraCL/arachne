@@ -1613,16 +1613,16 @@ migrationStart.onclick=async()=>{
 historyPanel=setupPaintHistory({trigger:$('open-history'),read:()=>doc,load:id=>api('/api/projects/'+id+'/paint/history'),canEdit:()=>!busy&&!modeler.isDragging()&&!surfaceTools.isEditing()&&!uvSelection.isDragging()&&!uvSelection.isTransforming(),
   restore:(direction,steps,origin)=>run(async()=>{if(doc.id!==origin.id)throw Error('当前工程已切换');await api('/api/projects/'+origin.id+'/paint/'+direction,{revision:origin.revision,steps});approvedPreviewId=null;},$('history-error'))});
 const newPaintDialog=$('new-paint-dialog'),importDialog=$('paint-import-dialog');
-setupProjectFiles({canOpen:canOpenProjectDialog,
+setupProjectFiles({canOpen:canOpenProjectDialog,notice:message=>$('status').textContent=message,
   create:(name,model,error,material,modelTemplate,preserveTextures,upAxis)=>run(async()=>{
     const options=new URLSearchParams({name,...(material==null?{}:{material}),...(!preserveTextures?{textures:'blank'}:{})});
     let project;
-    if(model?.format==='obj'){
+    if(model&&model.format!=='glb'){
       const files=new FormData();
       files.append('model',model.file);
       for(const file of model.attachments)files.append('attachment',file);
-      options.set('up',upAxis);
-      project=await responseJson(await fetch('/api/projects/obj-import?'+options,{method:'POST',body:files}));
+      if(model.format==='obj')options.set('up',upAxis);
+      project=await responseJson(await fetch('/api/projects/'+model.format+'-import?'+options,{method:'POST',body:files}));
     }else if(model){
       project=await responseJson(await fetch('/api/projects/model-import?'+options,{
         method:'POST',headers:{'Content-Type':'model/gltf-binary'},body:model.file

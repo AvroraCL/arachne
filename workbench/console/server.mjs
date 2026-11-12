@@ -1,6 +1,7 @@
 import {readDesktopWorkspace,writeDesktopWorkspace} from './desktop-workspaces.mjs';
 import {readDesktopSettings,writeDesktopSettings} from './desktop-settings.mjs';
 import {importGlbProject,importObjProject} from './model-registration.mjs';
+import {embedGltf} from './gltf-embed.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
@@ -134,19 +135,28 @@ function receiveGlb(req,name,material,preserveTextures){
     return importGlbProject(input,scratch,name,material,{preserveTextures});
   });
 }
-function receiveObj(req,name,material,upAxis,preserveTextures){
-  return withModelImport(req,maxModel+64*1024,'OBJ 和配套文件合计不能超过 128 MiB',async(scratch,parts)=>{
+function receiveModelFiles(req,format,name,material,upAxis,preserveTextures){
+  const label=format==='obj'?'OBJ':'glTF';
+  const message=label+' 和配套文件合计不能超过 128 MiB';
+  return withModelImport(req,maxModel+64*1024,message,async(scratch,parts)=>{
     const response=new Response(Readable.toWeb(Readable.from(parts)),{headers:{'Content-Type':req.headers['content-type']}});
     let form;
     try{form=await response.formData();}
-    catch(error){if(error.status===413||error.cause?.status===413)throw Object.assign(Error('OBJ 和配套文件合计不能超过 128 MiB'),{status:413});
-      throw Error('OBJ 上传数据不完整，请重新选择文件');}
+    catch(error){if(error.status===413||error.cause?.status===413)throw Object.assign(Error(message),{status:413});
+      throw Error(label+' 上传数据不完整，请重新选择文件');}
     const models=form.getAll('model'),model=models[0],files=form.getAll('attachment');
-    if(models.length!==1||!(model instanceof File)||!/\.obj$/i.test(model.name))throw Error('请选择一个 OBJ 模型');
-    if(files.length>24||files.some(file=>!(file instanceof File)||!/\.(?:mtl|png|jpe?g|webp)$/i.test(file.name)||file.name.length>250))
-      throw Error('最多选择 24 个 MTL、PNG、JPEG 或 WebP 配套文件');
+    const sidecars=format==='obj'?/\.(?:mtl|png|jpe?g|webp)$/i:/\.(?:bin|png|jpe?g|webp)$/i;
+    if(models.length!==1||!(model instanceof File)||!model.name.toLowerCase().endsWith('.'+format))throw Error('请选择一个 '+label+' 模型');
+    if(files.length>24||files.some(file=>!(file instanceof File)||!sidecars.test(file.name)||file.name.length>250))
+      throw Error('最多选择 24 个 '+(format==='obj'?'MTL':'BIN')+'、PNG、JPEG 或 WebP 配套文件');
     if(files.reduce((size,file)=>size+file.size,model.size)>maxModel)
-      throw Object.assign(Error('OBJ 和配套文件合计不能超过 128 MiB'),{status:413});
+      throw Object.assign(Error(message),{status:413});
+    if(format==='gltf'){
+      const chunks=await embedGltf(model,files,maxModel);
+      const input=path.join(scratch,'incoming.glb');
+      await fs.promises.writeFile(input,Readable.from(chunks),{flag:'wx'});
+      return importGlbProject(input,scratch,name,material,{preserveTextures});
+    }
     const seen=new Set();
     const attachments=files.map((file,index)=>{
       const key=file.name.normalize('NFC').toLowerCase();
@@ -176,17 +186,21 @@ const server=http.createServer(async(req,res)=>{
     if(![`127.0.0.1:${PORT}`,`localhost:${PORT}`].includes(req.headers.host)){send(res,403,{error:'仅限本地访问'});return;}
     if(req.headers.origin&&![local,`http://localhost:${PORT}`].includes(req.headers.origin)){send(res,403,{error:'拒绝跨来源访问'});return;}
     const url=new URL(req.url,local);
-    if(req.method==='POST'&&url.pathname==='/api/projects/model-import'){
-      if(req.headers['content-type']!=='model/gltf-binary'){send(res,415,{error:'请选择 GLB 模型'});return;}
+    if(req.method==='POST'&&['/api/projects/model-import','/api/projects/gltf-import'].includes(url.pathname)){
+      const binary=url.pathname==='/api/projects/model-import';
+      if(binary?req.headers['content-type']!=='model/gltf-binary':!String(req.headers['content-type']).startsWith('multipart/form-data;')){
+        send(res,415,{error:binary?'请选择 GLB 模型':'请选择 glTF 及配套文件'});return;
+      }
       const name=url.searchParams.get('name')?.trim()||'导入模型 · PBR 涂装';
       if(name.length>100)throw Error('工程名称不能超过 100 字');
       const chosen=url.searchParams.get('material');
       const material=chosen===null?undefined:chosen==='default'?'default':Number(chosen);
       if(chosen!==null&&material!=='default'&&(!/^(0|[1-9]\d*)$/.test(chosen)||!Number.isSafeInteger(material)))
-        throw Error('GLB 材质编号无效');
+        throw Error('glTF 材质编号无效');
       const textures=url.searchParams.get('textures')??'preserve';
       if(!['preserve','blank'].includes(textures))throw Error('请选择有效的源贴图导入方式');
-      send(res,201,await receiveGlb(req,name,material,textures==='preserve'));return;
+      const preserve=textures==='preserve';
+      send(res,201,await (binary?receiveGlb(req,name,material,preserve):receiveModelFiles(req,'gltf',name,material,undefined,preserve)));return;
     }
     if(req.method==='POST'&&url.pathname==='/api/projects/obj-import'){
       if(!String(req.headers['content-type']).startsWith('multipart/form-data;')){
@@ -198,7 +212,7 @@ const server=http.createServer(async(req,res)=>{
       if(material!==undefined&&(!material.trim()||material.length>250))throw Error('OBJ 材质名称无效');
       const upAxis=url.searchParams.get('up')??'y',textures=url.searchParams.get('textures')??'preserve';
       if(!['y','z'].includes(upAxis)||!['preserve','blank'].includes(textures))throw Error('请选择有效的 OBJ 导入设置');
-      send(res,201,await receiveObj(req,name,material,upAxis,textures==='preserve'));return;
+      send(res,201,await receiveModelFiles(req,'obj',name,material,upAxis,textures==='preserve'));return;
     }
     if(req.method==='POST'&&url.pathname==='/api/projects/paint-import'){
       if(req.headers['content-type']!=='application/zip'){send(res,415,{error:'请选择涂装交付 ZIP'});return;}
