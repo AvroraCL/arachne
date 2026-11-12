@@ -12,10 +12,10 @@ def decode(c):
 
 
 class MaterialImages:
-    def __init__(self, assets, memory_limit=64 * 1024 * 1024):
+    def __init__(self, assets, memory_limit=256 * 1024 * 1024):
         self.assets = assets
         self.images = {}
-        self.pixel_count = 0
+        self.memory_bytes = 0
         self.memory_limit = memory_limit
         self.spills = None
 
@@ -25,29 +25,30 @@ class MaterialImages:
 
     def __exit__(self, *error):
         self.images.clear()
+        self.memory_bytes = 0
         self.spills.__exit__(*error)
         self.spills = None
 
-    def load(self, asset):
-        if asset not in self.images:
+    def load(self, asset, mode='RGBA'):
+        key = (asset, mode)
+        if key not in self.images:
             with Image.open(self.assets[asset]) as image:
-                pixels = image.width * image.height
-                rgba = np.asarray(image.convert('RGBA'))
-                if self.pixel_count + pixels <= self.memory_limit:
-                    self.images[asset] = rgba
-                    self.pixel_count += pixels
+                pixels = np.asarray(image.convert(mode))
+                if self.memory_bytes + pixels.nbytes <= self.memory_limit:
+                    self.images[key] = pixels
+                    self.memory_bytes += pixels.nbytes
                 elif self.spills is not None:
-                    # Large stacks share disk-backed RGBA data between graph
-                    # tiles instead of keeping every decoded map in memory.
+                    # Decode each map once and let the OS page large sets as
+                    # individual tiles use them.
                     file = self.spills.enter_context(tempfile.TemporaryFile())
-                    file.truncate(rgba.nbytes)
-                    mapping = self.spills.enter_context(mmap.mmap(file.fileno(), rgba.nbytes))
-                    stored = np.ndarray(rgba.shape, dtype=np.uint8, buffer=mapping)
-                    stored[:] = rgba
-                    self.images[asset] = stored
+                    file.truncate(pixels.nbytes)
+                    mapping = self.spills.enter_context(mmap.mmap(file.fileno(), pixels.nbytes))
+                    stored = np.ndarray(pixels.shape, dtype=np.uint8, buffer=mapping)
+                    stored[:] = pixels
+                    self.images[key] = stored
                 else:
-                    raise ValueError('材质图像总像素超过 64 Mi 像素')
-        return self.images[asset]
+                    raise ValueError('材质图像超过本次合成的内存预算')
+        return self.images[key]
 
 
 class MaterialGraph:

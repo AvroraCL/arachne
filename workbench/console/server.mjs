@@ -5,7 +5,7 @@ import {embedGltf} from './gltf-embed.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
-import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,imageExportInput,checkPaintPreview,validateProjectPaint} from './paint.mjs';
+import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,imageExportInput,checkPaintPreview,validateProjectPaint} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
 import {resolvePaintRenderSettings} from './cycles-options.mjs';
@@ -103,12 +103,12 @@ async function receivePaintArchive(req){
     finally{importingPaintArchive=false;}
   }
 }
-let importingModel=false;
+let importingFiles=false;
 const maxModel=128*1024*1024;
-async function withModelImport(req,limit,message,receive){
+async function withFileImport(req,limit,message,receive){
   if(Number(req.headers['content-length'])>limit)throw Object.assign(Error(message),{status:413});
-  if(importingModel)throw Object.assign(Error('已有模型正在导入'),{status:429});
-  importingModel=true;
+  if(importingFiles)throw Object.assign(Error('已有模型或贴图正在导入'),{status:429});
+  importingFiles=true;
   let scratch;
   async function* parts(){
     let size=0;
@@ -119,15 +119,23 @@ async function withModelImport(req,limit,message,receive){
     }
   }
   try{
-    scratch=await fs.promises.mkdtemp(path.join(DATA,'.model-import-'));
+    scratch=await fs.promises.mkdtemp(path.join(DATA,'.file-import-'));
     return await receive(scratch,parts());
   }finally{
     try{if(scratch)await fs.promises.rm(scratch,{recursive:true,force:true});}
-    finally{importingModel=false;}
+    finally{importingFiles=false;}
+  }
+}
+async function readMultipart(req,parts,sizeError,formatError){
+  const response=new Response(Readable.toWeb(Readable.from(parts)),{headers:{'Content-Type':req.headers['content-type']}});
+  try{return await response.formData();}
+  catch(error){
+    if(error.status===413||error.cause?.status===413)throw Object.assign(Error(sizeError),{status:413});
+    throw Error(formatError);
   }
 }
 function receiveGlb(req,name,material,preserveTextures){
-  return withModelImport(req,maxModel,'GLB 不能超过 128 MiB',async(scratch,parts)=>{
+  return withFileImport(req,maxModel,'GLB 不能超过 128 MiB',async(scratch,parts)=>{
     const input=path.join(scratch,'incoming.glb'),upload=await fs.promises.open(input,'wx');
     try{
       for await(const part of parts)await upload.writeFile(part);
@@ -138,12 +146,8 @@ function receiveGlb(req,name,material,preserveTextures){
 function receiveModelFiles(req,format,name,material,upAxis,preserveTextures){
   const label=format==='obj'?'OBJ':'glTF';
   const message=label+' 和配套文件合计不能超过 128 MiB';
-  return withModelImport(req,maxModel+64*1024,message,async(scratch,parts)=>{
-    const response=new Response(Readable.toWeb(Readable.from(parts)),{headers:{'Content-Type':req.headers['content-type']}});
-    let form;
-    try{form=await response.formData();}
-    catch(error){if(error.status===413||error.cause?.status===413)throw Object.assign(Error(message),{status:413});
-      throw Error(label+' 上传数据不完整，请重新选择文件');}
+  return withFileImport(req,maxModel+64*1024,message,async(scratch,parts)=>{
+    const form=await readMultipart(req,parts,message,label+' 上传数据不完整，请重新选择文件');
     const models=form.getAll('model'),model=models[0],files=form.getAll('attachment');
     const sidecars=format==='obj'?/\.(?:mtl|png|jpe?g|webp)$/i:/\.(?:bin|png|jpe?g|webp)$/i;
     if(models.length!==1||!(model instanceof File)||!model.name.toLowerCase().endsWith('.'+format))throw Error('请选择一个 '+label+' 模型');
@@ -168,6 +172,28 @@ function receiveModelFiles(req,format,name,material,upAxis,preserveTextures){
     await fs.promises.writeFile(input,model.stream(),{flag:'wx'});
     for(const [index,file] of files.entries())await fs.promises.writeFile(attachments[index].path,file.stream(),{flag:'wx'});
     return importObjProject(input,scratch,name,{material,attachments,upAxis,preserveTextures});
+  });
+}
+function receiveMaterialFiles(req,id,revision){
+  const sizeError='整批材质贴图不能超过 128 MiB';
+  return withFileImport(req,maxModel+64*1024,sizeError,async(scratch,parts)=>{
+    const doc=read(id);
+    if(doc.workflowType!==PAINT)throw Error('请选择涂装工程');
+    if(doc.revision!==revision)throw Object.assign(Error('工程修订已变化'),{status:409,currentRevision:doc.revision});
+    const form=await readMultipart(req,parts,sizeError,'贴图上传数据不完整，请重新选择文件');
+    const images=form.getAll('image');
+    if(!images.length||images.length>16||images.some(file=>!(file instanceof File)||!file.size||
+      file.name.length>250||!/\.(png|jpe?g|webp|tga)$/i.test(file.name)))
+      throw Error('请选择 1–16 张 PNG、JPEG、WebP 或 TGA 贴图');
+    if(images.reduce((bytes,file)=>bytes+file.size,0)>maxModel||images.some(file=>file.size>96*1024*1024))
+      throw Object.assign(Error('单张源贴图不能超过 96 MiB，'+sizeError),{status:413});
+    const files=[];
+    for(const [index,file] of images.entries()){
+      const source=path.join(scratch,'source-'+index),destination=path.join(scratch,'map-'+index+'.png');
+      await fs.promises.writeFile(source,file.stream(),{flag:'wx'});
+      files.push({name:file.name,source,destination});
+    }
+    return importPaintMaps(doc,revision,files,scratch);
   });
 }
 function file(res,p){if(!fs.existsSync(p)||!fs.statSync(p).isFile()){send(res,404,{error:'文件不存在'});return;}res.writeHead(200,{'Content-Type':mime(p),'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'});fs.createReadStream(p).pipe(res);}
@@ -218,6 +244,14 @@ const server=http.createServer(async(req,res)=>{
       if(req.headers['content-type']!=='application/zip'){send(res,415,{error:'请选择涂装交付 ZIP'});return;}
       send(res,201,await receivePaintArchive(req));return;
     }
+    const materialUpload=req.method==='POST'&&/^\/api\/projects\/([\w-]{1,100})\/paint\/material-maps$/.exec(url.pathname);
+    if(materialUpload){
+      if(!String(req.headers['content-type']).startsWith('multipart/form-data;')){send(res,415,{error:'请选择材质贴图文件'});return;}
+      const value=url.searchParams.get('revision');
+      const revision=Number(value);
+      if(!/^(0|[1-9]\d*)$/.test(value??'')||!Number.isSafeInteger(revision))throw Error('工程修订无效');
+      send(res,201,await receiveMaterialFiles(req,materialUpload[1],revision));return;
+    }
     if(['POST','PUT','PATCH','DELETE'].includes(req.method)&&!String(req.headers['content-type']).startsWith('application/json')){send(res,415,{error:'写操作需要JSON'});return;}
     const parts=url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     if(parts.some(p=>p==='..'||p==='.'||p.includes('/')||p.includes('\\')||p.includes('\0')))throw Error('路径无效');
@@ -259,7 +293,7 @@ const server=http.createServer(async(req,res)=>{
       file(res,path.join(ROOT,'public',name));return;
     }
     if(parts[1]==='desktop-activity'&&parts.length===2&&req.method==='GET'){
-      const state=importingModel||importingPaintArchive?'saving':hasPendingJobs()||hasBlendMigrations()?'jobs':'ready';
+      const state=importingFiles||importingPaintArchive?'saving':hasPendingJobs()||hasBlendMigrations()?'jobs':'ready';
       send(res,200,{state});return;
     }
     if(parts[1]==='desktop-settings'&&parts.length===2){

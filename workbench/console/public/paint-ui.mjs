@@ -518,7 +518,7 @@ const surfaceTools=createSurfaceTools({viewport,host:$('viewport'),uvHost:$('uv-
   },
   swapInk:()=>changePaintColors(target=>paintColors.swap(target),'mask')
 });
-libraryUI=createPaintLibrary({host:$('paint-library'),read:()=>doc,uploadMaps:importProjectPngs,
+libraryUI=createPaintLibrary({host:$('paint-library'),read:()=>doc,uploadMaps:importProjectMaps,
   saveMap:(ops,origin)=>areaSystem.project.commands(ops,origin),
   selectedImage:()=>selectedAsset,
   onImportedImage:id=>{selectedAsset=id;renderAssets();renderAssetRoles();},
@@ -1778,28 +1778,19 @@ async function pngData(blob){
     reader.onerror=reject;reader.readAsDataURL(blob);
   });
 }
-async function importProjectPngs(files,origin,progress){
-  const uploaded=[],failures=[];
-  let revision=origin?.revision;
+async function importProjectMaps(files,origin){
+  let result,failure;
   const ok=await run(async()=>{
-    if(!origin||doc?.id!==origin.id||doc.revision!==revision)throw Error('工程修订已变化，请重新打开材质窗口');
-    for(const [index,file] of files.entries()){
-      progress?.(index,files.length);
-      if(doc?.id!==origin.id){failures.push('工程已切换，导入已停止');break;}
-      try{
-        const data=await pngData(file);
-        const result=await api('/api/projects/'+origin.id+'/paint/assets',{revision,name:file.name,data});
-        revision=result.document.revision;
-        uploaded.push({id:result.asset.id,name:file.name});
-      }catch(error){
-        failures.push(file.name+' · '+error.message);
-        if(error.status===409)break;
-      }
-    }
-    progress?.(files.length,files.length);
+    try{
+      if(!origin||doc?.id!==origin.id||doc.revision!==origin.revision)throw Error('工程修订已变化，请重新选择贴图');
+      const body=new FormData();
+      for(const file of files)body.append('image',file);
+      const response=await fetch('/api/projects/'+origin.id+'/paint/material-maps?revision='+origin.revision,{method:'POST',body});
+      result=await responseJson(response);
+    }catch(error){failure=error;throw error;}
   });
-  if(ok!==true)throw Error('请结束当前操作或重新打开材质窗口');
-  return {uploaded,failures};
+  if(ok!==true)throw failure||Error('请结束当前操作后再导入贴图');
+  return result.uploaded;
 }
 async function importAsset(blob,name,placement){
   const target={id:doc.id,revision:doc.revision},data=await pngData(blob);
@@ -2837,7 +2828,7 @@ decorateWorkspaceButtons(document,{
 document.querySelector('.canvas-document-icon').innerHTML=workspaceIcons.image;
 document.querySelectorAll('select').forEach(enhanceSelectMenu);
 
-areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferences.startupArea==='last',legacyCameraProject:restoreWorkbenchSession().projectId,desktopWorkspace,run,api,pngData,importAsset,importProjectPngs,busy:()=>busy,
+areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferences.startupArea==='last',legacyCameraProject:restoreWorkbenchSession().projectId,desktopWorkspace,run,api,pngData,importAsset,importProjectMaps,busy:()=>busy,
   renderSettings:renderSettingsBridge,renderResults:renderResultsBridge,
   materialInspection:()=>{const mask=doc&&inspectedMask();return mask?{kind:'mask',id:mask.id,projectId:doc.id}:doc&&isolatedLayerId?{kind:'layer',id:isolatedLayerId,projectId:doc.id}:null;},
   clearMaterialInspection,clearLayerIsolation,

@@ -109,7 +109,7 @@ export function setupPaintAreas(hooks){
       const data=await hooks.pngData(file);await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/assets',{revision:origin.revision,nodeId,...(origin.target?{materialId:origin.target.id}:{}),name:file.name,data}));return true;
     },
     importAsset:file=>write(()=>hooks.importAsset(file,file.name)),
-    importProjectPngs:hooks.importProjectPngs,
+    importProjectMaps:hooks.importProjectMaps,
     importDocumentAsset:async(file,origin,layerId,position)=>{
       const data=await hooks.pngData(file);
       const check=()=>{

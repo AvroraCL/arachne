@@ -13,8 +13,9 @@ export function createMaterialMapDialog({read,origin,save,upload}){
   const dialog=el('dialog','paint-form-dialog material-map-dialog');
   dialog.setAttribute('aria-label','从贴图创建材质');
   const form=el('form'),header=el('header'),close=el('button','','关闭');
-  const importButton=el('button','','导入 PNG…'),file=el('input');
-  file.type='file';file.accept='.png,image/png';file.multiple=true;file.hidden=true;file.setAttribute('aria-label','导入材质贴图');
+  const importButton=el('button','','导入贴图…'),file=el('input');
+  importButton.title='选择或拖入 PNG、JPEG、WebP 或 TGA';
+  file.type='file';file.accept='.png,.jpg,.jpeg,.webp,.tga,image/png,image/jpeg,image/webp';file.multiple=true;file.hidden=true;file.setAttribute('aria-label','导入材质贴图');
   importButton.type='button';importButton.onclick=()=>file.click();
   close.type='button';close.onclick=()=>dialog.close();header.append(el('strong','','从贴图创建材质'),importButton,close);
   const content=el('div','paint-form-content'),footer=el('footer','paint-form-footer');
@@ -110,19 +111,33 @@ export function createMaterialMapDialog({read,origin,save,upload}){
       group.value=suggestions[0].key;selectGroup();
     }else sync();
   }
-  file.onchange=async()=>{
-    const files=[...file.files];file.value='';
+  async function addFiles(files){
     if(!files.length||pending)return;
     error.textContent='';pending=true;sync();
+    importButton.textContent='正在导入 '+files.length+' 张…';
     try{
-      const {uploaded,failures}=await upload(files,start,(count,total)=>{importButton.textContent='导入中 '+count+' / '+total;});
+      const uploaded=await upload(files,start);
       if(read()?.id!==start.id)throw Error('工程已切换，请重新打开材质窗口');
       start=origin();assets=read().paint.assets;aliases.push(...uploaded);
       updateOptions(uploaded);
-      if(failures.length)error.textContent='已导入 '+uploaded.length+' / '+files.length+' 张。'+failures.join('。');
-    }catch(failure){error.textContent=failure.message;}
-    finally{pending=false;importButton.textContent='导入 PNG…';sync();}
-  };
+    }catch(failure){
+      error.textContent=failure.message;
+      if(failure.status===409&&read()?.id===start.id){start=origin();assets=read().paint.assets;updateOptions();}
+    }
+    finally{pending=false;importButton.textContent='导入贴图…';sync();}
+  }
+  file.onchange=()=>{const files=[...file.files];file.value='';void addFiles(files);};
+  dialog.addEventListener('dragover',event=>{
+    if(!event.dataTransfer?.types.includes('Files'))return;
+    event.preventDefault();event.dataTransfer.dropEffect=pending?'none':'copy';
+    dialog.toggleAttribute('data-file-drop',!pending);
+  });
+  dialog.addEventListener('dragleave',event=>{if(!dialog.contains(event.relatedTarget))dialog.removeAttribute('data-file-drop');});
+  dialog.addEventListener('drop',event=>{
+    dialog.removeAttribute('data-file-drop');
+    if(!event.dataTransfer?.types.includes('Files'))return;
+    event.preventDefault();void addFiles([...event.dataTransfer.files]);
+  });
   dialog.addEventListener('cancel',event=>{if(pending)event.preventDefault();});
   form.onsubmit=async event=>{
     event.preventDefault();

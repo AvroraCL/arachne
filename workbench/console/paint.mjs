@@ -728,6 +728,38 @@ function writePaintAsset(doc,revision,png,summary,update){
   },summary);
   return {document,asset:entry};
 }
+export async function importPaintMaps(doc,revision,files,scratch){
+  if(doc.revision!==revision)throw revisionError(doc);
+  const manifest=path.join(scratch,'maps.json');
+  await fsp.writeFile(manifest,JSON.stringify(files),{flag:'wx'});
+  let converted;
+  try{
+    const {stdout}=await renderTextFile(process.env.ARACHNE_PYTHON||'python',
+      ['-X','utf8',path.join(ROOT,'material_image_import.py'),manifest],{windowsHide:true,timeout:90000,maxBuffer:64*1024});
+    converted=JSON.parse(stdout);
+    if(!Array.isArray(converted)||converted.length!==files.length||converted.some((file,i)=>file!==files[i].source&&file!==files[i].destination))
+      throw Error('贴图转换结果不完整');
+  }catch(error){
+    const reason=error.stderr?.trim().split(/\r?\n/).at(-1);
+    throw Error(reason&&/^[\u4e00-\u9fff]/.test(reason)?reason:'无法完成整批贴图导入');
+  }
+  const current=read(doc.id);
+  if(current.revision!==revision)throw revisionError(current);
+  const pictures=[];
+  for(const [index,file] of converted.entries())pictures.push(describePng(current,await fsp.readFile(file),files[index].name,64));
+  const unique=new Map(pictures.map(png=>[png.entry.id,png]));
+  const saved=[...unique.values()].every(png=>png.existing)?current:commit(current.id,revision,next=>{
+    for(const png of unique.values())next.paint.assets[png.entry.id]=png.entry;
+    for(const png of unique.values())ensurePaintAsset(current,png);
+    return next;
+  },'导入材质贴图');
+  if(saved===current){
+    const latest=read(doc.id);
+    if(latest.revision!==revision)throw revisionError(latest);
+    for(const png of unique.values())ensurePaintAsset(current,png);
+  }
+  return {document:saved,uploaded:pictures.map((png,index)=>({id:png.entry.id,name:files[index].name}))};
+}
 export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId,materialId,imageLayer}){
   if(doc.revision!==revision)throw revisionError(doc);
   const image=imageLayer===undefined?null:fields(imageLayer,['documentId','layerId','x','y','scale','index','parentId']);
@@ -959,18 +991,14 @@ export async function restorePaint(archive,scratch){
   });
   throw Error('本机没有与交付包模型和 UV 缓存一致的登记工程');
 }
-function prepareEditableFiles(doc,out,files){
+async function prepareEditableFiles(doc,out,files){
   const manifestPath='editable/manifest.json',assets={};
   const entries=Object.entries(doc.paint.assets);
   if(entries.length>32000)throw Error('可编辑涂装素材数量超出打包限制');
-  const folder=path.join(out,'editable','assets');
-  fs.mkdirSync(folder,{recursive:true});
   for(const [id,item] of entries){
-    const name='paint-'+id+'.png',file=path.join(folder,name);
-    fs.copyFileSync(assetPath(doc,id),file,fs.constants.COPYFILE_EXCL);
-    if(hash(file)!==id)throw Error('打包时涂装素材指纹变化');
+    const name='paint-'+id+'.png';
     assets[id]={name:item.name,path:'assets/'+name,sha256:id};
-    files['editable/'+assets[id].path]=file;
+    files['editable/'+assets[id].path]=assetPath(doc,id);
   }
   files[manifestPath]=path.join(out,manifestPath);
   const geometry={material:doc.source.material,modelSha256:doc.source.files[doc.source.reviewSource],
@@ -979,8 +1007,10 @@ function prepareEditableFiles(doc,out,files){
     format:archiveFormat,version:1,name:doc.name,revision:doc.revision,geometry,...(doc.modeling?{modeling:doc.modeling}:{}),
     paint:{base:doc.paint.base,...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.sceneCursor?{sceneCursor:doc.paint.sceneCursor}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
   };
-  if(Buffer.byteLength(JSON.stringify(manifest,null,2)+'\n')>16*1024*1024)throw Error('可编辑工程清单超过 16 MiB，无法生成可恢复的 ZIP');
-  atomic(files[manifestPath],manifest);
+  const metadata=JSON.stringify(manifest)+'\n';
+  if(Buffer.byteLength(metadata)>64*1024*1024)throw Error('可编辑工程清单超过 64 MiB，无法生成可恢复的 ZIP');
+  await fsp.mkdir(path.dirname(files[manifestPath]),{recursive:true});
+  await fsp.writeFile(files[manifestPath],metadata,{flag:'wx'});
   return {manifestPath,assetCount:Object.keys(assets).length,geometry};
 }
 function prepareRegistrationFiles(source,files){
@@ -1187,7 +1217,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     stage(j,withTextures?'核对 4K 贴图并打包工程':'保存可编辑工程副本');
     let portable=false;
     try{
-      const editable=prepareEditableFiles(doc,out,files);
+      const editable=await prepareEditableFiles(doc,out,files);
       const report={format:archiveFormat,revision:doc.revision,editable};
       const registration=prepareRegistrationFiles(doc.source,files);
       if(registration){
@@ -1295,7 +1325,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
       }))});
     const registration=prepareRegistrationFiles(doc.source,files);
     Object.assign(expected,registration);
-    const editable=prepareEditableFiles(doc,pending,files);
+    const editable=await prepareEditableFiles(doc,pending,files);
     const packed=await packTexturePreset(bake,input,pending,files);
     const report={format:archiveFormat,revision:doc.revision,editable,bake:{previewId:preview.id,resolution:bake.resolution,files:textures},
       ...(packed?{textureOutput:packed}:{}),

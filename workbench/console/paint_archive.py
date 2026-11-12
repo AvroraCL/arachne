@@ -1,7 +1,7 @@
 # coding: utf-8
 """Read the editable payload from a local Arachne delivery ZIP."""
 from pathlib import Path
-from zipfile import BadZipFile, ZipFile, ZIP_DEFLATED, ZIP_STORED
+from zipfile import BadZipFile, ZipFile, ZipInfo, ZIP_DEFLATED, ZIP_STORED
 import hashlib
 import json
 import re
@@ -183,7 +183,7 @@ def unpack(file, output):
         hashes = report['fileSha256']
         digest = hashes[MANIFEST]
         require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest))
-        manifest_data = read_checked(archive, MANIFEST, 16 * MIB, digest)
+        manifest_data = read_checked(archive, MANIFEST, 64 * MIB, digest)
         manifest = json.loads(manifest_data, object_pairs_hook=unique_object)
         check_metadata(manifest, report, report_name)
         if report_name == PROJECT and 'bake' in report:
@@ -228,20 +228,34 @@ def pack_project(config):
     output = Path(config['out']) / 'project.zip'
     with ZipFile(output, 'x', ZIP_DEFLATED, compresslevel=3) as archive:
         for name, source in config['files'].items():
-            data = Path(source).read_bytes()
-            digest = hashes[name] = hashlib.sha256(data).hexdigest()
+            source = Path(source)
+            asset = name.startswith('editable/assets/')
+            size = source.stat().st_size
+            if asset:
+                require(0 < size <= 64 * MIB, '工程副本包含超过 64 MiB 的素材')
+                total_assets += size
+                require(total_assets <= 512 * MIB, '工程副本的可编辑素材总计不能超过 512 MiB')
+                entry = ZipInfo(name)
+                entry.compress_type = ZIP_STORED
+                entry.file_size = size
+            else:
+                entry = name
+            count = 0
+            checksum = hashlib.sha256()
+            with source.open('rb') as stream, archive.open(entry, 'w') as member:
+                while chunk := stream.read(MIB):
+                    count += len(chunk)
+                    require(count <= size, '打包时交付文件大小变化')
+                    checksum.update(chunk)
+                    member.write(chunk)
+            require(count == size, '打包时交付文件大小变化')
+            digest = hashes[name] = checksum.hexdigest()
             if name in expected:
                 require(digest == expected[name], '打包时交付文件指纹变化')
             if name in report.get('bake', {}).get('files', {}):
                 require(digest == report['bake']['files'][name], '打包时贴图指纹变化')
-            if name.startswith('editable/assets/'):
-                require(0 < len(data) <= 64 * MIB, '工程副本包含超过 64 MiB 的素材')
-                total_assets += len(data)
-                require(total_assets <= 512 * MIB, '工程副本的可编辑素材总计不能超过 512 MiB')
+            if asset:
                 require(name == f'editable/assets/paint-{digest}.png', '打包时涂装素材指纹变化')
-                archive.writestr(name, data, compress_type=ZIP_STORED)
-            else:
-                archive.writestr(name, data)
         report['fileSha256'] = hashes
         require(set(expected) <= set(hashes), '交付包缺少文件')
         report_data = json.dumps(report, ensure_ascii=False, indent=2)

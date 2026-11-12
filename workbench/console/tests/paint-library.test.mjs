@@ -87,13 +87,14 @@ with tempfile.TemporaryDirectory() as directory:
     cache=MaterialImages(assets)
     a=MaterialGraph(config['plan'],assets,cache)
     b=MaterialGraph(config['plan'],assets,cache)
-    assert cache.pixel_count==4 and a.images[config['asset']] is b.images[config['asset']]
+    assert cache.memory_bytes==16 and a.images[config['asset']] is b.images[config['asset']]
+    assert cache.load(config['asset'],'L').shape==(2,2) and cache.memory_bytes==20
     result=a.evaluate(np.zeros((4,14)),np.arange(4),2,2)
     for name,expected in [('metallic',.2),('ao',.4),('roughness',.4)]:
         assert np.allclose(result[:,CHANNELS[name]],expected),result
     with MaterialImages(assets,memory_limit=1) as spill:
         graph=MaterialGraph(config['plan'],assets,spill)
-        assert spill.pixel_count==0 and graph.images[config['asset']] is spill.load(config['asset'])
+        assert spill.memory_bytes==0 and graph.images[config['asset']] is spill.load(config['asset'])
         assert np.array_equal(graph.evaluate(np.zeros((4,14)),np.arange(4),2,2),result)
         del graph
     assert not spill.images and spill.spills is None

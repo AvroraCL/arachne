@@ -3,7 +3,7 @@ import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
-import {paintChannels,channelSpecs,renderChannel,liveStride} from './paint-channels.mjs';
+import {paintChannels,channelSpecs,activePaintChannels,renderChannel,liveStride} from './paint-channels.mjs';
 import {headerControls,chromeButton,areaIcons,createContextActions} from './area-chrome.mjs';
 import {projectionIsCurrent} from './paint-surface-state.mjs';
 import {createViewport} from './viewport3d.mjs';
@@ -344,12 +344,20 @@ export function registerAreaEditors(registry,bridge){
       sample:pickMaterial,place:(projector,hit)=>{const origin=placement;if(!origin||origin.layerId!==project.layerId)return;void bridge.validateSurface(hit,origin).then(()=>project.commands([{op:'update',id:origin.layerId,patch:{projector}}],origin)).then(()=>{placement=null;setMode('view');}).catch(ctx.error);},isHandHeld:()=>false,uvClip:()=>null
     });
     const brushBinding=createBrushBinding({project,painter,onApplied:settings=>{elements['brush-mirror-enabled'].checked=settings.mirror;}});
+    let channelFrame=null,displayedChannel='';
     function displayModeChanged(){syncRenderPreview();syncPreviewStatus();bridge.viewportDisplayChanged?.();}
     display=createViewportDisplayControls({ctx,view,viewport,isEditing:()=>modeler.isDragging()||painter.isEditing(),
       openRenderSettings:()=>bridge.renderSettings?.openSettings(),renderPlayback:pauseCycles,
       onMode:displayModeChanged,
-      change:({mode,xray,overlays,axis:showAxis,transform})=>{
-        viewport.setDisplay(mode,xray,!!frame?.request.inspectMask);
+      change:({mode,channel,xray,overlays,axis:showAxis,transform})=>{
+        const next=frame&&!frame.request.inspectMask?channel:'';
+        if(next!==displayedChannel||next&&channelFrame!==frame){
+          displayedChannel=viewport.showChannelPreview(next?frame:null,next)?next:'';
+          channelFrame=displayedChannel?frame:null;
+          if(displayedChannel)view.dataset.inspectedChannel=displayedChannel;
+          else delete view.dataset.inspectedChannel;
+        }
+        viewport.setDisplay(mode,xray,!!frame?.request.inspectMask||!!displayedChannel);
         viewport.setOverlays(overlays);
         modeler.setDisplayHelpers({overlays,transform});
         axis.hidden=!showAxis;
@@ -378,8 +386,11 @@ export function registerAreaEditors(registry,bridge){
       const rendered=display.mode==='cycles'&&cycles?.phase!=='off'&&cycles;
       const textured=!['solid','wire'].includes(display.mode);
       resolution.textContent=rendered?cycles.text:textured?materialPreviewText(frame,inspection,preview,project.document?.revision):'';
-      if(!inModeling()&&!placement&&view.dataset.state==='ready')
+      if(display.channel&&!inspection&&view.dataset.state==='ready')
+        status.textContent=(displayedChannel?'通道 · ':'等待通道 · ')+channelSpecs[display.channel].name;
+      else if(!inModeling()&&!placement&&view.dataset.state==='ready')
         status.textContent=rendered?'路径追踪':textured&&frame?'实时材质':textured?textureMessage:'';
+      else if(inModeling())showModelStatus();
       resolution.title=rendered?cycles.text:preview?.message||'';
       retry.hidden=rendered?!cycles.retry:!(preview?.error||preview?.phase==='error');
     }
@@ -453,7 +464,7 @@ export function registerAreaEditors(registry,bridge){
       const wasMask=!!frame.request.inspectMask;
       frame=null;delete view.dataset.materialInspection;
       viewport.showLivePaint(null);
-      if(wasMask)display.refresh();
+      if(wasMask||displayedChannel)display.refresh();
     }
     function applyFrame(current){
       if(view.dataset.state!=='ready'||current===frame)return;
@@ -465,7 +476,7 @@ export function registerAreaEditors(registry,bridge){
       const shadeChanged=!!frame?.request.inspectMask!==!!current.request.inspectMask;
       viewport.showLivePaint(current.pixels,current.request.size,null,{revision:current.request.revision,draft:!!current.request.operation});
       frame=current;
-      if(shadeChanged)display.refresh();
+      if(shadeChanged||display.channel)display.refresh();
       view.dataset.materialInspection=current.request.inspectMask?'mask':current.request.isolatedLayer?'layer':'';
     }
     async function sync(reselect=false){
@@ -478,7 +489,8 @@ export function registerAreaEditors(registry,bridge){
         projectCameraView=cameraFrame&&savedView?.projectCameraView===true;
         projectCameraKey='';cyclesPaused=savedView?.cyclesPaused===true;
         marquee.cancel();regionGesture.cancel();focusGesture.cancel();placement=null;
-        projectId=doc.id;lastScene=null;frame=null;revision=-1;navigating=false;delete view.dataset.materialInspection;modeler.close();
+        projectId=doc.id;lastScene=null;frame=null;revision=-1;navigating=false;delete view.dataset.materialInspection;
+        displayedChannel='';channelFrame=null;delete view.dataset.inspectedChannel;modeler.close();
         const task=loading=viewport.loadProject(doc);
         syncRenderPreview();
         try{
@@ -495,6 +507,7 @@ export function registerAreaEditors(registry,bridge){
         return;
       }
       if(view.dataset.state!=='ready')return;
+      display.setChannels(activePaintChannels(doc.paint));
       syncSceneCursor();
       frameButton.disabled=false;
       if(doc.revision!==revision&&!modeler.isDragging()&&!painter.isEditing()){marquee.cancel();revision=doc.revision;viewport.syncDocument(doc);modeler.syncDocument();}
@@ -836,7 +849,7 @@ function createLibraryEditor(ctx,bridge){
     else status.textContent='资源已新建，保留当前选择。';
   });toolbar.append(createResource);
   const mapDialog=createMaterialMapDialog({
-    read:()=>project.document,origin:()=>project.origin(),upload:bridge.importProjectPngs,
+    read:()=>project.document,origin:()=>project.origin(),upload:bridge.importProjectMaps,
     save:async(patch,origin)=>{
       const id=crypto.randomUUID(),view=viewGeneration,selection=selectionGeneration;
       await project.commands([{op:'library',library:'materials',id,action:'create',patch}],origin);

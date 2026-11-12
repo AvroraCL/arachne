@@ -61,12 +61,12 @@ try{
   const packedFiles=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
     'import base64,io,json',
     'from PIL import Image',
-    'specs={"蓝钢_BaseColor.png":(28,126,212,255),"蓝钢_ORM.png":(48,120,200,255),"蓝钢_Normal.png":(128,51,230,255)}',
+    'specs={"蓝钢_BaseColor.webp":((28,126,212,255),"WEBP",dict(lossless=True)),"蓝钢_ORM.tga":((48,120,200,255),"TGA",dict(compression="tga_rle")),"蓝钢_Normal.png":((128,51,230,255),"PNG",{})}',
     'files={}',
-    'for name,pixel in specs.items():',
-    ' out=io.BytesIO();Image.new("RGBA",(4096,4096),pixel).save(out,format="PNG");files[name]=base64.b64encode(out.getvalue()).decode()',
+    'for name,(pixel,kind,settings) in specs.items():',
+    ' out=io.BytesIO();Image.new("RGBA",(4096,4096),pixel).save(out,format=kind,**settings);files[name]=base64.b64encode(out.getvalue()).decode()',
     'print(json.dumps(files))'
-  ].join('\n')],{encoding:'utf8',maxBuffer:2*1024*1024}));
+  ].join('\n')],{encoding:'utf8',maxBuffer:4*1024*1024}));
   const packedPage=await browser.newPage({viewport:{width:1100,height:700}});
   const pageErrors=[];
   packedPage.on('pageerror',error=>pageErrors.push(error.message));
@@ -77,9 +77,15 @@ try{
   await packedShelf.getByRole('tab',{name:'材质',exact:true}).click();
   await packedShelf.getByRole('button',{name:'从贴图创建材质',exact:true}).click();
   const packedDialog=packedPage.getByRole('dialog',{name:'从贴图创建材质',exact:true});
-  await packedDialog.getByLabel('导入材质贴图').setInputFiles(Object.entries(packedFiles).map(([name,data])=>
-    ({name,mimeType:'image/png',buffer:Buffer.from(data,'base64')})));
+  const mixedFiles=Object.entries(packedFiles).map(([name,data])=>({name,mimeType:'application/octet-stream',buffer:Buffer.from(data,'base64')}));
+  await packedDialog.getByLabel('导入材质贴图').setInputFiles([mixedFiles[0],
+    {name:'无效贴图.tga',mimeType:'application/octet-stream',buffer:Buffer.from('unreadable')}]);
+  await packedDialog.getByRole('alert').filter({hasText:'无法读取贴图：无效贴图.tga'}).waitFor();
+  assert.deepEqual((await api(packRoute)).paint.assets,{});
+  assert.equal((await api(packRoute)).revision,packProject.revision);
+  await packedDialog.getByLabel('导入材质贴图').setInputFiles(mixedFiles);
   await packedDialog.getByRole('button',{name:'贴图通道布局',exact:true}).filter({hasText:'Unreal · ORM'}).waitFor();
+  assert.equal((await api(packRoute)).revision,packProject.revision+1);
   assert.equal(await packedDialog.getByLabel('材质名称').inputValue(),'蓝钢');
   await packedDialog.getByRole('button',{name:'法线方向',exact:true}).click();
   await packedPage.getByRole('option',{name:'DirectX（−Y）',exact:true}).click();
@@ -115,7 +121,7 @@ try{
   await packedPage.reload();
   await packedShelf.getByRole('button',{name:'蓝钢',exact:true}).waitFor();
   assert.deepEqual((await api(packRoute)).paint.materials,packedMaterial.paint.materials);
-  console.log('PASS 4K ORM import and DirectX normal conversion from the resource library, exact linear samples and reopen');
+  console.log('PASS atomic 4K WebP/TGA/PNG import, invalid image rollback, ORM channel values, DirectX normals and reopen');
 
   const libraryLayer=packedMaterial.paint.layers[0],overlayId='drawing-over-library',overlayLayer='drawing-pixels';
   const overlaySeed=await api(packPaint+'/commands',{revision:packedMaterial.revision,operations:[
@@ -498,9 +504,32 @@ try{
   ].join('\n'),...turnedMaps],{encoding:'utf8'}));
   assert.deepEqual(turnedPixels[0],[[255,255,0],[0,255,0],[0,0,255],[255,0,0],[170,85,255]]);
   assert.ok(turnedPixels[1].every(([x,y,z])=>x===204&&Math.abs(y-128)<=1&&z===230));
+  const activeViewport=packedPage.locator('.editor-viewport[data-state=ready]').first();
+  const viewportCanvas=activeViewport.locator('canvas').first();
+  const inspectedChannel=channel=>activeViewport.and(packedPage.locator('[data-inspected-channel="'+channel+'"]'));
+  await viewportCanvas.press('c');
+  await inspectedChannel('color').waitFor();
+  await viewportCanvas.press('c');
+  await inspectedChannel('metallic').waitFor();
+  await viewportCanvas.press('Shift+c');
+  await inspectedChannel('color').waitFor();
+  await viewportCanvas.press('m');
+  await inspectedChannel('color').waitFor({state:'hidden'});
+  const viewportHeader=activeViewport.locator('xpath=ancestor::section[contains(@class,"editor-area")]').locator('.area-header');
+  await viewportHeader.getByRole('button',{name:'着色设置',exact:true}).click();
+  await viewportHeader.getByRole('button',{name:'视口材质通道',exact:true}).click();
+  await packedPage.getByRole('option',{name:'法线',exact:true}).click();
+  await inspectedChannel('normal').waitFor();
+  await viewportHeader.getByRole('button',{name:'着色设置',exact:true}).click();
+  await packedPage.screenshot({path:path.join(data,'material-channel-normal.png')});
+  await packedPage.reload();
+  await inspectedChannel('normal').waitFor();
+  await viewportCanvas.press('m');
+  await inspectedChannel('normal').waitFor({state:'hidden'});
+  assert.equal((await api(tiledRoute)).revision,turned.revision);
   const untilted=await api(tiledPaint+'/undo',{revision:turned.revision});
   assert.equal(untilted.paint.layers[0].tiling.rotation,0);
-  console.log('PASS independent UV tiling on a library material, rotated normal, fixed drawing overlay and undo');
+  console.log('PASS independent UV tiling, rotated normal, fixed drawing overlay, channel inspection shortcuts and reopen');
 
   assert.deepEqual(pageErrors,[]);
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});

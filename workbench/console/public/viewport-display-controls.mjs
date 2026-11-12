@@ -1,5 +1,7 @@
 import {areaIcons,chromeMenu,openChromeMenu} from './area-chrome.mjs';
 import {setupPaintDisplay} from './paint-display.mjs';
+import {channelSpecs} from './paint-channels.mjs';
+import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 
 const icon=content=>`<svg class="chrome-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${content}</svg>`;
 const icons={
@@ -51,6 +53,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     root.append(container);return container;
   };
   let mode=Object.hasOwn(modes,state.display)?state.display:'material',xray=state.xray===true,projectLighting=state.projectLighting!==false;
+  let channel=Object.hasOwn(channelSpecs,state.channelDisplay)?state.channelDisplay:'',channels=[];
   let overlays=state.overlays!==false,gizmos=state.gizmos!==false,axis=state.axis!==false,transform=state.transformGizmo!==false;
   const gizmoGroup=group('操纵器');
   const gizmoButton=toggle('显示操纵器',icons.gizmos,()=>{gizmos=!gizmos;update();});
@@ -75,13 +78,18 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
   const shading=group('着色方式'),buttons=new Map();
   for(const [value,label] of Object.entries(modes)){
     const button=toggle(label,icons[value],()=>{
-      if(mode===value)return;
-      mode=value;update();onMode();
+      if(mode===value&&!channel)return;
+      mode=value;channel='';update();onMode();
     });
     if(value==='cycles')button.title='渲染预览 · 路径追踪';
     buttons.set(value,button);shading.append(button);
   }
   const shadingMenu=menu(shading,'着色设置');
+  const channelLabel=el('label','viewport-display-field'),channelSelect=document.createElement('select');
+  channelSelect.setAttribute('aria-label','视口材质通道');
+  channelLabel.append('查看通道',channelSelect);shadingMenu.content.append(channelLabel);
+  channelSelect.onchange=()=>setChannel(channelSelect.value);
+  enhanceSelectMenu(channelSelect);
   const useProject=check(shadingMenu.content,'使用工程布光',projectLighting,value=>{projectLighting=value;update();onMode();});
   root.append(renderPlayback);
   const fields=el('div','viewport-display-fields');
@@ -97,20 +105,41 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     pressed(gizmoButton,gizmos);pressed(overlayButton,overlays);pressed(xrayButton,canXray&&xray);
     xrayButton.disabled=!canXray;
     for(const [value,button] of buttons)pressed(button,mode===value);
+    channelSelect.value=mode==='material'?channel:'';syncSelectMenu(channelSelect);
     renderSettings.hidden=useProject.hidden=mode!=='cycles';
     fields.hidden=mode==='cycles'&&projectLighting;
     view.dataset.shading=mode;
-    change({mode,xray:canXray&&xray,overlays,axis:gizmos&&axis,transform:gizmos&&transform});
+    change({mode,channel:mode==='material'?channel:'',xray:canXray&&xray,overlays,axis:gizmos&&axis,transform:gizmos&&transform});
   }
   function update(){refresh();ctx.onChange();}
+  function setChannel(next){
+    if(next&&!channels.includes(next)||mode==='material'&&channel===next)return;
+    mode='material';channel=next;update();onMode();
+  }
+  function setChannels(next){
+    if(next.join(',')===channels.join(','))return;
+    channels=next;
+    if(channel&&!channels.includes(channel))channel='';
+    channelSelect.replaceChildren(new Option('完整材质',''),...channels.map(key=>new Option(channelSpecs[key].name,key)));
+    channelSelect.disabled=!channels.length;refresh();
+  }
   view.addEventListener('keydown',event=>{
-    if(event.key.toLowerCase()!=='n'||event.defaultPrevented||event.repeat||event.altKey||event.shiftKey||event.metaKey||event.ctrlKey||
+    const key=event.key.toLowerCase();
+    if(!['n','c','m'].includes(key)||event.defaultPrevented||event.repeat||event.isComposing||event.keyCode===229||event.altKey||event.metaKey||event.ctrlKey||
        event.target.closest('input,select,textarea,[contenteditable]')||document.querySelector('dialog[open],.custom-select-menu')||isEditing())return;
+    if(key==='c'&&channels.length){
+      const at=mode==='material'?channels.indexOf(channel):-1;
+      const index=at<0?(event.shiftKey?channels.length-1:0):(at+(event.shiftKey?-1:1)+channels.length)%channels.length;
+      event.preventDefault();event.stopPropagation();setChannel(channels[index]);return;
+    }
+    if(key==='m'&&!event.shiftKey){event.preventDefault();event.stopPropagation();setChannel('');return;}
+    if(key!=='n'||event.shiftKey)return;
     event.preventDefault();
     if(shadingMenu.details.open)shadingMenu.details.open=false;
     else openChromeMenu(shadingMenu.details);
   },{signal});
-  return {get mode(){return mode;},get projectLighting(){return projectLighting;},refresh,getState:()=>({display:mode,xray,overlays,gizmos,axis,transformGizmo:transform,projectLighting,scene:scene.getSettings()}),
+  return {get mode(){return mode;},get channel(){return mode==='material'?channel:'';},get projectLighting(){return projectLighting;},refresh,setChannels,
+    getState:()=>({display:mode,channelDisplay:channel,xray,overlays,gizmos,axis,transformGizmo:transform,projectLighting,scene:scene.getSettings()}),
     close(){for(const details of root.querySelectorAll('details[open]'))details.open=false;},
     dispose(){lifecycle.abort();scene.dispose();root.remove();}};
 }

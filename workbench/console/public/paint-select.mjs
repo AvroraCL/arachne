@@ -100,7 +100,14 @@ function openMenu(select,wrapper,button){
   menu.append(empty);
   const observer=new MutationObserver(()=>{if(!wrapper.isConnected)closeMenu();});
   active={wrapper,button,menu,events,observer};
-  const host=wrapper.closest('dialog[open]')||document.body;host.append(menu);
+  const popover=wrapper.closest(':popover-open');
+  const host=popover||wrapper.closest('dialog[open]')||document.body;
+  if(popover)menu.popover='manual';
+  host.append(menu);
+  if(popover){
+    menu.showPopover();
+    popover.addEventListener('beforetoggle',event=>{if(event.newState==='closed')closeMenu();},{signal});
+  }
   wrapper.classList.add('open');button.setAttribute('aria-expanded','true');button.setAttribute('aria-controls',menu.id);
   const preferredWidth=parseFloat(getComputedStyle(menu).getPropertyValue('--select-menu-width'));
   menu.style.width=preferredWidth?Math.min(preferredWidth,innerWidth-12)+'px':'max-content';

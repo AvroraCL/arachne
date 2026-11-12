@@ -29,6 +29,10 @@ def color(text):
     return decode(np.array(list(bytes.fromhex(text[1:]))) / 255)
 
 
+LINEAR_BYTES = np.arange(256, dtype=np.float32) / 255
+SRGB_BYTES = decode(LINEAR_BYTES)
+
+
 def blend_channel(backdrop, paint, mode):
     if mode == 'multiply':
         return backdrop * paint
@@ -60,7 +64,7 @@ def blend_channel(backdrop, paint, mode):
     return paint
 
 
-def sample(field, u, v, repeat=False):
+def sample(field, u, v, kind, repeat=False):
     h, w = field.shape[:2]
     if repeat:
         x, y = np.mod(u,1)*w-.5, np.mod(v,1)*h-.5
@@ -75,7 +79,15 @@ def sample(field, u, v, repeat=False):
         ix, iy = ix%w, iy%h
     if field.ndim == 3:
         dx, dy = dx[:, None], dy[:, None]
-    return (field[iy, ix] * (1-dx) + field[iy, nx] * dx) * (1-dy) + (field[ny, ix] * (1-dx) + field[ny, nx] * dx) * dy
+    def texel(row, column):
+        raw = field[row, column]
+        if kind in SRGB:
+            return SRGB_BYTES[raw]
+        value = LINEAR_BYTES[raw]
+        if kind == 'decal':
+            value[:, :3] = SRGB_BYTES[raw[:, :3]] * value[:, 3:]
+        return value
+    return (texel(iy, ix) * (1-dx) + texel(iy, nx) * dx) * (1-dy) + (texel(ny, ix) * (1-dx) + texel(ny, nx) * dx) * dy
 
 
 def sample_document(field,u,v,name,repeat=False,linear=False):
@@ -220,15 +232,11 @@ def picking_atlas(cache, material, binding):
 
 
 @lru_cache(maxsize=8)
-def read_art(file, kind, live):
+def preview_art(file, mode):
     with Image.open(file) as im:
-        im = im.convert('RGBA' if kind=='decal' else 'RGB' if kind in RGB else 'L')
-        if live:
-            im.thumbnail((2048,2048),Image.Resampling.BILINEAR)
-        raw = np.asarray(im,dtype=np.float32)/255
-    if kind=='decal':
-        return np.concatenate((decode(raw[:,:,:3])*raw[:,:,3:],raw[:,:,3:]),axis=2)
-    return decode(raw) if kind in SRGB else raw
+        im = im.convert(mode)
+        im.thumbnail((2048,2048),Image.Resampling.BILINEAR)
+        return np.asarray(im)
 
 
 def at_range(ids, start, end):
@@ -236,7 +244,7 @@ def at_range(ids, start, end):
 
 
 def mask_values(mask, surface_mask, ids, u, v, base=1):
-    initial = sample(mask,u,v) if mask is not None else np.full(len(ids),base,dtype=np.float32)
+    initial = sample(mask,u,v,'mask') if mask is not None else np.full(len(ids),base,dtype=np.float32)
     if surface_mask is None or not len(ids):
         return initial
     indexes, opacity, value = surface_mask
@@ -339,7 +347,8 @@ def composite_layers(cfg, step, material_images):
     folder_visibility, folder_scopes = {}, {}
     inspected_folder = None
     def art(asset, kind):
-        return read_art(cfg['assets'][asset],kind,step>=8)
+        mode = 'RGBA' if kind=='decal' else 'RGB' if kind in RGB else 'L'
+        return preview_art(cfg['assets'][asset], mode) if step>=8 else material_images.load(asset, mode)
 
     def prepare_mask(layer, inspection):
         if not (layer.get('maskEnabled', True) or inspection):
@@ -463,7 +472,7 @@ def composite_layers(cfg, step, material_images):
                 continue
             weight = np.full(len(ids),layer['opacity'],dtype=float)
             if image is not None:
-                sampled = sample(image,u,v)
+                sampled = sample(image,u,v,'decal')
                 alpha = sampled[:,3]
                 rgb = np.divide(sampled[:,:3],alpha[:,None],out=np.zeros_like(sampled[:,:3]),where=alpha[:,None]>0)
                 weight *= alpha
@@ -509,7 +518,7 @@ def composite_layers(cfg, step, material_images):
                     if isinstance(texture,dict):
                         value,document_alpha=sample_document(texture['document'],map_u,map_v,name,repeat=tiling is not None,linear=texture['colorSpace']=='linear')
                         channel_weight*=document_alpha
-                    else:value = sample(texture,map_u,map_v,repeat=tiling is not None)
+                    else:value = sample(texture,map_u,map_v,name,repeat=tiling is not None)
                     if name=='normal' and tiling and tiling['rotation']:
                         value = rotated_normal(value, tiling['rotation'])
                 blend = layer.get('blend','normal') if name=='color' else layer.get('channelBlend',{}).get(name,'normal')

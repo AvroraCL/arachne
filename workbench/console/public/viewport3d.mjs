@@ -1,4 +1,4 @@
-import {channelSpecs,activePaintChannels} from './paint-channels.mjs';
+import {channelSpecs,activePaintChannels,renderChannel} from './paint-channels.mjs';
 import {applyModelState} from './paint-model-state.mjs';
 import {configureNavigation,attachOrbitInput,alignedCamera,projectionCamera,movedCamera} from './viewport-navigation.mjs';
 import {createUnlitMaterial,updateLivePaintTextures,fillLivePaintTextures} from './viewport-materials.mjs';
@@ -18,6 +18,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   let renderer,scene,camera,controls,model,previewModel,manifest,doc,sequence=0,active=false,pending=false,sceneChanged=true;
   let scalarTextures={},texture,maskPreview=null,textureOverride=null,textureSequence=0,wireframe=false,unlit=false,orthographic=false,solo=false,selected=null;
   let livePaint=null,paintFrame=null,axisMotion=null,liveUsageKey='';
+  let inspectionMap=null,inspectionChannel='';
   let radius=1,center=new THREE.Vector3(),topUp=new THREE.Vector3(0,0,-1),frameCount=0;
  const modelBounds=new THREE.Box3(),depthForward=new THREE.Vector3();
  let objectOutline=null,showOverlays=true,outlineCount=0,displayMode=null,xray=false;
@@ -223,6 +224,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if (!model) return;
     objectOutline?.clear();outlineCount=0;setOutlineStatus();
     releaseLivePaint();
+    clearChannelPreview();
     previewModel?.removeFromParent();
     previewModel = null;
     scene.remove(model);
@@ -252,7 +254,8 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
         const isTarget = name === manifest.targetMaterial;
         const dimmed = Boolean(solo && selected && name !== selected);
         material.wireframe = wireframe;
-        material.map = isTarget ? maskPreview||livePaint?.color||texture||original.map : original.map;
+        const inspecting=isTarget&&!!inspectionChannel;
+        material.map = isTarget ? maskPreview||inspectionMap||livePaint?.color||texture||original.map : original.map;
         material.color.copy(isTarget && (maskPreview||livePaint||texture) ? new THREE.Color(0xffffff) : original.color);
         const extra=k=>isTarget&&enabled.has(k)?(liveMap(k)||scalarTextures[k]):null;
         const alpha=extra('alpha');
@@ -270,11 +273,11 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
           material.emissiveMap=emission||original.emissiveMap;material.emissive.copy(emission?new THREE.Color(1,1,1):original.emissive);material.emissiveIntensity=emission?1:original.emissiveIntensity;
           material.aoMap=ao||original.aoMap;material.aoMapIntensity=ao?1:original.aoMapIntensity;
         }
-        material.alphaMap = alpha||original.alphaMap;
-        material.opacity = (alpha?1:original.opacity) * (dimmed ? .12 : 1);
+        material.alphaMap = inspecting?null:alpha||original.alphaMap;
+        material.opacity = (inspecting||alpha?1:original.opacity) * (dimmed ? .12 : 1);
         const paintedBlend=Boolean(alpha&&!material.alphaTest);
-        material.transparent = original.transparent || dimmed || paintedBlend;
-        material.depthWrite = dimmed||paintedBlend ? false : original.depthWrite;
+        material.transparent = dimmed||!inspecting&&(original.transparent||paintedBlend);
+        material.depthWrite = !dimmed&&(inspecting||!paintedBlend&&original.depthWrite);
         material.needsUpdate = true;
       }
     }
@@ -527,6 +530,30 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     }
     maskPreview.needsUpdate=true;request();
   }
+  function clearChannelPreview(){
+    inspectionMap?.dispose();inspectionMap=null;inspectionChannel='';
+  }
+  function showChannelPreview(frame,channel){
+    if(!model)return false;
+    if(!frame||!Object.hasOwn(channelSpecs,channel)){
+      if(inspectionChannel){clearChannelPreview();paintMaterials();}
+      return false;
+    }
+    const {pixels,request:{size}}=frame;
+    if(channel==='color')clearChannelPreview();
+    else{
+      if(inspectionMap?.image.width!==size){
+        inspectionMap?.dispose();
+        inspectionMap=new THREE.DataTexture(new Uint8Array(size*size*4),size,size,THREE.RGBAFormat);
+        inspectionMap.colorSpace=THREE.SRGBColorSpace;
+        inspectionMap.magFilter=THREE.LinearFilter;inspectionMap.minFilter=THREE.LinearFilter;
+      }
+      renderChannel(pixels,size,channel,inspectionMap.image.data);
+      inspectionMap.needsUpdate=true;
+    }
+    inspectionChannel=channel;
+    paintMaterials();return true;
+  }
   function shade(flat) {
     unlit = flat;
     if (!model) return;
@@ -566,5 +593,5 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     (localUI?host.querySelector('[data-vp-ortho]'):document.getElementById('vp-ortho'))?.setAttribute('aria-pressed', String(orthographic));
     size();
   }
-  return {readCamera:()=>camera&&cameraState(),dispose(){if(disposed)return;disposed=true;sequence++;textureSequence++;active=false;resizeObserver?.disconnect();controls?.dispose();pathTracer?.dispose();disposeModel();objectOutline?.dispose();environment?.dispose();solidMaterial.dispose();wireMaterial.dispose();renderer?.dispose();renderer?.domElement.remove();cursorMark?.remove();},modelingContext,applyCamera,navigate,pickTargetUV,focusDistanceAt,viewFrame,screenPoint,setSceneCursor,cursorPointAt,showLivePaint,showMaskCanvas,setRenderPreview,renderPreviewState:()=>pathTracer?.state(),setDisplay,setOverlays,setEnvironment(raw){displaySettings=sceneOptions(raw);syncEnvironment();},capture(){if(!renderer||!camera||host.dataset.state!=='ready')throw Error('请等待模型载入');updateDepthRange();renderObserved();notifyCamera();const data=renderer.domElement.toDataURL('image/png');request();return data;},getRenderSettings(samples=64){if(!manifest||host.dataset.state!=='ready'||!camera)throw Error('请等待三维模型与贴图载入');const aspect=host.clientWidth/Math.max(host.clientHeight,1),width=Math.round(Math.min(1200,1200*aspect)),height=Math.round(width/aspect);const match=manifest.textureUrl?.match(/\/jobs\/([^/]+)\/files\//);return {samples,width:Math.max(128,width),height:Math.max(128,Math.min(2048,height)),textureJobId:match?.[1]||null,camera:cameraState()};},loadProject,focusSelected,setActive(value){active=value;if(!active&&axisMotion)applyCamera(axisMotion.end);else size();},fit:frameAll,direction,projection,select,setWireframe(value){wireframe=value;paintMaterials();},setUnlit:shade,setSolo(value){solo=value;paintMaterials();},syncDocument(next){if(doc?.id!==next.id)return loadProject(next);const changed=JSON.stringify(doc.modeling)!==JSON.stringify(next.modeling),visibilityChanged=JSON.stringify(doc.paint?.renderVisibility)!==JSON.stringify(next.paint?.renderVisibility);doc=next;if(visibilityChanged)request();if(changed&&model&&!previewModel){applyModelState(model,doc.modeling);updateModelBounds();request();}textureStatus();},async setTextureSource(source){textureOverride=source;await this.refreshTexture();},async reload(){if(doc)return loadProject(doc);},async refreshTexture(){if(!doc||!manifest||host.dataset.state==='error')return;const token=sequence,textureToken=++textureSequence;try{const r=await fetch(`/api/projects/${doc.id}/viewport`);if(!r.ok)throw Error('贴图来源请求失败');const next=resolvedTexture(await r.json());if(token!==sequence||textureToken!==textureSequence)return;if(next.status==='ready'&&(next.textureUrl!==manifest.textureUrl||JSON.stringify(next.materialUrls)!==JSON.stringify(manifest.materialUrls)))await applyTexture(next,token,textureToken);else{manifest=next;textureStatus();}}catch(e){state('贴图更新失败：'+e.message,'error');}},getState(){return {projectId:doc?.id,modelRadius:radius,meshCount:host.dataset.meshes,frames:frameCount,clipping:camera?{near:camera.near,far:camera.far}:null,selected,wireframe,unlit,orthographic,position:camera?.position.toArray(),materialUrls:manifest?.materialUrls,textureUrl:manifest?.textureUrl,textureRevision:manifest?.textureRevision};}};
+  return {showChannelPreview,readCamera:()=>camera&&cameraState(),dispose(){if(disposed)return;disposed=true;sequence++;textureSequence++;active=false;resizeObserver?.disconnect();controls?.dispose();pathTracer?.dispose();disposeModel();objectOutline?.dispose();environment?.dispose();solidMaterial.dispose();wireMaterial.dispose();renderer?.dispose();renderer?.domElement.remove();cursorMark?.remove();},modelingContext,applyCamera,navigate,pickTargetUV,focusDistanceAt,viewFrame,screenPoint,setSceneCursor,cursorPointAt,showLivePaint,showMaskCanvas,setRenderPreview,renderPreviewState:()=>pathTracer?.state(),setDisplay,setOverlays,setEnvironment(raw){displaySettings=sceneOptions(raw);syncEnvironment();},capture(){if(!renderer||!camera||host.dataset.state!=='ready')throw Error('请等待模型载入');updateDepthRange();renderObserved();notifyCamera();const data=renderer.domElement.toDataURL('image/png');request();return data;},getRenderSettings(samples=64){if(!manifest||host.dataset.state!=='ready'||!camera)throw Error('请等待三维模型与贴图载入');const aspect=host.clientWidth/Math.max(host.clientHeight,1),width=Math.round(Math.min(1200,1200*aspect)),height=Math.round(width/aspect);const match=manifest.textureUrl?.match(/\/jobs\/([^/]+)\/files\//);return {samples,width:Math.max(128,width),height:Math.max(128,Math.min(2048,height)),textureJobId:match?.[1]||null,camera:cameraState()};},loadProject,focusSelected,setActive(value){active=value;if(!active&&axisMotion)applyCamera(axisMotion.end);else size();},fit:frameAll,direction,projection,select,setWireframe(value){wireframe=value;paintMaterials();},setUnlit:shade,setSolo(value){solo=value;paintMaterials();},syncDocument(next){if(doc?.id!==next.id)return loadProject(next);const changed=JSON.stringify(doc.modeling)!==JSON.stringify(next.modeling),visibilityChanged=JSON.stringify(doc.paint?.renderVisibility)!==JSON.stringify(next.paint?.renderVisibility);doc=next;if(visibilityChanged)request();if(changed&&model&&!previewModel){applyModelState(model,doc.modeling);updateModelBounds();request();}textureStatus();},async setTextureSource(source){textureOverride=source;await this.refreshTexture();},async reload(){if(doc)return loadProject(doc);},async refreshTexture(){if(!doc||!manifest||host.dataset.state==='error')return;const token=sequence,textureToken=++textureSequence;try{const r=await fetch(`/api/projects/${doc.id}/viewport`);if(!r.ok)throw Error('贴图来源请求失败');const next=resolvedTexture(await r.json());if(token!==sequence||textureToken!==textureSequence)return;if(next.status==='ready'&&(next.textureUrl!==manifest.textureUrl||JSON.stringify(next.materialUrls)!==JSON.stringify(manifest.materialUrls)))await applyTexture(next,token,textureToken);else{manifest=next;textureStatus();}}catch(e){state('贴图更新失败：'+e.message,'error');}},getState(){return {projectId:doc?.id,modelRadius:radius,meshCount:host.dataset.meshes,frames:frameCount,clipping:camera?{near:camera.near,far:camera.far}:null,selected,wireframe,unlit,orthographic,position:camera?.position.toArray(),materialUrls:manifest?.materialUrls,textureUrl:manifest?.textureUrl,textureRevision:manifest?.textureRevision};}};
 }
