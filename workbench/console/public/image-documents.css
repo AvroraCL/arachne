@@ -122,3 +122,5 @@
 
 .document-colors input::-webkit-color-swatch-wrapper{padding:0}.document-colors input::-webkit-color-swatch{border:0;border-radius:0}.document-colors input::-moz-color-swatch{border:0;border-radius:0}
 .document-colors input:focus-visible{outline:1px solid #aaa;outline-offset:1px}
+
+.document-export-button[aria-busy=true] .chrome-icon{opacity:.45}

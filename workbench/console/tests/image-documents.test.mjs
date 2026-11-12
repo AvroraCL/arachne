@@ -62,7 +62,7 @@ test('RGBA live input includes only the layers and assets required for the reque
 });
 test('independent compositor preserves transparency, mask edits, layer order, linear blending and transform',()=>{
  const script=`import numpy as np
-from image_documents import composite_document
+from image_documents import composite_document,png_bytes
 from paint_worker import sample_document
 field=np.array([[[255,0,0,255],[0,0,0,0]]],dtype=np.uint8);v,a=sample_document(field,np.array([.5]),np.array([.5]),'color');assert np.allclose(v,[1,0,0]) and np.allclose(a,.5)
 gray=np.full((1,1,4),128,dtype=np.uint8);gray[:,:,3]=255;v,a=sample_document(gray,np.array([.5]),np.array([.5]),'color',linear=True);assert np.allclose(v,128/255)
@@ -75,6 +75,11 @@ assert list(p[0,0,:3])==[0,0,255] and abs(int(p[0,0,3])-128)<=1
 base['maskEnabled']=False;base['strokes'].append(dict(transformUV=dict(rect=[0,0,1,1],offset=[.5,0],scale=[1,1],angle=0,copy=False,interpolation='nearest')));doc['layers']=[base];p=composite_document(doc,{},64)
 assert p[32,16,3]==0 and p[32,48,3]==255
 from PIL import Image
+from io import BytesIO
+for color_space,key,value in [('linear','gamma',1),('srgb','srgb',0)]:
+ with Image.open(BytesIO(png_bytes(p,color_space))) as encoded:
+  assert encoded.info[key] == value
+  assert np.array_equal(np.asarray(encoded),p)
 import tempfile
 from pathlib import Path
 with tempfile.TemporaryDirectory() as folder:

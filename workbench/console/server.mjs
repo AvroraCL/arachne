@@ -3,7 +3,7 @@ import {importGlbProject} from './model-registration.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
-import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,checkPaintPreview} from './paint.mjs';
+import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,imageExportInput,checkPaintPreview} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
 import {resolvePaintRenderSettings} from './cycles-options.mjs';
@@ -253,16 +253,16 @@ const server=http.createServer(async(req,res)=>{
       if(operation==='render-session'){
         updateCyclesSession(doc,b,()=>listJobs(id));send(res,202,{accepted:true});return;
       }
-      if(operation==='image-live'||operation==='image-clipboard'){
-        const clipboard=operation==='image-clipboard';
+      if(['image-live','image-clipboard','image-export'].includes(operation)){
+        const inputFor={'image-live':imageDocumentInput,'image-clipboard':imageClipboardInput,'image-export':imageExportInput}[operation];
         if(b.revision!==doc.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
-        const input=clipboard?imageClipboardInput(doc,b):imageDocumentInput(doc,b);
+        const input=inputFor(doc,b);
         const controller=new AbortController();
         res.on('close',()=>{if(!res.writableEnded)controller.abort();});
         const pixels=await livePaint(input,{signal:controller.signal});
         if(res.destroyed)return;
         if(read(id).revision!==b.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
-        res.writeHead(200,{'Content-Type':clipboard?'image/png':'application/octet-stream','Cache-Control':'no-store',
+        res.writeHead(200,{'Content-Type':operation==='image-live'?'application/octet-stream':'image/png','Cache-Control':'no-store',
           'X-Paint-Resolution':String(input.liveResolution),'X-Paint-Revision':String(b.revision)});
         res.end(pixels);return;
       }

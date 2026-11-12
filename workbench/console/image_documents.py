@@ -5,9 +5,10 @@ No geometry, protection atlas or PBR layer state is used to edit a document.
 from io import BytesIO
 import hashlib
 import json
+import struct
 from collections import OrderedDict
 import numpy as np
-from PIL import Image
+from PIL import Image, PngImagePlugin
 from paint_surface import Surface
 
 
@@ -111,8 +112,17 @@ def clipboard_png(pixels, region):
         cropped[~surface._polygon_tile(rect, polygon)[::-1]] = 0
     if not cropped.size or not cropped[:, :, 3].any():
         raise ValueError('选区内没有可复制的像素')
+    return png_bytes(cropped)
+
+
+def png_bytes(pixels, color_space=None):
+    metadata = PngImagePlugin.PngInfo()
+    if color_space == 'srgb':
+        metadata.add(b'sRGB', bytes([0]))
+    elif color_space == 'linear':
+        metadata.add(b'gAMA', struct.pack('>I', 100000))
     out = BytesIO()
-    Image.fromarray(cropped).save(out, format='PNG', compress_level=3)
+    Image.fromarray(pixels).save(out, format='PNG', pnginfo=metadata, compress_level=3)
     return out.getvalue()
 
 

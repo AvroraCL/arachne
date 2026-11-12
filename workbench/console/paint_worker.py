@@ -13,7 +13,7 @@ from PIL import Image
 
 from paint_surface import Surface, registered_surface
 from material_graph import MaterialGraph
-from image_documents import document_pixels,composite_document,clipboard_png
+from image_documents import document_pixels,composite_document,clipboard_png,png_bytes
 
 
 def decode(srgb):
@@ -482,7 +482,11 @@ def live_pixels(cfg):
         doc=cfg['paint']['imageDocuments'][cfg['imageDocumentId']]
         if cfg.get('isolatedImageLayer'):doc={**doc,'layers':[l for l in doc['layers'] if l['id']==cfg['isolatedImageLayer']]}
         pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
-        return clipboard_png(pixels,cfg['clipboardRegion']) if cfg.get('clipboardRegion') else pixels.tobytes()
+        if cfg.get('clipboardRegion'):
+            return clipboard_png(pixels,cfg['clipboardRegion'])
+        if cfg.get('imagePng'):
+            return png_bytes(pixels,doc['colorSpace'])
+        return pixels.tobytes()
     step = 4096//cfg.get('liveResolution',256)
     pixels,(protected,conflict,written,eligible) = composite(cfg,step)
     codes = diagnostic_codes(protected,conflict,written)

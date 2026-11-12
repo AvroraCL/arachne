@@ -586,6 +586,26 @@ try{
   assert.deepEqual(crossDocument.paint.imageDocuments[clipboardDocument].layers,inPlace.paint.imageDocuments[clipboardDocument].layers);
   assert.deepEqual(errors,[]);
   console.log('PASS 4K selection copy, lasso transparency, original scale, same-document placement and cross-document paste');
+  const [pngDownload]=await Promise.all([
+    page.waitForEvent('download',{timeout:120000}),
+    imageEditor.getByRole('button',{name:'导出当前贴图 PNG',exact:true}).click()
+  ]);
+  assert.equal(pngDownload.suggestedFilename(),'剪贴板目标.png');
+  const drawingPng=path.join(data,'drawing.png');
+  await pngDownload.saveAs(drawingPng);
+  execFileSync(python,['-c',[
+    'from PIL import Image',
+    'import sys',
+    'with Image.open(sys.argv[1]) as im:',
+    ' assert im.size == (4096, 4096) and im.mode == "RGBA"',
+    ' assert im.info.get("srgb") == 0',
+    ' assert im.getpixel((32, 32))[3] == 0',
+    ' assert im.getpixel((int(.31*4096), int(.35*4096))) == (36, 138, 207, 255)',
+    ' assert im.getpixel((int(.39*4096), int(.35*4096)))[3] == 0'
+  ].join('\n'),drawingPng],{stdio:'inherit'});
+  assert.equal((await api(project(libraryTarget.id))).revision,crossDocument.revision);
+  console.log('PASS standalone 4K RGBA PNG download with color space and transparent mask');
+
   await imageEditor.getByRole('button',{name:'图像文档',exact:true}).click();
   await page.getByRole('option',{name:'剪贴板来源',exact:true}).click();
   await page.locator('[data-image-layer-id="'+clipboardLayer+'"] .document-layer-select').click();

@@ -532,6 +532,10 @@ export function imageClipboardInput(doc,request){
   const input=imageDocumentInput(doc,{revision,documentId,isolatedImageLayer:layerId,resolution:4096});
   return {...input,clipboardRegion:{rect,polygon}};
 }
+export function imageExportInput(doc,request){
+  const {revision,documentId}=fields(request,['revision','documentId']);
+  return {...imageDocumentInput(doc,{revision,documentId,resolution:4096}),imagePng:true};
+}
 function completePng(bytes){
   if(bytes.length<45||!bytes.subarray(0,8).equals(pngSignature)||
      bytes.readUInt32BE(8)!==13||bytes.toString('ascii',12,16)!=='IHDR'||

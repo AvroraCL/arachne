@@ -59,11 +59,14 @@ export function createDocumentEditor(ctx,bridge){
     destination.value=previous||linked?.id||'';syncSelectMenu(destination);
   }
   const copy=button('复制图像选区',copySelection),paste=button('粘贴为图像层',pasteSelection);
+  const download=chromeButton(button('导出当前贴图 PNG',downloadDocument),'download');
+  download.classList.add('document-export-button');
+  download.title='导出当前贴图 · 4096 × 4096 PNG';
   chromeButton(copy,'copy');chromeButton(paste,'paste');
   copy.title='复制图像选区 · ⌘ / Ctrl + C';paste.title='粘贴为图像层 · ⌘ / Ctrl + V';
-  copy.disabled=paste.disabled=true;
-  let copying=false;
-  header.append(picker,create,channel,destination,bind,copy,paste);headerControls(ctx,header);
+  copy.disabled=paste.disabled=download.disabled=true;
+  let copying=false,exportRequest=null;
+  header.append(picker,create,channel,destination,bind,copy,paste,download);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const parameters=el('div','document-tool-parameters'),viewOptions=el('div','document-view-options');
   const rail=el('aside','document-tools'),stage=el('div','editor-image-stage document-image-stage'),canvas=el('canvas'),empty=el('div','document-empty'),status=el('output','editor-message');
@@ -199,6 +202,36 @@ export function createDocumentEditor(ctx,bridge){
   function syncClipboard(){
     copy.disabled=!canCopy();paste.disabled=!canPaste()||!copiedImage();
     copy.setAttribute('aria-busy',String(copying));
+    download.disabled=!canPaste()||!!exportRequest;
+    download.setAttribute('aria-busy',String(!!exportRequest));
+    download.title=exportRequest?'正在导出 4K PNG…':'导出当前贴图 · 4096 × 4096 PNG';
+  }
+  async function downloadDocument(){
+    const image=currentDocument(project);
+    if(!image||exportRequest||!canPaste())return;
+    const {id,revision,documentId}=imageSelectionOrigin(project);
+    const controller=exportRequest=new AbortController();
+    syncClipboard();
+    try{
+      const response=await fetch('/api/projects/'+id+'/paint/image-export',{
+        method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+        body:JSON.stringify({revision,documentId})
+      });
+      if(response.status===204)throw Error('图像已变化，请重新导出');
+      if(!response.ok)throw Error((await response.json()).error||'导出 PNG 失败');
+      const png=await response.blob();
+      if(controller.signal.aborted)return;
+      const url=URL.createObjectURL(png),link=el('a');
+      const name=image.name.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g,'_').replace(/[ .]+$/,'')||'贴图';
+      link.href=url;link.download=name+'.png';
+      host.append(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),10000);
+    }catch(error){
+      if(!disposed&&error.name!=='AbortError')ctx.error(error);
+    }finally{
+      exportRequest=null;
+      if(!disposed)syncClipboard();
+    }
   }
   function copySelection(){
     if(!canCopy())return false;
@@ -344,7 +377,7 @@ export function createDocumentEditor(ctx,bridge){
       shown=visible;live.setVisible(visible);
       if(visible)sync();
     },
-    dispose(){disposed=true;unsub();stopClipboard();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.clear();resize.disconnect();},setPaintMode(next){setMode(next);}};
+    dispose(){disposed=true;exportRequest?.abort();unsub();stopClipboard();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.clear();resize.disconnect();},setPaintMode(next){setMode(next);}};
 }
 
 export function createImagePanel(type,ctx){
