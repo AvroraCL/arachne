@@ -16,6 +16,7 @@ import {pauseImageThumbnail,updateImageThumbnail} from './image-layer-thumbnails
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 function button(text,action,label=text){const b=el('button','',text);b.type='button';b.onclick=action;b.setAttribute('aria-label',label);b.title=label;return b;}
 function choice(label,items,value,change){const s=el('select');s.setAttribute('aria-label',label);for(const [id,name] of items)s.append(new Option(name,id));s.value=value;s.onchange=()=>change(s.value);return s;}
+const selectionNames={rect:'矩形选区',ellipse:'椭圆选区',lasso:'套索'};
 const currentDocument=project=>{const documents=project.document?.paint.imageDocuments??{},id=project.imageContext?.documentId;return Object.hasOwn(documents,id)?documents[id]:null;};
 const currentLayer=project=>currentDocument(project)?.layers.find(l=>l.id===project.imageContext?.layerId);
 function selectImage(project,patch){project.selectImage({...project.imageContext,...patch},undefined,{force:true});if(!project.isImageEditorActive||project.isImageEditorActive())project.setEditorDomain('image');}
@@ -84,7 +85,7 @@ export function createDocumentEditor(ctx,bridge){
   parameters.append(controls.bar);
   options.append(toolName,parameters,viewOptions);
   host.classList.add('document-editor');host.append(options,rail,stage,status);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
-  let mode=state.tool||'orbit',selectionShape=state.selectionTool==='lasso'?'lasso':'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
+  let mode=state.tool||'orbit',selectionShape=Object.hasOwn(selectionNames,state.selectionTool)?state.selectionTool:'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
   let painter,previewCaption='';
   function extent(){return Math.max(1,Math.min(stage.clientWidth,stage.clientHeight)-48);}
   function layout(){
@@ -135,6 +136,7 @@ export function createDocumentEditor(ctx,bridge){
     preview:draft,commit:(op,origin)=>void save(op,origin),sample:sampleImage,place:()=>{}});
   const brushBinding=createBrushBinding({project,painter});
   selectionControls(elements,parameters,stage);
+  elements['uv-ellipse-tool']=button(selectionNames.ellipse);
   const transformOptions=elements['uv-transform-options'];
   for(const field of transformOptions.querySelectorAll('[data-transform-field]')){
     field.dataset.scrubNumber='';
@@ -145,7 +147,7 @@ export function createDocumentEditor(ctx,bridge){
   selection=bridge.createSelection({pane:stage,canvas,elements,isHandHeld:()=>space||!!nav,
     context:()=>{const l=currentLayer(project),origin=imageOrigin(),editable=!!l&&!l.locked&&!bridge.busy(),pixels=project.imageContext?.target!=='mask';return {...origin,id:l?.id,projectId:origin.id,active:!!currentDocument(project),interactive:!painter.isEditing()&&!nav,image:l?.kind==='image'?{x:l.x,y:l.y,scale:l.scale,rotation:l.rotation,stretch:l.stretch,size:[project.document.paint.assets[l.asset].width,project.document.paint.assets[l.asset].height]}:null,canTransform:editable&&pixels&&(l.kind==='image'||l.kind==='pixel'&&!!l.strokes?.length),canClear:editable&&pixels&&l.kind==='pixel',canFillMaterial:editable&&pixels&&l.kind==='pixel',canFillMask:editable};},
     activate:()=>{setMode('select');return true;},onTransformState:syncToolName,preview:op=>draft(op),commit:(op,origin)=>save(op,{...origin,id:origin.projectId}),fillOperation:(rect,target,value,polygon)=>painter.fillUV(rect,target,value,polygon)});
-  for(const [id,label,icon,key] of [['uv-select-tool','矩形选区','marquee','M'],['uv-lasso-tool','套索','lasso','L'],['uv-transform-tool','自由变换','transform','V'],['surface-orbit','抓手','hand','H'],['surface-paint','画笔','brush','B'],['uv-eraser-tool','橡皮擦','eraser','E'],['surface-sample','取样','eyedropper','I']]){
+  for(const [id,label,icon,key] of [['uv-select-tool',selectionNames.rect,'marquee','M'],['uv-ellipse-tool',selectionNames.ellipse,'ellipseMarquee','Shift+M'],['uv-lasso-tool',selectionNames.lasso,'lasso','L'],['uv-transform-tool','自由变换','transform','V'],['surface-orbit','抓手','hand','H'],['surface-paint','画笔','brush','B'],['uv-eraser-tool','橡皮擦','eraser','E'],['surface-sample','取样','eyedropper','I']]){
     const control=elements[id];control.textContent=label;chromeButton(control,icon,label);
     control.title=label+' · '+key;control.setAttribute('aria-keyshortcuts',key);rail.append(control);
   }
@@ -153,7 +155,7 @@ export function createDocumentEditor(ctx,bridge){
   elements['uv-transform-tool'].setAttribute('aria-keyshortcuts','V Control+T Meta+T');
   const textTool=button('文字工具',()=>{selection.stop();setMode('text');});
   chromeButton(textTool,'text');textTool.title='文字工具 · T';textTool.setAttribute('aria-keyshortcuts','T');rail.append(textTool);
-  for(const [id,shape] of [['uv-select-tool','rect'],['uv-lasso-tool','lasso']])elements[id].addEventListener('click',()=>{selectionShape=shape;syncToolName();ctx.onChange();});
+  for(const [id,shape] of [['uv-select-tool','rect'],['uv-ellipse-tool','ellipse'],['uv-lasso-tool','lasso']])elements[id].addEventListener('click',()=>{selectionShape=shape;syncToolName();ctx.onChange();});
   elements['surface-orbit'].onclick=()=>{selection.stop();setMode('orbit');};elements['surface-paint'].onclick=()=>{selection.stop();elements['brush-erase'].checked=false;setMode(project.imageContext?.target==='mask'?'mask':'paint');};elements['uv-eraser-tool'].onclick=()=>{selection.stop();elements['brush-erase'].checked=true;setMode(project.imageContext?.target==='mask'?'mask':'paint');};elements['surface-sample'].onclick=()=>{if(project.imageContext?.target!=='mask'){selection.stop();setMode('sample');}};
   const colors=el('div','document-colors'),front=el('input'),back=el('input');front.type=back.type='color';front.setAttribute('aria-label','图像前景色');back.setAttribute('aria-label','图像背景色');colors.append(back,front,button('⇄',()=>colorKey('x'),'交换图像前景色和背景色'),button('◩',()=>colorKey('d'),'恢复图像黑白'));rail.append(colors);
   function colorTarget(){return project.imageContext?.target==='mask'?'mask':'paint';}
@@ -161,7 +163,7 @@ export function createDocumentEditor(ctx,bridge){
   front.oninput=()=>{bridge.setColor(colorTarget(),'foreground',front.value);syncColors();};back.oninput=()=>{bridge.setColor(colorTarget(),'background',back.value);syncColors();};
   function colorKey(key){bridge.colorKey(key,colorTarget());syncColors();painter.render();}
   function syncToolName(transforming=selection?.isTransforming()){
-    const caption=transforming?'自由变换':{orbit:'抓手',paint:elements['brush-erase'].checked?'橡皮擦':'画笔',mask:elements['brush-erase'].checked?'蒙版橡皮擦':'蒙版画笔',select:selectionShape==='lasso'?'套索':'矩形选区',sample:'取样',text:'文字'}[mode];
+    const caption=transforming?'自由变换':{orbit:'抓手',paint:elements['brush-erase'].checked?'橡皮擦':'画笔',mask:elements['brush-erase'].checked?'蒙版橡皮擦':'蒙版画笔',select:selectionNames[selectionShape],sample:'取样',text:'文字'}[mode];
     if(toolName.textContent===caption)return;
     toolName.textContent=caption;
     parameters.scrollLeft=0;
@@ -264,7 +266,7 @@ export function createDocumentEditor(ctx,bridge){
     if(mod&&!event.altKey){
       if(key==='c'&&!event.shiftKey)handled=copySelection();
       else if(key==='z')void project.travel(event.shiftKey?'redo':'undo').catch(ctx.error);
-      else if(key==='a')selection.selectAll();
+      else if(key==='a')selection.selectAll(selectionShape);
       else if(key==='d')selection.clear();
       else if(key==='t')selection.start();
       else if(key==='0'){zoom=1;pan=[0,0];layout();}
@@ -278,7 +280,11 @@ export function createDocumentEditor(ctx,bridge){
     else if(key==='escape'){
       nav=null;painter.cancel({preserveMode:true});
       if(!selection.cancel())selection.clear();
-    }else if(key==='m')elements['uv-select-tool'].click();
+    }else if(key==='m'){
+      const elliptical=selectionShape==='ellipse';
+      const tool=event.shiftKey!==elliptical?'uv-ellipse-tool':'uv-select-tool';
+      elements[tool].click();
+    }
     else if(key==='l')elements['uv-lasso-tool'].click();
     else if(key==='v')handled=selection.start();
     else if(key==='t')textTool.click();

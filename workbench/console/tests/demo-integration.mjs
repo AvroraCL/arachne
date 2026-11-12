@@ -541,6 +541,8 @@ try{
   const imageEditor=page.locator('.editor-area[data-editor=image]').first();
   const imageCanvas=imageEditor.getByLabel('图像文档画布');
   await imageCanvas.waitFor();
+  await imageEditor.getByRole('button',{name:'图像文档',exact:true}).click();
+  await page.getByRole('option',{name:'剪贴板来源',exact:true}).click();
   await imageEditor.getByRole('button',{name:'矩形选区',exact:true}).click();
   const imageBounds=await imageCanvas.boundingBox();
   await page.mouse.move(imageBounds.x+imageBounds.width*.1,imageBounds.y+imageBounds.height*.1);
@@ -571,6 +573,38 @@ try{
   assert.deepEqual(crossDocument.paint.imageDocuments[clipboardDocument].layers,inPlace.paint.imageDocuments[clipboardDocument].layers);
   assert.deepEqual(errors,[]);
   console.log('PASS 4K selection copy, lasso transparency, original scale, same-document placement and cross-document paste');
+  await imageEditor.getByRole('button',{name:'图像文档',exact:true}).click();
+  await page.getByRole('option',{name:'剪贴板来源',exact:true}).click();
+  await page.locator('[data-image-layer-id="'+clipboardLayer+'"] .document-layer-select').click();
+  await imageCanvas.focus();
+  await page.keyboard.press('Shift+m');
+  const ellipseTool=imageEditor.getByRole('button',{name:'椭圆选区',exact:true});
+  assert.equal(await ellipseTool.getAttribute('aria-pressed'),'true');
+  const circleBounds=await imageCanvas.boundingBox();
+  await page.keyboard.down('Shift');
+  await page.mouse.move(circleBounds.x+circleBounds.width*.1,circleBounds.y+circleBounds.height*.1);
+  await page.mouse.down();
+  await page.mouse.move(circleBounds.x+circleBounds.width*.6,circleBounds.y+circleBounds.height*.42,{steps:5});
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  const outline=imageEditor.locator('.area-selection-overlay[data-polygon]');
+  await outline.waitFor({state:'attached'});
+  await page.keyboard.press('Control+t');
+  await outline.locator('xpath=self::*[@data-transforming]').waitFor({state:'attached'});
+  await page.keyboard.press('Escape');
+  assert.equal(await ellipseTool.getAttribute('aria-pressed'),'true');
+  assert.equal(await outline.getAttribute('data-transforming'),null);
+  await imageEditor.getByRole('button',{name:'填充蒙版',exact:true}).click();
+  const ellipseMask=await waitFor(async()=>{
+    const state=await api(project(libraryTarget.id));
+    return state.paint.imageDocuments[clipboardDocument].layers[0].maskStrokes.find(stroke=>stroke.polygon?.length>100);
+  },'椭圆蒙版填充');
+  const [left,top,right,bottom]=ellipseMask.rect;
+  assert.ok(Math.abs((right-left)-(bottom-top))<.002);
+  assert.equal(ellipseMask.value,0);
+  assert.deepEqual(errors,[]);
+  console.log('PASS Shift circle marquee, selection after cancelled free transform and exact polygon mask fill');
+
   await page.addInitScript(()=>{
     window.arachneDesktop=Object.freeze({notifyProject(){}});
   });

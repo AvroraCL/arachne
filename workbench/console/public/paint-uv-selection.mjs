@@ -9,6 +9,13 @@ const polygonBounds=points=>[Math.min(...points.map(p=>p[0])),Math.min(...points
   Math.max(...points.map(p=>p[0])),Math.max(...points.map(p=>p[1]))];
 const corners=([l,t,r,b])=>[[l,t],[r,t],[r,b],[l,b]];
 const resolution=4096;
+const ellipseUnit=Array.from({length:192},(_,i)=>{
+  const angle=2*Math.PI*i/192;
+  return [(1+Math.cos(angle))/2,(1+Math.sin(angle))/2];
+});
+const ellipse=([left,top,right,bottom])=>ellipseUnit.map(([u,v])=>[
+  clamp(left+u*(right-left),left,right),clamp(top+v*(bottom-top),top,bottom)
+]);
 
 function imageBounds(image){
   const [w,h]=image.size,unit=image.scale/Math.max(w,h);
@@ -21,6 +28,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   const overlay=$('uv-selection-overlay'), border=$('uv-selection-border'), handles=$('uv-selection-handles');
   const lassoBorder=$('uv-lasso-border');
   const selectTool=$('uv-select-tool'),lassoTool=$('uv-lasso-tool'),transformTool=$('uv-transform-tool');
+  const ellipseTool=elements?.['uv-ellipse-tool'];
   const options=$('uv-transform-options'), selectionOptions=$('uv-selection-options');
   const eraseButton=$('uv-selection-erase'), fillMaterial=$('uv-selection-fill-material'), fillMask=$('uv-selection-fill-mask');
   const maskValue=$('uv-selection-mask-value');
@@ -34,7 +42,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     return circle;
   });
   let tool='none', rect=null, polygon=null, draft=null, owner=null, gesture=null;
-  const selecting=()=>tool==='rect'||tool==='lasso';
+  const selecting=()=>['rect','ellipse','lasso'].includes(tool);
   const sameOwner=(a,b)=>a?.id===b?.id&&a?.projectId===b?.projectId&&a?.imageDocumentId===b?.imageDocumentId;
   function point(event){
     const box=canvas.getBoundingClientRect();
@@ -77,6 +85,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
       String(tool==='none'&&$('viewport').dataset.tool==='orbit'));
     selectTool.setAttribute('aria-pressed',String(tool==='rect'&&state.active));
     lassoTool.setAttribute('aria-pressed',String(tool==='lasso'&&state.active));
+    ellipseTool?.setAttribute('aria-pressed',String(tool==='ellipse'&&state.active));
     transformTool.setAttribute('aria-pressed',String(!!draft&&state.active));
     transformTool.disabled=$('uv-transform-start').disabled=!(selected||state.image)||!state.canTransform;
     $('uv-transform-start').title=state.maskInspection?'蒙版检查中可框选并填充蒙版':
@@ -87,7 +96,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     selectionOptions.hidden=!state.active||tool==='none'||!!draft;
     $('uv-selection-size').textContent=selected
       ? Math.round((rect[2]-rect[0])*resolution)+' × '+Math.round((rect[3]-rect[1])*resolution)+' px'
-      : tool==='lasso'?'沿边缘拖动，松开闭合选区':'拖出矩形选区';
+      : {lasso:'沿边缘拖动，松开闭合选区',ellipse:'拖出椭圆 · Shift 正圆',rect:'拖出矩形 · Shift 正方形'}[tool]||'';
     $('uv-selection-clear').disabled=!selected;
     eraseButton.disabled=!selected||!state.canClear||!!gesture;
     fillMaterial.disabled=!selected||!state.canFillMaterial||!!gesture;
@@ -138,7 +147,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   }
   function cancel(){
     if(!draft)return false;
-    tool=draft.owner.image?'none':draft.polygon?'lasso':'rect';
+    tool=draft.selectionTool;
     draft=null;gesture=null;
     preview(null);
     render();
@@ -161,8 +170,8 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     cancel();tool=shape;render();if(focus)pane.focus({preventScroll:true});
     return true;
   }
-  function selectAll(){
-    if(!context().active||!choose())return false;
+  function selectAll(shape='rect'){
+    if(!context().active||!choose(selecting()?tool:shape))return false;
     owner=context();rect=[0,0,1,1];polygon=null;render();
     return true;
   }
@@ -171,7 +180,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     const state=context();
     if(gesture||!state.interactive||!(rect||state.image)||!state.canTransform||!activate())return false;
     draft={owner:state,rect:state.image?imageBounds(state.image):rect,polygon:state.image?null:polygon,
-      offset:[0,0],scale:[1,1],angle:0,copy:false};
+      selectionTool:tool,offset:[0,0],scale:[1,1],angle:0,copy:false};
     tool='transform';
     render();
     pane.focus({preventScroll:true});
@@ -181,7 +190,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     if(!draft||gesture)return false;
     if(!changed()){cancel();return true;}
     const op=operation(),state=draft.owner,previous=draft,marquee=rect,outline=polygon;
-    draft=null;rect=null;polygon=null;owner=null;tool=state.image?'none':outline?'lasso':'rect';render();
+    draft=null;rect=null;polygon=null;owner=null;tool=previous.selectionTool;render();
     if(await commit(op,state))return true;
     const latest=context();
     if(latest.active&&sameOwner(state,latest)&&state.revision===latest.revision){
@@ -228,6 +237,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
 
   selectTool.onclick=()=>choose('rect');
   lassoTool.onclick=()=>choose('lasso');
+  if(ellipseTool)ellipseTool.onclick=()=>choose('ellipse');
   transformTool.onclick=$('uv-transform-start').onclick=start;
   $('uv-transform-cancel').onclick=cancel;
   $('uv-selection-clear').onclick=clear;
@@ -264,6 +274,18 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     rect=polygonBounds(polygon);
   }
 
+  function updateMarquee(p,shift){
+    const {start,kind}=gesture,end=p.map(n=>clamp(n,0,1));
+    if(shift){
+      const deltas=end.map((n,i)=>n-start[i]);
+      const signs=deltas.map(n=>n<0?-1:1);
+      const size=Math.min(Math.max(...deltas.map(Math.abs)),...start.map((n,i)=>signs[i]<0?n:1-n));
+      for(let i=0;i<2;i++)end[i]=start[i]+signs[i]*size;
+    }
+    rect=rectFrom(start,end);
+    polygon=kind==='ellipse'?ellipse(rect):null;
+  }
+
   pane.addEventListener('pointerdown',event=>{
     const state=context();
     if(!state.interactive||gesture||tool==='none'||event.button!==0||isHandHeld()||
@@ -280,7 +302,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
         gesture={kind:'lasso',pointer:event.pointerId,path:[start]};
       }else{
         owner=state;rect=rectFrom(start,start);polygon=null;
-        gesture={kind:'rect',pointer:event.pointerId,start};
+        gesture={kind:tool,pointer:event.pointerId,start};
       }
     }else clear();
     if(gesture){
@@ -295,15 +317,8 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     const p=point(event),{kind,start,before}=gesture;
     if(kind==='lasso'){
       updateLasso(p);render();
-    }else if(kind==='rect'){
-      const end=p.map(n=>clamp(n,0,1));
-      if(event.shiftKey){
-        const deltas=end.map((n,i)=>n-start[i]);
-        const signs=deltas.map(n=>n<0?-1:1);
-        const size=Math.min(Math.max(...deltas.map(Math.abs)),...start.map((n,i)=>signs[i]<0?n:1-n));
-        for(let i=0;i<2;i++)end[i]=start[i]+signs[i]*size;
-      }
-      rect=rectFrom(start,end);render();
+    }else if(kind==='rect'||kind==='ellipse'){
+      updateMarquee(p,event.shiftKey);render();
     }else if(kind==='move-selection'){
       const shift=p.map((n,i)=>clamp(n-start[i],-before[i],1-before[i+2]));
       rect=before.map((n,i)=>clamp(n+shift[i%2],0,1));
@@ -335,9 +350,12 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   function end(event){
     if(gesture?.pointer!==event.pointerId)return;
     const previous=gesture;
-    if(previous.kind==='lasso'&&event.type==='pointerup')updateLasso(point(event),true);
+    if(event.type==='pointerup'){
+      if(previous.kind==='lasso')updateLasso(point(event),true);
+      else if(previous.kind==='rect'||previous.kind==='ellipse')updateMarquee(point(event),event.shiftKey);
+    }
     gesture=null;
-    if(previous.kind==='rect'||previous.kind==='lasso'){
+    if(['rect','ellipse','lasso'].includes(previous.kind)){
       if(event.type!=='pointerup'||rect[2]-rect[0]<1/resolution||rect[3]-rect[1]<1/resolution||
          (polygon&&new Set(polygon.map(p=>p.join(','))).size<3))clear();
       else render();

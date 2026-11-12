@@ -32,6 +32,7 @@ export const workspaceIcons = {
   pen: svg('<path d="m12 4 4 4 M4 12l9-9 4 4-9 9-5 1 1-5Z"/>'),
   text: svg('<path d="M3 5h14 M10 5v11 M7 16h6 M3 5v2 M17 5v2"/>'),
   marquee: svg('<rect x="3" y="3" width="14" height="14" stroke-dasharray="2 2"/>'),
+  ellipseMarquee: svg('<circle cx="10" cy="10" r="7" stroke-dasharray="2 2"/>'),
   lasso: svg('<path d="M5.5 13.5C2 12.3 2 8.3 4.4 6.3c2.9-2.5 9.5-2.7 12.2.2 2.1 2.3.4 5.5-3.4 6.7-2.8.9-6.8.3-7.5 1.9-.9 1.8 1.8 2.4 2.6 1 .5-.9-.2-2.2-1.4-2.7"/>'),
   transform: svg('<path d="M3 7V3h4m6 0h4v4m0 6v4h-4m-6 0H3v-4m7-6v6M7 10h6"/>'),
   hand: svg('<path d="M6 10V6a1 1 0 0 1 2 0v3-5a1 1 0 0 1 2 0v5-6a1 1 0 0 1 2 0v6-4a1 1 0 0 1 2 0v6l1.5-1.5a1.3 1.3 0 0 1 2 1.6l-3 4.4A4 4 0 0 1 11 17H9a4 4 0 0 1-3.3-1.8L3 11a1.3 1.3 0 0 1 2-1.6L6 10Z"/>'),
