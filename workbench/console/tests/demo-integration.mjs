@@ -604,6 +604,34 @@ try{
   assert.equal(ellipseMask.value,0);
   assert.deepEqual(errors,[]);
   console.log('PASS Shift circle marquee, selection after cancelled free transform and exact polygon mask fill');
+  const maskThumb=page.locator('[data-image-layer-id="'+clipboardLayer+'"] .document-layer-mask');
+  await maskThumb.click({modifiers:['Alt']});
+  await imageEditor.locator('.editor-message').filter({hasText:'蒙版 ·'}).waitFor();
+  await imageCanvas.focus();
+  await page.keyboard.press('Control+i');
+  async function sourceLayer(){
+    const state=await api(project(libraryTarget.id));
+    return state.paint.imageDocuments[clipboardDocument].layers[0];
+  }
+  const invertedMask=await waitFor(async()=>{
+    const layer=await sourceLayer();
+    return layer.maskBase===0&&layer;
+  },'反相图像蒙版');
+  assert.ok(invertedMask.maskStrokes.every(stroke=>stroke.value===1));
+  await maskThumb.click({button:'right'});
+  await page.getByRole('menuitem',{name:'删除蒙版',exact:true}).click();
+  await maskThumb.waitFor({state:'hidden'});
+  const removedMask=await sourceLayer();
+  assert.equal(removedMask.maskEnabled,false);
+  assert.equal(removedMask.maskStrokes,undefined);
+  assert.deepEqual(removedMask.strokes,invertedMask.strokes);
+  await imageCanvas.focus();
+  await page.keyboard.press('Control+z');
+  await maskThumb.waitFor();
+  assert.deepEqual(await sourceLayer(),invertedMask);
+  assert.deepEqual(errors,[]);
+  console.log('PASS isolated mask view, inversion shortcut, removal and undo');
+
 
   await page.addInitScript(()=>{
     window.arachneDesktop=Object.freeze({notifyProject(){}});

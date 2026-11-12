@@ -40,6 +40,7 @@ export const workspaceIcons = {
   eyedropper: svg('<path d="m11 6 3 3m-4-2 2-2 3 3-2 2m-.7-4.7 2-2a1.4 1.4 0 0 1 2 2l-2 2M11 8l-6 6-.5 1.5-.5.5 1 .5.5-.5L7 16l6-6"/>'),
   eraser: svg('<path d="m8 4 8 6a1.2 1.2 0 0 1 .2 1.7L12 17H7l-4-3a1.2 1.2 0 0 1-.2-1.7l5.2-8.3Zm-3 5 8 6m-6 2h10"/>'),
   mask: svg('<rect x="3" y="4" width="14" height="12" rx="1"/><circle cx="10" cy="10" r="3.2" fill="currentColor" stroke="none"/>'),
+  invert: svg('<circle cx="10" cy="10" r="6"/><path d="M10 4a6 6 0 0 1 0 12Z" fill="currentColor" stroke="none"/>'),
   fillLayer: svg('<path d="m3 8 7-4 7 4-7 4-7-4Zm0 4 7 4 7-4"/><path d="m5 9.2 7-4m-4 5.8 7-4"/>'),
   settings: svg('<path d="m8 3 .5-1h3l.5 2 2 .8 2-.5 1.5 2.6-1.5 1.4V11l1.5 1.4-1.5 2.6-2-.5-2 .8-.5 2h-3l-.5-2-2-.8-2 .5-1.5-2.6L4 11V8.3L2.5 7 4 4.3l2 .5 2-.8Z"/><circle cx="10" cy="9.7" r="2.5"/>'),
   plus: svg('<path d="M10 4v12 M4 10h12"/>'),

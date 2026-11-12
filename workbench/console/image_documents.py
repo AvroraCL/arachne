@@ -33,9 +33,8 @@ def converted(stroke):
     return {**{k:v for k,v in stroke.items() if k!='color'},'channels':{'color':True},'values':{'color':stroke['color']}}
 
 
-def mask_values(surface,layer,ids):
-    result=np.full(len(ids),layer.get('maskBase',1),dtype=np.float32)
-    mask=surface.mask(layer.get('maskStrokes',[]))
+def mask_values(base,mask,ids):
+    result=np.full(len(ids),base,dtype=np.float32)
     if mask is not None and len(mask[0]) and len(ids):
         affected,alpha,value=mask
         i=np.searchsorted(affected,ids);found=(i<len(affected))&(affected[np.minimum(i,len(affected)-1)]==ids)
@@ -64,8 +63,10 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
     for layer in document['layers']:
         if inspect_mask:
             if layer['id']==inspect_mask:
+                mask=surface.mask(layer.get('maskStrokes',[]))
                 for start in range(0,len(result),131072):
-                    ids=np.arange(start,min(start+131072,len(result)));value=mask_values(surface,layer,ids)
+                    ids=np.arange(start,min(start+131072,len(result)))
+                    value=mask_values(layer.get('maskBase',1),mask,ids)
                     result[ids,:3]=value[:,None] if linear else decode(value[:,None]);result[ids,3]=1
                 break
             continue
@@ -82,11 +83,7 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
         for ids,pixels in ranges:
             opacity=np.full(len(ids),layer['opacity'],dtype=np.float32)
             if layer['maskEnabled']:
-                m=np.full(len(ids),layer['maskBase'],dtype=np.float32)
-                if mask is not None and len(mask[0]):
-                    at=np.searchsorted(mask[0],ids);found=(at<len(mask[0]))&(mask[0][np.minimum(at,len(mask[0])-1)]==ids)
-                    i=at[found];m[found]=m[found]*(1-mask[1][i])+mask[2][i]
-                opacity*=m
+                opacity*=mask_values(layer['maskBase'],mask,ids)
             src_alpha=np.clip(pixels[:,3]*opacity,0,1);back=result[ids];back_alpha=back[:,3]
             src=np.divide(pixels[:,:3],pixels[:,3:],out=np.zeros_like(pixels[:,:3]),where=pixels[:,3:]>0)
             base=np.divide(back[:,:3],back[:,3:],out=np.zeros_like(back[:,:3]),where=back[:,3:]>0)

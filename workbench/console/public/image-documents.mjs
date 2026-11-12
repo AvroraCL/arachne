@@ -90,6 +90,17 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     if(layer.maskEnabled&&o.patch.maskEnabled===false)layer.maskStrokes??=[];
     Object.assign(layer,o.patch);
   }
+  else if(o.action==='invertMask'||o.action==='removeMask'){
+    if(!hasImageLayerMask(layer))throw Error('图像图层没有蒙版');
+    if(o.action==='invertMask'){
+      layer.maskBase=1-layer.maskBase;
+      for(const stroke of layer.maskStrokes??[])stroke.value=1-stroke.value;
+    }else{
+      layer.maskEnabled=false;
+      layer.maskBase=1;
+      delete layer.maskStrokes;
+    }
+  }
   else if(o.action==='removeLayer')doc.layers.splice(index,1);
   else if(o.action==='duplicateLayer'){if(!id(o.patch?.id)||doc.layers.some(l=>l.id===o.patch.id))throw Error('图像副本编号无效');doc.layers.splice(index+1,0,{...structuredClone(layer),id:o.patch.id,name:(layer.name.slice(0,90)+' 副本')});}
   else if(o.action==='moveLayer'){if(!Number.isInteger(o.index)||o.index<0||o.index>=doc.layers.length)throw Error('图像层序无效');doc.layers.splice(index,1);doc.layers.splice(o.index,0,layer);}

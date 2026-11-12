@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand} from '../public/image-documents.mjs';
+import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand,hasImageLayerMask} from '../public/image-documents.mjs';
 import {imageDocumentInput} from '../paint.mjs';
 const defaults=()=>({layers:[],assets:{}}),options={requireUnlocked:()=>{}},checks={checkStroke:s=>{assert.equal(s.uv,true);assert.ok(s.rect||s.stamps);},checkedUVTransform:t=>assert.ok(t.rect)};
 const edit=(paint,action,extra={})=>imageDocumentOperation(paint,{op:'image',documentId:'doc',action,...extra},options);
@@ -16,6 +16,25 @@ test('document commands cannot smuggle PBR channels, surface stamps or invalid r
  for(const stroke of [{uv:true,stamps:[[.5,.5]],radius:.02,color:'#112233',channels:{roughness:true}},{uv:false,stamps:[[0,0,0,0,0,1]],color:'#112233'}]){const next=structuredClone(paint);edit(next,'stroke',{layerId:'pixel',target:'pixels',stroke});assert.throws(()=>validateImageDocuments(next,checks),/二维 RGB/);}
  edit(paint,'bind',{channel:'color',newLayerId:'material'});paint.layers[0].documentMaps.color='missing';assert.throws(()=>validateImageDocuments(paint,checks),/绑定/);
  const wrapped=surfaceToImageCommand({op:'stroke',id:'pixel',target:'material',stroke:{uv:true,values:{color:'#112233',roughness:.8},channels:{color:true},erase:false,rect:[0,0,1,1],opacity:1}},'doc');assert.equal(wrapped.target,'pixels');assert.equal(wrapped.stroke.color,'#112233');assert.equal(wrapped.stroke.values,undefined);assert.equal(wrapped.stroke.channels,undefined);
+});
+test('mask inversion preserves soft brush coverage and deletion resets only the mask',()=>{
+ const paint=defaults();edit(paint,'create');edit(paint,'addLayer',{layerId:'pixel',kind:'pixel'});
+ const layer=paint.imageDocuments.doc.layers[0],origin={layerId:'pixel'};
+ const stroke={uv:true,stamps:[[.25,.75]],radius:.02,opacity:.5,hardness:.25,value:.25};
+ edit(paint,'stroke',{...origin,target:'mask',stroke});
+ edit(paint,'updateLayer',{...origin,patch:{maskEnabled:false,maskBase:.75}});
+ edit(paint,'invertMask',origin);
+ assert.equal(layer.maskEnabled,false);
+ assert.equal(layer.maskBase,.25);
+ assert.deepEqual(layer.maskStrokes,[{...stroke,value:.75}]);
+ validateImageDocuments(paint,checks);
+ edit(paint,'updateLayer',{...origin,patch:{locked:true}});
+ assert.throws(()=>edit(paint,'removeMask',origin),/锁定/);
+ edit(paint,'updateLayer',{...origin,patch:{locked:false}});
+ edit(paint,'removeMask',origin);
+ assert.equal(hasImageLayerMask(layer),false);
+ assert.equal(layer.maskBase,1);
+ assert.throws(()=>edit(paint,'invertMask',origin),/没有蒙版/);
 });
 test('RGBA live input includes only the layers and assets required for the requested pixels',()=>{
  const paint=defaults(),visibleAsset='1'.repeat(64),hiddenAsset='2'.repeat(64),otherAsset='3'.repeat(64);
