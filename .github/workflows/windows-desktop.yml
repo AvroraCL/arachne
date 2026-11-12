@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: windows-desktop-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   desktop:
@@ -34,6 +34,9 @@ jobs:
           npm ci
           python -m pip install -r requirements.txt
           npx --no-install playwright-core install --only-shell chromium
+      - name: Run unit tests on Windows
+        working-directory: workbench/console
+        run: npm test
       - name: Build the Windows desktop package
         working-directory: workbench/console
         env:
@@ -41,6 +44,7 @@ jobs:
         run: npm run package:win
       - name: Verify the extracted desktop package
         working-directory: workbench/console
+        timeout-minutes: 12
         env:
           ARACHNE_PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/arachne-windows
           ARACHNE_DESKTOP_SCREENSHOTS: ${{ runner.temp }}/arachne-screenshots
@@ -50,7 +54,9 @@ jobs:
           $hash = (Get-Content ($archive.FullName + '.sha256')).Split(' ')[0]
           if ((Get-FileHash $archive.FullName -Algorithm SHA256).Hash -ne $hash) { throw 'Desktop ZIP checksum mismatch' }
           $extracted = Join-Path $env:RUNNER_TEMP '阿拉克涅 包验证'
-          Expand-Archive -Path $archive.FullName -DestinationPath $extracted
+          python -m zipfile -e $archive.FullName $extracted
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop ZIP extraction failed' }
+          Write-Host 'Desktop ZIP checksum and extraction verified'
           $executable = Join-Path (Join-Path $extracted $archive.BaseName) 'Arachne.exe'
           node tests/windows-desktop-integration.mjs $executable
       - uses: actions/upload-artifact@v6
