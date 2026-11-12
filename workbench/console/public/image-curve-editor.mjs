@@ -43,8 +43,9 @@ function loadHistogram({id,revision,documentId},image,layerId){
 }
 
 function histogramPath(counts){
-  const peak=Math.max(1,...counts);
-  return 'M0 255'+Array.from(counts,(count,x)=>' L'+x+' '+(255-238*Math.sqrt(count/peak)).toFixed(1)).join('')+' L255 255Z';
+  const smoothed=Array.from(counts,(count,x)=>(counts[x-1]||0)+2*count+(counts[x+1]||0));
+  const peak=Math.max(1,...smoothed);
+  return 'M0 255'+smoothed.map((count,x)=>' L'+x+' '+(255-238*Math.sqrt(count/peak)).toFixed(1)).join('')+' L255 255Z';
 }
 
 function curvesPath(points){

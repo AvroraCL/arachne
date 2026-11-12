@@ -1743,7 +1743,7 @@ $('upload').onchange=()=>run(async()=>{
   await importAsset(file,file.name);$('upload').value='';
 });
 for(const id of ['undo','redo','preview'])$(id).onclick=()=>{
-  if(areaSystem&&id!=='preview')void areaSystem.project.travel(id).catch(error=>$('status').textContent=error.message);
+  if(areaSystem&&id!=='preview')areaSystem.travelHistory(id);
   else if(workArea==='modeling'&&id!=='preview')modeler.travel(id);
   else void run(()=>post(id,{requestId:crypto.randomUUID()}));
 };

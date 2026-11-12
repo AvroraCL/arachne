@@ -701,7 +701,7 @@ try{
   assert.ok(Number(await editor.locator('.document-image-stage').getAttribute('data-pending-strokes'))>=3);
   assert.equal((await pendingPreview).status(),200);
   await canvas.focus();
-  await page.keyboard.press('Control+z');
+  assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('undo')),true);
   const rapidStrokes=current=>current.paint.imageDocuments[rapidDoc].layers[0].strokes;
   const rapidlyUndone=await until(async()=>{
     const current=await api(projectRoute);
@@ -932,8 +932,28 @@ try{
   assert.ok(Math.abs(polygonStroke.polygon[1][1]-polygonStroke.polygon[0][1])<.00001);
   assert.deepEqual(rgba(await imagePng('polygon-lasso.png',polygonClear.revision,polyDoc),
     [xy(.31,.31),xy(.6,.6),xy(.1,.1)])[1].map(pixel=>pixel[3]),[0,255,255]);
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS Polygonal Lasso, Shift snapping, vertex deletion, Enter closure, Esc restore and exact 4K triangle');
+
+  assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('history')),true);
+  const historyDialog=page.getByRole('dialog',{name:'历史记录',exact:true});
+  const historyEntry=historyDialog.getByRole('button',{name:'撤销 1 步：清除选区',exact:true});
+  await historyEntry.waitFor();
+  assert.match(await historyEntry.textContent(),/多边形套索验收 · 多边形底稿/);
+  await historyDialog.getByRole('button',{name:'关闭历史记录',exact:true}).click();
+  await page.setViewportSize({width:960,height:600});
+  await brushTool.click();
+  const railBounds=await editor.locator('.document-tools').boundingBox();
+  const foregroundBounds=await editor.getByLabel('图像前景色',{exact:true}).boundingBox();
+  assert.ok(foregroundBounds.y>=railBounds.y&&foregroundBounds.y+foregroundBounds.height<=railBounds.y+railBounds.height);
+  const parameters=editor.locator('.document-tool-parameters');
+  await parameters.waitFor();
+  const horizontal=await parameters.evaluate(element=>element.scrollWidth>element.clientWidth);
+  assert.equal(horizontal,true);
+  await parameters.evaluate(element=>{element.scrollLeft=element.scrollWidth;});
+  await editor.locator('.document-tool-parameters[data-scroll-start]').waitFor();
+  await page.screenshot({path:path.join(data,'compact-drawing-tools.png')});
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS meaningful drawing history, native-menu undo and compact tool rail with pinned colors');
 }catch(error){
   console.error(logs);
   throw error;

@@ -95,9 +95,17 @@ export function createDocumentEditor(ctx,bridge){
   header.append(picker,create,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const parameters=el('div','document-tool-parameters'),viewOptions=el('div','document-view-options');
-  const rail=el('aside','document-tools'),stage=el('div','editor-image-stage document-image-stage'),canvas=el('canvas'),empty=el('div','document-empty'),status=el('output','editor-message');
+  const rail=el('aside','document-tools'),toolList=el('div','document-tool-list');
+  const stage=el('div','editor-image-stage document-image-stage'),canvas=el('canvas'),empty=el('div','document-empty'),status=el('output','editor-message');
+  rail.append(toolList);
   options.setAttribute('role','group');options.setAttribute('aria-label','图像工具选项');
   viewOptions.setAttribute('role','group');viewOptions.setAttribute('aria-label','画布缩放');
+  function syncParameterEdges(){
+    const remaining=parameters.scrollWidth-parameters.clientWidth-parameters.scrollLeft;
+    parameters.toggleAttribute('data-scroll-start',parameters.scrollLeft>1);
+    parameters.toggleAttribute('data-scroll-end',remaining>1);
+  }
+  parameters.addEventListener('scroll',syncParameterEdges,{passive:true,signal});
   parameters.addEventListener('wheel',event=>{
     if(event.deltaX||!event.deltaY||event.ctrlKey||event.metaKey||parameters.scrollWidth<=parameters.clientWidth)return;
     const unit=event.deltaMode===1?16:event.deltaMode===2?parameters.clientWidth:1;
@@ -134,7 +142,7 @@ export function createDocumentEditor(ctx,bridge){
       if(status.textContent!==label)status.textContent=label;
     }
     painter?.refreshUVCursor();
-    selection?.sync();gradientTool?.layout();cloneTool?.layout();shapeTool?.layout();ctx.onChange();
+    selection?.sync();gradientTool?.layout();cloneTool?.layout();shapeTool?.layout();syncParameterEdges();ctx.onChange();
   }
   const imageOrigin=()=>({id:project.document?.id,revision:project.document?.revision,imageDocumentId:project.imageContext?.documentId});
   const mapOperation=(op,origin)=>op?surfaceToImageCommand(op,origin?.imageDocumentId||project.imageContext?.documentId):null;
@@ -284,29 +292,31 @@ export function createDocumentEditor(ctx,bridge){
     fillOperation:(rect,target,value,shape)=>painter.fillUV(rect,target,value,shape,{opacity:1})});
   for(const [id,label,icon,key] of [['uv-select-tool',selectionNames.rect,'marquee','M'],['uv-ellipse-tool',selectionNames.ellipse,'ellipseMarquee','Shift+M'],['uv-lasso-tool',selectionNames.lasso,'lasso','L'],['uv-polygon-tool',selectionNames.polygon,'polygonLasso','Shift+L'],['uv-transform-tool','自由变换','transform','V'],['surface-orbit','抓手','hand','H'],['surface-paint','画笔','brush','B'],['uv-eraser-tool','橡皮擦','eraser','E'],['surface-sample','取样','eyedropper','I']]){
     const control=elements[id];control.textContent=label;chromeButton(control,icon,label);
-    control.title=label+' · '+key;control.setAttribute('aria-keyshortcuts',key);rail.append(control);
+    control.title=label+' · '+key;control.setAttribute('aria-keyshortcuts',key);toolList.append(control);
   }
   elements['uv-transform-tool'].title='自由变换 · V / Ctrl T / ⌘T · 方向键微移 · Shift 十像素';
   elements['uv-transform-tool'].setAttribute('aria-keyshortcuts','V Control+T Meta+T');
   const textTool=button('文字工具',()=>{selection.stop();setMode('text');});
-  chromeButton(textTool,'text');textTool.title='文字工具 · T';textTool.setAttribute('aria-keyshortcuts','T');rail.append(textTool);
+  chromeButton(textTool,'text');textTool.title='文字工具 · T';textTool.setAttribute('aria-keyshortcuts','T');toolList.append(textTool);
   const shapeButton=button('形状工具',()=>{selection.stop();setMode('shape');stage.focus({preventScroll:true});});
   chromeButton(shapeButton,'shape');shapeButton.title='形状工具 · U / Shift+U · Shift 等比 · Alt 从中心';
-  shapeButton.setAttribute('aria-keyshortcuts','U Shift+U');rail.append(shapeButton);
+  shapeButton.setAttribute('aria-keyshortcuts','U Shift+U');toolList.append(shapeButton);
   const gradientButton=button('渐变工具',()=>{selection.stop();setMode('gradient');stage.focus({preventScroll:true});});
   chromeButton(gradientButton,'gradient');gradientButton.title='渐变工具 · G / Shift+G';gradientButton.setAttribute('aria-keyshortcuts','G Shift+G');
-  rail.insertBefore(gradientButton,elements['surface-sample']);
+  toolList.insertBefore(gradientButton,elements['surface-sample']);
   const bucketButton=button('油漆桶',()=>{selection.stop();setMode('bucket');stage.focus({preventScroll:true});});
   chromeButton(bucketButton,'paintBucket');bucketButton.title='油漆桶 · G / Shift+G · 取样当前像素层';
   bucketButton.setAttribute('aria-keyshortcuts','G Shift+G');
-  rail.insertBefore(bucketButton,elements['surface-sample']);
+  toolList.insertBefore(bucketButton,elements['surface-sample']);
   const cloneButton=button('仿制图章',()=>{
     selection.stop();elements['brush-erase'].checked=false;setMode('clone');stage.focus({preventScroll:true});
   });
   chromeButton(cloneButton,'cloneStamp');
   cloneButton.title='仿制图章 · S · Alt / Option 单击取样';
   cloneButton.setAttribute('aria-keyshortcuts','S');
-  rail.insertBefore(cloneButton,gradientButton);
+  toolList.insertBefore(cloneButton,gradientButton);
+  for(const control of [elements['uv-transform-tool'],elements['surface-paint'],gradientButton,textTool])
+    control.dataset.toolGroupStart='';
   for(const [id,shape] of [['uv-select-tool','rect'],['uv-ellipse-tool','ellipse'],['uv-lasso-tool','lasso'],['uv-polygon-tool','polygon']]){
     elements[id].addEventListener('click',()=>{
       selectionShape=shape;
@@ -330,6 +340,7 @@ export function createDocumentEditor(ctx,bridge){
     if(toolName.textContent===caption)return;
     toolName.textContent=caption;
     parameters.scrollLeft=0;
+    syncParameterEdges();
   }
   function setMode(next){
     mode=next;showSampleNotice();
@@ -346,7 +357,7 @@ export function createDocumentEditor(ctx,bridge){
     cloneTool?.setActive(next==='clone');
     shapeTool?.setActive(next==='shape');
     syncToolName();
-    controls.bar.hidden=!['paint','mask','clone'].includes(next);painter.render();ctx.onChange();
+    controls.bar.hidden=!['paint','mask','clone'].includes(next);painter.render();syncParameterEdges();ctx.onChange();
   }
   const fitCanvas=button('适应画布',()=>{zoom=1;pan=[0,0];layout();}),actualSize=button('100%',()=>{zoom=4096/extent();pan=[0,0];layout();});
   chromeButton(fitCanvas,'fit');fitCanvas.append(el('span','document-fit-label','适应画布'));
@@ -517,6 +528,13 @@ export function createDocumentEditor(ctx,bridge){
     const dragged=readAssetDrag(transfer,project.document);if(!dragged){ctx.error(Error('素材所属工程或修订已变化，请重新拖动'));return;}
     const origin=imageSelectionOrigin(project),name=project.document.paint.assets[dragged.id].name;void run(()=>addImageAsset(project,origin,dragged.id,name,position));
   },{signal});
+  function travelHistory(direction){
+    if(drawingGesture()||selection.isDragging()||selection.isTransforming()||nav)return false;
+    const id=project.document?.id;
+    if(!id)return false;
+    void strokeQueue.flush().then(saved=>saved&&project.document?.id===id&&project.travel(direction)).catch(ctx.error);
+    return true;
+  }
   function handleKey(event){
     if(event.defaultPrevented||event.isComposing||event.target.closest('input,textarea,select,.custom-select,[contenteditable]'))return false;
     const key=event.key.toLowerCase(),mod=event.ctrlKey||event.metaKey;
@@ -557,7 +575,7 @@ export function createDocumentEditor(ctx,bridge){
           });
         }
       }
-      else if(key==='z')void strokeQueue.flush().then(saved=>saved&&project.travel(event.shiftKey?'redo':'undo')).catch(ctx.error);
+      else if(key==='z')travelHistory(event.shiftKey?'redo':'undo');
       else if(key==='a')selection.selectAll(selectionShape);
       else if(key==='d'&&event.shiftKey)handled=selection.reselect();
       else if(key==='d')selection.clear();
@@ -614,7 +632,7 @@ export function createDocumentEditor(ctx,bridge){
   }
   host.addEventListener('keydown',handleKey,{signal});
   host.addEventListener('keyup',event=>{if(event.key===' '){space=false;painter.refreshUVCursor();}},{signal});window.addEventListener('blur',()=>{space=false;nav=null;gradientTool.cancel();shapeTool.cancel();painter.cancel({preserveMode:true});selection.cancel();},{signal});
-  const resize=new ResizeObserver(layout);resize.observe(stage);
+  const resize=new ResizeObserver(layout);resize.observe(stage);resize.observe(parameters);
   function sync(reselect=false){
     if(disposed||!shown||!project.document)return;const doc=project.document;
     brushBinding.sync(reselect);
@@ -637,7 +655,7 @@ export function createDocumentEditor(ctx,bridge){
     picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||writing();gradientButton.disabled=!image||writing()||c?.target==='mask'&&!!layer?.locked;bucketButton.disabled=cloneButton.disabled=!canPaintPixels();shapeButton.disabled=!canCreateShape();bucketTool.sync();cloneTool.layout();shapeTool.sync();empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();syncStrokePreview();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
     canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
     getSelection(origin){return shown&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&
       !selection.isDragging()&&!selection.isTransforming()?selection.clip():null;},

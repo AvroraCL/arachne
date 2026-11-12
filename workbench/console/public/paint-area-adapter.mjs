@@ -165,6 +165,12 @@ export function setupPaintAreas(hooks){
   function materialViewport(){const editors=areas.editors();return preferredViewport&&editors.includes(preferredViewport)?preferredViewport:editors.find(e=>e.kind==='viewport');}
   function targetViewport(){const target=materialViewport();return target?.isReady()?target:areas.editors().find(e=>e.kind==='viewport'&&e.isReady());}
   return {project,areas,
+    travelHistory(direction){
+      const editor=project.editorDomain==='image'&&imageEditor();
+      if(editor?.travelHistory)return editor.travelHistory(direction);
+      void project.travel(direction).catch(error=>hooks.error(error.message));
+      return true;
+    },
     materialSelectionChanged(){project.selectedLayer(hooks.layerId(),undefined,{force:true});},
     brushSettings(){const editors=areas.editors(),target=preferredCanvas&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(editor=>['viewport','image','uv'].includes(editor.kind));return target?.getBrushSettings?.()||null;},
     maskTarget({openViewport=true}={}){if(openViewport&&!materialViewport())areas.openEditor('viewport');materialViewport()?.setPaintMode('mask');project.setEditorDomain('material');},
