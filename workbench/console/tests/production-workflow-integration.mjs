@@ -111,7 +111,16 @@ try{
   await mapDialog.getByRole('button',{name:'颜色',exact:true}).filter({hasText:'2 张候选'}).click();
   const large=mapDialog.getByRole('option',{name:'青灰合金_BaseColor.png · 4096 × 4096',exact:true});
   await until(()=>large.locator('img').evaluate(img=>img.naturalWidth===128),'4K 颜色候选缩略图');
-  await large.click();
+  await page.keyboard.press('Escape');
+  assert.equal(await mapDialog.isVisible(),true);
+  assert.equal(await large.count(),0);
+  const colorChoice=mapDialog.getByRole('button',{name:'颜色',exact:true}).filter({hasText:'2 张候选'});
+  await colorChoice.press('ArrowDown');
+  const optionId=await large.getAttribute('id');
+  const list=mapDialog.getByRole('listbox',{name:'颜色',exact:true});
+  for(let i=0;i<5&&(await list.getAttribute('aria-activedescendant'))!==optionId;i++)await page.keyboard.press('ArrowDown');
+  assert.equal(await list.getAttribute('aria-activedescendant'),optionId);
+  await page.keyboard.press('Enter');
   await mapDialog.getByRole('button',{name:'创建材质',exact:true}).click();
   await shelf.getByRole('button',{name:'青灰合金',exact:true}).dblclick();
   const mapped=await until(async()=>{const doc=await readDoc();return doc.paint.layers.some(layer=>layer.materialId)&&doc;},'贴图材质应用至模型');
@@ -138,10 +147,36 @@ try{
   await page.getByRole('button',{name:'表面噪声合成',exact:true}).click();
   await page.getByRole('option',{name:'相减',exact:true}).click();
   await until(async()=>wearState(await readDoc()).maskEffects[1].blend==='subtract','噪声相减');
-  await page.getByRole('button',{name:'手绘修正',exact:true}).click();
-  await page.getByRole('option',{name:'在效果后',exact:true}).click();
+  const commandUrl=origin+paint+'/commands';
+  const beforeMaskWrite=await readDoc();
+  let finishMaskWrite;
+  const maskWriteGate=new Promise(resolve=>{finishMaskWrite=resolve;});
+  const holdMaskWrite=async intercepted=>{
+    await maskWriteGate;
+    await intercepted.continue();
+  };
+  await page.route(commandUrl,holdMaskWrite);
+  try{
+    await page.getByRole('button',{name:'手绘修正',exact:true}).click();
+    await page.getByRole('option',{name:'在效果后',exact:true}).click();
+    await until(async()=>await page.locator('#project-save-state').textContent()==='正在保存…','蒙版写入等待');
+    assert.equal(await page.evaluate(()=>dispatchEvent(new Event('beforeunload',{cancelable:true}))),false);
+    assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'saving');
+    await page.evaluate(()=>document.querySelector('#open-projects').click());
+    assert.equal(await page.locator('dialog.workbench-picker[open]').count(),0);
+    assert.equal((await readDoc()).revision,beforeMaskWrite.revision);
+    const leave=page.waitForEvent('dialog',{timeout:5000});
+    await page.evaluate(()=>{setTimeout(()=>location.reload(),0);});
+    const prompt=await leave;await prompt.dismiss();
+    assert.equal(prompt.type(),'beforeunload');
+  }finally{
+    finishMaskWrite();
+    await page.unrouteAll({behavior:'wait'});
+  }
   await until(async()=>wearState(await readDoc()).maskStrokeOrder==='after','手绘覆盖效果');
   await until(async()=>await page.locator('#project-save-state').textContent()==='已保存','材质参数已保存');
+  assert.equal(await page.evaluate(()=>dispatchEvent(new Event('beforeunload',{cancelable:true}))),true);
+  console.log('PASS an in-flight material command blocks navigation, project switching and desktop quit until saved');
   const beforeStrokes=await readDoc(),strokeAttempts=[];
   await page.evaluate(()=>{
     const setItem=Storage.prototype.setItem;

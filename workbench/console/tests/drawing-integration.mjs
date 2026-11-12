@@ -857,7 +857,7 @@ try{
   releaseWrite();
   const retryStroke=editor.getByRole('button',{name:'重试保存笔触',exact:true});
   await retryStroke.waitFor();
-  assert.equal(await page.locator('#project-save-state').textContent(),'保存失败');
+  assert.equal(await page.locator('#project-save-state').textContent(),'笔触未保存');
   assert.equal(await page.evaluate(async()=> (await window.arachneNativeHost.prepareToCloseAsync()).state),'unsaved');
   assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('openProject')),true);
   assert.equal(await page.locator('#open-project-dialog[open]').count(),0);

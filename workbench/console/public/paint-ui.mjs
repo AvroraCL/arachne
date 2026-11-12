@@ -221,15 +221,24 @@ $('model-mode').onchange=()=>modeler.setMode($('model-mode').value);
 for(const control of modelElements)control.onclick=()=>modeler.setElement(control.dataset.modelElement);
 for(const control of modelTools)control.onclick=()=>modeler.setTool(control.dataset.modelTool);
 const route=()=>'/api/projects/'+doc.id+'/paint';
+const hasPendingProjectWrites=()=>[...projectWrites.values()].some(count=>count>0);
+const hasActiveEdits=()=>!!(document.querySelector('.workspace-range-field[data-dragging],.workspace-range-field[data-editing],[data-document-dirty]')||
+  propertyDraft||layerRename||modelMarquee||modeler.isDragging()||surfaceTools.isEditing()||uvSelection.isDragging()||uvSelection.isTransforming()||
+  maskEditor.isOpen()||paintTextEditor.isOpen||areaSystem?.isEditing());
 function renderProjectState(){
   const name=$('project-name'),status=$('project-save-state');
   name.textContent=doc?.name||'未打开工程';name.title=doc?.name||'';
   const strokes=areaSystem?.strokeSaveStatus()||[];
-  const pending=projectWrites.get(doc?.id)||strokes.some(item=>item.saving)||desktopWorkspace?.saving;
-  const failure=strokes.find(item=>item.failure)?.failure.message||projectSaveErrors.get(doc?.id)||desktopWorkspace?.failure?.message||areaSystem?.areas.layoutSaveError?.message;
-  const state=!doc?'empty':pending?'saving':failure?'error':'saved',label={empty:'',saving:'正在保存…',error:'保存失败',saved:'已保存'}[state];
+  const pending=projectWrites.get(doc?.id)||strokes.some(item=>item.saving);
+  const strokeError=strokes.find(item=>item.failure)?.failure.message;
+  const layoutError=desktopWorkspace?.failure?.message||areaSystem?.areas.layoutSaveError?.message;
+  const projectError=projectSaveErrors.get(doc?.id),failure=strokeError||projectError||layoutError;
+  const failureLabel=strokeError?'笔触未保存':projectError?'工程保存失败':'布局未保存';
+  const state=!doc?'empty':pending?'saving':failure?'error':desktopWorkspace?.saving?'saving':'saved';
+  const label={empty:'',saving:pending?'正在保存…':'正在保存布局…',
+    error:failureLabel,saved:'已保存'}[state];
   status.dataset.state=state;if(status.textContent!==label)status.textContent=label;
-  status.title=failure||'工程修改自动保存在本机';
+  status.title=failure?failureLabel+'：'+failure:'工程修改自动保存在本机';
   $('open-project-details').disabled=$('open-project-copy').disabled=!doc;
   $('project-detail-name').textContent=doc?.name||'未打开工程';
   $('project-detail-id').textContent=doc?.id||'—';
@@ -1647,6 +1656,7 @@ async function projects(){
   return (await api('/api/projects')).filter(project=>project.workflowType==='pbr_paint');
 }
 async function load(id,{initialLayer}={}){
+  if(hasPendingProjectWrites())throw Error('正在保存工程，请稍后再切换');
   if(areaSystem?.strokeSaveStatus().some(item=>item.pending))throw Error('请先保存或放弃待保存的笔触，再切换工程');
   if(maskEditor.isOpen())throw Error('请先保存或取消当前蒙版');
   if(!/^[\w-]{1,100}$/.test(id))throw Object.assign(Error('工程 ID 无效'),{status:400});
@@ -1684,8 +1694,10 @@ function canOpenProjectDialog(){
   if(areaSystem?.strokeSaveStatus().some(item=>item.pending)){
     $('status').textContent='请先保存或放弃待保存的笔触';return false;
   }
-  return !busy&&!modeler.isDragging()&&!modelMarquee&&!surfaceTools.isEditing()&&
-    !uvSelection.isDragging()&&!uvSelection.isTransforming()&&!areaSystem?.isEditing()&&!document.querySelector('dialog[open]');
+  if(hasPendingProjectWrites()){
+    $('status').textContent='正在保存工程，请稍后再切换';return false;
+  }
+  return !busy&&!hasActiveEdits()&&!document.querySelector('dialog[open]');
 }
 const projectDialog=$('project-dialog');
 $('open-project-details').onclick=()=>{
@@ -3015,20 +3027,19 @@ Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({w
   if(desktopWorkspace)return desktopWorkspace.flush();
 },status:()=>{
   const strokes=areaSystem?.strokeSaveStatus()||[];
-  if(busy||[...projectWrites.values()].some(count=>count>0))return {state:'saving'};
+  if(busy||hasPendingProjectWrites())return {state:'saving'};
   if(strokes.some(item=>item.saving))return {state:'saving'};
   if(strokes.some(item=>item.failure)||desktopWorkspace?.failure||areaSystem?.areas.layoutSaveError)return {state:'unsaved'};
   if([...projectSaveErrors.values()].some(Boolean))return {state:'error'};
-  if(document.querySelector('dialog[open]:not(#task-monitor),.workspace-range-field[data-dragging],.workspace-range-field[data-editing],[data-document-dirty]')||
-     propertyDraft||layerRename||modelMarquee||modeler.isDragging()||surfaceTools.isEditing()||uvSelection.isDragging()||uvSelection.isTransforming()||
-     areaSystem?.areas.editors().some(editor=>editor.isEditing?.()))return {state:'editing'};
+  if(document.querySelector('dialog[open]:not(#task-monitor)')||hasActiveEdits())return {state:'editing'};
   if(jobs.some(job=>['queued','running'].includes(job.status)))return {state:'jobs'};
   return {state:'ready'};
 }})});
 $('save-workbench').onclick=()=>window.arachneNativeHost.command('save');
 window.addEventListener('beforeunload',event=>{
   const layoutSaved=areaSystem?.areas.save();
-  if(layoutSaved!==false&&!areaSystem?.strokeSaveStatus().some(item=>item.pending)&&!desktopWorkspace?.failure&&!desktopWorkspace?.saving)return;
+  if(layoutSaved!==false&&!busy&&!hasPendingProjectWrites()&&!hasActiveEdits()&&!areaSystem?.strokeSaveStatus().some(item=>item.pending)&&
+    !desktopWorkspace?.failure&&!desktopWorkspace?.saving)return;
   event.preventDefault();event.returnValue='';
 });
 

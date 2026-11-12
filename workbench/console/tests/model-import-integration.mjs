@@ -195,6 +195,8 @@ async function verifyProceduralMasks(cubeId){
     const current=await api(wearRoute);
     return current.paint.layers[0].maskStrokeOrder==='after'&&current;
   });
+  await wearPage.getByRole('button',{name:'手绘修正',exact:true}).filter({hasText:'在效果后'}).waitFor();
+  await until(async()=>await wearPage.locator('#project-save-state').textContent()==='已保存');
   const maskFrame=async current=>{
     const response=await fetch(origin+wearPaint+'/live',{method:'POST',
       headers:{Origin:origin,'Content-Type':'application/json'},
@@ -205,6 +207,8 @@ async function verifyProceduralMasks(cubeId){
   const initialMask=await maskFrame(correctionOrder),maskSample=(192*256+6)*15;
   assert.ok(initialMask[maskSample]>0);
   const view3d=wearPage.locator('.editor-viewport[data-state=ready]').first();
+  await wearPage.getByRole('button',{name:'交互模式',exact:true}).filter({hasText:'蒙版绘制'}).waitFor();
+  await wearPage.getByRole('button',{name:'绘制蒙版 · 金属磨边',exact:true}).and(wearPage.locator('[aria-pressed=true]')).waitFor();
   const wearBounds=await view3d.boundingBox();
   const screenPoint=(x,y)=>[wearBounds.x+x*wearBounds.width,wearBounds.y+y*wearBounds.height];
   await wearPage.mouse.move(...screenPoint(.48,.5));await wearPage.mouse.down();
@@ -212,7 +216,10 @@ async function verifyProceduralMasks(cubeId){
   const handPainted=await until(async()=>{
     const current=await api(wearRoute);
     return current.paint.layers[0].maskStrokes?.length===1&&current;
-  },12000);
+  },12000).catch(async error=>{
+    await wearPage.screenshot({path:path.join(data,'material-mask-stroke-failure.png')});
+    throw error;
+  });
   assert.ok(handPainted.paint.layers[0].maskStrokes[0].stamps.length>0);
   const corrected=await api(wearPaint+'/commands',{revision:handPainted.revision,operations:[
     {op:'stroke',id:wearLayer.id,target:'mask',stroke:{uv:true,rect:[.02,.71,.031,.79],value:0,opacity:1}}

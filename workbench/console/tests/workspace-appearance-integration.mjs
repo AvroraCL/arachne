@@ -91,7 +91,10 @@ try{
   await toolOptions.locator('.document-current-tool').filter({hasText:'自由变换'}).waitFor();
   assert.deepEqual(await measureToolbar(),brushGeometry);
   await page.screenshot({path:path.join(evidence,'drawing-narrow-transform.png')});
+  assert.equal(await page.evaluate(()=>dispatchEvent(new Event('beforeunload',{cancelable:true}))),false);
+  assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'editing');
   await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(()=>dispatchEvent(new Event('beforeunload',{cancelable:true}))),true);
   assert.equal((await api(route)).revision,project.revision+1);
   await shelf('笔刷').click();
   await scope.click();
@@ -148,7 +151,7 @@ try{
   const pendingRatio=await ratio();assert.notEqual(pendingRatio,customRatio);
   const recovery=page.locator('.area-layout-save');
   await recovery.getByRole('alert').filter({hasText:'浏览器存储空间不足'}).waitFor();
-  assert.equal(await page.locator('#project-save-state').textContent(),'保存失败');
+  assert.equal(await page.locator('#project-save-state').textContent(),'布局未保存');
   assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'unsaved');
   assert.equal(await ratio(),pendingRatio);
   await page.evaluate(()=>window.restoreLayoutStorage());

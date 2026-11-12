@@ -25,7 +25,7 @@ button.primary:hover:not(:disabled){background:#4b4b4b;border-color:#5a5a5a}
 .project-tools{gap:12px;margin-left:auto;flex:0 1 auto;flex-wrap:nowrap;padding-inline-start:16px}
 #project-name{max-width:min(280px,24vw);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--paint-font-ui,13px);font-weight:600;color:#ccc}
 #project-save-state{flex:none;min-width:42px;color:#858585;font-size:var(--paint-font-caption,12px);white-space:nowrap}
-#project-save-state[data-state=error]{color:#eee;text-decoration:underline dotted;text-underline-offset:3px}
+#project-save-state[data-state=error]{color:#e1bb80;text-decoration:underline dotted;text-underline-offset:3px}
 #project-save-state[data-state=saving]{color:#ccc}
 :is(#project-dialog,#glb-migration-dialog){width:min(520px,calc(100vw - 28px));max-height:calc(100dvh - 28px);padding:0;color:#ddd;background:#242424;border:1px solid #484848;border-radius:8px}
 :is(#project-dialog,#glb-migration-dialog)::backdrop{background:#0008}
