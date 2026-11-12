@@ -105,7 +105,7 @@ export function workspacePreset(name){
   const side=pair('y',leaf(name==='modeling'?'scene':name==='drawing'?'imageLayers':'layers','side-top'),properties,.43);
   const main=name==='drawing'?leaf('image','main'):leaf('viewport','main',{mode:name==='modeling'?'object':'view'});
   const content=name==='modeling'?pair('y',main,leaf('shader','nodes'),.80):
-    pair('y',main,leaf('library','assets'),name==='drawing'?.85:.79);
+    pair('y',main,leaf('library','assets',{kind:name==='drawing'?'assets':'materials'}),name==='drawing'?.85:.79);
   return pair('x',content,side,.79);
 }
 

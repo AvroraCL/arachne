@@ -47,6 +47,10 @@ try{
   await page.evaluate(()=>document.fonts.ready);
   const viewport=page.locator('.editor-viewport[data-state=ready]').first();
   const canvas=page.getByLabel('图像文档画布',{exact:true}).first();
+  const library=page.locator('.editor-area[data-editor=library]').first();
+  const shelf=name=>library.getByRole('tab',{name,exact:true});
+  const scope=library.getByRole('button',{name:'资源库范围',exact:true});
+  const resourceSearch=library.getByRole('searchbox',{name:'搜索资源',exact:true});
   async function show(workspace){
     await page.locator('[data-area-mode='+workspace+']').click();
     if(workspace==='drawing'){
@@ -59,6 +63,8 @@ try{
     await page.setViewportSize(dimensions);
     for(const workspace of ['modeling','material','drawing']){
       await show(workspace);
+      if(workspace==='drawing')assert.equal(await shelf('图片').getAttribute('aria-selected'),'true');
+      if(workspace==='material')assert.equal(await shelf('材质').getAttribute('aria-selected'),'true');
       const widths=await page.evaluate(()=>({document:document.documentElement.scrollWidth,window:innerWidth}));
       assert.ok(widths.document<=widths.window);
       await page.screenshot({path:path.join(evidence,workspace+'-'+size+'.png')});
@@ -87,6 +93,24 @@ try{
   await page.screenshot({path:path.join(evidence,'drawing-narrow-transform.png')});
   await page.keyboard.press('Escape');
   assert.equal((await api(route)).revision,project.revision+1);
+  await shelf('笔刷').click();
+  await scope.click();
+  await page.getByRole('option',{name:'个人',exact:true}).click();
+  await resourceSearch.fill('喷涂');
+  await show('material');
+  assert.equal(await shelf('材质').getAttribute('aria-selected'),'true');
+  assert.equal(await resourceSearch.inputValue(),'');
+  assert.match(await scope.innerText(),/当前项目/);
+  await show('drawing');
+  assert.equal(await shelf('笔刷').getAttribute('aria-selected'),'true');
+  assert.equal(await resourceSearch.inputValue(),'喷涂');
+  assert.match(await scope.innerText(),/个人/);
+  await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync());
+  await page.reload();
+  await shelf('笔刷').waitFor();
+  assert.equal(await shelf('笔刷').getAttribute('aria-selected'),'true');
+  assert.equal(await resourceSearch.inputValue(),'喷涂');
+  assert.match(await scope.innerText(),/个人/);
 
   await page.setViewportSize({width:1200,height:800});
   await show('modeling');
@@ -136,6 +160,7 @@ try{
   assert.deepEqual(errors,[]);
   console.log('PASS all three workspaces at 1440 and 900 px; viewport reallocates its buffer at 125%, 200% and 100% without a CSS resize');
   console.log('PASS narrow drawing toolbar keeps its height across eight tools and transform, with reachable brush settings');
+  console.log('PASS drawing defaults to image assets, and drawing and material remember their separate library tabs after reload');
   console.log('PASS custom layout reload, browser quota error, quit protection and retry without losing the layout');
 }catch(error){console.error(logs);throw error;}
 finally{

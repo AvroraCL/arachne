@@ -8,15 +8,16 @@ import {matchesSearch,searchTerms} from './search-picker.mjs';
 
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,selectedImage=()=>null,importResource,onImportedImage,onAppliedSmart}){
-  let kind='materials',picked=null,project=null,brushKey='',gridKey='',nodesOpen=true,selectionGeneration=0;
-  let scope='project';try{scope=localStorage.getItem('arachne-library-scope')==='personal'?'personal':'project';}catch{}
+  let kind='materials',picked=null,project=null,brushKey='',gridKey='',nodesOpen=true,selectionGeneration=0,mountedView=null;
+  let initialScope='project';try{initialScope=localStorage.getItem('arachne-library-scope')==='personal'?'personal':'project';}catch{}
+  let scope=initialScope;
   const bar=el('div','library-bar'),tabs=el('div','library-tabs'),tools=el('div','library-actions'),grid=el('div','library-grid');
   enableResourceGridKeys(grid);
   tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','资源库');
   const search=el('input');search.type='search';search.placeholder='搜索资源';search.setAttribute('aria-label','搜索资源');
   function button(text,action,label){const b=el('button','',text);b.type='button';b.onclick=action;if(label)b.setAttribute('aria-label',label);return b;}
   for(const [id,name] of [['materials','材质'],['brushes','笔刷'],['images','图片'],['smartMaterials','智能材质']]){
-    const b=button(name,()=>{if(!canEdit())return;selectionGeneration++;kind=id;picked=null;gridKey='';remember();sync();changed();});b.dataset.library=id;b.setAttribute('role','tab');tabs.append(b);
+    const b=button(name,()=>{if(!canEdit())return;selectionGeneration++;kind=id;picked=null;gridKey='';remember();sync();changed();rememberView();});b.dataset.library=id;b.setAttribute('role','tab');tabs.append(b);
   }
   const create=button('＋ 新建',()=>mutate('create'));
   const mapDialog=createMaterialMapDialog({
@@ -43,7 +44,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   tools.append(create,fromMaps,capture,duplicate,rename,remove,apply,nodes,output,savePersonal);bar.append(tabs,scopeSelect,search,tools);host.append(bar,grid);enhanceSelectMenu(scopeSelect);scopeSelect.closest('.custom-select').classList.add('library-scope');
   scopeSelect.onchange=()=>{if(!canEdit()){setSelectValue(scopeSelect,scope);return;}selectionGeneration++;scope=scopeSelect.value;
     if(scope==='project'&&kind==='smartMaterials'){kind='materials';picked=null;remember();}
-    try{localStorage.setItem('arachne-library-scope',scope);}catch{}sync();changed();};
+    try{localStorage.setItem('arachne-library-scope',scope);}catch{}sync();changed();rememberView();};
   const personal=createPersonalShelf({
     host,read,canEdit,
     importResource:async(item,revision)=>{
@@ -63,6 +64,22 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   actions.append(button('取消',()=>dialog.close()));const confirm=el('button','','保存');confirm.type='submit';actions.append(confirm);form.append(heading,name,actions);dialog.append(form);document.body.append(dialog);
   form.onsubmit=async e=>{e.preventDefault();const t=target();if(!t||!canEdit())return;dialog.close();await write([{op:'library',library:t.library,id:t.id,action:'update',patch:{name:name.value.trim()}}]);};
   function remember(){try{localStorage.setItem('arachne-library:'+project,JSON.stringify({kind,picked,nodesOpen}));}catch{}}
+  const rememberView=()=>mountedView?.();
+  const getView=()=>({kind:kind==='images'?'assets':kind,scope,query:search.value.slice(0,120)});
+  function mountView(state,fallback,onChange){
+    mountedView=onChange;
+    const type=state.kind||fallback;
+    const next=type==='assets'?'images':type;
+    const nextScope=['project','personal'].includes(state.scope)?state.scope:initialScope;
+    if(scope!==nextScope||kind!==next)picked=null;
+    scope=nextScope;
+    if(['materials','brushes','images','smartMaterials'].includes(next))kind=next;
+    if(scope==='project'&&kind==='smartMaterials'){kind='materials';picked=null;}
+    setSelectValue(scopeSelect,scope);
+    search.value=typeof state.query==='string'?state.query.slice(0,120):'';
+    selectionGeneration++;gridKey='';sync();changed();
+    return ()=>{if(mountedView===onChange){mountedView=null;selectionGeneration++;}};
+  }
   const current=()=>{const entries=read()?.paint[kind];return entries&&Object.hasOwn(entries,picked)?entries[picked]:null;};
   function target(){const item=current();return scope==='project'&&item?{library:kind,id:picked,...item}:null;}
   async function mutate(action){
@@ -78,11 +95,20 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
     if(!Object.hasOwn(read()?.paint[library]||{},id))return;
     selectionGeneration++;
     scope='project';setSelectValue(scopeSelect,scope);
-    kind=library;picked=id;nodesOpen=true;if(library==='brushes')brushKey='';remember();sync();changed({force:true});
+    kind=library;picked=id;nodesOpen=true;if(library==='brushes')brushKey='';remember();sync();changed({force:true});rememberView();
   }
   function sync(){
     const doc=read();if(!doc)return;
-    if(project!==doc.id){selectionGeneration++;project=doc.id;picked=null;brushKey='';gridKey='';try{const saved=JSON.parse(localStorage.getItem('arachne-library:'+project));if(saved&&['materials','brushes','images',...(scope==='personal'?['smartMaterials']:[])].includes(saved.kind)){kind=saved.kind;picked=saved.picked;nodesOpen=saved.nodesOpen!==false;}}catch{}}
+    if(project!==doc.id){
+      selectionGeneration++;project=doc.id;picked=null;brushKey='';gridKey='';
+      try{
+        const saved=JSON.parse(localStorage.getItem('arachne-library:'+project));
+        if(saved&&['materials','brushes','images',...(scope==='personal'?['smartMaterials']:[])].includes(saved.kind)){
+          if(!mountedView)kind=saved.kind;
+          if(kind===saved.kind){picked=saved.picked;nodesOpen=saved.nodesOpen!==false;}
+        }
+      }catch{}
+    }
     if(picked&&!current()){picked=null;brushKey='';}
     const item=current();
     if(scope==='project'&&kind==='brushes'&&item&&canEdit()){const key=JSON.stringify([project,picked,item.graph]);if(key!==brushKey){applyBrush(evaluateBrushGraph(item.graph));brushKey=key;}}
@@ -123,14 +149,14 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
     }
     for(const tile of grid.querySelectorAll('.library-tile'))tile.setAttribute('aria-pressed',String(tile.dataset.resourceId===picked));
   }
-  search.oninput=sync;
-  function showImages(){selectionGeneration++;scope='project';setSelectValue(scopeSelect,scope);kind='images';picked=null;gridKey='';remember();sync();changed();}
+  search.oninput=()=>{sync();rememberView();};
+  function showImages(){selectionGeneration++;scope='project';setSelectValue(scopeSelect,scope);kind='images';picked=null;gridKey='';remember();sync();changed();rememberView();}
   function saveSmart(id){
     selectionGeneration++;scope='personal';setSelectValue(scopeSelect,scope);
     kind='smartMaterials';picked=null;search.value='';gridKey='';
     try{localStorage.setItem('arachne-library-scope',scope);}catch{}
-    remember();sync();changed();
+    remember();sync();changed();rememberView();
     return personal.save('smartMaterials',id);
   }
-  return {sync,select,target,showImages,saveSmart};
+  return {sync,select,target,showImages,saveSmart,getView,mountView};
 }

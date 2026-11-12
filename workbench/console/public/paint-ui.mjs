@@ -2986,6 +2986,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
+  mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,
   foreground:()=>paintColors.pair('paint').foreground,setForeground:color=>changePaintColors(()=>paintColors.set('paint','foreground',color),'paint'),
   maskInk:()=>maskGray(paintColors.pair('mask').foreground),setMaskInk:value=>changePaintColors(()=>paintColors.set('mask','foreground',value?'#ffffff':'#000000'),'mask'),
   colorPair:target=>paintColors.pair(target),setColor:(target,slot,value)=>changePaintColors(()=>paintColors.set(target,slot,value),target),
