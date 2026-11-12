@@ -36,13 +36,13 @@ export function createNativeWorkbench({window,document,status,flush,imageCommand
       if(modal)return name==='paste'&&nativeEdit?'native-text':false;
       const handled=editorCommand?.(name,focused);
       if(handled!==undefined)return handled;
-      if(name==='cut')return imageCommand?.('cutSelection')===true;
-      if(name==='paste'&&nativeEdit)return imageCommand?.('pasteSystemImage')===true?true:'native-text';
+      if(name==='cut')return imageCommand?.('cutSelection',focused)===true;
+      if(name==='paste'&&nativeEdit)return imageCommand?.('pasteSystemImage',focused)===true?true:'native-text';
       return name==='copy'&&window.getSelection?.()?.toString()?fallback():false;
     }
     if(['copyMerged','pasteInPlace'].includes(name)){
       if(text||modal)return false;
-      return imageCommand?.(name)===true;
+      return imageCommand?.(name,focused)===true;
     }
     const id=commands[name];
     if(!id||document.querySelector('dialog[open]'))return false;

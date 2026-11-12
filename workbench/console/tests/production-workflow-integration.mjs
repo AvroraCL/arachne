@@ -177,6 +177,7 @@ try{
   await until(async()=>await page.locator('#project-save-state').textContent()==='已保存','材质参数已保存');
   assert.equal(await page.evaluate(()=>dispatchEvent(new Event('beforeunload',{cancelable:true}))),true);
   console.log('PASS an in-flight material command blocks navigation, project switching and desktop quit until saved');
+  const viewportBeforeError=await viewport().boundingBox();
   const beforeStrokes=await readDoc(),strokeAttempts=[];
   await page.evaluate(()=>{
     const setItem=Storage.prototype.setItem;
@@ -218,6 +219,9 @@ try{
   const recovery=page.locator('.material-stroke-recovery');
   await recovery.getByRole('alert').filter({hasText:'2 笔待保存'}).waitFor();
   await recovery.getByRole('alert').filter({hasText:'无法写入恢复草稿'}).waitFor();
+  assert.equal(await page.locator('#project-save-state').textContent(),'笔触未保存');
+  assert.equal(await page.locator('#status').textContent(),'');
+  assert.deepEqual(await viewport().boundingBox(),viewportBeforeError);
   assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'unsaved');
   assert.equal(wearState(await readDoc()).maskStrokes.length,1);
   await page.screenshot({path:path.join(evidence,'01-material-save-recovery.png')});

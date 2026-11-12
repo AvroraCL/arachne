@@ -116,6 +116,23 @@ try{
   assert.match(await scope.innerText(),/个人/);
 
   await page.setViewportSize({width:1200,height:800});
+  const libraryArea=await library.getAttribute('data-area-id');
+  const secondary=page.locator('.editor-area[data-area-id="'+libraryArea+'"]');
+  const editorPicker=secondary.getByRole('button',{name:'编辑器类型',exact:true});
+  await editorPicker.click();
+  await page.getByRole('option',{name:'材质节点编辑器',exact:true}).click();
+  await secondary.locator('.shader-editor').waitFor();
+  await canvas.focus();
+  await secondary.getByRole('button',{name:'启用节点材质',exact:true}).focus();
+  for(const action of ['copyMerged','pasteInPlace'])
+    assert.equal(await page.evaluate(action=>window.arachneNativeHost.command(action,{nativeEdit:true}),action),false);
+  await canvas.focus();
+  assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('copyMerged',{nativeEdit:true})),true);
+  await imageEditor.getByText(/已合并复制 4096 × 4096 px/).waitFor();
+  await editorPicker.click();
+  await page.getByRole('option',{name:'资源库',exact:true}).click();
+  assert.equal(await shelf('笔刷').getAttribute('aria-selected'),'true');
+
   await show('modeling');
   const cdp=await page.context().newCDPSession(page);
   const readBuffer=()=>viewport.evaluate(host=>{
@@ -164,6 +181,7 @@ try{
   console.log('PASS all three workspaces at 1440 and 900 px; viewport reallocates its buffer at 125%, 200% and 100% without a CSS resize');
   console.log('PASS narrow drawing toolbar keeps its height across eight tools and transform, with reachable brush settings');
   console.log('PASS drawing defaults to image assets, and drawing and material remember their separate library tabs after reload');
+  console.log('PASS native image clipboard commands follow the focused editor in a mixed workspace');
   console.log('PASS custom layout reload, browser quota error, quit protection and retry without losing the layout');
 }catch(error){console.error(logs);throw error;}
 finally{

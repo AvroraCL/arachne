@@ -322,7 +322,7 @@ export function createDocumentEditor(ctx,bridge){
   const strokeQueue=createImageStrokeQueue({read:()=>project.document,readLatest:bridge.readStrokeProject,
     write:(operation,origin)=>project.commands([operation],origin),
     onPreview:syncStrokePreview,onStateChange:()=>{sync();syncStrokeSave();},
-    onError:error=>{if(!disposed)ctx.error(error);},
+    onError:error=>{if(!disposed&&!strokeQueue.failure)ctx.error(error);},
     onDraftChange:journal.write
   });
   function showSampleNotice(text='',pending=false){

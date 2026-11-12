@@ -39,7 +39,7 @@ export function createMaterialStrokeSave({workspace,project,readLatest,onSettled
   }
   const queue=createImageStrokeQueue({domain:'material',read:()=>project.document,readLatest,
     write:(operation,origin)=>project.commands([operation],origin),
-    onPreview:syncPreview,onStateChange:syncState,onError,
+    onPreview:syncPreview,onStateChange:syncState,onError:error=>{if(!queue.failure)onError(error);},
     onDraftChange:journal.write
   });
   function syncProject(){

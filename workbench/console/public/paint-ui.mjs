@@ -1643,7 +1643,7 @@ async function run(action,errorOutput=null){
   try{await action();await refresh();return true;}
   catch(error){
     if(error.status===409)await refresh();
-    (errorOutput||$(!doc?'welcome-error':$('delivery-dialog').open?'delivery-error':'status')).textContent=error.message;
+    if(errorOutput!==false)(errorOutput||$(!doc?'welcome-error':$('delivery-dialog').open?'delivery-error':'status')).textContent=error.message;
     return false;
   }
   finally{
@@ -1691,12 +1691,7 @@ async function load(id,{initialLayer}={}){
   showView(view);
 }
 function canOpenProjectDialog(){
-  if(areaSystem?.strokeSaveStatus().some(item=>item.pending)){
-    $('status').textContent='请先保存或放弃待保存的笔触';return false;
-  }
-  if(hasPendingProjectWrites()){
-    $('status').textContent='正在保存工程，请稍后再切换';return false;
-  }
+  if(hasPendingProjectWrites()||areaSystem?.strokeSaveStatus().some(item=>item.pending))return false;
   return !busy&&!hasActiveEdits()&&!document.querySelector('dialog[open]');
 }
 const projectDialog=$('project-dialog');
@@ -3020,7 +3015,7 @@ async function saveWorkbench(){
   areaSystem?.areas.save();
   if(desktopWorkspace?.failure)await desktopWorkspace.retry();
 }
-Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,imageCommand:action=>areaSystem?.imageCommand(action),
+Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,imageCommand:(action,focused)=>areaSystem?.imageCommand(action,focused),
   editorCommand:(action,focused)=>areaSystem?.editorCommand(action,focused),
   save:()=>void saveWorkbench(),flush:async()=>{
   if(areaSystem?.areas.save()===false)return false;

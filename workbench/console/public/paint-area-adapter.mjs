@@ -24,13 +24,13 @@ export function setupPaintAreas(hooks){
   let materialVisible=false,materialDetail=false,visibleEditors=[],inspection=null,inspectionFrame=null,inspectionStatus=null;
   let adjustmentPreview=null;
   let materialStrokes;
-  const write=async(action)=>{
-    let value,failure;const ok=await hooks.run(async()=>{try{value=await action();}catch(error){failure=error;throw error;}});
+  const write=async(action,errorOutput)=>{
+    let value,failure;const ok=await hooks.run(async()=>{try{value=await action();}catch(error){failure=error;throw error;}},errorOutput);
     if(ok!==true)throw failure||Error('操作未完成，请结束当前编辑后重试');return value;
   };
   const project=createProjectState({
     write:(operations,origin)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/commands',{revision:origin.revision,operations,
-      ...(origin.strokeRequestId?{strokeRequestId:origin.strokeRequestId}:{})})),
+      ...(origin.strokeRequestId?{strokeRequestId:origin.strokeRequestId}:{})}),origin.strokeRequestId?false:undefined),
     beforeTravel:async()=>{
       if(materialStrokes.editing)throw Error('请先完成当前材质笔触');
       if(materialStrokes.size&&!await materialStrokes.flush())throw Error('请先保存或放弃待保存的材质笔触');
@@ -172,12 +172,18 @@ export function setupPaintAreas(hooks){
     const editors=areas.editors();
     return preferredCanvas?.kind==='image'&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(item=>item.kind==='image');
   }
+  function focusedImageEditor(focused){
+    if(project.editorDomain!=='image')return null;
+    const editor=areas.editorFor(focused)??areas.active;
+    if(editor?.kind==='image')return editor;
+    return !editor||['imageLayers','imageProperties'].includes(editor.kind)?imageEditor():null;
+  }
   for(const [control,,action] of imageMenuActions)control.onclick=()=>{
-    if(project.editorDomain==='image')imageEditor()?.[action]?.();
+    focusedImageEditor()?.[action]?.();
   };
   imageMenuActions[0][0].closest('details').addEventListener('toggle',event=>{
     if(!event.currentTarget.open)return;
-    const editor=project.editorDomain==='image'?imageEditor():null;
+    const editor=focusedImageEditor();
     for(const [control,enabled,action] of imageMenuActions){
       control.hidden=!editor?.[action];
       control.disabled=!editor?.[enabled]?.();
@@ -200,9 +206,8 @@ export function setupPaintAreas(hooks){
       if(!['image','imageLayers','imageProperties'].includes(editor?.kind))return undefined;
       return imageEditor()?.editCommand?.(action);
     },
-    imageCommand(action){
-      if(project.editorDomain!=='image')return false;
-      return imageEditor()?.[action]?.()??false;
+    imageCommand(action,focused){
+      return focusedImageEditor(focused)?.[action]?.()??false;
     },
     travelHistory(direction){
       const editor=project.editorDomain==='image'&&imageEditor();
