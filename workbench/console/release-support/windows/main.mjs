@@ -61,7 +61,7 @@ async function canClose(win){
   if(sameOrigin(win.webContents.getURL())){
     try{
       for(let n=0;n<20;n++){
-        status=(await win.webContents.executeJavaScript('window.arachneNativeHost?.prepareToClose()?.state'))||'ready';
+        status=(await win.webContents.executeJavaScript('(async()=>{const host=window.arachneNativeHost;return (host?.prepareToCloseAsync?await host.prepareToCloseAsync():host?.prepareToClose())?.state;})()'))||'ready';
         if(status!=='saving')break;
         await delay(100);
       }

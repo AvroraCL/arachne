@@ -1,3 +1,4 @@
+import {readDesktopWorkspace,writeDesktopWorkspace} from './desktop-workspaces.mjs';
 import {readDesktopSettings,writeDesktopSettings} from './desktop-settings.mjs';
 import {importGlbProject} from './model-registration.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
@@ -200,6 +201,11 @@ const server=http.createServer(async(req,res)=>{
         }
         send(res,200,writeDesktopSettings(await body(req,32768)));return;
       }
+      send(res,405,{error:'方法不支持'});return;
+    }
+    if(parts[1]==='desktop-layout'&&parts.length===2){
+      if(req.method==='GET'){send(res,200,readDesktopWorkspace());return;}
+      if(req.method==='POST'){send(res,200,writeDesktopWorkspace(await body(req,12*1024*1024)));return;}
       send(res,405,{error:'方法不支持'});return;
     }
     if(parts[1]==='personal-library'){

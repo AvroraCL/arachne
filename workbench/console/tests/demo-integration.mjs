@@ -13,6 +13,7 @@ import {demoProjectId} from '../demo-source.mjs';
 import {defaultLibraryMaterial} from '../public/paint-library.mjs';
 import {nativeModelSteps} from '../model-binding.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
+import {findNode} from '../public/workspace-state.mjs';
 import {captureRenderPreset,updateDeliveryOptions} from '../public/paint-delivery-options.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
@@ -798,9 +799,6 @@ try{
   await waitFor(async()=>(await api(project(libraryTarget.id))).paint.layers.some(layer=>layer.materialId===mapId),'应用贴图材质');
   console.log('PASS PBR map grouping, typed node links and applying the generated material');
 
-
-
-
   await page.addInitScript(()=>{
     window.arachneDesktop=Object.freeze({notifyProject(){}});
   });
@@ -817,6 +815,20 @@ try{
   assert.equal(saved.revision,1);
   assert.equal(saved.settings.preferences.density,'comfortable');
   assert.equal((await api('/api/desktop-settings',{revision:0,settings:saved.settings},409)).currentRevision,1);
+  await page.locator('[data-area-mode=modeling]').click();
+  const desktopView=page.locator('.editor-area[data-area-id=main][data-editor=viewport]');
+  await desktopView.locator('.editor-viewport[data-state=ready]').waitFor();
+  await desktopView.getByRole('button',{name:'变换枢轴',exact:true}).click();
+  await page.getByRole('option',{name:'活动元素',exact:true}).click();
+  await page.locator('[data-area-mode=drawing]').click();
+  assert.deepEqual(await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync()),{state:'ready'});
+  const profileLayout=await api('/api/desktop-layout');
+  assert.equal(profileLayout.layout.activeWorkspace,'drawing');
+  assert.equal(findNode(profileLayout.layout.modeling,'main').states.viewport.pivot,'active');
+  assert.equal(findNode(profileLayout.layout.modeling,'side-top').editor,'console');
+  const staleLayout=await api('/api/desktop-layout',{revision:profileLayout.revision-1,layout:profileLayout.layout},409);
+  assert.equal(staleLayout.currentRevision,profileLayout.revision);
+
   const originalOrigin=base;
   await stop();
   await start(noBlender);
@@ -824,6 +836,12 @@ try{
   await page.goto(base+'/?project='+libraryTarget.id);
   await page.locator('html[data-ui-density=comfortable]').waitFor();
   assert.deepEqual(await api('/api/desktop-settings'),saved);
-  console.log('PASS native preferences survive a new local service port and reject stale writes');
+  await page.locator('[data-area-mode=drawing][aria-pressed=true]').waitFor();
+  await page.locator('[data-area-mode=modeling]').click();
+  await page.locator('[data-area-id=side-top][data-editor=console]').waitFor();
+  await desktopView.locator('.editor-viewport[data-transform-pivot=active]').waitFor();
+  assert.deepEqual(await api('/api/desktop-settings'),saved);
+
+  console.log('PASS native preferences, active workspace, editor layout and pivot survive a new local service port');
 }catch(error){console.error(log);throw error;}
 finally{if(browser)await browser.close();await stop();console.log('Demo verification data:',data);}

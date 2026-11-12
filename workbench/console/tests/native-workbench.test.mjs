@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createNativeWorkbench,notifyNativeProject} from '../public/native-workbench.mjs';
 
-function fixture(){
+function fixture(flush){
   const calls=[],controls=new Map();let modal=false,focused=null,state='ready';
   for(const id of ['new','open-projects','open-paint-import','open-glb-migration','open-command-picker','open-workspace-layouts','open-delivery','undo','redo'])
     controls.set(id,{disabled:false,hidden:false,click(){calls.push(id);}});
   const document={get activeElement(){return focused;},querySelector:()=>modal?{}:null,getElementById:id=>controls.get(id),execCommand:name=>(calls.push('text-'+name),true)};
-  const bridge=createNativeWorkbench({window:{},document,status:()=>({state})});
+  const bridge=createNativeWorkbench({window:{},document,status:()=>({state}),flush});
   return {bridge,calls,controls,focus:value=>focused=value,modal:value=>modal=value,state:value=>state=value};
 }
 
@@ -45,4 +45,18 @@ test('project notification is optional and sends only the project identity',()=>
   const messages=[];notifyNativeProject({},null);notifyNativeProject({}, {id:'p'});
   notifyNativeProject({webkit:{messageHandlers:{arachne:{postMessage:value=>messages.push(value)}}}},{id:'p-1',name:'测试'});
   assert.deepEqual(messages,[{type:'project',id:'p-1',name:'测试'}]);
+});
+
+test('native shutdown waits for the last workspace save and preserves editing guards',async()=>{
+  let finish,started=false;
+  const f=fixture(()=>{started=true;return new Promise(resolve=>{finish=resolve;});});
+  f.state('editing');
+  assert.deepEqual(await f.bridge.prepareToCloseAsync(),{state:'editing'});
+  assert.equal(started,false);
+  f.state('ready');
+  let returned=false;
+  const result=f.bridge.prepareToCloseAsync().then(value=>{returned=true;return value;});
+  assert.equal(started,true);assert.equal(returned,false);
+  finish();
+  assert.deepEqual(await result,{state:'ready'});
 });

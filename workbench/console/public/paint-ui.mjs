@@ -1,3 +1,4 @@
+import {connectDesktopWorkspace} from './paint-desktop-workspace.mjs';
 import {connectDesktopSettings} from './paint-desktop-settings.mjs';
 import {setupProjectFiles} from './paint-project-files.mjs';
 import {setupTaskMonitor} from './paint-task-monitor.mjs';
@@ -53,7 +54,7 @@ import {createMaskThumbnails} from './paint-mask-thumbnails.mjs';
 import {startAssetDrag,currentAssetDrag,endAssetDrag,hasAssetDrag,readAssetDrag} from './paint-asset-drag.mjs';
 
 const $=id=>document.getElementById(id);
-const desktopSettings=await connectDesktopSettings(window,localStorage);
+const [desktopSettings,desktopWorkspace]=await Promise.all([connectDesktopSettings(window,localStorage),connectDesktopWorkspace(window)]);
 let preferences=desktopSettings?.initial?.preferences||loadPreferences(localStorage);
 applyAppearance(preferences);
 const names={...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),x:'横向中心',y:'纵向中心',scale:'缩放',rotation:'旋转角度'};
@@ -2722,7 +2723,7 @@ decorateWorkspaceButtons(document,{
 document.querySelector('.canvas-document-icon').innerHTML=workspaceIcons.image;
 document.querySelectorAll('select').forEach(enhanceSelectMenu);
 
-areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferences.startupArea==='last',run,api,pngData,importAsset,importProjectPngs,busy:()=>busy,
+areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferences.startupArea==='last',desktopWorkspace,run,api,pngData,importAsset,importProjectPngs,busy:()=>busy,
   renderSettings:renderSettingsBridge,renderResults:renderResultsBridge,
   materialInspection:()=>{const mask=doc&&inspectedMask();return mask?{kind:'mask',id:mask.id,projectId:doc.id}:doc&&isolatedLayerId?{kind:'layer',id:isolatedLayerId,projectId:doc.id}:null;},
   clearMaterialInspection,clearLayerIsolation,
@@ -2751,7 +2752,9 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
 });
 // The native host asks before quitting; no project command or direct disk
 // access is exposed to it. Active edits and pending writes must finish first.
-Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,status:()=>{
+Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,flush:async()=>{
+  if(desktopWorkspace){areaSystem?.areas.save();await desktopWorkspace.flush();}
+},status:()=>{
   if(busy||[...projectWrites.values()].some(count=>count>0))return {state:'saving'};
   if([...projectSaveErrors.values()].some(Boolean))return {state:'error'};
   if(document.querySelector('dialog[open],.workspace-range-field[data-dragging],.workspace-range-field[data-editing],[data-document-dirty]')||

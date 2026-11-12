@@ -107,10 +107,17 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
     func prepareToQuit(_ completion: @escaping (String) -> Void) {
         if !downloads.isEmpty { completion("downloads"); return }
         guard sameOrigin(webView.url) else { completion("unavailable"); return }
-        webView.evaluateJavaScript("window.arachneNativeHost?.prepareToClose() ?? null") { value, error in
-            guard error == nil, let result = value as? [String: Any], let state = result["state"] as? String,
-                  ["ready", "saving", "editing", "error", "jobs"].contains(state) else { completion("unavailable"); return }
-            completion(state)
+        Task { @MainActor in
+            do {
+                let value = try await webView.callAsyncJavaScript(
+                    "const host=window.arachneNativeHost; return host?.prepareToCloseAsync ? await host.prepareToCloseAsync() : host?.prepareToClose() ?? null",
+                    arguments: [:], in: nil, contentWorld: .page)
+                guard let status = value as? [String: Any], let state = status["state"] as? String,
+                      ["ready", "saving", "editing", "error", "jobs"].contains(state) else {
+                    completion("unavailable"); return
+                }
+                completion(state)
+            } catch { completion("unavailable") }
         }
     }
 

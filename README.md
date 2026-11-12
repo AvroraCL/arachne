@@ -18,7 +18,7 @@
 
 ## Windows x64 桌面版
 
-安装版从开始菜单启动。便携版解压完整 ZIP 后双击 `Arachne.exe`。应用在独立窗口打开，内置 Electron、Python 和出图用 Chromium。工程和设置保存在 `%LOCALAPPDATA%\Arachne\Workbench`。Mac 和 Windows 桌面版的设置面板选项与最近打开的工程保存在各自的数据目录，服务更换本机端口后仍可恢复。
+安装版从开始菜单启动。便携版解压完整 ZIP 后双击 `Arachne.exe`。应用在独立窗口打开，内置 Electron、Python 和出图用 Chromium。工程和设置保存在 `%LOCALAPPDATA%\Arachne\Workbench`。Mac 和 Windows 桌面版的设置、工作区布局和最近打开的工程保存在各自的数据目录，服务更换本机端口后仍可恢复。
 
 构建时先安装工作台依赖并安装 Playwright Chromium，再运行 `npm run package:win`。构建器会下载并验证固定版本的 Windows 运行时，生成便携 ZIP 和 SHA-256 校验文件。从其他系统交叉构建时，用 `ARACHNE_PACKAGE_WIN_BROWSER` 指向 Windows x64 Chromium Headless Shell 目录。安装 NSIS 3.13 后，可用 `npm run package:win:installer` 生成安装程序。
 

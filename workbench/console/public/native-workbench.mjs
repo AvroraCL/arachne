@@ -4,7 +4,7 @@ const commands={newProject:'new',openProject:'open-projects',saveProjectCopy:'op
   importArchive:'open-paint-import',migrateModel:'open-glb-migration',searchCommands:'open-command-picker',workspaceLayouts:'open-workspace-layouts',createBackup:'create-paint-backup',downloadBackup:'download-paint-backup',
   export:'open-delivery',history:'open-history',renderTasks:'open-task-monitor',renderSettings:'open-render-settings',settings:'open-settings'};
 
-export function createNativeWorkbench({window,document,status}){
+export function createNativeWorkbench({window,document,status,flush}){
   function command(name){
     const focused=document.activeElement;
     if(name==='save'){
@@ -34,7 +34,13 @@ export function createNativeWorkbench({window,document,status}){
     }
     return status();
   }
-  return Object.freeze({command,status,prepareToClose});
+  async function prepareToCloseAsync(){
+    const before=prepareToClose();
+    if(!['ready','jobs'].includes(before.state))return before;
+    await flush?.();
+    return status();
+  }
+  return Object.freeze({command,status,prepareToClose,prepareToCloseAsync});
 }
 
 export function notifyNativeProject(window,project){

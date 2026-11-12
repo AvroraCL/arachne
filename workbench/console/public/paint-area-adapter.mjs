@@ -115,7 +115,7 @@ export function setupPaintAreas(hooks){
     }
   };
   registerAreaEditors(registry,bridge);
-  const areas=createAreaWorkspace({host:workspace,registry,project,initial:hooks.initial,restoreActive:hooks.restoreActive!==false,
+  const areas=createAreaWorkspace({host:workspace,registry,project,initial:hooks.initial,restoreActive:hooks.restoreActive!==false,desktopWorkspace:hooks.desktopWorkspace,
     canChange:()=>!hooks.busy()&&!document.querySelector('dialog[open]')&&!hooks.imageEditing(),
     onVisibleEditors:editors=>{visibleEditors=editors;updateMaterialDemand();},
     onActivate:instance=>{if(instance?.domain)project.setEditorDomain(instance.domain);if(instance?.kind==='viewport'){preferredViewport=instance;project.setEditorDomain('material');}if(['viewport','image','uv'].includes(instance?.kind))preferredCanvas=instance;syncWorkspaceButtons();hooks.cameraChanged?.();},onWorkspace:()=>{project.setEditorDomain(areas.name==='drawing'?'image':'material');syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name);hooks.remember();}

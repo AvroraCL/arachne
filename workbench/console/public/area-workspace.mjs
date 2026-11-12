@@ -35,20 +35,25 @@ function enableHeaderScrolling(tools){
   }
   for(const type of ['pointerup','pointercancel','lostpointercapture'])tools.addEventListener(type,end);
 }
-export function createAreaWorkspace({host,registry,project,initial='material',restoreActive=true,canChange=()=>true,onActivate=()=>{},onWorkspace=()=>{},onVisibleEditors=()=>{}}){
-  const key='arachne-area-workspaces-v1',views=new Map(),layouts={};let name=initial,active=null,gesture=null,maximized=null,timer=null,disposed=false,hoverPoint=null;
-  try{const saved=JSON.parse(localStorage.getItem(key));if(restoreActive&&['modeling','material','drawing'].includes(saved?.activeWorkspace))name=saved.activeWorkspace;for(const mode of Object.keys(workspaceNames))if(saved?.[mode])layouts[mode]=saved.layerEditorVersion===2?validateLayout(saved[mode]):migrateLayerEditors(validateLayout(saved[mode]),mode);}catch{}
+export function createAreaWorkspace({host,registry,project,initial='material',restoreActive=true,desktopWorkspace=null,canChange=()=>true,onActivate=()=>{},onWorkspace=()=>{},onVisibleEditors=()=>{}}){
+  const key='arachne-area-workspaces-v1',views=new Map(),layouts={};let name=initial,active=null,gesture=null,maximized=null,timer=null,disposed=false,hoverPoint=null,profileError='';
+  try{const saved=desktopWorkspace?.initial||JSON.parse(localStorage.getItem(key));if(restoreActive&&['modeling','material','drawing'].includes(saved?.activeWorkspace))name=saved.activeWorkspace;for(const mode of Object.keys(workspaceNames))if(saved?.[mode])layouts[mode]=saved.layerEditorVersion===2?validateLayout(saved[mode]):migrateLayerEditors(validateLayout(saved[mode]),mode);}catch{}
   for(const mode of Object.keys(workspaceNames))layouts[mode]??=workspacePreset(mode);
   const root=el('div','area-layout'),notice=el('output','area-notice');notice.setAttribute('role','status');host.append(root,notice);host.classList.add('modular-workspace');
   function capture(){for(const [id,v] of views){const area=findNode(layouts[name],id);if(area?.kind==='area')area.states[area.editor]=v.instance.getState?.()||area.states[area.editor]||{};}}
   function writeLayouts(next){
-    try{localStorage.setItem(key,JSON.stringify({...next,activeWorkspace:name,layerEditorVersion:2}));}
-    catch{throw Error('布局未保存：本机存储空间不足');}
+    const serialized=JSON.stringify({...next,activeWorkspace:name,layerEditorVersion:2});
+    desktopWorkspace?.save(serialized,message=>{
+      if(disposed)return;
+      profileError=message;notice.textContent=message;
+    });
+    try{localStorage.setItem(key,serialized);}
+    catch{if(!desktopWorkspace)throw Error('布局未保存，本机存储空间不足');}
   }
   function persist(){
     if(disposed)return;
     capture();
-    try{writeLayouts(layouts);notice.textContent='';}catch(error){showError(error);}
+    try{writeLayouts(layouts);notice.textContent=profileError;}catch(error){showError(error);}
   }
   function replaceLayouts(file){
     if(!canAdjust())throw Error('请完成当前编辑或保存，再更换工作区布局');
