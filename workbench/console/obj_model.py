@@ -19,6 +19,19 @@ def name_key(value):
     return unicodedata.normalize('NFC', value.strip().strip('"').replace('\\', '/').split('/')[-1]).casefold()
 
 
+def without_comment(line):
+    if '#' not in line:
+        return line
+    # Keep Blender's literal "mesh#part" names and quoted texture paths.
+    quoted = False
+    for i, char in enumerate(line):
+        if char == '"' and (not i or line[i - 1] != '\\'):
+            quoted = not quoted
+        elif char == '#' and not quoted and (not i or line[i - 1].isspace()):
+            return line[:i]
+    return line
+
+
 def statements(file):
     with file.open('rb') as probe:
         prefix = probe.read(256 * 1024)
@@ -30,7 +43,7 @@ def statements(file):
     with file.open(encoding=encoding) as stream:
         continued = ''
         for number, line in enumerate(stream, 1):
-            line = continued + line.split('#', 1)[0].strip()
+            line = without_comment(continued + line).strip()
             if len(line) > 65536:
                 raise ValueError(f'OBJ／MTL 第 {number} 行过长')
             if line.endswith('\\'):

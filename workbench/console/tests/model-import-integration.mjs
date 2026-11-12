@@ -1109,17 +1109,17 @@ async function verifyModelWorkflows(){
   const objFiles=path.join(data,'OBJ 测试 文件');
   await fs.mkdir(objFiles);
   const objFile=path.join(objFiles,'凹形机翼.obj'),mtlFile=path.join(objFiles,'表面 材质.mtl');
-  const objColor=path.join(objFiles,'表面 色彩.png'),objRoughness=path.join(objFiles,'粗糙度 图.png');
+  const objColor=path.join(objFiles,'表面 # 色彩.png'),objRoughness=path.join(objFiles,'粗糙度 图.png');
   await fs.writeFile(objFile,[
-    'mtllib 表面 材质.mtl','o 凹形机翼','s 1',
-    'v -1 -1 0','v 1 -1 0','v 1 1 0','v 0 0 0','v -1 1 0',
+    'mtllib 表面 材质.mtl','o 外壳#凹形机翼 # 物体注释','s 1',
+    'v -1 -1 0 # 顶点注释','v 1 -1 0','v 1 1 0','v 0 0 0','v -1 1 0',
     'vt 0 0','vt 1 0','vt 1 1','vt .5 .5','vt 0 1',
-    'usemtl 机翼表面','f -5/-5 -4/-4 -3/-3 -2/-2 -1/-1',
+    'usemtl 机翼#表面 # 材质注释','f -5/-5 -4/-4 -3/-3 -2/-2 -1/-1 # 面注释',
     'o 支架','usemtl 支架材料','v -1 -1 -1','v 1 -1 -1','v 0 0 -1',
     'f -3/1 -2/2 -1/4',''
   ].join('\n'));
   await fs.writeFile(mtlFile,[
-    'newmtl 机翼表面','Kd 1 1 1','map_Kd 表面 色彩.png','map_Pr 粗糙度 图.png',
+    'newmtl 机翼#表面 # 材质注释','Kd 1 1 1','map_Kd "表面 # 色彩.png" # 贴图注释','map_Pr 粗糙度 图.png',
     'newmtl 支架材料','Kd .2 .3 .4','Pr .65',''
   ].join('\n'));
   execFileSync(pythonExecutable(),['-X','utf8','-c',[
@@ -1139,7 +1139,7 @@ async function verifyModelWorkflows(){
   await objDialog.getByRole('button',{name:'向上轴',exact:true}).click();
   await objDialog.getByRole('option',{name:'Z 向上',exact:true}).click();
   await objDialog.getByRole('button',{name:'涂装材质',exact:true}).click();
-  await objDialog.getByRole('option',{name:'机翼表面',exact:true}).click();
+  await objDialog.getByRole('option',{name:'机翼#表面',exact:true}).click();
   await reopened.screenshot({path:path.join(data,'obj-import-options.png')});
   await objDialog.locator('#new-paint-submit').click();
   await objDialog.waitFor({state:'hidden'});
@@ -1147,12 +1147,13 @@ async function verifyModelWorkflows(){
   const objDoc=await api(objRoute),objManifest=await api(objRoute+'/viewport');
   assert.equal(objDoc.name,'凹形机翼');
   assert.equal(objDoc.source.format,'glb');
-  assert.equal(objDoc.source.material,'机翼表面');
+  assert.equal(objDoc.source.material,'机翼#表面');
   assert.equal(objDoc.source.uvSha256,objManifest.metadata.uv_before);
   assert.deepEqual(Object.keys(objDoc.paint.layers[0].maps).sort(),['alpha','color','metallic','roughness']);
   const objGlb=Buffer.from(await (await fetch(origin+objManifest.modelUrl)).arrayBuffer());
   const objJsonSize=objGlb.readUInt32LE(12);
   const objGltf=JSON.parse(objGlb.subarray(20,20+objJsonSize).toString());
+  assert.ok(objGltf.nodes.some(node=>node.name==='外壳#凹形机翼'));
   const readFloats=(accessorIndex)=>{
     const accessor=objGltf.accessors[accessorIndex],view=objGltf.bufferViews[accessor.bufferView];
     return Array.from({length:view.byteLength/4},(_,index)=>objGlb.readFloatLE(28+objJsonSize+(view.byteOffset||0)+index*4));

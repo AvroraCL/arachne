@@ -55,6 +55,15 @@ async function checkArchive(file){
 
 const modelExtension=/\.(glb|gltf|obj)$/i;
 const fileNameKey=name=>name.normalize('NFC').toLowerCase();
+function withoutObjComment(line){
+  if(!line.includes('#'))return line;
+  let quoted=false;
+  for(let i=0;i<line.length;i++){
+    if(line[i]==='"'&&line[i-1]!=='\\')quoted=!quoted;
+    else if(line[i]==='#'&&!quoted&&(i===0||/\s/.test(line[i-1])))return line.slice(0,i);
+  }
+  return line;
+}
 
 async function objMaterials(file){
   const probe=await file.slice(0,256*1024).arrayBuffer();
@@ -64,7 +73,7 @@ async function objMaterials(file){
   const materials=new Set();
   let pending='',continued='',material='默认材质';
   const read=line=>{
-    const value=continued+line.split('#',1)[0].trim();
+    const value=withoutObjComment(continued+line).trim();
     if(value.length>65536)throw Error('OBJ 中有过长的指令');
     if(value.endsWith('\\')){continued=value.slice(0,-1)+' ';return;}
     continued='';
