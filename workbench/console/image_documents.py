@@ -122,47 +122,105 @@ def apply_adjustment(result, layer, surface, linear):
         result[ids, :3] = back[:, :3] + (mixed - back[:, :3]) * opacity
 
 
+def image_tiles(pixels):
+    for start in range(0, len(pixels), 131072):
+        tile = pixels[start:start+131072]
+        active = np.flatnonzero(tile[:, 3] > 0)
+        if len(active):
+            yield active + start, tile[active]
+
+
+def pixel_tiles(ids, alpha, premult):
+    for start in range(0, len(ids), 131072):
+        span = slice(start, start+131072)
+        yield ids[span], np.column_stack((premult[span], alpha[span]))
+
+
+def composite_tile(result, ids, pixels, opacity, mode, clipped=False):
+    if not len(ids):
+        return
+    source_alpha = pixels[:, 3:]*opacity
+    back = result[ids]
+    back_alpha = back[:, 3:]
+    if clipped or mode != 'normal':
+        source = np.divide(pixels[:, :3], pixels[:, 3:], out=np.zeros_like(pixels[:, :3]), where=pixels[:, 3:]>0)
+        base = np.divide(back[:, :3], back_alpha, out=np.zeros_like(back[:, :3]), where=back_alpha>0)
+        mixed = blend_rgb(base, source, mode)
+        if clipped:
+            result[ids, :3] = back[:, :3] + (mixed*back_alpha-back[:, :3])*source_alpha
+            return
+        premult = source_alpha*((1-back_alpha)*source+back_alpha*mixed)
+    else:
+        premult = pixels[:, :3]*opacity
+    result[ids, :3] = back[:, :3]*(1-source_alpha)+premult
+    result[ids, 3:] = source_alpha+back_alpha*(1-source_alpha)
+
+
+def composite_layer(result, layer, surface, assets, linear, color, clipped=False, group_base=False):
+    if not layer['visible'] or not layer['opacity']:
+        return
+    if layer['kind']=='adjustment':
+        apply_adjustment(result, layer, surface, linear)
+        return
+    if layer['kind']=='pixel':
+        ids, paint = surface.paint([converted(s) for s in layer.get('strokes', [])], {'color':True}, color)
+        if 'color' not in paint:
+            return
+        alpha, premult = paint['color']
+        ranges = pixel_tiles(ids, alpha, premult)
+    elif layer['kind']=='gradient':
+        ranges = gradient_tiles(surface, layer['gradient'], color)
+    else:
+        ranges = image_tiles(image_pixels(layer, assets, surface.uv_shape[0], linear))
+    mask = surface.mask(layer.get('maskStrokes', [])) if layer['maskEnabled'] else None
+    for ids, pixels in ranges:
+        if clipped:
+            keep = result[ids, 3] > 0
+            ids, pixels = ids[keep], pixels[keep]
+        opacity = 1 if group_base else layer['opacity']
+        if layer['maskEnabled']:
+            opacity = opacity * mask_values(layer, mask, ids, surface)[:, None]
+        composite_tile(result, ids, pixels, opacity, 'normal' if group_base else layer['blend'], clipped)
+
+
 def composite_document(document,assets,size=4096,inspect_mask=None):
     surface=ImageSurface(size);result=np.zeros((size*size,4),dtype=np.float32)
     linear=document['colorSpace']=='linear'
     def color(text):
         c=np.array(list(bytes.fromhex(text[1:])),dtype=np.float32)/255
         return c if linear else decode(c)
-    for layer in document['layers']:
-        if inspect_mask:
-            if layer['id']==inspect_mask:
-                mask=surface.mask(layer.get('maskStrokes',[]))
-                for start in range(0,len(result),131072):
-                    ids=np.arange(start,min(start+131072,len(result)))
-                    value=mask_values(layer,mask,ids,surface)
-                    result[ids,:3]=value[:,None] if linear else decode(value[:,None]);result[ids,3]=1
+    layers = document['layers']
+    if inspect_mask:
+        for layer in layers:
+            if layer['id'] == inspect_mask:
+                mask = surface.mask(layer.get('maskStrokes', []))
+                for start in range(0, len(result), 131072):
+                    ids = np.arange(start, min(start+131072, len(result)))
+                    value = mask_values(layer, mask, ids, surface)
+                    result[ids, :3] = value[:, None] if linear else decode(value[:, None])
+                    result[ids, 3] = 1
                 break
-            continue
-        if not layer['visible'] or not layer['opacity']:continue
-        if layer['kind']=='adjustment':
-            apply_adjustment(result,layer,surface,linear)
-            continue
-        if layer['kind']=='pixel':
-            ids,paint=surface.paint([converted(s) for s in layer.get('strokes',[])],{'color':True},color)
-            if 'color' not in paint:continue
-            alpha,premult=paint['color'];pixels=np.column_stack((premult,alpha));ranges=[(ids,pixels)]
-        elif layer['kind']=='gradient':
-            ranges=gradient_tiles(surface,layer['gradient'],color)
-        else:
-            image_data=image_pixels(layer,assets,size,linear)
-            ranges=((np.arange(start,min(start+131072,len(result))),image_data[start:start+131072]) for start in range(0,len(result),131072))
-        # Mask samples are sparse and sorted, just like the reusable UV brush kernel.
-        mask=surface.mask(layer.get('maskStrokes',[])) if layer['maskEnabled'] else None
-        for ids,pixels in ranges:
-            opacity=np.full(len(ids),layer['opacity'],dtype=np.float32)
-            if layer['maskEnabled']:
-                opacity*=mask_values(layer,mask,ids,surface)
-            src_alpha=np.clip(pixels[:,3]*opacity,0,1);back=result[ids];back_alpha=back[:,3]
-            src=np.divide(pixels[:,:3],pixels[:,3:],out=np.zeros_like(pixels[:,:3]),where=pixels[:,3:]>0)
-            base=np.divide(back[:,:3],back[:,3:],out=np.zeros_like(back[:,:3]),where=back[:,3:]>0)
-            mixed=blend_rgb(base,src,layer['blend'])
-            result[ids,:3]=back[:,:3]*(1-src_alpha[:,None])+src_alpha[:,None]*((1-back_alpha[:,None])*src+back_alpha[:,None]*mixed)
-            result[ids,3]=src_alpha+back_alpha*(1-src_alpha)
+    else:
+        index = 0
+        while index < len(layers):
+            base = layers[index]
+            end = index+1
+            while end < len(layers) and layers[end].get('clipped', False):
+                end += 1
+            clips = [layer for layer in layers[index+1:end] if layer['visible'] and layer['opacity']]
+            index = end
+            if base.get('clipped', False) or not base['visible'] or not base['opacity']:
+                continue
+            if not clips or base['kind'] == 'adjustment':
+                composite_layer(result, base, surface, assets, linear, color)
+                continue
+            group = np.zeros_like(result)
+            composite_layer(group, base, surface, assets, linear, color, group_base=True)
+            for layer in clips:
+                composite_layer(group, layer, surface, assets, linear, color, clipped=True)
+            for ids, pixels in image_tiles(group):
+                composite_tile(result, ids, pixels, base['opacity'], base['blend'])
+            del group
     # Encode in tiles to keep the 4K working set bounded.
     out=np.empty((len(result),4),dtype=np.uint8)
     for start in range(0,len(result),131072):

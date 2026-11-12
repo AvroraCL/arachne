@@ -365,8 +365,63 @@ try{
   await page.mouse.move(...await point([.5,.7]));
   await editor.locator('.area-uv-cursor').waitFor({state:'visible'});
   await page.screenshot({path:path.join(data,'brush-options.png')});
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS opacity and flow, document-space spacing, Shift-click line, zoomed stroke, separate eraser and radius cursor');
+
+  const clipDoc='clipping-document',clipBase='clipping-base',clipColor='clipping-color',clipEffect='clipping-effect';
+  const clipSeed=await api(paintRoute+'/commands',{revision:erased.revision,operations:[
+    {op:'image',action:'create',documentId:clipDoc,patch:{name:'剪贴蒙版验收'}},
+    {op:'image',action:'addLayer',documentId:clipDoc,layerId:'clip-backdrop',kind:'pixel',patch:{name:'下方背景'}},
+    {op:'image',action:'stroke',documentId:clipDoc,layerId:'clip-backdrop',target:'pixels',
+      stroke:{uv:true,rect:[0,.1,.2,.8],opacity:1,color:'#c8501e',erase:false}},
+    {op:'image',action:'addLayer',documentId:clipDoc,layerId:clipBase,kind:'pixel',patch:{name:'剪贴底层',opacity:.5}},
+    {op:'image',action:'stroke',documentId:clipDoc,layerId:clipBase,target:'pixels',
+      stroke:{uv:true,rect:[.25,.2,.7,.75],opacity:.5,color:'#326496',erase:false}},
+    {op:'image',action:'addLayer',documentId:clipDoc,layerId:clipColor,kind:'pixel',patch:{name:'剪贴色层'}},
+    {op:'image',action:'stroke',documentId:clipDoc,layerId:clipColor,target:'pixels',
+      stroke:{uv:true,rect:[0,0,.5,1],opacity:1,color:'#406080',erase:false}},
+    {op:'image',action:'addLayer',documentId:clipDoc,layerId:clipEffect,kind:'adjustment',
+      patch:{name:'剪贴反相',adjustment:{type:'invert'}}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(clipDoc,{force:true});
+  const clipButton=page.getByRole('button',{name:'剪贴色层',exact:true});
+  await clipButton.click({button:'right'});
+  await page.getByRole('menuitem',{name:'创建剪贴蒙版'}).click();
+  const clipState=(current,id)=>current.paint.imageDocuments[clipDoc].layers.find(layer=>layer.id===id);
+  const clipped=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>clipSeed.revision&&clipState(current,clipColor).clipped&&current;
+  },'通过图层菜单创建剪贴蒙版');
+  const clippedEffectRow=page.locator('[data-image-layer-id="'+clipEffect+'"]');
+  await clippedEffectRow.getByRole('button',{name:'Alt / Option 单击创建剪贴蒙版',exact:true}).click({modifiers:['Alt']});
+  const clippingGroup=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>clipped.revision&&clipState(current,clipEffect).clipped&&current;
+  },'Alt 单击分界线剪贴调整图层');
+  const clipSamples=[xy(.1,.4),xy(.4,.4),xy(.6,.4),xy(.8,.4)];
+  const [,clipPixels]=rgba(await imagePng('clipping-group.png',clippingGroup.revision,clipDoc),clipSamples);
+  assert.deepEqual(clipPixels,[[200,80,30,255],[191,159,127,64],[205,155,105,64],[0,0,0,0]]);
+  await page.screenshot({path:path.join(data,'clipping-layers.png')});
+  await page.getByRole('button',{name:'隐藏 剪贴底层',exact:true}).click();
+  const hiddenClips=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>clippingGroup.revision&&!clipState(current,clipBase).visible&&current;
+  },'隐藏剪贴底层');
+  assert.deepEqual(rgba(await imagePng('clipping-hidden.png',hiddenClips.revision,clipDoc),clipSamples)[1],
+    [[200,80,30,255],[0,0,0,0],[0,0,0,0],[0,0,0,0]]);
+  await page.getByRole('button',{name:'显示 剪贴底层',exact:true}).click();
+  await clipButton.click({button:'right'});
+  await page.getByRole('menuitem',{name:'释放剪贴蒙版'}).click();
+  const released=await until(async()=>{
+    const current=await api(projectRoute);
+    return !clipState(current,clipColor).clipped&&!clipState(current,clipEffect).clipped&&current;
+  },'释放选中层和上方剪贴层');
+  await page.reload();
+  await canvas.waitFor();
+  assert.equal((await api(projectRoute)).revision,released.revision);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS clipping mask from menu and Option-click, adjustment clipping, exact alpha, hidden base, release and reopen');
 }catch(error){
   console.error(logs);
   throw error;

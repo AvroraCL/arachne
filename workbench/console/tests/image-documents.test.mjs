@@ -1,11 +1,37 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand,hasImageLayerMask,imageDocumentLimit} from '../public/image-documents.mjs';
+import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand,hasImageLayerMask,imageDocumentLimit,imageClippingBase} from '../public/image-documents.mjs';
 import {imageDocumentInput} from '../paint.mjs';
 import {newImageAdjustment,checkImageAdjustment,imageBlendModes} from '../public/image-adjustments.mjs';
 const defaults=()=>({layers:[],assets:{}}),options={requireUnlocked:()=>{}},checks={checkStroke:s=>{assert.equal(s.uv,true);assert.ok(s.rect||s.stamps);},checkedUVTransform:t=>assert.ok(t.rect)};
 const edit=(paint,action,extra={})=>imageDocumentOperation(paint,{op:'image',documentId:'doc',action,...extra},options);
+test('clipping groups follow adjacent layers and hidden bases cannot clip against another visible layer',()=>{
+ const paint=defaults();
+ edit(paint,'create');
+ for(const layerId of ['other','base','color','detail'])edit(paint,'addLayer',{layerId,kind:'pixel'});
+ assert.throws(()=>edit(paint,'setClipping',{layerId:'other',clipped:true}),/下方的底层/);
+ for(const layerId of ['color','detail'])edit(paint,'setClipping',{layerId,clipped:true});
+ const layers=paint.imageDocuments.doc.layers;
+ assert.equal(imageClippingBase(layers,3).id,'base');
+ edit(paint,'addLayer',{layerId:'between',kind:'pixel',index:3});
+ assert.equal(layers[3].clipped,true);
+ edit(paint,'duplicateLayer',{layerId:'base',patch:{id:'copy'}});
+ assert.equal(layers.at(-1).id,'copy');
+ edit(paint,'updateLayer',{layerId:'base',patch:{visible:false}});
+ validateImageDocuments(paint,checks);
+ const doc={id:'clipping',revision:7,paint};
+ assert.deepEqual(imageDocumentInput(doc,{documentId:'doc',revision:7}).paint.imageDocuments.doc.layers.map(layer=>layer.id),['other','copy']);
+ const isolated=imageDocumentInput(doc,{documentId:'doc',revision:7,isolatedImageLayer:'color'});
+ assert.equal(isolated.paint.imageDocuments.doc.layers[0].clipped,false);
+ edit(paint,'setClipping',{layerId:'between',clipped:false});
+ assert.equal(layers[2].clipped,true);
+ assert.equal(layers[3].clipped,undefined);
+ assert.equal(layers[4].clipped,undefined);
+ edit(paint,'removeLayer',{layerId:'base'});
+ assert.equal(layers[1].clipped,undefined);
+ validateImageDocuments(paint,checks);
+});
 test('image adjustments have independent masks and validate exact parameters without altering pixel layers',()=>{
  const paint=defaults();
  edit(paint,'create');

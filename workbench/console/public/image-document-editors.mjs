@@ -3,7 +3,7 @@ import {headerControls,chromeButton,createContextActions} from './area-chrome.mj
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
 import {createLiveView} from './paint-live-view.mjs';
-import {hasImageLayerMask,imageDocumentLimit,surfaceToImageCommand} from './image-documents.mjs';
+import {hasImageLayerMask,imageDocumentLimit,imageClippingBase,surfaceToImageCommand} from './image-documents.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {layerLockOwner} from './paint-layer-tree.mjs';
@@ -33,7 +33,12 @@ async function command(project,op){return project.commands([{op:'image',document
 async function commandAt(project,origin,op){return project.commands([{op:'image',documentId:origin.documentId,...op}],origin);}
 export function imageSelectionOrigin(project){const c=project.imageContext;return {...project.origin(),documentId:c?.documentId,layerId:c?.layerId,target:c?.target};}
 function selectAddedLayer(project,origin,layerId){const c=project.imageContext;if(project.document?.id===origin.id&&c?.documentId===origin.documentId&&c?.layerId===origin.layerId&&c?.target===origin.target)selectImage(project,{layerId,target:'pixels'});}
-async function addPixel(project,origin){const layerId=crypto.randomUUID();await project.commands([{op:'image',documentId:origin.documentId,action:'addLayer',layerId,kind:'pixel'}],origin);selectAddedLayer(project,origin,layerId);}
+async function addPixel(project,origin){
+  const layerId=crypto.randomUUID(),layers=project.document.paint.imageDocuments[origin.documentId].layers;
+  const index=layers.findIndex(layer=>layer.id===origin.layerId)+1||layers.length;
+  await commandAt(project,origin,{action:'addLayer',layerId,kind:'pixel',index});
+  selectAddedLayer(project,origin,layerId);
+}
 export async function addImageAsset(project,origin,asset,name,position){const layerId=crypto.randomUUID();await project.commands([{op:'image',documentId:origin.documentId,action:'addLayer',layerId,kind:'image',patch:{asset,name,...position}}],origin);selectAddedLayer(project,origin,layerId);}
 function remember(project){try{localStorage.setItem('arachne-image-selection:'+project.document.id,JSON.stringify(project.imageContext));}catch{}}
 export function createDocumentEditor(ctx,bridge){
@@ -414,6 +419,13 @@ export function createDocumentEditor(ctx,bridge){
         const before=zoom;zoom=Math.max(.03,Math.min(40,zoom*(key==='-'?.8:1.25)));
         pan=pan.map(value=>value*zoom/before);layout();
       }else handled=false;
+    }else if(mod&&event.altKey&&(event.code==='KeyG'||key==='g')&&!event.shiftKey){
+      const image=currentDocument(project),layer=currentLayer(project),index=image?.layers.indexOf(layer);
+      handled=!!layer&&!layer.locked&&!writing()&&!selection.isTransforming()&&!!imageClippingBase(image.layers,index);
+      if(handled){
+        const origin=imageSelectionOrigin(project);
+        void run(()=>commandAt(project,origin,{action:'setClipping',layerId:layer.id,clipped:!layer.clipped}));
+      }
     }else if(event.altKey)handled=false;
     else if(key===' '){space=true;painter.refreshUVCursor();}
     else if(key==='escape'){
@@ -785,6 +797,9 @@ export function createImagePanel(type,ctx){
       {label:item.visible?'隐藏':'显示',icon:item.visible?'hidden':'eye',run:update({visible:!item.visible})},
       {label:item.locked?'解锁':'锁定',icon:item.locked?'unlock':'lock',run:update({locked:!item.locked})},
       null,up,down,null,
+      {label:item.clipped?'释放剪贴蒙版':'创建剪贴蒙版',icon:'clippingMask',shortcut:'⌥⌘G',
+        enabled:editable&&!!imageClippingBase(layers,index),
+        run:()=>commandAt(project,origin,{action:'setClipping',layerId:item.id,clipped:!item.clipped})},
       {label:hasMask?'选择蒙版':'添加蒙版',icon:'mask',enabled:editable||hasMask,run:()=>selectLayerMask(item,origin)},
       ...(hasMask?[
         {label:'单独查看蒙版',icon:'eye',shortcut:'Alt',run:()=>selectLayerMask(item,origin,{inspect:true})},
@@ -802,7 +817,9 @@ export function createImagePanel(type,ctx){
     textThumb.innerHTML=workspaceIcons.text;textThumb.setAttribute('aria-hidden','true');textThumb.title='双击编辑文字';
     const effectThumb=el('span','document-adjustment-thumbnail');
     effectThumb.innerHTML=workspaceIcons.adjustment;effectThumb.setAttribute('aria-hidden','true');
-    const view={row,preview,textThumb,effectThumb,maskPreview,name,item,nearViewport:!thumbnailObserver};
+    const clipMark=el('span','document-layer-clip-mark');
+    clipMark.innerHTML=workspaceIcons.clippingMask;
+    const view={row,preview,textThumb,effectThumb,maskPreview,name,item,clipMark,nearViewport:!thumbnailObserver};
     function setLayer(patch){
       const origin=imageSelectionOrigin(project);
       void run(()=>commandAt(project,origin,{action:'updateLayer',layerId:item.id,patch}));
@@ -826,9 +843,16 @@ export function createImagePanel(type,ctx){
       selectLayerMask(layer,imageSelectionOrigin(project),{inspect:event.altKey});
     });
     mask.className='document-layer-mask';
+    const clipEdge=button('',event=>{
+      if(!event.altKey){select.click();return;}
+      const origin=imageSelectionOrigin(project);
+      void run(()=>commandAt(project,origin,{action:'setClipping',layerId:item.id,clipped:!view.item.clipped}));
+    });
+    clipEdge.className='document-layer-clip-edge';
+    clipEdge.tabIndex=-1;
     row.dataset.imageLayerId=item.id;
-    row.append(eye,select,mask,name,lock);
-    Object.assign(view,{eye,select,lock,mask});
+    row.append(eye,select,mask,name,lock,clipMark,clipEdge);
+    Object.assign(view,{eye,select,lock,mask,clipEdge});
     bindReorder(view);
     row.oncontextmenu=event=>openLayerMenu(event,view);
     select.onkeydown=event=>{
@@ -853,11 +877,18 @@ export function createImagePanel(type,ctx){
       control.innerHTML=workspaceIcons[icon];
     }
   }
-  function updateRow(view,item,context,target,busy){
-    const {row,eye,select,preview,textThumb,effectThumb,mask,maskPreview,lock,name}=view;
+  function updateRow(view,item,context,target,busy,base,hasClips){
+    const {row,eye,select,preview,textThumb,effectThumb,mask,maskPreview,lock,name,clipMark,clipEdge}=view;
     const selected=item.id===target.layerId,hasMask=hasImageLayerMask(item);
     row.toggleAttribute('data-selected',selected);
     row.toggleAttribute('data-has-mask',hasMask);
+    row.toggleAttribute('data-clipped',!!item.clipped);
+    row.toggleAttribute('data-clipping-base',hasClips);
+    clipMark.hidden=!item.clipped;
+    if(item.clipped)clipMark.title='剪贴到底层 '+base?.name;
+    clipEdge.hidden=!base||item.locked;
+    clipEdge.disabled=busy;
+    labelButton(clipEdge,'Alt / Option 单击'+(item.clipped?'释放':'创建')+'剪贴蒙版');
     mask.hidden=!hasMask;
     select.setAttribute('aria-pressed',String(selected&&target.target!=='mask'));
     mask.setAttribute('aria-pressed',String(selected&&target.target==='mask'));
@@ -929,7 +960,8 @@ export function createImagePanel(type,ctx){
         stopPreviews(view);
       }
       view.row.hidden=!shown;
-      if(shown)updateRow(view,item,previewContext,context,busy);
+      if(shown)updateRow(view,item,previewContext,context,busy,
+        imageClippingBase(image.layers,index),!item.clipped&&!!image.layers[index+1]?.clipped);
     }
   }
   function renderAdjustment(layer,busy){

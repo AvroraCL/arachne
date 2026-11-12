@@ -580,10 +580,17 @@ export function imageDocumentInput(doc,{revision,documentId,operation,inspectMas
   if(isolatedImageLayer&&!image.layers.some(layer=>layer.id===isolatedImageLayer))throw Error('图像图层不存在');
   if(inspectMask&&!image.layers.some(layer=>layer.id===inspectMask))throw Error('图像蒙版不存在');
 
-  const selected=isolatedImageLayer?image.layers.filter(layer=>layer.id===isolatedImageLayer):image.layers;
+  const selected=isolatedImageLayer
+    ?image.layers.filter(layer=>layer.id===isolatedImageLayer).map(layer=>layer.clipped?{...layer,clipped:false}:layer)
+    :image.layers;
+  let baseVisible=false;
   const layers=inspectMask
     ?selected.filter(layer=>layer.id===inspectMask).map(({id,maskBase,maskStrokes,maskGradient})=>({id,maskBase,maskStrokes,...(maskGradient?{maskGradient}:{})}))
-    :selected.filter(layer=>layer.visible&&layer.opacity>0);
+    :selected.filter(layer=>{
+      const visible=layer.visible&&layer.opacity>0;
+      if(!layer.clipped)baseVisible=visible&&layer.kind!=='adjustment';
+      return visible&&(!layer.clipped||baseVisible);
+    });
   const assetIds=new Set(inspectMask?[]:layers.filter(layer=>layer.kind==='image').map(layer=>layer.asset));
   return {
     paint:{imageDocuments:{[documentId]:{colorSpace:image.colorSpace,layers}}},
