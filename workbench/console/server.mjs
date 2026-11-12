@@ -103,7 +103,7 @@ async function receivePaintArchive(req){
 }
 let importingModel=false;
 const maxModel=128*1024*1024;
-async function receiveModel(req,name){
+async function receiveModel(req,name,material){
   if(Number(req.headers['content-length'])>maxModel)throw Object.assign(Error('GLB 不能超过 128 MiB'),{status:413});
   if(importingModel)throw Object.assign(Error('已有模型正在导入'),{status:429});
   importingModel=true;
@@ -119,7 +119,7 @@ async function receiveModel(req,name){
         await upload.writeFile(part);
       }
     }finally{await upload.close();}
-    return await importGlbProject(input,scratch,name);
+    return await importGlbProject(input,scratch,name,material);
   }finally{
     importingModel=false;
     if(scratch)await fs.promises.rm(scratch,{recursive:true,force:true});
@@ -145,7 +145,11 @@ const server=http.createServer(async(req,res)=>{
       if(req.headers['content-type']!=='model/gltf-binary'){send(res,415,{error:'请选择 GLB 模型'});return;}
       const name=url.searchParams.get('name')?.trim()||'导入模型 · PBR 涂装';
       if(name.length>100)throw Error('工程名称不能超过 100 字');
-      send(res,201,await receiveModel(req,name));return;
+      const chosen=url.searchParams.get('material');
+      const material=chosen===null?undefined:chosen==='default'?'default':Number(chosen);
+      if(chosen!==null&&material!=='default'&&(!/^(0|[1-9]\d*)$/.test(chosen)||!Number.isSafeInteger(material)))
+        throw Error('GLB 材质编号无效');
+      send(res,201,await receiveModel(req,name,material));return;
     }
     if(req.method==='POST'&&url.pathname==='/api/projects/paint-import'){
       if(req.headers['content-type']!=='application/zip'){send(res,415,{error:'请选择涂装交付 ZIP'});return;}

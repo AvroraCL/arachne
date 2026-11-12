@@ -1,12 +1,48 @@
+import {syncSelectMenu} from './paint-select.mjs';
+
 const defaultProjectName='示例模型 · PBR 涂装';
 const MiB=1024*1024;
+
+function paintableMaterials(model){
+  const entries=new Map(),visited=new Set();
+  const scene=model?.scenes?.[model.scene??0];
+  const pending=Array.isArray(scene?.nodes)?[...scene.nodes].reverse():[];
+  while(pending.length){
+    const index=pending.pop(),node=model.nodes?.[index];
+    if(!Number.isInteger(index)||!node||visited.has(index))continue;
+    visited.add(index);
+    if(Array.isArray(node.children))for(let i=node.children.length-1;i>=0;i--)pending.push(node.children[i]);
+    const primitives=model.meshes?.[node.mesh]?.primitives;
+    if(!Array.isArray(primitives))continue;
+    for(const primitive of primitives){
+      const uv=primitive?.attributes?.TEXCOORD_0;
+      if((primitive?.mode??4)!==4||!Number.isInteger(uv)||model.accessors?.[uv]?.type!=='VEC2')continue;
+      const index=primitive.material;
+      if(index===undefined){entries.set('default','默认材质');continue;}
+      const material=model.materials?.[index];
+      if(!Number.isInteger(index)||!material||entries.has(String(index)))continue;
+      const name=typeof material.name==='string'?material.name.trim().slice(0,100):'';
+      entries.set(String(index),name||'材质 '+(index+1));
+    }
+  }
+  const counts=new Map();
+  for(const name of entries.values())counts.set(name,(counts.get(name)||0)+1);
+  return [...entries].map(([value,name])=>[value,counts.get(name)>1&&value!=='default'?name+' · '+(Number(value)+1):name]);
+}
 
 async function checkGlb(file){
   if(file.size>128*MiB)throw Error('GLB 不能超过 128 MiB');
   if(file.size<20)throw Error('请选择有效的 GLB 2.0 模型');
-  const header=new DataView(await file.slice(0,12).arrayBuffer());
-  if(header.getUint32(0,true)!==0x46546c67||header.getUint32(4,true)!==2||header.getUint32(8,true)!==file.size)
+  const header=new DataView(await file.slice(0,20).arrayBuffer()),jsonEnd=20+header.getUint32(12,true);
+  if(header.getUint32(0,true)!==0x46546c67||header.getUint32(4,true)!==2||header.getUint32(8,true)!==file.size||
+     header.getUint32(16,true)!==0x4e4f534a||jsonEnd>file.size)
     throw Error('请选择有效的 GLB 2.0 模型');
+  let model;
+  try{model=JSON.parse(await file.slice(20,jsonEnd).text());}
+  catch{throw Error('GLB 场景描述无效');}
+  const entries=paintableMaterials(model);
+  if(!entries.length)throw Error('模型中没有使用 TEXCOORD_0 的三角网格');
+  return entries;
 }
 
 async function checkArchive(file){
@@ -71,11 +107,11 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
     const [file]=files;
     validating=true;invalid=false;error.textContent='';sync();
     try{
-      await check(file);
+      const info=await check(file);
       if(token!==request||!dialog.open)return;
-      selected=file;onFile?.(file);
+      selected=file;onFile?.(file,info);
     }catch(failure){
-      if(token===request&&dialog.open){invalid=true;error.textContent=failure.message;}
+      if(token===request&&dialog.open){selected=null;onFile?.(null);invalid=true;error.textContent=failure.message;}
     }finally{
       if(token===request&&dialog.open){validating=false;sync();}
     }
@@ -107,7 +143,8 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
 
 export function setupProjectFiles({canOpen,create,restore}){
   const byId=id=>document.getElementById(id);
-  const name=byId('new-paint-name');
+  const name=byId('new-paint-name'),material=byId('new-paint-material');
+  const materialRow=material.closest('label');
   let suggested=defaultProjectName;
   const newDialog=fileDialog({
     dialog:byId('new-paint-dialog'),input:byId('new-paint-model'),drop:byId('new-paint-model-drop'),
@@ -115,7 +152,10 @@ export function setupProjectFiles({canOpen,create,restore}){
     choose:byId('choose-new-paint-model'),clear:byId('clear-new-paint-model'),
     close:byId('new-paint-close'),submit:byId('new-paint-submit'),error:byId('new-paint-error'),
     check:checkGlb,defaultLabel:'示例模型',defaultHint:'拖入 GLB，或选择文件',optional:true,
-    onFile(file){
+    onFile(file,entries=[]){
+      materialRow.hidden=!file;
+      material.replaceChildren(new Option('自动选择','auto'),...entries.map(([id,title])=>new Option(title,id)));
+      syncSelectMenu(material);
       const next=file?.name.replace(/\.glb$/i,'').trim().slice(0,100)||defaultProjectName;
       if(!name.value.trim()||name.value===suggested)name.value=next;
       suggested=next;
@@ -123,9 +163,10 @@ export function setupProjectFiles({canOpen,create,restore}){
     async commit(model,error){
       const value=name.value.trim();
       if(!value){error.textContent='请输入工程名称';name.focus();return false;}
-      name.disabled=true;
-      try{return await create(value,model,error);}
-      finally{name.disabled=false;}
+      const chosen=model&&material.value!=='auto'?material.value:null;
+      name.disabled=material.disabled=true;syncSelectMenu(material);
+      try{return await create(value,model,error,chosen);}
+      finally{name.disabled=material.disabled=false;syncSelectMenu(material);}
     }
   });
   const importDialog=fileDialog({

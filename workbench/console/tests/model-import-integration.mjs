@@ -23,7 +23,7 @@ const digest=value=>createHash('sha256').update(value).digest('hex');
 if(process.platform!=='win32')
   await fs.writeFile(probe,'#!/bin/sh\ntouch "$(dirname "$0")/blender-invoked"\nexit 42\n',{mode:0o700});
 
-function sampleModel(){
+function sampleModel(coverUv=true){
   const parts=[
     new Float32Array([-1,0,-1,-1,0,1,1,0,1,1,0,-1]),
     new Float32Array([0,0,0,1,1,1,1,0]),
@@ -36,7 +36,7 @@ function sampleModel(){
     nodes:[{name:'涂装面',mesh:0},{name:'遮挡面',mesh:1,translation:[.25,.3,0],scale:[.34,1,.42]},
       {name:'缩放组',scale:[1.2,1,.85],children:[1]}],
     meshes:[{primitives:[{attributes:{POSITION:0,TEXCOORD_0:1},indices:2,material:0}]},
-      {primitives:[{attributes:{POSITION:0},indices:2,material:1}]}],
+      {primitives:[{attributes:{POSITION:0,...(coverUv?{TEXCOORD_0:1}:{})},indices:2,material:1}]}],
     materials:[{name:'表面材料',doubleSided:true,pbrMetallicRoughness:{baseColorFactor:[.03,.2,.36,1],metallicFactor:.1,roughnessFactor:.6}},
       {name:'遮挡材料',doubleSided:true,pbrMetallicRoughness:{baseColorFactor:[.6,.22,.05,1],metallicFactor:0,roughnessFactor:.7}}],
     buffers:[{byteLength:binary.length}],
@@ -90,6 +90,13 @@ async function api(route,body){
 try{
   origin=await start(data);
   assert.deepEqual(await api('/api/projects'),[]);
+  const noUv=await fetch(origin+'/api/projects/model-import?material=1',{
+    method:'POST',headers:{'Content-Type':'model/gltf-binary',Origin:origin},body:sampleModel(false).bytes
+  });
+  assert.equal(noUv.status,400);
+  assert.deepEqual(await noUv.json(),{error:'所选材质没有有效 TEXCOORD_0 或 UV 超出 0–1'});
+  assert.deepEqual(await api('/api/projects'),[]);
+
   await assert.rejects(fs.stat(path.join(data,'model-geometry')),{code:'ENOENT'});
   browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   const page=await browser.newPage({viewport:{width:1400,height:900}});
@@ -121,12 +128,15 @@ try{
   await newDialog.getByText('uncached-model.glb',{exact:true}).waitFor();
   assert.equal(await modelName.inputValue(),'uncached-model');
   assert.deepEqual(await api('/api/projects'),[]);
+  await newDialog.getByRole('button',{name:'涂装材质',exact:true}).click();
+  await newDialog.getByRole('option',{name:'表面材料',exact:true}).waitFor();
+  await newDialog.getByRole('option',{name:'遮挡材料',exact:true}).click();
   await newDialog.locator('#new-paint-submit').click();
   const id=await until(async()=>new URL(page.url()).searchParams.get('project'));
   const route='/api/projects/'+id,paint=route+'/paint';
   const registered=await api(route),manifest=await api(route+'/viewport');
   assert.equal(registered.source.format,'glb');
-  assert.equal(registered.source.material,'表面材料');
+  assert.equal(registered.source.material,'遮挡材料');
   assert.equal(manifest.metadata.input_sha256,digest(model.bytes));
   assert.equal(manifest.metadata.uv_before,registered.source.uvSha256);
   const glb=Buffer.from(await (await fetch(origin+manifest.modelUrl)).arrayBuffer());
@@ -230,7 +240,9 @@ try{
     ' model=Model(z.extract("model.glb",sys.argv[3]))',
     ' assert model.uv_digest()==mat["uvSha256"]',
     ' assert model.primitives[0]["positions"][0,1]==0.25',
-    ' assert model.primitives[0]["material"]["pbrMetallicRoughness"]["baseColorTexture"]',
+    ' assert "baseColorTexture" not in model.primitives[0]["material"]["pbrMetallicRoughness"]',
+    ' assert model.primitives[0]["material"]["pbrMetallicRoughness"]["baseColorFactor"]==[.03,.2,.36,1]',
+    ' assert model.primitives[1]["material"]["pbrMetallicRoughness"]["baseColorTexture"]',
     ' with Image.open(io.BytesIO(z.read("render.png"))) as frame:',
     '  assert frame.size==(384,288)',
     '  frame.load()'

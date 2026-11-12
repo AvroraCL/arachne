@@ -77,7 +77,17 @@ def register(config):
     eligible = list(dict.fromkeys(labels[valid].tolist()))
     if not eligible:
         raise ValueError('请选择至少有一个材质使用有效 TEXCOORD_0 且 UV 位于 0–1 内的 GLB')
-    material = eligible[0]
+    chosen = config.get('material')
+    if chosen is None:
+        material = eligible[0]
+    else:
+        material_index = model.default_material_index if chosen == 'default' else chosen
+        materials = model.scene['materials']
+        if type(material_index) is not int or not 0 <= material_index < len(materials):
+            raise ValueError('所选 GLB 材质不存在')
+        material = materials[material_index]['name']
+        if material not in eligible:
+            raise ValueError('所选材质没有有效 TEXCOORD_0 或 UV 超出 0–1')
     props = next(p['material'] for p in model.primitives if p['label']==material).get('pbrMetallicRoughness',{})
     factor = np.clip(np.asarray(props.get('baseColorFactor',[1,1,1,1]),dtype=float),0,1)
     rgb = np.where(factor[:3]<=.0031308,factor[:3]*12.92,1.055*factor[:3]**(1/2.4)-.055)

@@ -96,11 +96,12 @@ class Model:
         }
         if unsupported:
             raise ValueError('请导出未使用 Draco、Meshopt 或 KTX2 压缩的 GLB')
+        self.default_material_index = None
         if registration:
             names(scene['nodes'],'物体')
             names(scene.setdefault('materials',[]),'材质')
             if not scene['materials'] or any('material' not in p for mesh in scene['meshes'] for p in mesh['primitives']):
-                fallback = len(scene['materials'])
+                fallback = self.default_material_index = len(scene['materials'])
                 scene['materials'].append({})
                 names(scene['materials'],'材质')
                 for mesh in scene['meshes']:

@@ -17,21 +17,23 @@ const preservedSurfaceFiles=[
 ];
 export const glbRegistrationFiles=(legacySurface=false)=>legacySurface?[...coreRegistrationFiles,...preservedSurfaceFiles]:coreRegistrationFiles;
 
-export async function registerGlb(input,scratch,python=pythonExecutable()){
+export async function registerGlb(input,scratch,{python=pythonExecutable(),material}={}){
   const staging=path.join(scratch,'registration');
   const config=path.join(scratch,'input.json');
   await fs.mkdir(staging);
-  atomic(config,{input,out:staging,ownerPid:process.pid});
+  atomic(config,{input,out:staging,material,ownerPid:process.pid});
   try{
     await execute(python,['-X','utf8',path.join(ROOT,'model_surface.py'),'register',config],
       {cwd:ROOT,windowsHide:true,timeout:180000});
   }catch(error){
-    throw Error(error.stderr?.trim().slice(-1200)||'GLB 登记失败，请检查文件格式和原 UV');
+    const reason=error.stderr?.trim();
+    if(reason&&!/[\r\n]/.test(reason))throw Error(reason.slice(0,400));
+    throw Error('GLB 登记失败，请检查文件格式和原 UV');
   }
   return staging;
 }
-export async function importGlbProject(input,scratch,name){
-  const staging=await registerGlb(input,scratch);
+export async function importGlbProject(input,scratch,name,material){
+  const staging=await registerGlb(input,scratch,{material});
   return installGlbRegistration(staging,doc=>forkProject(doc.id,doc,name));
 }
 export async function describeGlbRegistration(folder,id,files=folder){

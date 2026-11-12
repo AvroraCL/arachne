@@ -20,7 +20,7 @@ export async function nativeDemoTemplate(python=pythonExecutable()){
     try{
       const input=path.join(scratch,'demo.glb');
       await execute(python,[path.join(import.meta.dirname,'generate-demo-glb.py'),input],{windowsHide:true,timeout:20000});
-      const staging=await registerGlb(input,scratch,python);
+      const staging=await registerGlb(input,scratch,{python});
       const document=await describeGlbRegistration(demo,nativeDemoProjectId,staging);
       atomic(path.join(staging,'project.json'),{...document,source:portableSource(document.source),
         name:'示例模型 · PBR 涂装',revision:0,updated:new Date().toISOString()});
