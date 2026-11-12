@@ -35,6 +35,9 @@ try {
     if ((Get-ItemProperty -LiteralPath $uninstallKey).InstallLocation -ne $app) {
         throw 'The Windows uninstall entry points to a different folder'
     }
+    if ((Get-ItemProperty -LiteralPath $uninstallKey).DisplayName -cne '阿拉克涅') {
+        throw 'The Windows uninstall entry does not preserve the Chinese product name'
+    }
     if (!(Test-Path -LiteralPath $shortcut)) { throw 'The Start menu shortcut is missing' }
     $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
     if ($target -ne $executable) { throw 'The Start menu shortcut points to a different executable' }

@@ -15,7 +15,7 @@ const pending=installer+'.'+randomUUID()+'.tmp';
 const option=process.platform==='win32'?'/':'-';
 try{
   execFileSync(process.env.ARACHNE_MAKENSIS||'makensis',[
-    option+'V2',option+'DVERSION='+APP_VERSION,option+'DPRODUCT_VERSION='+APP_VERSION.replace(/[^\d.]/g,'').replace(/\.\.+/,'.'),
+    option+'V2',option+'INPUTCHARSET','UTF8',option+'DVERSION='+APP_VERSION,option+'DPRODUCT_VERSION='+APP_VERSION.replace(/[^\d.]/g,'').replace(/\.\.+/,'.'),
     option+'DBUNDLE_FILES='+path.join(bundle,'*'),option+'DAPP_ICON='+path.join(bundle,'resources','app','arachne.ico'),
     option+'DOUTPUT='+pending,path.join(root,'release-support/windows/installer.nsi')
   ],{stdio:'inherit',windowsHide:true});
