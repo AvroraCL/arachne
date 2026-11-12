@@ -34,7 +34,7 @@ function openMenu(select,wrapper,button){
   const menu=document.createElement('div');
   menu.id='paint-select-menu-'+(++sequence);
   menu.className='custom-select-menu';
-  const {menuClass,optionIcon}=controls.get(select);
+  const {menuClass,optionIcon,optionDetail}=controls.get(select);
   if(menuClass)menu.classList.add(menuClass);
   menu.setAttribute('role','listbox');
   menu.setAttribute('aria-label',button.getAttribute('aria-label'));
@@ -70,6 +70,20 @@ function openMenu(select,wrapper,button){
     item.className='custom-select-option';item.textContent=option.label;item.title=option.label;
     item.setAttribute('aria-label',option.label);
     if(optionIcon){const icon=document.createElement('span'),label=document.createElement('span');icon.className='select-option-icon';icon.setAttribute('aria-hidden','true');icon.innerHTML=optionIcon(option)||'';label.textContent=option.label;item.replaceChildren(icon,label);}
+    const detail=optionDetail?.(option);
+    if(detail){
+      const text=document.createElement('span'),label=document.createElement('span'),description=document.createElement('small');
+      text.className='select-option-detail';label.textContent=option.label;description.textContent=detail.text||'';
+      text.append(label,description);item.replaceChildren(text);
+      item.title=item.title+(detail.text?' · '+detail.text:'');item.setAttribute('aria-label',item.title);
+      item.classList.add('select-option-with-detail');
+      if(detail.image){
+        const thumb=document.createElement('span'),image=document.createElement('img');
+        thumb.className='select-option-thumbnail';image.alt='';image.loading='lazy';image.decoding='async';
+        image.src=detail.image;image.onerror=()=>{image.hidden=true;};
+        thumb.append(image);item.prepend(thumb);
+      }
+    }
     if(option.dataset.shortcut){
       const label=document.createElement('span'),shortcut=document.createElement('kbd');label.className='menu-item-label';
       label.textContent=option.label.replace(' · '+option.dataset.shortcut,'');shortcut.textContent=option.dataset.shortcut;shortcut.setAttribute('aria-hidden','true');
@@ -168,7 +182,7 @@ export function setSelectValue(select,value){
   syncSelectMenu(select);
 }
 
-export function enhanceSelectMenu(select,{menuClass='',optionIcon=null,iconOnly=false,triggerIcon=''}={}){
+export function enhanceSelectMenu(select,{menuClass='',optionIcon=null,optionDetail=null,iconOnly=false,triggerIcon=''}={}){
   if(controls.has(select)||select.multiple||select.size>1||select.hasAttribute('data-no-custom-select'))return;
   const wrapper=document.createElement('span'),button=document.createElement('button');
   const label=select.labels[0];
@@ -185,7 +199,7 @@ export function enhanceSelectMenu(select,{menuClass='',optionIcon=null,iconOnly=
   }
   select.before(wrapper);wrapper.append(select,button);
   select.tabIndex=-1;select.setAttribute('aria-hidden','true');
-  controls.set(select,{button,wrapper,menuClass,optionIcon,iconOnly,triggerIcon});
+  controls.set(select,{button,wrapper,menuClass,optionIcon,optionDetail,iconOnly,triggerIcon});
   syncSelectMenu(select);
   select.addEventListener('change',()=>syncSelectMenu(select));
   new MutationObserver(()=>{

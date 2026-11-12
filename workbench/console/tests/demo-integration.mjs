@@ -828,8 +828,12 @@ try{
     name:'Panel_'+channel+'.png',mimeType:'image/png',buffer:Buffer.from(data,'base64')
   }));
   inputFiles.splice(2,0,{name:'invalid.png',mimeType:'image/png',buffer:Buffer.from('invalid')});
+  const beforeFailedMaps=await api(project(libraryTarget.id));
   await mapDialog.getByLabel('导入材质贴图').setInputFiles(inputFiles);
-  await mapDialog.getByRole('alert').filter({hasText:'已导入 5 / 6 张'}).waitFor();
+  await mapDialog.getByRole('alert').filter({hasText:'无法读取贴图：invalid.png'}).waitFor();
+  assert.deepEqual((await api(project(libraryTarget.id))).paint.assets,beforeFailedMaps.paint.assets);
+  await mapDialog.getByLabel('导入材质贴图').setInputFiles(inputFiles.filter(file=>file.name!=='invalid.png'));
+  await mapDialog.getByRole('status').filter({hasText:'已选择 5 张贴图'}).waitFor();
   assert.equal(await mapDialog.getByLabel('材质名称').inputValue(),'Panel');
   await mapDialog.getByRole('button',{name:'不透明度来源',exact:true}).click();
   await page.getByRole('option',{name:'Alpha 通道',exact:true}).click();

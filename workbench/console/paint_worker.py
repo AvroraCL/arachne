@@ -243,8 +243,7 @@ def at_range(ids, start, end):
     return slice(*np.searchsorted(ids,[start,end]))
 
 
-def mask_values(mask, surface_mask, ids, u, v, base=1):
-    initial = sample(mask,u,v,'mask') if mask is not None else np.full(len(ids),base,dtype=np.float32)
+def mask_strokes(initial, surface_mask, ids):
     if surface_mask is None or not len(ids):
         return initial
     indexes, opacity, value = surface_mask
@@ -255,6 +254,20 @@ def mask_values(mask, surface_mask, ids, u, v, base=1):
     selected = local[match]
     initial[selected] = initial[selected]*(1-opacity[span][match])+value[span][match]
     return initial
+
+
+def blend_mask_value(previous, value, mode):
+    if mode=='multiply':
+        return previous*value
+    if mode=='add':
+        return np.minimum(1,previous+value)
+    if mode=='subtract':
+        return np.maximum(0,previous-value)
+    if mode=='max':
+        return np.maximum(previous,value)
+    if mode=='min':
+        return np.minimum(previous,value)
+    return value
 
 
 def mask_effects(coverage, effects, generated, surface, ids):
@@ -284,8 +297,7 @@ def mask_effects(coverage, effects, generated, surface, ids):
             if effect['axis'].startswith('-'):
                 value = 1-value
             value = smooth((value-effect['center'])/effect['feather']+.5)
-        if effect.get('blend')=='multiply':
-            value *= previous
+        value = blend_mask_value(previous, value, effect.get('blend'))
         previous = previous*(1-effect['opacity'])+value*effect['opacity']
     coverage[eligible] = previous
     if generated:
@@ -294,9 +306,17 @@ def mask_effects(coverage, effects, generated, surface, ids):
 
 
 def mask_coverage(prepared, surface, ids, u, v):
-    image, strokes, base, effects, generated = prepared
-    coverage = mask_values(image, strokes, ids, u, v, base)
-    return mask_effects(coverage, effects, generated, surface, ids) if effects else coverage
+    image, strokes, base, effects, after, generated = prepared
+    coverage = sample(image,u,v,'mask') if image is not None else np.full(len(ids),base,dtype=np.float32)
+    if not after:
+        coverage = mask_strokes(coverage, strokes, ids)
+    if effects:
+        coverage = mask_effects(coverage, effects, generated, surface, ids)
+    if after and strokes is not None:
+        coverage = mask_strokes(coverage, strokes, ids)
+        if generated:
+            coverage[~surface.allowed[ids]] = 0
+    return coverage
 
 
 def finish_layer_groups(stack, keep, result, written, surface, ids, u, v):
@@ -352,12 +372,12 @@ def composite_layers(cfg, step, material_images):
 
     def prepare_mask(layer, inspection):
         if not (layer.get('maskEnabled', True) or inspection):
-            return None, None, 1, [], False
+            return None, None, 1, [], False, False
         image = art(layer['mask'], 'mask') if layer.get('mask') else None
         strokes = surface.mask(layer.get('maskStrokes', []), stroke_sample)
         effects = [e for e in layer.get('maskEffects', []) if e['enabled'] and e['opacity']]
         generated = any(e['kind'] in ('height', 'facing', 'edgeWear', 'surfaceNoise') for e in effects)
-        return image, strokes, layer.get('maskBase', 1), effects, generated
+        return image, strokes, layer.get('maskBase', 1), effects, layer.get('maskStrokeOrder')=='after', generated
 
     for layer in paint['layers']:
         parent = layer.get('parentId')
@@ -370,7 +390,7 @@ def composite_layers(cfg, step, material_images):
             folder_visibility[layer['id']] = visible and opacity > 0
             if inspection or (not inspect and visible and opacity > 0):
                 prepared = prepare_mask(layer, inspection)
-                image, strokes, base, effects, generated = prepared
+                image, strokes, base, effects, _, generated = prepared
                 has_generator |= generated
                 if inspection:
                     inspected_folder = prepared

@@ -61,10 +61,10 @@ try{
   const packedFiles=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
     'import base64,io,json',
     'from PIL import Image',
-    'specs={"蓝钢_BaseColor.webp":((28,126,212,255),"WEBP",dict(lossless=True)),"蓝钢_ORM.tga":((48,120,200,255),"TGA",dict(compression="tga_rle")),"蓝钢_Normal.png":((128,51,230,255),"PNG",{})}',
+    'specs={"蓝钢_BaseColor.webp":((28,126,212,255),"WEBP",dict(lossless=True),4096),"蓝钢_ORM.tga":((48,120,200,255),"TGA",dict(compression="tga_rle"),4096),"蓝钢_Normal.png":((128,51,230,255),"PNG",{},4096),"蓝钢_2K_BaseColor.webp":((144,47,39,255),"WEBP",dict(lossless=True),2048),"蓝钢_ORM_1K.tga":((160,40,8,255),"TGA",dict(compression="tga_rle"),1024)}',
     'files={}',
-    'for name,(pixel,kind,settings) in specs.items():',
-    ' out=io.BytesIO();Image.new("RGBA",(4096,4096),pixel).save(out,format=kind,**settings);files[name]=base64.b64encode(out.getvalue()).decode()',
+    'for name,(pixel,kind,settings,size) in specs.items():',
+    ' out=io.BytesIO();Image.new("RGBA",(size,size),pixel).save(out,format=kind,**settings);files[name]=base64.b64encode(out.getvalue()).decode()',
     'print(json.dumps(files))'
   ].join('\n')],{encoding:'utf8',maxBuffer:4*1024*1024}));
   const packedPage=await browser.newPage({viewport:{width:1100,height:700}});
@@ -77,6 +77,7 @@ try{
   await packedShelf.getByRole('tab',{name:'材质',exact:true}).click();
   await packedShelf.getByRole('button',{name:'从贴图创建材质',exact:true}).click();
   const packedDialog=packedPage.getByRole('dialog',{name:'从贴图创建材质',exact:true});
+  await packedDialog.getByRole('status').filter({hasText:'没有贴图'}).waitFor();
   const mixedFiles=Object.entries(packedFiles).map(([name,data])=>({name,mimeType:'application/octet-stream',buffer:Buffer.from(data,'base64')}));
   await packedDialog.getByLabel('导入材质贴图').setInputFiles([mixedFiles[0],
     {name:'无效贴图.tga',mimeType:'application/octet-stream',buffer:Buffer.from('unreadable')}]);
@@ -87,10 +88,25 @@ try{
   await packedDialog.getByRole('button',{name:'贴图通道布局',exact:true}).filter({hasText:'Unreal · ORM'}).waitFor();
   assert.equal((await api(packRoute)).revision,packProject.revision+1);
   assert.equal(await packedDialog.getByLabel('材质名称').inputValue(),'蓝钢');
+  const confirmMap=packedDialog.getByRole('button',{name:'创建材质',exact:true});
+  assert.equal(await confirmMap.isEnabled(),false);
+  await packedDialog.getByRole('status').filter({hasText:'2 项待选择'}).waitFor();
+  await packedDialog.getByRole('button',{name:'颜色',exact:true}).filter({hasText:'2 张候选'}).click();
+  const largeColor=packedDialog.getByRole('option',{name:'蓝钢_BaseColor.webp · 4096 × 4096',exact:true});
+  const smallColor=packedDialog.getByRole('option',{name:'蓝钢_2K_BaseColor.webp · 2048 × 2048',exact:true});
+  await smallColor.waitFor();
+  await until(()=>largeColor.locator('img').evaluate(img=>img.naturalWidth===128),'preview for the large color candidate');
+  await until(()=>smallColor.locator('img').evaluate(img=>img.naturalWidth===128),'preview for the small color candidate');
+  await packedPage.screenshot({path:path.join(data,'material-map-candidates.png')});
+  await largeColor.click();
+  assert.equal(await confirmMap.isEnabled(),false);
+  await packedDialog.getByRole('button',{name:'打包贴图',exact:true}).filter({hasText:'2 张候选'}).click();
+  await packedDialog.getByRole('option',{name:'蓝钢_ORM_1K.tga · 1024 × 1024',exact:true}).waitFor();
+  await packedDialog.getByRole('option',{name:'蓝钢_ORM.tga · 4096 × 4096',exact:true}).click();
   await packedDialog.getByRole('button',{name:'法线方向',exact:true}).click();
   await packedPage.getByRole('option',{name:'DirectX（−Y）',exact:true}).click();
   await packedPage.screenshot({path:path.join(data,'packed-material-import.png')});
-  await packedDialog.getByRole('button',{name:'创建材质',exact:true}).click();
+  await confirmMap.click();
   await packedDialog.waitFor({state:'hidden'});
   await packedShelf.getByRole('button',{name:'蓝钢',exact:true}).dblclick();
   const packedMaterial=await until(async()=>{
@@ -121,7 +137,7 @@ try{
   await packedPage.reload();
   await packedShelf.getByRole('button',{name:'蓝钢',exact:true}).waitFor();
   assert.deepEqual((await api(packRoute)).paint.materials,packedMaterial.paint.materials);
-  console.log('PASS atomic 4K WebP/TGA/PNG import, invalid image rollback, ORM channel values, DirectX normals and reopen');
+  console.log('PASS atomic 4K WebP/TGA/PNG import, candidate dimensions and previews, explicit ORM selection, DirectX normals and reopen');
 
   const libraryLayer=packedMaterial.paint.layers[0],overlayId='drawing-over-library',overlayLayer='drawing-pixels';
   const overlaySeed=await api(packPaint+'/commands',{revision:packedMaterial.revision,operations:[
@@ -198,11 +214,16 @@ try{
   const newLayer=await api(packPaint+'/commands',{revision:restoredBrush.revision,operations:[
     {op:'add',kind:'fill',patch:{name:'边缘磨损',maskEnabled:true,
       values:{color:'#e5bd70',metallic:.85,roughness:.26},channels:{color:true,metallic:true,roughness:true},
-      maskEffects:[{...newMaskEffect('edgeWear'),width:6}]}}
+      maskStrokeOrder:'after',maskEffects:[{...newMaskEffect('edgeWear'),width:6},
+        {...newMaskEffect('surfaceNoise'),blend:'subtract',opacity:.4}]}}
+  ]});
+  const originalWear=newLayer.paint.layers.at(-1);
+  const fixedWear=await api(packPaint+'/commands',{revision:newLayer.revision,operations:[
+    {op:'stroke',id:originalWear.id,target:'mask',stroke:{uv:true,rect:[.02,.71,.031,.79],value:0,opacity:1}}
   ]});
   const smartName='蓝钢与边缘磨损';
-  const grouped=await api(packPaint+'/commands',{revision:newLayer.revision,operations:[
-    {op:'group',ids:newLayer.paint.layers.map(layer=>layer.id),patch:{name:smartName}}
+  const grouped=await api(packPaint+'/commands',{revision:fixedWear.revision,operations:[
+    {op:'group',ids:fixedWear.paint.layers.map(layer=>layer.id),patch:{name:smartName}}
   ]});
   const group=grouped.paint.layers[0];
   await packedPage.reload();
@@ -254,6 +275,9 @@ try{
   assert.notEqual(appliedFill.documentMaps.color,overlayId);
   assert.deepEqual(applied.paint.materials[appliedFill.materialId].graph,grouped.paint.materials[libraryLayer.materialId].graph);
   assert.deepEqual(applied.paint.imageDocuments[appliedFill.documentMaps.color],overlayEdited.paint.imageDocuments[overlayId]);
+  assert.equal(appliedWear.maskStrokeOrder,'after');
+  assert.deepEqual(appliedWear.maskEffects,originalWear.maskEffects);
+  assert.deepEqual(appliedWear.maskStrokes,fixedWear.paint.layers.at(-1).maskStrokes);
   await packedPage.locator('[data-layer-id="'+appliedWear.id+'"] .layer-select').waitFor();
   await packedPage.locator('.editor-viewport[data-state=ready]').first().waitFor();
   const freshView=await until(()=>savedView(newProject.id),'new project framed independently');
@@ -270,9 +294,10 @@ try{
   await fs.writeFile(smartFile,Buffer.from(await (await fetch(origin+smartBake.colorUrl)).arrayBuffer()));
   const smartPixels=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
     'import json,sys','from PIL import Image',
-    'im=Image.open(sys.argv[1]);print(json.dumps([im.getpixel((int(x*4096),1024)) for x in (.024,.166)]))'
+    'im=Image.open(sys.argv[1]);print(json.dumps([im.getpixel((int(x*4096),int(y*4096))) for x,y in ((.024,.75),(.166,.25),(.024,.32))]))'
   ].join('\n'),smartFile],{encoding:'utf8'}));
-  assert.deepEqual(smartPixels,[[229,189,112],[28,126,212]]);
+  assert.deepEqual(smartPixels.slice(0,2),[[28,126,212],[28,126,212]]);
+  assert.notDeepEqual(smartPixels[2],[28,126,212]);
 
   const backup=await job(newRoute,'backup',{revision:applied.revision,requestId:'smart-material-portable'});
   const zip=await (await fetch(origin+backup.archiveUrl)).arrayBuffer();
@@ -287,7 +312,7 @@ try{
   const redo=await api(newRoute+'/paint/redo',{revision:undo.revision});
   assert.deepEqual(redo.paint,applied.paint);
   const changed=await api(newRoute+'/paint/commands',{revision:redo.revision,operations:[
-    {op:'update',id:appliedWear.id,patch:{maskEffects:[{...appliedWear.maskEffects[0],width:2}]}}
+    {op:'update',id:appliedWear.id,patch:{maskEffects:[{...appliedWear.maskEffects[0],width:2},...appliedWear.maskEffects.slice(1)]}}
   ]});
   assert.equal(changed.paint.layers.at(-1).maskEffects[0].width,2);
   assert.equal((await api(packRoute)).paint.layers.at(-1).maskEffects[0].width,6);

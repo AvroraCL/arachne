@@ -6,13 +6,14 @@ const suffixes={
   color:['base color','basecolor','albedo','diffuse','color','颜色','基础色'],
   metallic:['metallic','metalness','metal','金属度'],
   roughness:['roughness','rough','粗糙度'],
-  normal:['normal opengl','normal gl','normalgl','normal','nrm','法线'],
+  normal:['normal directx','normaldirectx','normal dx','normaldx','nrm dx','normal opengl','normalopengl','normal gl','normalgl','nrm gl','normal','nrm','法线'],
   height:['height','displacement','disp','高度'],
   emission:['emissive','emission','发光','自发光'],
   alpha:['opacity','alpha','透明度','不透明度'],
   ao:['ambient occlusion','ambientocclusion','occlusion','ao','环境遮蔽']
 };
 const separator=/[\s._-]+/g;
+const sizeSuffix=/\s(?:\d{1,2}k|512|1024|2048|4096|8192|16384|\d{3,5}x\d{3,5}|(?:8|16|32)bit)$/i;
 const packedSuffixes={unreal:['orm'],unity:['hdrp mask map','hdrp maskmap','mask map','maskmap']};
 export const packedMaterialLayouts={
   unreal:{label:'Unreal · ORM',description:'R 环境遮蔽 · G 粗糙度 · B 金属度',
@@ -22,38 +23,60 @@ export const packedMaterialLayouts={
 };
 
 export function groupMaterialMaps(assets,aliases=[]){
-  const groups=new Map(),sources=[...Object.entries(assets),...aliases.map(({id,name})=>[id,{name}])];
+  const groups=new Map(),sources=[...Object.entries(assets),...aliases.map(({id,name})=>[id,{...assets[id],name}])];
+  const stripSize=value=>{
+    let previous;
+    do{previous=value;value=value.replace(sizeSuffix,'');}while(previous!==value);
+    return value;
+  };
   function groupFor(stem,suffix){
-    const name=stem.slice(0,-suffix.length).trim()||'未命名贴图组',key=name.toLowerCase();
-    if(!groups.has(key))groups.set(key,{key,name,maps:{},names:{}});
+    const name=stripSize(stem.slice(0,-suffix.length).trim())||'未命名贴图组',key=name.toLowerCase();
+    if(!groups.has(key))groups.set(key,{key,name,maps:{},names:{},candidates:{},packed:{},packedCandidates:{}});
     return groups.get(key);
   }
+  function addCandidates(target,key,id,asset,normalFormat){
+    const list=target[key]??=[];
+    const previous=list.find(item=>item.id===id);
+    if(previous){
+      // Import aliases preserve the name the user chose, while identical
+      // bytes remain a single candidate in the same channel.
+      previous.name=asset.name;
+      if(normalFormat)previous.normalFormat=normalFormat;
+      return;
+    }
+    list.push({id,name:asset.name,width:asset.width,height:asset.height,...(normalFormat?{normalFormat}:{})});
+  }
   for(const [id,asset] of sources){
-    const stem=asset.name.normalize('NFKC').replace(/\.[^.]+$/,'').replace(separator,' ').trim()
-      .replace(/\s(?:\d+k|\d{3,4}|\d+bit)$/i,'');
+    const stem=stripSize(asset.name.normalize('NFKC').replace(/\.[^.]+$/,'').replace(separator,' ').trim());
     const lower=stem.toLowerCase();
     const format=Object.keys(packedSuffixes).find(key=>packedSuffixes[key].some(term=>lower===term||lower.endsWith(' '+term)));
     if(format){
       const suffix=packedSuffixes[format].find(term=>lower===term||lower.endsWith(' '+term));
       const group=groupFor(stem,suffix);
-      const packed=group.packed??={};
-      if(!Object.hasOwn(packed,format))packed[format]=id;
-      else if(packed[format]!==id)packed[format]=null;
+      addCandidates(group.packedCandidates,format,id,asset);
       continue;
     }
     for(const channel of paintChannels){
       const suffix=suffixes[channel].find(term=>lower===term||lower.endsWith(' '+term));
       if(!suffix)continue;
       const group=groupFor(stem,suffix);
-      // A repeated channel needs a manual choice.
-      if(!Object.hasOwn(group.maps,channel))group.maps[channel]=id;
-      else if(group.maps[channel]!==id)group.maps[channel]=null;
-      if(group.maps[channel]===id)group.names[channel]=asset.name;
+      const normalFormat=channel!=='normal'?undefined:
+        /(?:directx|dx)$/.test(suffix)?'directx':/(?:opengl|gl)$/.test(suffix)?'opengl':undefined;
+      addCandidates(group.candidates,channel,id,asset,normalFormat);
       break;
     }
   }
-  return [...groups.values()].filter(group=>Object.values(group.maps).some(Boolean)||Object.values(group.packed??{}).some(Boolean))
-    .sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
+  const byName=(a,b)=>a.name.localeCompare(b.name,'zh-CN',{numeric:true})||a.id.localeCompare(b.id);
+  for(const group of groups.values()){
+    for(const [channel,list] of Object.entries(group.candidates)){
+      list.sort(byName);group.maps[channel]=list.length===1?list[0].id:null;
+      if(list.length===1)group.names[channel]=list[0].name;
+    }
+    for(const [format,list] of Object.entries(group.packedCandidates)){
+      list.sort(byName);group.packed[format]=list.length===1?list[0].id:null;
+    }
+  }
+  return [...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-CN',{numeric:true}));
 }
 
 export function mappedLibraryMaterial(maps,assets,{alphaOutput='value',packed=null,normalFormat='opengl'}={}){

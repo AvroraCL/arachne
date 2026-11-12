@@ -195,6 +195,7 @@ export function setupPaintAreas(hooks){
     openMaterialPainting(){areas.openEditor('viewport');materialViewport()?.setPaintMode('paint');project.setEditorDomain('material');},
     async addImageAsset(asset){const origin=imageSelectionOrigin(project),item=project.document?.paint.assets?.[asset];if(!project.document?.paint.imageDocuments?.[origin.documentId])throw Error('请先新建或打开图像文档');if(!item)throw Error('图片素材不存在');await addImageAssetToDocument(project,origin,asset,item.name);},
     sync(){const doc=hooks.read();if(!doc)return;const opening=lastProject!==doc.id;if(opening){lastProject=doc.id;sharedPreview.clear();}project.publish(doc);if(opening&&(areas.active?.kind==='image'||areas.name==='drawing'))project.setEditorDomain('image');project.selectedLayer(hooks.layerId());const t=hooks.resource();project.selectedResource(t?{library:t.library,id:t.id}:null);syncPreviews();areas.sync();},
+    materialDraftContext:()=>materialVisible?previewContext(inspection):null,
     acceptExternalDraft:operation=>project.acceptExternalDraft(operation),draftPreview:operation=>activePreview().update(operation),
     busyChanged(){
       for(const editor of areas.editors()){

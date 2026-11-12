@@ -7,6 +7,7 @@ import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
 import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,imageExportInput,checkPaintPreview,validateProjectPaint} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
+import {assetPreview} from './asset-preview.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
 import {resolvePaintRenderSettings} from './cycles-options.mjs';
 import {renderSceneObjects} from './render-scene-objects.mjs';
@@ -338,6 +339,15 @@ const server=http.createServer(async(req,res)=>{
       if(req.method==='GET'&&operation==='assets'&&parts.length===6){
         const a=doc.paint.assets[parts[5]];if(!a)throw Error('涂装素材不存在');
         file(res,path.join(projectDir(id),'assets',a.file));return;
+      }
+      if(req.method==='GET'&&operation==='assets'&&parts.length===7&&parts[6]==='preview'){
+        const assetId=parts[5],a=Object.hasOwn(doc.paint.assets,assetId)?doc.paint.assets[assetId]:null;
+        if(!/^[a-f0-9]{64}$/.test(assetId)||a?.file!=='paint-'+assetId+'.png'){
+          send(res,404,{error:'涂装素材不存在'});return;
+        }
+        const preview=await assetPreview(assetId,path.join(projectDir(id),'assets',a.file));
+        res.writeHead(200,{'Content-Type':'image/png','Content-Length':preview.length,'Cache-Control':'private, max-age=86400','X-Content-Type-Options':'nosniff'});
+        res.end(preview);return;
       }
       if(req.method==='GET'&&operation==='render-session'){
         const controller=new AbortController();

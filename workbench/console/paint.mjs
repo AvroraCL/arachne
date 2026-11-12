@@ -4,7 +4,7 @@ import {imageStrokeQueueLimit,strokeReceiptLimit} from './public/image-stroke-qu
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels,channelBlendChoices} from './public/paint-channels.mjs';
 import {checkedTexturePreset,textureExportPresets} from './public/texture-export-presets.mjs';
-import {maskGeneratorFields,maskEffectBlends} from './public/paint-mask-effects.mjs';
+import {maskGeneratorFields,maskEffectBlendLabel,maskEffectLimit} from './public/paint-mask-effects.mjs';
 import {validateLibraries,libraryOperation,compileLibraryMaterial} from './public/paint-library.mjs';
 import {compileMaterialGraph} from './public/material-graph.mjs';
 import {pinSurfaceInputs,validateSurfaceBindings} from './paint-surface-bindings.mjs';
@@ -52,7 +52,7 @@ const fields=(patch,keys)=>{
   return patch;
 };
 const supportsBlend=(channel,blend)=>channelBlendChoices(channel).some(([mode])=>mode===blend);
-const folderFields=['name','visible','locked','opacity','mask','maskBase','maskEnabled','maskEffects'];
+const folderFields=['name','visible','locked','opacity','mask','maskBase','maskEnabled','maskEffects','maskStrokeOrder'];
 const layerFields=[...folderFields,'channelOpacity','channelBlend','channels','values','x','y','scale','rotation','image','blend','maps','tiling','projector','space','uvScale','materialId','documentMaps'];
 const revisionError=doc=>Object.assign(Error('工程修订已变化'),{status:409,currentRevision:doc.revision});
 const materialValues=v=>v&&legacyChannels.every(k=>Object.hasOwn(v,k))&&Object.keys(v).every(k=>channels.includes(k)&&(channelSpecs[k].type==='color'?color(v[k]):unit(v[k])));
@@ -71,24 +71,30 @@ function checkedText(value){
 }
 function textLayerName(style){return '文字 · '+style.content.trim().split('\n')[0].trim().slice(0,80);}
 function checkMaskEffects(effects){
-  if(!Array.isArray(effects)||effects.length>12)throw Error('蒙版效果栈最多包含 12 项');
+  if(!Array.isArray(effects)||effects.length>maskEffectLimit)throw Error('蒙版效果栈最多包含 '+maskEffectLimit+' 项');
+  const ids=new Set();
   for(const effect of effects){
-    const common=['kind','enabled','opacity'];
+    const common=['kind','id','enabled','opacity','blend'];
     if(!effect||typeof effect.enabled!=='boolean'||!unit(effect.opacity))throw Error('蒙版效果参数无效');
+    if(effect.id!==undefined){
+      if(typeof effect.id!=='string'||!/^[\w-]{1,100}$/.test(effect.id)||ids.has(effect.id))throw Error('蒙版效果编号无效或重复');
+      ids.add(effect.id);
+    }
+    if(effect.blend!==undefined&&!maskEffectBlendLabel(effect.blend))throw Error('蒙版效果合成方式无效');
     if(effect.kind==='invert')fields(effect,common);
     else if(effect.kind==='levels'){
       fields(effect,[...common,'black','white','gamma']);
       if(!unit(effect.black)||!unit(effect.white)||effect.white-effect.black<.0001||!ranged(effect.gamma,.1,5))
         throw Error('色阶需要有效的黑点、白点和中间调');
     }else if(['height','facing'].includes(effect.kind)){
-      fields(effect,[...common,'axis','center','feather','blend']);
+      fields(effect,[...common,'axis','center','feather']);
       if(!['x','-x','y','-y','z','-z'].includes(effect.axis)||!unit(effect.center)||
-         !ranged(effect.feather,.01,1)||!['replace','multiply'].includes(effect.blend))
+         !ranged(effect.feather,.01,1)||!effect.blend)
         throw Error('几何蒙版参数无效');
     }else if(Object.hasOwn(maskGeneratorFields,effect.kind)){
       const specs=maskGeneratorFields[effect.kind];
-      fields(effect,[...common,'blend',...specs.map(spec=>spec.key)]);
-      if(!maskEffectBlends.some(([value])=>effect.blend===value)||specs.some(spec=>{
+      fields(effect,[...common,...specs.map(spec=>spec.key)]);
+      if(!effect.blend||specs.some(spec=>{
         const value=effect[spec.key];
         return spec.choices?!spec.choices.some(([choice])=>value===choice):
           !ranged(value,spec.min,spec.max)||(spec.integer&&!Number.isInteger(value));
@@ -284,7 +290,8 @@ function validate(doc){
     }
     if(l.mask!=null&&!asset(doc,l.mask))throw Error('蒙版素材不存在');
     if(l.maskBase!==undefined&&!unit(l.maskBase)||
-       l.maskEnabled!==undefined&&typeof l.maskEnabled!=='boolean')throw Error('蒙版底色或启用状态无效');
+       l.maskEnabled!==undefined&&typeof l.maskEnabled!=='boolean'||
+       l.maskStrokeOrder!==undefined&&!['before','after'].includes(l.maskStrokeOrder))throw Error('蒙版底色、顺序或启用状态无效');
     if(l.maskEffects!==undefined)checkMaskEffects(l.maskEffects);
     for(const stroke of [...(l.strokes||[]),...(l.maskStrokes||[])])
       stampCount+=(stroke.stamps?.length??1)*(stroke.mirrorX?2:1);
@@ -595,8 +602,8 @@ function liveOperationAllowed(doc,operation){
   if(operation.op!=='update')return false;
   const item=doc.paint.layers.find(layer=>layer.id===operation.id);
   if(!item)return false;
-  if(item.kind==='group')return keys.every(key=>key==='opacity');
-  const allowed=['opacity','values'];
+  if(item.kind==='group')return keys.every(key=>key==='opacity'||key==='maskEffects');
+  const allowed=['opacity','values','maskEffects'];
   if(item.kind==='fill')allowed.push('tiling');
   if(item.kind==='decal'){
     if(item.projector)allowed.push('projector');

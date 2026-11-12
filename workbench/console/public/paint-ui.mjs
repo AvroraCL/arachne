@@ -3,7 +3,7 @@ import {compositionKey} from './text-input.mjs';
 import {connectDesktopSettings} from './paint-desktop-settings.mjs';
 import {setupProjectFiles} from './paint-project-files.mjs';
 import {textureExportPresets} from './texture-export-presets.mjs';
-import {maskEffectLabels,maskEffectBlends,maskGeneratorFields,newMaskEffect} from './paint-mask-effects.mjs';
+import {maskEffectLabels,maskEffectBlends,maskEffectBlendLabel,maskEffectLimit,maskGeneratorFields,newMaskEffect} from './paint-mask-effects.mjs';
 import {setupTaskMonitor} from './paint-task-monitor.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {setupProjectWelcome} from './paint-project-welcome.mjs';
@@ -351,7 +351,7 @@ function livePropertyField(text,type,value,makePatch,options={},selectedLayer=la
   return field(text,type,value,null,{...options,previewOperation:operation});
 }
 function field(text,type,value,change,options={}){
-  const {dragSpeed,previewOperation,...attributes}=options;
+  const {dragSpeed,previewOperation,previewMask=false,...attributes}=options;
   const label=element('label',type==='number'?'':text),input=element(type==='select'?'select':'input');
   input.setAttribute('aria-label',text);
   if(type==='select')for(const [id,name] of options.choices)input.append(new Option(name,id));
@@ -366,8 +366,8 @@ function field(text,type,value,change,options={}){
   const snapshot=previewOperation?{projectId:doc.id,revision:doc.revision}:null;
   const isCurrent=()=>doc?.id===snapshot.projectId&&doc.revision===snapshot.revision&&input.isConnected;
   function draft(){
-    const context=liveContext();
-    if(!isCurrent()||!context||context.inspectMask||busy||surfaceTools.isEditing()||uvSelection.isTransforming())return;
+    const context=areaSystem?.materialDraftContext()??liveContext();
+    if(!isCurrent()||!context||context.inspectMask&&!previewMask||busy||surfaceTools.isEditing()||uvSelection.isTransforming())return;
     const next=currentValue();
     if(!input.validity.valid||next===value||type==='number'&&!Number.isFinite(next)){
       if(propertyDraft===input)clearPropertyDraft();
@@ -648,48 +648,105 @@ $('brush-ink').onchange=()=>{
   if(value!=='custom')changePaintColors(()=>paintColors.set('mask',$('brush-erase').checked?'background':'foreground',value==='1'?'#ffffff':'#000000'),'mask');
 };
 const effectAxes=[['z','朝上'],['-z','朝下'],['x','X 正向'],['-x','X 负向'],['y','Y 正向'],['-y','Y 负向']];
-function renderMaskEffects(l,editTarget=edit){
-  const effects=l.maskEffects||[],stack=element('fieldset');
-  stack.className='property-material mask-effects';
-  stack.append(element('legend','蒙版效果'));
-  if(effects.length<12)stack.append(field('添加效果','select','',kind=>kind&&editTarget({maskEffects:[...effects,newMaskEffect(kind)]}),
-    {choices:[['','选择效果'],...Object.entries(maskEffectLabels)]}));
-  for(const [index,effect] of effects.entries()){
-    const section=element('section'),label=maskEffectLabels[effect.kind];
-    section.className='mask-effect';
-    section.append(element('strong',label));
-    const change=patch=>editTarget({maskEffects:effects.map((item,i)=>i===index?{...item,...patch}:item)});
-    section.append(field('启用'+label,'checkbox',effect.enabled,enabled=>change({enabled})));
-    if(effect.enabled) section.append(field(label+'强度','number',effect.opacity,opacity=>change({opacity}),{min:0,max:1}));
-    if(effect.enabled&&effect.kind==='levels'){
-      for(const [key,name,min,max] of [['black','输入黑点',0,1],['white','输入白点',0,1],['gamma','中间调',.1,5]])
-        section.append(field(name,'number',effect[key],value=>change({[key]:value}),{min,max}));
+function renderMaskEffects(form,l,editTarget,liveField){
+  const effects=l.maskEffects||[],stack=element('section'),states=form.propertySections??={};
+  const key='effect:'+doc.id+':'+l.id+':',idFor=(effect,index)=>effect.id||'legacy-'+index;
+  const stateKey=(effect,index)=>key+idFor(effect,index);
+  stack.className='mask-effects';
+  stack.setAttribute('aria-label','蒙版效果 · '+l.name);
+  const header=element('div');header.className='mask-effects-heading';
+  header.append(element('strong','蒙版效果'));
+  if(effects.length)header.append(element('small','自下而上'));
+  stack.append(header);
+  function applyEffects(next){
+    return editTarget({maskEffects:next.map(effect=>{
+      if(effect.id)return effect;
+      const id=crypto.randomUUID(),i=effects.indexOf(effect);
+      if(i>=0&&Object.hasOwn(states,stateKey(effect,i)))states[key+id]=states[stateKey(effect,i)];
+      return {...effect,id};
+    })});
+  }
+  if(effects.length<maskEffectLimit){
+    const add=field('添加效果','select','',kind=>{
+      if(!kind)return;
+      const effect={...newMaskEffect(kind),id:crypto.randomUUID()};
+      states[key+effect.id]=true;
+      return applyEffects([...effects,effect]);
+    },{choices:[['','添加效果…'],...Object.entries(maskEffectLabels)]});
+    add.classList.add('mask-effects-add');add.firstChild.remove();header.append(add);
+  }
+  for(const [index,effect] of [...effects.entries()].reverse()){
+    const section=element('section'),row=element('div'),body=element('div'),label=maskEffectLabels[effect.kind];
+    const state=stateKey(effect,index);
+    section.className='mask-effect';row.className='mask-effect-row';body.className='mask-effect-parameters';
+    section.dataset.effectId=idFor(effect,index);
+    section.toggleAttribute('data-disabled',!effect.enabled);
+    const controls=element('div');controls.className='mask-effect-actions';
+    const toggle=localButton('',()=>{
+      states[state]=body.hidden;updateOpen();
+      form.dispatchEvent(new Event('property-section-change'));
+    });
+    toggle.className='mask-effect-toggle';toggle.dataset.lockAction='view';
+    toggle.setAttribute('aria-label','参数 · '+label);
+    toggle.innerHTML=workspaceIcons.chevron;
+    toggle.append(element('strong',label));
+    const mode=effect.blend||'replace',summary=element('small',maskEffectBlendLabel(mode));
+    summary.className='mask-effect-mode';toggle.append(summary);
+    body.setAttribute('role','group');body.setAttribute('aria-label','蒙版效果参数 · '+l.name+' › '+label);
+    function updateOpen(){
+      const open=states[state]??index===effects.length-1;
+      toggle.setAttribute('aria-expanded',String(effect.enabled&&open));
+      body.hidden=!effect.enabled||!open;
+      section.toggleAttribute('data-open',!body.hidden);
     }
-    if(effect.enabled&&['height','facing'].includes(effect.kind)){
-      section.append(field(label+'方向','select',effect.axis,axis=>change({axis}),{choices:effectAxes}),
-        field('阈值','number',effect.center,center=>change({center}),{min:0,max:1}),
-        field('过渡','number',effect.feather,feather=>change({feather}),{min:.01,max:1}));
+    updateOpen();
+    toggle.disabled=!effect.enabled;
+    row.append(toggle);
+    const replaceEffect=patch=>({maskEffects:effects.map((item,i)=>i===index?{...item,...patch}:item)});
+    const change=patch=>editTarget(replaceEffect(patch));
+    const enabled=field('启用'+label,'checkbox',effect.enabled,enabled=>change({enabled}));
+    enabled.classList.add('mask-effect-enabled');enabled.firstChild.remove();enabled.title='启用'+label;
+    controls.append(enabled);
+    function action(name,icon,handler,disabled=false){
+      const control=button('',handler);control.className='mask-effect-action';
+      control.innerHTML=workspaceIcons[icon];control.title=name;control.setAttribute('aria-label',name);control.disabled=disabled;controls.append(control);
     }
-    if(effect.enabled&&Object.hasOwn(maskGeneratorFields,effect.kind)){
-      for(const {key,label,choices,min,max,step,dragSpeed} of maskGeneratorFields[effect.kind])
-        section.append(field(label,choices?'select':'number',effect[key],value=>change({[key]:value}),
-          choices?{choices}:{min,max,step,dragSpeed}));
-    }
-    if(effect.enabled&&effect.blend)
-      section.append(field(label+'合成','select',effect.blend,blend=>change({blend}),{choices:maskEffectBlends}));
-    const actions=element('div');actions.className='bar';
-    for(const [delta,text] of [[-1,'上移'],[1,'下移']]){
-      const control=button(text,()=>{
+    for(const [delta,text,icon] of [[1,'上移','moveUp'],[-1,'下移','moveDown']]){
+      action(text+label,icon,()=>{
         const next=effects.slice();
         [next[index],next[index+delta]]=[next[index+delta],next[index]];
-        return editTarget({maskEffects:next});
-      });
-      control.setAttribute('aria-label',text+label);
-      control.disabled=index+delta<0||index+delta>=effects.length;actions.append(control);
+        return applyEffects(next);
+      },index+delta<0||index+delta>=effects.length);
     }
-    const remove=button('删除',()=>editTarget({maskEffects:effects.filter((_,i)=>i!==index)}));
-    remove.setAttribute('aria-label','删除'+label);
-    actions.append(remove);section.append(actions);stack.append(section);
+    action('复制'+label,'copy',()=>{
+      const id=crypto.randomUUID(),next=effects.slice();
+      next.splice(index+1,0,{...structuredClone(effect),id});
+      states[key+id]=false;
+      return applyEffects(next);
+    },effects.length>=maskEffectLimit);
+    action('删除'+label,'trash',()=>applyEffects(effects.filter((_,i)=>i!==index)));
+    row.append(controls);
+    const numeric=(key,name,options)=>liveField(name,'number',effect[key],value=>replaceEffect({[key]:value}),{...options,previewMask:true});
+    body.append(field(label+'合成','select',mode,blend=>change({blend}),{choices:maskEffectBlends}),
+      numeric('opacity',label+'强度',{min:0,max:1}));
+    if(effect.kind==='levels'){
+      body.append(numeric('black','输入黑点',{min:0,max:effect.white-.0001}),numeric('white','输入白点',{min:effect.black+.0001,max:1}),
+        numeric('gamma','中间调',{min:.1,max:5}));
+    }else if(['height','facing'].includes(effect.kind)){
+      body.append(field(label+'方向','select',effect.axis,axis=>change({axis}),{choices:effectAxes}),
+        numeric('center','阈值',{min:0,max:1}),numeric('feather','过渡',{min:.01,max:1}));
+    }else if(Object.hasOwn(maskGeneratorFields,effect.kind)){
+      for(const {key,label,choices,min,max,step,dragSpeed} of maskGeneratorFields[effect.kind])
+        body.append(choices?field(label,'select',effect[key],value=>change({[key]:value}),{choices}):numeric(key,label,{min,max,step,dragSpeed}));
+    }
+    section.append(row,body);stack.append(section);
+  }
+  if(effects.length){
+    const order=field('手绘修正','select',l.maskStrokeOrder||'before',maskStrokeOrder=>editTarget({maskStrokeOrder}),
+      {choices:[['before','在效果前'],['after','在效果后']]});
+    order.classList.add('mask-stroke-order');
+    order.title='在效果后应用笔触，可直接遮盖或恢复最终蒙版';
+    stack.append(order);
   }
   return stack;
 }
@@ -748,7 +805,7 @@ function renderProperties(form=$('properties'),scope=null){
       ensureSelected();
       if(!busy&&!maskEditor.isOpen()){activateSurface('mask');areaSystem?.maskTarget();}
     }));
-    mask.append(renderMaskEffects(l,editTarget));
+    mask.append(renderMaskEffects(form,l,editTarget,liveField));
   }
   if(l?.kind==='group'){
     if(!maskTarget){
@@ -903,7 +960,7 @@ function renderPropertyLock(form=$('properties'),active=layer(),count=selection.
   form.firstElementChild.after(note);
   for(const control of form.querySelectorAll('button,input,select,textarea')){
     const action=control.closest('[data-lock-action]')?.dataset.lockAction;
-    if(action!=='visibility'&&(action!=='duplicate'||owner!==active))control.disabled=true;
+    if(!['view','visibility'].includes(action)&&(action!=='duplicate'||owner!==active))control.disabled=true;
   }
 }
 function layerActions(l,{issue=command,add=addAndSelect}={}){

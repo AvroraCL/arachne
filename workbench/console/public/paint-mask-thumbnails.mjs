@@ -7,7 +7,8 @@ export async function maskThumbnailKey(doc,layer){
   if(!geometryKeys.has(doc))geometryKeys.set(doc,digest([doc.source.files,doc.modeling,doc.paint.surfaceBindings]));
   // Layer color, opacity and mask enablement do not change the raw mask.
   return [doc.id,layer.id,await geometryKeys.get(doc),await digest([
-    layer.kind,layer.mask,layer.maskBase,layer.maskStrokes,layer.maskEffects,
+    layer.kind,layer.mask,layer.maskBase,layer.maskStrokes,layer.maskStrokeOrder,
+    layer.maskEffects?.map(({id,...effect})=>effect),
     layer.image,layer.projector,layer.space,layer.x,layer.y,layer.scale,layer.rotation,layer.uvScale
   ])].join(':');
 }

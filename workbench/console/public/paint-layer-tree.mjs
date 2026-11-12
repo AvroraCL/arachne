@@ -1,6 +1,6 @@
 export const layerParent=layer=>layer.parentId??null;
 export const layerChildren=(layers,parentId)=>layers.filter(layer=>layerParent(layer)===parentId);
-export const materialMaskFields=['mask','maskBase','maskEnabled','maskEffects','maskStrokes'];
+export const materialMaskFields=['mask','maskBase','maskEnabled','maskEffects','maskStrokes','maskStrokeOrder'];
 export const hasMaterialMask=layer=>!!layer&&(!!layer.mask||layer.maskBase===0||!!layer.maskStrokes?.length||
   !!layer.maskEffects?.length||typeof layer.maskEnabled==='boolean');
 

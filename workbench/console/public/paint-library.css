@@ -58,6 +58,26 @@
 .material-map-dialog .paint-form-footer{flex:none;height:auto;min-height:42px;align-items:center;padding:7px 12px}
 .material-map-packed-hint{margin:0 0 3px 114px;color:var(--ui-secondary);font-size:12px;line-height:1.45}
 .material-map-packed-hint[hidden]{display:none}
+.material-map-match-status{margin:0 0 2px 114px;color:var(--ui-secondary);font-size:12px;line-height:1.45}
+.material-map-match-status[data-map-pending],.material-map-row[data-map-pending] .custom-select-button{color:#d6b682}
+.material-map-select-menu{--select-menu-width:316px;grid-template-columns:minmax(0,1fr)}
+.material-map-select-menu .custom-select-group{display:grid;min-width:0}
+.material-map-select-menu .custom-select-group-title{font-size:11px;color:var(--ui-secondary);padding:5px 8px 2px}
+.material-map-dialog .material-map-select-menu .custom-select-option{
+  display:flex;align-items:center;justify-content:flex-start;min-width:0;width:100%;text-align:left;gap:8px;padding:4px 8px}
+.material-map-select-menu .select-option-check{margin-left:auto;flex:none}
+.material-map-select-menu [aria-selected=false] .select-option-check{visibility:hidden}
+.material-map-select-menu .select-option-with-detail{min-height:40px}
+.select-option-thumbnail{flex:none;display:grid;place-items:center;width:34px;height:34px;overflow:hidden;
+  background:repeating-conic-gradient(#353535 0 25%,#292929 0 50%) 0/10px 10px;border-radius:2px}
+.select-option-thumbnail>img{width:100%;height:100%;object-fit:contain}
+.select-option-detail{display:grid;min-width:0;gap:2px}
+.select-option-detail>*{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.select-option-detail>small{color:var(--ui-secondary);font-size:11px}
+@media(max-width:430px){
+  .material-map-dialog .material-map-row{grid-template-columns:88px minmax(0,1fr)}
+  .material-map-packed-hint,.material-map-match-status{margin-left:94px}
+}
 .library-smart-preview{display:grid;place-items:center;width:58%;height:76%;margin:auto;color:var(--material-color,#808080)}
 .library-smart-preview svg{width:100%;height:100%;filter:drop-shadow(0 1px 1px #0009)}
 .material-map-error{flex:1;max-height:72px;margin:0;overflow:auto;overflow-wrap:anywhere;font-size:12px;line-height:1.45}

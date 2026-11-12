@@ -525,8 +525,6 @@ body:has(#mask-editor.surface-mask[open]) #viewport canvas{cursor:crosshair}
 #projector-gizmo::before{content:'';position:absolute;left:50%;top:-14px;width:1px;height:14px;background:#ddd;pointer-events:none}
 #projector-gizmo button{min-height:24px;padding:2px 5px;background:#222e;cursor:grab}
 #viewport-status[data-error=true]{color:#ffae99}
-.mask-effect{padding:6px 0;border-top:1px solid #343434;margin-top:5px}
-.mask-effect>.bar{margin-top:4px}
 .layer-mask[data-mask-disabled]{opacity:.42}
 .layer-mask[data-mask-effects]{border-bottom:2px solid #929fb2}
 

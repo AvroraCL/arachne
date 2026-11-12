@@ -37,11 +37,19 @@ test('resources validate missing graphs, protect referenced deletion and avoid i
 test('PBR map grouping keeps distinct names and asks for ambiguous channels',()=>{
   const assets={
     a:{name:'Panel_BaseColor.png'},b:{name:'Panel Roughness 4K.png'},c:{name:'Panel_NormalGL.png'},
-    d:{name:'Panel_Roughness_8K.png'},e:{name:'Other_AO.png'},f:{name:'Panel_NormalDX.png'}
+    d:{name:'Panel_8K_Roughness.png'},e:{name:'Other_AO.png'},f:{name:'Panel_NormalDX.png'},
+    g:{name:'Stone_1024_ORM.tga'},h:{name:'Stone_ORM_2K.tga'}
   };
   const panel=groupMaterialMaps(assets).find(group=>group.name==='Panel');
-  assert.deepEqual(panel.maps,{color:'a',roughness:null,normal:'c'});
+  assert.deepEqual(panel.maps,{color:'a',roughness:null,normal:null});
+  assert.deepEqual(panel.candidates.roughness.map(item=>item.id).sort(),['b','d']);
+  assert.deepEqual(Object.fromEntries(panel.candidates.normal.map(item=>[item.id,item.normalFormat])),
+    {c:'opengl',f:'directx'});
   assert.deepEqual(groupMaterialMaps(assets).find(group=>group.name==='Other').maps,{ao:'e'});
+  const packedOnly=groupMaterialMaps(assets).find(group=>group.name==='Stone');
+  assert.equal(packedOnly.packed.unreal,null);
+  assert.deepEqual(packedOnly.packedCandidates.unreal.map(item=>item.id).sort(),['g','h']);
+  assert.equal(groupMaterialMaps(assets,[{id:'b',name:'Panel_Roughness.png'}]).find(item=>item.name==='Panel').candidates.roughness.length,2);
   const stored=Object.fromEntries(Object.entries(assets).map(([id,asset])=>[id.repeat(64),asset]));
   const graph=mappedLibraryMaterial({color:'a'.repeat(64),roughness:'b'.repeat(64),normal:'c'.repeat(64),alpha:'e'.repeat(64)},stored,{alphaOutput:'alpha'});
   assert.deepEqual(graph.nodes.filter(node=>node.type==='image').map(({id,params})=>[id,params.colorSpace]),[

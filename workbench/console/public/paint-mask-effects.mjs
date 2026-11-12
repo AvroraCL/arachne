@@ -13,7 +13,11 @@ export const maskGeneratorFields={
   ]
 };
 export const maskEffectLabels={invert:'反相',levels:'色阶',height:'位置渐变',facing:'表面朝向',edgeWear:'边缘磨损',surfaceNoise:'表面噪声'};
-export const maskEffectBlends=[['multiply','乘以已有蒙版'],['replace','替换已有蒙版']];
+export const maskEffectBlends=[
+  ['replace','替换'],['multiply','相乘'],['add','相加'],['subtract','相减'],['max','取大'],['min','取小']
+];
+export const maskEffectBlendLabel=mode=>maskEffectBlends.find(([key])=>key===mode)?.[1];
+export const maskEffectLimit=12;
 
 export function newMaskEffect(kind){
   const effect={kind,enabled:true,opacity:1};

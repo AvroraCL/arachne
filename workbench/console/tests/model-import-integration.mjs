@@ -88,8 +88,152 @@ async function api(route,body){
   assert.ok(r.ok,JSON.stringify(json));
   return json;
 }
-try{
-  origin=await start(data);
+async function verifyProceduralMasks(cubeId){
+  const wearRoute='/api/projects/'+cubeId,wearPaint=wearRoute+'/paint';
+  const wearSeed=await api(wearPaint+'/commands',{revision:0,operations:[
+    {op:'base',patch:{color:'#182537',metallic:.05,roughness:.65}},
+    {op:'add',kind:'fill',patch:{name:'金属磨边',maskEnabled:true,maskBase:1,
+      channels:{color:true,metallic:true,roughness:true},values:{color:'#e5bd70',metallic:.85,roughness:.26}}}
+  ]});
+  const wearLayer=wearSeed.paint.layers[0],wearPage=await browser.newPage({viewport:{width:1400,height:900}});
+  await wearPage.goto(origin+'/?project='+cubeId);
+  await wearPage.locator('[data-area-mode=material]').click();
+  await wearPage.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
+  await wearPage.getByRole('button',{name:'绘制蒙版 · 金属磨边',exact:true}).click();
+  const effects=wearPage.getByRole('button',{name:'添加效果',exact:true});
+  await effects.click();
+  await wearPage.getByRole('option',{name:'边缘磨损',exact:true}).click();
+  await until(async()=>(await api(wearRoute)).paint.layers[0].maskEffects?.[0]?.kind==='edgeWear');
+  const width=wearPage.getByRole('spinbutton',{name:'磨损宽度 (%)',exact:true});
+  const liveWidth=wearPage.waitForResponse(response=>
+    response.url().endsWith('/paint/live')&&response.request().postDataJSON()?.operation?.patch?.maskEffects?.[0]?.width===6);
+  await width.fill('6');
+  assert.equal((await liveWidth).status(),200);
+  await width.press('Tab');
+  const edgeMask=await until(async()=>{
+    const current=await api(wearRoute);
+    return current.paint.layers[0].maskEffects?.[0]?.width===6&&current;
+  });
+  const wearJob=await api(wearPaint+'/preview',{revision:edgeMask.revision,requestId:'crease-mask'});
+  const wearBake=await until(async()=>{
+    const job=await api(wearRoute+'/jobs/'+wearJob.id);
+    if(job.status==='failed')throw Error(job.error);
+    return job.status==='completed'&&job;
+  });
+  assert.equal(wearBake.paintReport.uv_unchanged,true);
+  assert.equal(wearBake.paintReport.protectedTexelsWritten,0);
+  const wearImage=path.join(data,'edge-wear-4k.png');
+  await fs.writeFile(wearImage,Buffer.from(await (await fetch(origin+wearBake.colorUrl)).arrayBuffer()));
+  const wearPixels=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import json,sys',
+    'from PIL import Image',
+    'im=Image.open(sys.argv[1]); print(json.dumps([im.size,[im.getpixel((int(x*4096),int(y*4096))) for x,y in ((.024,.25),(.166,.25),(.01,.25))]]))'
+  ].join('\n'),wearImage],{encoding:'utf8'}));
+  assert.deepEqual(wearPixels,[[4096,4096],[[229,189,112],[24,37,55],[24,37,55]]]);
+  await effects.click();
+  await wearPage.getByRole('option',{name:'表面噪声',exact:true}).click();
+  const noiseMask=await until(async()=>{
+    const current=await api(wearRoute);
+    return current.paint.layers[0].maskEffects?.length===2&&current;
+  });
+  const invalidNoise=await fetch(origin+wearPaint+'/commands',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({revision:noiseMask.revision,operations:[{op:'update',id:wearLayer.id,patch:{
+      maskEffects:[noiseMask.paint.layers[0].maskEffects[0],{...noiseMask.paint.layers[0].maskEffects[1],seed:.5}]
+    }}]})
+  });
+  assert.equal(invalidNoise.status,400);
+  await wearPage.getByRole('button',{name:'表面噪声合成',exact:true}).click();
+  await wearPage.getByRole('option',{name:'相减',exact:true}).click();
+  const subtractMask=await until(async()=>{
+    const current=await api(wearRoute);
+    return current.paint.layers[0].maskEffects[1].blend==='subtract'&&current;
+  });
+  await wearPage.getByRole('button',{name:'表面噪声合成',exact:true}).filter({hasText:'相减'}).waitFor();
+  await until(async()=>await wearPage.locator('#project-save-state').textContent()==='已保存',12000);
+  const noiseOpacity=wearPage.getByRole('spinbutton',{name:'表面噪声强度',exact:true});
+  await noiseOpacity.fill('0.5');await noiseOpacity.press('Tab');
+  const mixedMask=await until(async()=>{
+    const current=await api(wearRoute);
+    return current.paint.layers[0].maskEffects[1].opacity===.5&&current;
+  });
+  assert.equal(mixedMask.revision,subtractMask.revision+1);
+  await wearPage.getByRole('button',{name:'参数 · 表面噪声',exact:true}).click();
+  await noiseOpacity.waitFor({state:'hidden'});
+  assert.equal((await api(wearRoute)).revision,mixedMask.revision);
+  await wearPage.getByRole('button',{name:'复制表面噪声',exact:true}).click();
+  const copiedEffect=await until(async()=>{
+    const current=await api(wearRoute);
+    return current.paint.layers[0].maskEffects.length===3&&current;
+  });
+  const [edge,noise,copy]=copiedEffect.paint.layers[0].maskEffects;
+  assert.notEqual(noise.id,copy.id);
+  assert.deepEqual({...copy,id:noise.id},noise);
+  const copiedRow=wearPage.locator('[data-effect-id="'+copy.id+'"]');
+  await copiedRow.getByRole('checkbox',{name:'启用表面噪声',exact:true}).uncheck();
+  await until(async()=>!(await api(wearRoute)).paint.layers[0].maskEffects[2].enabled);
+  await copiedRow.getByRole('button',{name:'下移表面噪声',exact:true}).click();
+  const reordered=await until(async()=>{
+    const current=await api(wearRoute);
+    return current.paint.layers[0].maskEffects[1].id===copy.id&&current;
+  });
+  assert.deepEqual(reordered.paint.layers[0].maskEffects.map(effect=>effect.id),[edge.id,copy.id,noise.id]);
+  await wearPage.getByRole('button',{name:'手绘修正',exact:true}).click();
+  await wearPage.getByRole('option',{name:'在效果后',exact:true}).click();
+  const correctionOrder=await until(async()=>{
+    const current=await api(wearRoute);
+    return current.paint.layers[0].maskStrokeOrder==='after'&&current;
+  });
+  const maskFrame=async current=>{
+    const response=await fetch(origin+wearPaint+'/live',{method:'POST',
+      headers:{Origin:origin,'Content-Type':'application/json'},
+      body:JSON.stringify({revision:current.revision,inspectMask:wearLayer.id,resolution:256,format:'pbr8'})});
+    assert.equal(response.status,200);
+    return new Uint8Array(await response.arrayBuffer());
+  };
+  const initialMask=await maskFrame(correctionOrder),maskSample=(192*256+6)*15;
+  assert.ok(initialMask[maskSample]>0);
+  const view3d=wearPage.locator('.editor-viewport[data-state=ready]').first();
+  const wearBounds=await view3d.boundingBox();
+  const screenPoint=(x,y)=>[wearBounds.x+x*wearBounds.width,wearBounds.y+y*wearBounds.height];
+  await wearPage.mouse.move(...screenPoint(.48,.5));await wearPage.mouse.down();
+  await wearPage.mouse.move(...screenPoint(.53,.5),{steps:6});await wearPage.mouse.up();
+  const handPainted=await until(async()=>{
+    const current=await api(wearRoute);
+    return current.paint.layers[0].maskStrokes?.length===1&&current;
+  },12000);
+  assert.ok(handPainted.paint.layers[0].maskStrokes[0].stamps.length>0);
+  const corrected=await api(wearPaint+'/commands',{revision:handPainted.revision,operations:[
+    {op:'stroke',id:wearLayer.id,target:'mask',stroke:{uv:true,rect:[.02,.71,.031,.79],value:0,opacity:1}}
+  ]});
+  assert.equal((await maskFrame(corrected))[maskSample],0);
+  await wearPage.screenshot({path:path.join(data,'procedural-mask-workbench.png')});
+  await wearPage.reload();
+  assert.deepEqual((await api(wearRoute)).paint.layers,corrected.paint.layers);
+  const undoCorrection=await api(wearPaint+'/undo',{revision:corrected.revision});
+  assert.deepEqual(undoCorrection.paint.layers,handPainted.paint.layers);
+  const redoCorrection=await api(wearPaint+'/redo',{revision:undoCorrection.revision});
+  assert.deepEqual(redoCorrection.paint.layers,corrected.paint.layers);
+  const correctedJob=await api(wearPaint+'/preview',{revision:redoCorrection.revision,requestId:'corrected-mixed-mask'});
+  const correctedBake=await until(async()=>{
+    const job=await api(wearRoute+'/jobs/'+correctedJob.id);
+    if(job.status==='failed')throw Error(job.error);
+    return job.status==='completed'&&job;
+  });
+  assert.equal(correctedBake.paintReport.uv_unchanged,true);
+  assert.equal(correctedBake.paintReport.protectedTexelsWritten,0);
+  const correctedFile=path.join(data,'corrected-mask-4k.png');
+  await fs.writeFile(correctedFile,Buffer.from(await (await fetch(origin+correctedBake.colorUrl)).arrayBuffer()));
+  const correctedPixels=JSON.parse(execFileSync(pythonExecutable(),['-B','-X','utf8','-c',
+    'import json,sys;from PIL import Image;im=Image.open(sys.argv[1]);print(json.dumps([im.size,im.getpixel((98,3072))]))',
+    correctedFile],{encoding:'utf8'}));
+  assert.deepEqual(correctedPixels,[[4096,4096],[24,37,55]]);
+  await wearPage.close();
+  console.log('PASS live mesh wear, noise subtraction, compact effect controls, post-effect brush, 4K pixels, UV protection and undo/redo');
+
+}
+
+async function verifyModelWorkflows(){
   assert.deepEqual(await api('/api/projects'),[]);
   const noUv=await fetch(origin+'/api/projects/model-import?material=1',{
     method:'POST',headers:{'Content-Type':'model/gltf-binary',Origin:origin},body:sampleModel(false).bytes
@@ -1019,66 +1163,19 @@ try{
   assert.deepEqual(objPixels,[[[192,32,10],[12,36,128]],[255,64],[90,90]]);
   console.log('PASS OBJ with Chinese sidecar paths, concave face, original UV orientation, model edit, reopen and 4K bake');
 
-  const wearRoute='/api/projects/'+templates[0].id,wearPaint=wearRoute+'/paint';
-  const wearSeed=await api(wearPaint+'/commands',{revision:0,operations:[
-    {op:'base',patch:{color:'#182537',metallic:.05,roughness:.65}},
-    {op:'add',kind:'fill',patch:{name:'金属磨边',maskEnabled:true,maskBase:1,
-      channels:{color:true,metallic:true,roughness:true},values:{color:'#e5bd70',metallic:.85,roughness:.26}}}
-  ]});
-  const wearLayer=wearSeed.paint.layers[0],wearPage=await browser.newPage({viewport:{width:1400,height:900}});
-  await wearPage.goto(origin+'/?project='+templates[0].id);
-  await wearPage.locator('[data-area-mode=material]').click();
-  await wearPage.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
-  await wearPage.getByRole('button',{name:'绘制蒙版 · 金属磨边',exact:true}).click();
-  const effects=wearPage.getByRole('button',{name:'添加效果',exact:true});
-  await effects.click();
-  await wearPage.getByRole('option',{name:'边缘磨损',exact:true}).click();
-  await until(async()=>(await api(wearRoute)).paint.layers[0].maskEffects?.[0]?.kind==='edgeWear');
-  const width=wearPage.getByRole('spinbutton',{name:'磨损宽度 (%)',exact:true});
-  await width.fill('6');await width.press('Tab');
-  const edgeMask=await until(async()=>{
-    const current=await api(wearRoute);
-    return current.paint.layers[0].maskEffects?.[0]?.width===6&&current;
-  });
-  const wearJob=await api(wearPaint+'/preview',{revision:edgeMask.revision,requestId:'crease-mask'});
-  const wearBake=await until(async()=>{
-    const job=await api(wearRoute+'/jobs/'+wearJob.id);
-    if(job.status==='failed')throw Error(job.error);
-    return job.status==='completed'&&job;
-  });
-  assert.equal(wearBake.paintReport.uv_unchanged,true);
-  assert.equal(wearBake.paintReport.protectedTexelsWritten,0);
-  const wearImage=path.join(data,'edge-wear-4k.png');
-  await fs.writeFile(wearImage,Buffer.from(await (await fetch(origin+wearBake.colorUrl)).arrayBuffer()));
-  const wearPixels=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
-    'import json,sys',
-    'from PIL import Image',
-    'im=Image.open(sys.argv[1]); print(json.dumps([im.size,[im.getpixel((int(x*4096),int(y*4096))) for x,y in ((.024,.25),(.166,.25),(.01,.25))]]))'
-  ].join('\n'),wearImage],{encoding:'utf8'}));
-  assert.deepEqual(wearPixels,[[4096,4096],[[229,189,112],[24,37,55],[24,37,55]]]);
-  await effects.click();
-  await wearPage.getByRole('option',{name:'表面噪声',exact:true}).click();
-  const noiseMask=await until(async()=>{
-    const current=await api(wearRoute);
-    return current.paint.layers[0].maskEffects?.length===2&&current;
-  });
-  const invalidNoise=await fetch(origin+wearPaint+'/commands',{
-    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
-    body:JSON.stringify({revision:noiseMask.revision,operations:[{op:'update',id:wearLayer.id,patch:{
-      maskEffects:[noiseMask.paint.layers[0].maskEffects[0],{...noiseMask.paint.layers[0].maskEffects[1],seed:.5}]
-    }}]})
-  });
-  assert.equal(invalidNoise.status,400);
-  await wearPage.screenshot({path:path.join(data,'procedural-mask-workbench.png')});
-  await wearPage.reload();
-  assert.deepEqual((await api(wearRoute)).paint.layers[0].maskEffects,noiseMask.paint.layers[0].maskEffects);
-  await api(wearPaint+'/undo',{revision:noiseMask.revision});
-  assert.equal((await api(wearRoute)).paint.layers[0].maskEffects.length,1);
-  await wearPage.close();
-  console.log('PASS mesh edge wear and world-space noise mask UI, crease pixels, UV protection, reopen and undo');
+  await verifyProceduralMasks(templates[0].id);
 
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
+}
+
+try{
+  origin=await start(data);
+  if(process.argv.includes('--mask-only')){
+    browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+    const cube=await api('/api/projects',{workflowType:'pbr_paint',modelTemplate:'cube'});
+    await verifyProceduralMasks(cube.id);
+  }else await verifyModelWorkflows();
 }finally{
   await browser?.close();
   for(const service of services)if(service.exitCode===null&&service.signalCode===null){
