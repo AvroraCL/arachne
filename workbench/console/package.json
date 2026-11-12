@@ -13,6 +13,7 @@
     "package:win:installer": "node scripts/package-windows-installer.mjs",
     "verify:demo": "node tests/demo-integration.mjs",
     "verify:drawing": "node tests/drawing-integration.mjs",
+    "verify:drawing-batch": "node tests/image-layer-batch-integration.mjs",
     "verify:material-library": "node tests/material-library-integration.mjs",
     "verify:model-import": "node tests/model-import-integration.mjs",
     "verify:blend-migration": "node tests/blend-migration-integration.mjs"

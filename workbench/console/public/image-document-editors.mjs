@@ -10,6 +10,7 @@ import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {layerChildren,layerIsVisible,layerLockOwner,layerParent,layerTreeOrder,layerTreeRows} from './paint-layer-tree.mjs';
 import {followingClips,imageGroupBlend,imageLayerInsertion} from './image-layer-tree.mjs';
+import {checkImageLayerDuplicate,imageBatchSelection,imageLayerLimit,imageLayerMoveStep,planImageLayerDelete,planImageLayerMove} from './image-layer-batch.mjs';
 import {channelSpecs,paintChannels} from './paint-channels.mjs';
 import {maskGray} from './paint-colors.mjs';
 import {createBrushBinding} from './paint-brush-binding.mjs';
@@ -938,6 +939,9 @@ export function createImagePanel(type,ctx){
   search.onkeydown=event=>{if(event.key==='Escape'&&!compositionKey(event)){event.preventDefault();event.stopPropagation();filterOpen=false;resetFilter();filterChanged();toggle?.focus();}};
   const rowsHost=el('div'),message=el('p','document-muted');
   const actions=el('div','document-layer-actions'),primaryActions=el('div','document-layer-primary-actions');
+  const feedback=type==='layers'?el('output','document-layer-feedback'):null;
+  const dropNote=type==='layers'?el('output','document-layer-drop-note'):null;
+  let feedbackTimer=null,completedAction='';
   let footerStack=[];
   const stackButtons=type==='layers'?[['上移','moveUp'],['下移','moveDown'],['复制','copy'],['删除','trash']].map(([label,icon],index)=>
     chromeButton(button(label,()=>{
@@ -963,7 +967,8 @@ export function createImagePanel(type,ctx){
     primaryActions.append(addMask,addAdjustment,addGroup,add,stackButtons[3]);
     actions.append(...stackButtons.slice(0,3),primaryActions);
     error.classList.add('document-layer-error');
-    host.append(actions);
+    feedback.setAttribute('role','status');dropNote.setAttribute('role','status');
+    dropNote.hidden=true;host.append(dropNote,feedback,actions);
   }
   const rows=new Map();
   const menu=type==='layers'?createContextActions('图像图层操作',failure=>ctx.error(failure)):null;
@@ -990,6 +995,16 @@ export function createImagePanel(type,ctx){
     selectionContext=selectionKey(origin,active,'pixels');
     selectImage(project,{layerId:active,target:'pixels'});
     sync();
+  }
+  function updateBatchFeedback(){
+    if(!feedback)return;
+    const visible=new Set(renderedRows.map(row=>row.layer.id)),hidden=[...selectedRows].filter(id=>!visible.has(id)).length;
+    feedback.textContent=completedAction||(selectedRows.size>1?selectedRows.size+' 个图层已选'+(hidden?' · '+hidden+' 个不在筛选结果中':''):'');
+    feedback.hidden=!feedback.textContent;
+  }
+  function noteBatch(text){
+    completedAction=text;clearTimeout(feedbackTimer);updateBatchFeedback();
+    feedbackTimer=setTimeout(()=>{completedAction='';updateBatchFeedback();},3500);
   }
   function selectRow(item,event){
     if(event.shiftKey&&selectionAnchor){
@@ -1021,7 +1036,7 @@ export function createImagePanel(type,ctx){
   }
   function createGroup(fromSelection){
     const image=currentDocument(project);
-    if(!image||ctx.busy?.()||image.layers.length>=64)return;
+    if(!image||ctx.busy?.()||image.layers.length>=imageLayerLimit)return;
     const origin=imageSelectionOrigin(project),layerId=crypto.randomUUID();
     const op=fromSelection?{action:'groupLayers',layerIds:[...selectedRows]}:
       {action:'addLayer',kind:'group',...imageLayerInsertion(image.layers,origin.layerId)};
@@ -1062,9 +1077,20 @@ export function createImagePanel(type,ctx){
       groupDialog.setAction('解散图层组','子图层将保留，组蒙版和组级显示、混合设置会移除。',action);
     else return run(action);
   }
-  if(type==='layers')body.addEventListener('keydown',event=>{
-    if(compositionKey(event)||!(event.ctrlKey||event.metaKey)||event.altKey||event.key.toLowerCase()!=='g'||
-       event.target.closest('input,select,textarea,[contenteditable]'))return;
+  if(type==='layers')host.addEventListener('keydown',event=>{
+    if(event.defaultPrevented||compositionKey(event)||event.altKey||
+       event.target.closest('input,select,textarea,[contenteditable],dialog[open]'))return;
+    const key=event.key.toLowerCase(),mod=event.ctrlKey||event.metaKey;
+    const slot=!event.shiftKey&&(mod?{']':0,'[':1,j:2}[key]:['delete','backspace'].includes(key)?3:undefined);
+    if(slot!==false&&slot!==undefined){
+      const action=footerStack[slot];
+      if(!action)return;
+      event.preventDefault();event.stopPropagation();
+      if(action.enabled)void run(action.run);
+      else if(action.reason)noteBatch(action.reason);
+      return;
+    }
+    if(!mod||key!=='g')return;
     const item=currentLayer(project);
     if(!item||event.shiftKey&&item.kind!=='group')return;
     event.preventDefault();event.stopPropagation();
@@ -1143,6 +1169,14 @@ export function createImagePanel(type,ctx){
     reorder=null;
     if(dropRow)delete dropRow.dataset.dropEdge;
     dropRow=null;
+    if(dropNote){dropNote.hidden=true;dropNote.textContent='';}
+  }
+  function reportDrop(target){
+    if(!dropNote||reorder?.kind!=='layer')return;
+    const {count}=reorder,description=target?.note;
+    dropNote.textContent='移动 '+count+' 项'+(description?' · '+description:'');
+    dropNote.toggleAttribute('data-blocked',!!target?.blocked);
+    dropNote.hidden=false;
   }
   function reorderTarget(event,view){
     if(!reorder||!event.dataTransfer.types.includes(imageDragTypes[reorder.kind])||view.row.hidden)return null;
@@ -1157,15 +1191,16 @@ export function createImagePanel(type,ctx){
       if(targetLock||!hasImageLayerMask(source))return null;
       return {edge:'mask',copy};
     }
-    if(sourceLock||source.kind==='group'&&layerTreeOrder(image.layers,source.id).includes(view.item))return null;
     const rect=view.row.getBoundingClientRect(),fraction=(event.clientY-rect.top)/rect.height;
-    if(view.item.kind==='group'&&fraction>=.24&&fraction<=.76&&!targetLock)
-      return {edge:'inside'};
-    const parent=image.layers.find(item=>item.id===layerParent(view.item));
-    if(parent&&layerLockOwner(image.layers,parent))return null;
-    const edge=fraction<.5?'above':'below',siblings=layerChildren(image.layers,layerParent(view.item));
-    const sourceIndex=siblings.indexOf(source),targetIndex=siblings.indexOf(view.item);
-    return sourceIndex>=0&&targetIndex-sourceIndex===(edge==='above'?1:-1)?null:{edge};
+    const edge=view.item.kind==='group'&&fraction>=.24&&fraction<=.76?'inside':fraction<.5?'above':'below';
+    try{
+      const plan=planImageLayerMove(image.layers,reorder.ids,{anchorId:view.item.id,placement:edge});
+      if(!plan.changed)return {blocked:true,note:'图层位置未改变'};
+      const group=image.layers.find(item=>item.id===plan.parentId);
+      const note=edge==='inside'?'放入「'+view.item.name+'」':
+        (group?'「'+group.name+'」内：':'根图层：')+'置于「'+view.item.name+(edge==='above'?'」上方':'」下方');
+      return {edge,note};
+    }catch(error){return {blocked:true,note:error.message};}
   }
   function bindReorder(view){
     const {row,select,name,mask}=view;
@@ -1175,10 +1210,21 @@ export function createImagePanel(type,ctx){
       }
       clearDrag();
       menu.close();
-      reorder={origin:imageSelectionOrigin(project),layerId:view.item.id,row,kind};
+      let ids,count;
+      if(kind==='layer'){
+        if(!selectedRows.has(view.item.id))setRowSelection([view.item.id],view.item.id);
+        ids=[...selectedRows];
+        try{
+          const layers=currentDocument(project).layers,batch=imageBatchSelection(layers,ids);
+          if(batch.affected.some(layer=>layerLockOwner(layers,layer)))throw Error('所选图层或组内图层已锁定');
+          count=batch.affected.length;
+        }catch(error){event.preventDefault();noteBatch(error.message);return;}
+      }
+      reorder={origin:imageSelectionOrigin(project),layerId:view.item.id,row,kind,ids,count};
       row.dataset.dragging='';
       event.dataTransfer.setData(imageDragTypes[kind],view.item.id);
       event.dataTransfer.effectAllowed=kind==='layer'?'move':view.lockOwner?'copy':'copyMove';
+      reportDrop();
     };
     for(const [source,kind] of [[select,'layer'],[name,'layer'],[mask,'mask']]){
       source.ondragstart=event=>startDrag(event,kind);
@@ -1186,11 +1232,12 @@ export function createImagePanel(type,ctx){
     }
     row.ondragenter=row.ondragover=event=>{
       const target=reorderTarget(event,view);
-      if(dropRow&&(!target||dropRow!==row)){
+      if(dropRow&&(!target||target.blocked||dropRow!==row)){
         delete dropRow.dataset.dropEdge;
         dropRow=null;
       }
-      if(!target)return;
+      reportDrop(target);
+      if(!target||target.blocked){if(reorder)event.dataTransfer.dropEffect='none';return;}
       event.preventDefault();
       event.dataTransfer.dropEffect=target.copy?'copy':'move';
       if(row.dataset.dropEdge!==target.edge)row.dataset.dropEdge=target.edge;
@@ -1200,17 +1247,21 @@ export function createImagePanel(type,ctx){
       if(dropRow!==row||row.contains(event.relatedTarget))return;
       delete row.dataset.dropEdge;
       dropRow=null;
+      reportDrop();
     };
     row.ondrop=event=>{
       const target=reorderTarget(event,view);
-      if(!target)return;
+      if(!target||target.blocked)return;
       event.preventDefault();
-      const {origin,layerId,kind}=reorder,targetLayerId=view.item.id;
+      const {origin,layerId,kind,ids,count}=reorder,targetLayerId=view.item.id;
       clearDrag();
       if(kind==='layer'){
         void run(async()=>{
-          await commandAt(project,origin,{action:'moveLayer',layerId,anchorId:targetLayerId,placement:target.edge});
-          if(!disposed&&target.edge==='inside')changeGroup(targetLayerId,true);
+          await commandAt(project,origin,{action:'moveLayers',layerIds:ids,anchorId:targetLayerId,placement:target.edge});
+          if(!disposed&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId){
+            if(target.edge==='inside')changeGroup(targetLayerId,true);
+            noteBatch('已移动 '+count+' 项');
+          }
         });
         return;
       }
@@ -1224,25 +1275,50 @@ export function createImagePanel(type,ctx){
   }
   function stackActions(item,layers,origin,editable){
     if(!item)return [];
-    const siblings=layerChildren(layers,layerParent(item)),index=siblings.indexOf(item);
-    const apply=operation=>()=>commandAt(project,origin,{layerId:item.id,...operation()});
-    const move=(label,icon,target,placement)=>({label,icon,enabled:editable&&!!target,
-      run:apply(()=>({action:'moveLayer',anchorId:target.id,placement}))});
-    const remove=apply(()=>({action:'removeLayer'}));
-    return [
-      move('上移','moveUp',siblings[index+1],'above'),
-      move('下移','moveDown',siblings[index-1],'below'),
-      {label:'复制',icon:'copy',enabled:editable,run:async()=>{
-        const layerId=crypto.randomUUID();
-        await apply(()=>({action:'duplicateLayer',patch:{id:layerId}}))();
-        if(!disposed)selectAddedLayer(project,origin,layerId);
-      }},
-      {label:'删除',icon:'trash',enabled:editable,run:()=>{
-        if(item.kind==='group'&&layerChildren(layers,item.id).length)
-          groupDialog.setAction('删除图层组','将删除「'+item.name+'」和其中的图层。',remove);
-        else return remove();
-      }}
-    ];
+    const ids=selectedRows.has(item.id)?[...selectedRows]:[item.id];
+    const batch=imageBatchSelection(layers,ids),count=batch.affected.length,multi=ids.length>1;
+    const actionName=label=>multi?label+' '+count+' 项':label;
+    const sameImage=()=>!disposed&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId;
+    const apply=(action,patch)=>commandAt(project,origin,{action,layerIds:ids,...patch});
+    const guarded=(label,icon,shortcut,plan,execute)=>{
+      let result,reason;
+      if(editable)try{result=plan();}catch(error){reason=error.message;}
+      if(editable&&!result&&!reason)reason='没有可用的移动位置；也可拖动到其他图层组';
+      return {label:actionName(label),icon,shortcut,enabled:!!result,reason,run:()=>execute(result)};
+    };
+    const move=(label,icon,shortcut,direction)=>guarded(label,icon,shortcut,()=>imageLayerMoveStep(layers,ids,direction),async placement=>{
+      await apply('moveLayers',placement);
+      if(sameImage())noteBatch('已移动 '+count+' 项');
+    });
+    const duplicate=guarded('复制','copy','⌘ / Ctrl + J',()=>checkImageLayerDuplicate(layers,ids),async plan=>{
+      const copyIds=plan.roots.map(()=>crypto.randomUUID());
+      await apply('duplicateLayers',{copyIds});
+      if(sameImage()&&project.imageContext?.layerId===origin.layerId){
+        resetFilter();
+        const activeRoot=plan.roots.findIndex(layer=>layer.id===origin.layerId);
+        setRowSelection(copyIds,copyIds[activeRoot]??copyIds.at(-1));
+        noteBatch('已复制 '+count+' 项');
+      }
+    });
+    const remove=guarded('删除','trash','Delete',()=>planImageLayerDelete(layers,ids),plan=>{
+      const removeSelection=async()=>{
+        await apply('removeLayers');
+        if(!sameImage())return;
+        const remaining=plan.layers,active=project.imageContext?.layerId;
+        if(!remaining.some(layer=>layer.id===active)){
+          const next=remaining.at(-1)?.id??null;
+          setRowSelection(next?[next]:[],next);
+        }
+        noteBatch('已删除 '+count+' 项'+(plan.released.length?' · 解除 '+plan.released.length+' 个剪贴关系':''));
+      };
+      const visible=new Set(renderedRows.map(row=>row.layer.id));
+      if(plan.released.length||plan.roots.some(layer=>layer.kind==='group')||ids.some(id=>!visible.has(id))){
+        const clips=plan.released.length?' '+plan.released.length+' 个保留的图层会解除剪贴。':'';
+        groupDialog.setAction(multi?'删除所选图层':item.kind==='group'?'删除图层组':'删除图层',
+          '将删除 '+count+' 项。'+clips,removeSelection);
+      }else return removeSelection();
+    });
+    return [move('上移','moveUp','⌘ / Ctrl + ]',1),move('下移','moveDown','⌘ / Ctrl + [',-1),duplicate,remove];
   }
   function editText(item,origin=imageSelectionOrigin(project)){
     if(item?.text&&!layerLockOwner(currentDocument(project).layers,item)&&!ctx.busy?.())ctx.openImageText?.(origin,item);
@@ -1274,11 +1350,18 @@ export function createImagePanel(type,ctx){
     const origin=imageSelectionOrigin(project),editable=!view.lockOwner,hasMask=hasImageLayerMask(item);
     const maskAction=action=>()=>commandAt(project,origin,{action,layerId:item.id});
     const update=patch=>()=>commandAt(project,origin,{action:'updateLayer',layerId:item.id,patch});
-    const [up,down,copy,remove]=stackActions(item,layers,origin,editable);
+    const [up,down,copy,remove]=stackActions(item,layers,origin,true);
     menuTarget={id:item.id,revision:origin.revision};
     // A right-click can open the popover before the pointer is released.
     // Keep the pointer just inside the menu so the release does not dismiss it.
     const position=anchor??{clientX:event.clientX-2,clientY:event.clientY-2};
+    if(selectedRows.size>1){
+      menu.open(position,'已选 '+selectedRows.size+' 个图层',[
+        {label:'将所选图层成组',icon:'folder',shortcut:'⌘ / Ctrl + G',enabled:editable,run:()=>createGroup(true)},
+        null,up,down,copy,remove
+      ]);
+      return;
+    }
     menu.open(position,item.name,[
       {label:'重命名',icon:'pen',shortcut:'F2',enabled:editable,run:()=>startRename(view)},
       {label:'将所选图层成组',icon:'folder',shortcut:'⌘ / Ctrl + G',enabled:editable,run:()=>createGroup(true)},
@@ -1457,7 +1540,10 @@ export function createImagePanel(type,ctx){
     }
     const previewContext={projectId:doc.id,revision:doc.revision,documentId:context.documentId,colorSpace:image.colorSpace};
     for(const [id,view] of rows){
-      if(visibleIds.has(id)||view.row.hidden)continue;
+      if(visibleIds.has(id))continue;
+      view.row.toggleAttribute('data-selected',selectedRows.has(id));
+      view.row.toggleAttribute('data-active',context.layerId===id);
+      if(view.row.hidden)continue;
       if(renaming?.view===view)finishRename({commit:true});
       stopPreviews(view);view.row.hidden=true;
     }
@@ -1585,7 +1671,7 @@ export function createImagePanel(type,ctx){
     const lockOwner=layer&&layerLockOwner(image.layers,layer);
     if(add){
       const parent=layer&&(layer.kind==='group'?layer:layerParent(layer)&&image.layers.find(item=>item.id===layerParent(layer)));
-      add.disabled=addAdjustment.disabled=addGroup.disabled=!image||busy||image.layers.length>=64||!!(parent&&layerLockOwner(image.layers,parent));
+      add.disabled=addAdjustment.disabled=addGroup.disabled=!image||busy||image.layers.length>=imageLayerLimit||!!(parent&&layerLockOwner(image.layers,parent));
     }
     if(toggle){
       toggle.disabled=!image;
@@ -1600,6 +1686,7 @@ export function createImagePanel(type,ctx){
         for(const control of stackButtons)control.disabled=true;
       }
       clearRows();
+      if(feedback){renderedRows=[];updateBatchFeedback();}
       bar=null;
       curveEditor?.dispose();curveEditor=null;
       body.replaceChildren(el('p','document-muted','没有打开图像文档'));
@@ -1650,8 +1737,13 @@ export function createImagePanel(type,ctx){
       renderRows(image,doc,c,visibleIds,busy,filtering);
 
       addMask.disabled=!canEdit||hasImageLayerMask(layer);
-      footerStack=stackActions(layer,image.layers,origin,canEdit);
-      stackButtons.forEach((control,i)=>{control.disabled=!footerStack[i]?.enabled;});
+      footerStack=stackActions(layer,image.layers,origin,!busy);
+      stackButtons.forEach((control,i)=>{
+        const action=footerStack[i];
+        control.disabled=!action?.enabled;
+        if(action){labelButton(control,action.label);control.title=action.reason||action.label+(action.shortcut?' · '+action.shortcut:'');}
+      });
+      updateBatchFeedback();
     }else{
       curveEditor?.dispose();curveEditor=null;
       body.replaceChildren();
@@ -1727,6 +1819,7 @@ export function createImagePanel(type,ctx){
     activate(){project.setEditorDomain('image');},
     dispose(){
       disposed=true;
+      clearTimeout(feedbackTimer);
       curveEditor?.dispose();curveEditor=null;
       if(adjustmentEditing)clearAdjustment(adjustmentEditing.owner);
       unsub();

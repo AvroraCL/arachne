@@ -6,6 +6,7 @@ import {validImageShape} from './image-shapes.mjs';
 import {layerChildren,layerLockOwner,layerParent} from './paint-layer-tree.mjs';
 import {arrangeImageLayer,duplicateImageLayer,followingClips,groupImageLayers,imageGroupBlend,imageGroupTarget,imageLayersBefore,
   imageStackBase,removeImageLayer,repairImageClips,ungroupImageLayer,validateImageLayerTree} from './image-layer-tree.mjs';
+import {duplicateImageLayerBatch,imageLayerLimit,planImageLayerDelete,planImageLayerMove} from './image-layer-batch.mjs';
 const record=o=>o&&typeof o==='object'&&!Array.isArray(o),id=s=>typeof s==='string'&&/^[\w-]{1,100}$/.test(s),unit=n=>Number.isFinite(n)&&n>=0&&n<=1;
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
@@ -74,7 +75,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
   if(!record(documents)||Object.keys(documents).length>imageDocumentLimit)throw Error('工程最多包含 16 个图像文档');
   let stamps=0;
   for(const [key,doc] of Object.entries(documents)){
-    if(!id(key)||!exact(doc,['name','width','height','colorSpace','layers'])||!label(doc.name)||doc.width!==4096||doc.height!==4096||!['srgb','linear'].includes(doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>64)throw Error('图像文档无效');
+    if(!id(key)||!exact(doc,['name','width','height','colorSpace','layers'])||!label(doc.name)||doc.width!==4096||doc.height!==4096||!['srgb','linear'].includes(doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>imageLayerLimit)throw Error('图像文档无效');
     const ids=new Set();
     for(const [index,layer] of doc.layers.entries()){
       if(!exact(layer,['id','kind','parentId',...layerFields,'strokes','maskStrokes','text'])||!id(layer.id)||ids.has(layer.id)||typeof layer.kind!=='string'||!Object.hasOwn(layerNames,layer.kind)||!label(layer.name)||typeof layer.visible!=='boolean'||typeof layer.locked!=='boolean'||!unit(layer.opacity)||!(imageBlendModes.includes(layer.blend)||layer.kind==='group'&&layer.blend===imageGroupBlend)||typeof layer.maskEnabled!=='boolean'||!unit(layer.maskBase))throw Error('图像图层无效');
@@ -148,7 +149,7 @@ function imageGroupName(layers){
   return name;
 }
 export function imageDocumentOperation(paint,o,{requireUnlocked}){
-  if(!exact(o,['op','action','documentId','newDocumentId','layerId','layerIds','parentId','anchorId','placement','sourceLayerId','reveal','copy','clipped','patch','kind','target','stroke','transform','rect',...uvShapeFields,'index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
+  if(!exact(o,['op','action','documentId','newDocumentId','layerId','layerIds','copyIds','parentId','anchorId','placement','sourceLayerId','reveal','copy','clipped','patch','kind','target','stroke','transform','rect',...uvShapeFields,'index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
   const documents=paint.imageDocuments??={},doc=Object.hasOwn(documents,o.documentId)?documents[o.documentId]:null;
   if(o.action==='create'){
     if(doc||!exact(o.patch??{},['name','colorSpace']))throw Error('图像文档已存在或参数无效');
@@ -193,6 +194,21 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     if(!id(o.layerId)||doc.layers.some(l=>l.id===o.layerId)||!exact(o.patch??{},['name']))throw Error('新图层组参数无效');
     groupImageLayers(doc,o.layerIds,{id:o.layerId,kind:'group',name:imageGroupName(doc.layers),...imageLayerDefaults,blend:imageGroupBlend,...o.patch});
     return;
+  }
+  const batchFields=['op','action','documentId','layerIds'];
+  if(o.action==='moveLayers'){
+    if(!exact(o,[...batchFields,'anchorId','placement']))throw Error('图层移动参数无效');
+    const plan=planImageLayerMove(doc.layers,o.layerIds,o);
+    if(!plan.changed)throw Error('图层顺序没有变化');
+    doc.layers=plan.layers;return;
+  }
+  if(o.action==='duplicateLayers'){
+    if(!exact(o,[...batchFields,'copyIds']))throw Error('图层复制参数无效');
+    doc.layers=duplicateImageLayerBatch(doc.layers,o.layerIds,o.copyIds);return;
+  }
+  if(o.action==='removeLayers'){
+    if(!exact(o,batchFields))throw Error('图层删除参数无效');
+    doc.layers=planImageLayerDelete(doc.layers,o.layerIds).layers;return;
   }
   const index=doc.layers.findIndex(l=>l.id===o.layerId),layer=doc.layers[index];if(!layer)throw Error('图像图层不存在');
   const owner=layerLockOwner(doc.layers,layer);

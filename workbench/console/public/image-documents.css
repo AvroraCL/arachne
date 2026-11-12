@@ -223,6 +223,16 @@
 }
 .document-layer-mask[data-disabled] canvas{opacity:.4}
 .document-layer-error:empty{display:none}
+.document-layer-feedback{
+  flex:none;padding:3px 8px;min-height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--chrome-muted,#aaa);font-size:11px;line-height:16px
+}
+.document-layer-drop-note{
+  position:absolute;z-index:4;inset:auto 6px calc(var(--chrome-control) + 10px);
+  padding:5px 8px;border:1px solid #ffffff19;border-radius:3px;background:#30363c;
+  color:#eee;line-height:1.4;font-size:12px;overflow-wrap:anywhere;pointer-events:none
+}
+.document-layer-drop-note[data-blocked]{color:#e1bc8e;background:#352f29}
 .document-layer-actions{
   display:flex;align-items:center;flex:none;gap:2px;padding:3px 5px;
   border-top:1px solid var(--chrome-line);background:var(--chrome-panel-title);
