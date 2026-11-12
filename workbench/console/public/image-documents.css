@@ -19,6 +19,24 @@
 #workspace .document-parameter-strip>button[aria-disabled=true]{color:var(--ui-muted);opacity:.46;cursor:default}
 .document-parameter-strip>button .chrome-icon{width:12px;height:12px}
 .document-parameter-back .chrome-icon{transform:rotate(180deg)}
+.document-brush-popup{flex:none;margin-inline-start:4px}
+.document-brush-popup[hidden]{display:none}
+#workspace .document-brush-popup>summary{
+  display:grid;place-items:center;width:30px;height:var(--chrome-control);padding:0;list-style:none;cursor:pointer;
+  border:0;border-radius:var(--chrome-radius);background:transparent;color:var(--chrome-text);
+}
+#workspace .document-brush-popup>summary:is(:hover,:focus-visible),#workspace .document-brush-popup[open]>summary{background:var(--chrome-hover)}
+.document-brush-popup>summary::-webkit-details-marker{display:none}
+.document-brush-popup>summary .chrome-icon{width:16px;height:16px}
+.document-brush-popup-content{
+  position:fixed;inset:auto;margin:0;width:min(246px,calc(100vw - 12px));max-height:calc(100vh - 18px);
+  overflow:auto;padding:8px;color:var(--chrome-text);background:var(--chrome-panel-title);
+  border:1px solid var(--chrome-line);border-radius:6px;box-shadow:0 8px 28px #0007;
+}
+.document-brush-popup-content:popover-open{display:grid;gap:4px}
+.document-brush-popup-content>label{display:grid;grid-template-columns:1fr minmax(0,1fr);gap:8px;align-items:center;min-height:27px;padding-inline:3px}
+.document-brush-popup-content>label:has(input[type=checkbox]){grid-template-columns:1fr auto}
+.document-brush-popup-content .workspace-range-field{width:100%;min-width:0}
 .document-tool-parameters{
   display:flex;align-items:center;gap:8px;min-width:0;height:calc(var(--chrome-control) + 4px);
   overflow-x:auto;overflow-y:hidden;scrollbar-width:none;

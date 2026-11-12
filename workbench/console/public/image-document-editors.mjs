@@ -1,7 +1,7 @@
 import {copyImagePixels,copiedImage,onImageClipboardChange,imageClipboardPlacement} from './image-clipboard.mjs';
 import {compositionKey} from './text-input.mjs';
 import {drawingImageTypes,acceptsDrawingImage,prepareDrawingImage} from './drawing-image-import.mjs';
-import {headerControls,chromeButton,createContextActions} from './area-chrome.mjs';
+import {headerControls,chromeButton,chromeMenu,createContextActions} from './area-chrome.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
 import {createLiveView} from './paint-live-view.mjs';
@@ -143,14 +143,31 @@ export function createDocumentEditor(ctx,bridge){
   scrollBack.classList.add('document-parameter-back');
   scrollForward.classList.add('document-parameter-forward');
   scrollBack.hidden=scrollForward.hidden=true;
-  parameterStrip.append(scrollBack,parameters,scrollForward);
+  const brushOptions=el('details','document-brush-popup'),brushSummary=el('summary');
+  const brushPopup=el('div','document-brush-popup-content');
+  brushPopup.tabIndex=-1;brushPopup.setAttribute('role','dialog');brushPopup.setAttribute('aria-label','笔尖参数');
+  chromeButton(brushSummary,'settings','笔尖参数');brushSummary.setAttribute('role','button');brushSummary.setAttribute('aria-haspopup','dialog');
+  brushSummary.setAttribute('aria-expanded','false');
+  brushOptions.append(brushSummary,brushPopup);brushOptions.hidden=true;
+  chromeMenu(brushOptions,brushPopup);
+  brushOptions.addEventListener('toggle',()=>{
+    brushSummary.setAttribute('aria-expanded',String(brushOptions.open));
+    if(brushOptions.open&&document.activeElement===brushSummary)brushPopup.focus({preventScroll:true});
+  },{signal});
+  brushSummary.addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||!brushOptions.open)return;
+    event.preventDefault();event.stopPropagation();brushOptions.open=false;
+    if(brushPopup.matches(':popover-open'))brushPopup.hidePopover();
+  },{signal});
+  parameterStrip.append(scrollBack,parameters,scrollForward,brushOptions);
   const rail=el('aside','document-tools'),toolList=el('div','document-tool-list');
   const stage=el('div','editor-image-stage document-image-stage'),canvas=el('canvas'),empty=el('div','document-empty'),status=el('output','editor-message');
   rail.append(toolList);
   options.setAttribute('role','group');options.setAttribute('aria-label','图像工具选项');
   viewOptions.setAttribute('role','group');viewOptions.setAttribute('aria-label','画布缩放');
   function syncParameterEdges(){
-    const overflowing=parameterStrip.clientWidth>0&&parameters.scrollWidth>parameterStrip.clientWidth+1;
+    const available=parameterStrip.clientWidth-brushOptions.offsetWidth;
+    const overflowing=available>0&&parameters.scrollWidth>available+1;
     scrollBack.hidden=scrollForward.hidden=!overflowing;
     const remaining=parameters.scrollWidth-parameters.clientWidth-parameters.scrollLeft;
     const hasPrevious=overflowing&&parameters.scrollLeft>1,hasNext=overflowing&&remaining>1;
@@ -162,8 +179,16 @@ export function createDocumentEditor(ctx,bridge){
   function scrollParameters(direction){
     const control=direction===1?scrollForward:scrollBack;
     if(control.getAttribute('aria-disabled')==='true')return;
+    const at=parameters.scrollLeft,max=parameters.scrollWidth-parameters.clientWidth;
+    const root=parameters.getBoundingClientRect().left;
+    const visible=[...parameters.children].filter(item=>!item.hidden);
+    const items=visible.flatMap(item=>item.matches('.editor-toolbar')?[...item.children].filter(child=>!child.hidden):[item]);
+    const boundaries=[0,max,...items.map(item=>item.getBoundingClientRect().left-root+at)];
+    const target=at+direction*Math.max(48,parameters.clientWidth*.75);
+    const next=boundaries.filter(position=>direction*(position-at)>1&&position>=0&&position<=max)
+      .reduce((best,position)=>Math.abs(position-target)<Math.abs(best-target)?position:best,direction===1?max:0);
     const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
-    parameters.scrollBy({left:direction*Math.max(48,parameters.clientWidth*.75),behavior:reduceMotion?'instant':'smooth'});
+    parameters.scrollTo({left:next,behavior:reduceMotion?'instant':'smooth'});
   }
   const stripResize=new ResizeObserver(syncParameterEdges);
   stripResize.observe(parameterStrip);
@@ -186,12 +211,30 @@ export function createDocumentEditor(ctx,bridge){
     input.dataset.scrubSpeed=String(speed);
   }
   controls.bar.classList.add('document-brush-options');
+  const brushFields=['brush-hardness','brush-opacity','brush-flow','brush-spacing','brush-uv-pressure'].map(key=>{
+    const label=elements[key].closest('label'),anchor=document.createComment(key),popupAnchor=document.createComment(key);
+    label.before(anchor);brushPopup.append(popupAnchor);
+    return {key,label,anchor,popupAnchor};
+  });
   parameters.append(controls.bar);
   options.append(toolName,parameterStrip,viewOptions);
   host.classList.add('document-editor');host.append(options,rail,stage,status,importInput);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
   let mode=state.tool||'orbit',selectionShape=Object.hasOwn(selectionNames,state.selectionTool)?state.selectionTool:'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
   let lassoShape=state.lassoShape==='polygon'?'polygon':'lasso';
   let painter,gradientTool,bucketTool,cloneTool,shapeTool,pendingImageEdit=null,previewCaption='',fillGroup=state.fillGroup==='bucket'?'bucket':'gradient';
+  function layoutBrushOptions(){
+    const width=host.clientWidth,compact=width>0&&width<780,small=width>0&&width<440;
+    const enabled=compact&&['paint','mask','clone'].includes(mode);
+    if(!enabled&&brushOptions.open)brushOptions.open=false;
+    brushOptions.hidden=!enabled;
+    for(const {key,label,anchor,popupAnchor} of brushFields){
+      const primary=key==='brush-hardness'||key==='brush-opacity';
+      const docked=compact&&(!primary||small);
+      if(docked&&label.parentNode!==brushPopup)popupAnchor.after(label);
+      else if(!docked&&label.parentNode!==controls.bar)anchor.after(label);
+    }
+    syncParameterEdges();
+  }
   function extent(){return Math.max(1,Math.min(stage.clientWidth,stage.clientHeight)-48);}
   function layout(){
     if(!shown)return;
@@ -204,7 +247,7 @@ export function createDocumentEditor(ctx,bridge){
       if(status.textContent!==label)status.textContent=label;
     }
     painter?.refreshUVCursor();
-    selection?.sync();gradientTool?.layout();cloneTool?.layout();shapeTool?.layout();syncParameterEdges();ctx.onChange();
+    selection?.sync();gradientTool?.layout();cloneTool?.layout();shapeTool?.layout();layoutBrushOptions();ctx.onChange();
   }
   const imageOrigin=()=>({id:project.document?.id,revision:project.document?.revision,imageDocumentId:project.imageContext?.documentId});
   const mapOperation=(op,origin)=>op?surfaceToImageCommand(op,origin?.imageDocumentId||project.imageContext?.documentId):null;
@@ -420,7 +463,7 @@ export function createDocumentEditor(ctx,bridge){
     cloneTool?.setActive(next==='clone');
     shapeTool?.setActive(next==='shape');
     syncToolName();
-    controls.bar.hidden=!['paint','mask','clone'].includes(next);painter.render();syncParameterEdges();ctx.onChange();
+    controls.bar.hidden=!['paint','mask','clone'].includes(next);painter.render();layoutBrushOptions();ctx.onChange();
   }
   const fitCanvas=button('适应画布',()=>{zoom=1;pan=[0,0];layout();}),actualSize=button('100%',()=>{zoom=4096/extent();pan=[0,0];layout();});
   chromeButton(fitCanvas,'fit');fitCanvas.append(el('span','document-fit-label','适应画布'));

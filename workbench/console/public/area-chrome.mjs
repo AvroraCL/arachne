@@ -61,6 +61,7 @@ export function chromeMenu(menu,content){
     else{state.focusOnOpen=event.key==='ArrowUp'?'last':'first';menu.open=true;}
   });
   content.addEventListener('keydown',event=>{
+    if(event.defaultPrevented)return;
     if(event.key==='Escape'){
       event.preventDefault();event.stopPropagation();menu.open=false;
       if(content.matches(':popover-open'))content.hidePopover();

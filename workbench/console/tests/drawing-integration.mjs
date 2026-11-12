@@ -1013,6 +1013,17 @@ try{
   assert.equal(await opacityReadout.evaluate(node=>node.scrollWidth<=node.clientWidth),true);
   const parameters=editor.locator('.document-tool-parameters');
   await parameters.waitFor();
+  const brushParams=editor.getByRole('button',{name:'笔尖参数',exact:true});
+  if(!await brushParams.isVisible())await page.setViewportSize({width:820,height:600});
+  await brushParams.click();
+  const brushPopup=editor.getByRole('dialog',{name:'笔尖参数',exact:true});
+  await brushPopup.waitFor();
+  await brushPopup.getByRole('checkbox',{name:'压感',exact:true}).waitFor();
+  assert.equal(await brushPopup.locator('[data-brush-setting="brush-flow"]').count(),1);
+  await page.screenshot({path:path.join(data,'compact-brush-options.png')});
+  await page.keyboard.press('Escape');
+  await brushPopup.waitFor({state:'hidden'});
+  await editor.getByRole('button',{name:'矩形选区',exact:true}).click();
   const nextParameters=editor.getByRole('button',{name:'下一组工具参数',exact:true});
   const previousParameters=editor.getByRole('button',{name:'上一组工具参数',exact:true});
   if(!await nextParameters.isVisible())await page.setViewportSize({width:820,height:600});
@@ -1022,6 +1033,7 @@ try{
   await page.screenshot({path:path.join(data,'compact-drawing-tools.png')});
   await previousParameters.click();
   await editor.locator('.document-tool-parameters[data-scroll-start]').waitFor({state:'hidden'});
+  await brushTool.click();
   const radiusBeforeTip=Number(await option('像素半径').inputValue());
   const hardnessBeforeTip=Number(await option('硬度').inputValue());
   const [tipX,tipY]=await point([.47,.53]);
