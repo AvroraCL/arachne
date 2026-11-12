@@ -80,7 +80,8 @@ export function createMaterialStrokeSave({workspace,project,readLatest,onSettled
       if(gestureOwner!==null&&gestureOwner!==owner)return;
       gestureOwner=null;queue.submit(operation,origin);
     },
-    release,syncPreview:()=>syncPreview(true),retrySave,
+    release,syncPreview:()=>syncPreview(true),retrySave,flush:()=>queue.flush(),
+    get editing(){return gestureOwner!==null;},
     get size(){return queue.size;},get saving(){return queue.saving;},
     status:()=>({pending:queue.size,saving:queue.saving,failure:queue.failure}),
     dispose(){unsubscribe();recovery.remove();delete workspace.dataset.pendingMaterialStrokes;}

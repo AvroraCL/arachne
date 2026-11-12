@@ -59,7 +59,17 @@
 .mask-effects-add .custom-select{width:auto}
 .mask-effect{background:#ffffff03}
 .mask-effect+.mask-effect{margin-top:2px}
-.mask-effect-row{min-height:27px;gap:1px}
+.mask-effect-row{position:relative;min-height:27px;gap:1px}
+.mask-effect-row[data-effect-drop]::after{
+  content:'';position:absolute;inset-inline:4px;block-size:2px;background:var(--accent,#7296bc);pointer-events:none
+}
+.mask-effect-row[data-effect-drop=above]::after{top:0}
+.mask-effect-row[data-effect-drop=below]::after{bottom:0}
+.mask-effect[data-effect-dragging] .mask-effect-row{opacity:.65}
+#workspace .property-section-body .mask-effect-grip{
+  flex:0 0 15px;min-width:15px;min-height:24px;padding:0;background:transparent;color:#979797;cursor:grab
+}
+.mask-effect-grip .chrome-icon{width:13px;height:13px;pointer-events:none}
 .mask-effect[data-open] .mask-effect-row{background:#ffffff08}
 .mask-effect[data-disabled] .mask-effect-toggle{opacity:.6}
 .mask-effect-toggle{flex:1;min-height:26px;justify-content:flex-start;gap:3px;text-align:left}

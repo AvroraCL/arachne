@@ -20,7 +20,7 @@ import {createBrushBinding} from './paint-brush-binding.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {navigationCommand} from './viewport-navigation.mjs';
 import {createViewportProjectViews} from './viewport-project-views.mjs';
-import {layerIsVisible,layerLockOwner} from './paint-layer-tree.mjs';
+import {layerIsVisible,layerLockOwner,hasMaterialMask} from './paint-layer-tree.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {outlineBranches,outlineNameMatches,outlineRows} from './scene-outline.mjs';
 import {createSceneContextMenu} from './scene-context-menu.mjs';
@@ -92,7 +92,7 @@ export function registerAreaEditors(registry,bridge){
         const added=doc.paint.layers.at(-1);if(!disposed&&project.document?.id===origin.id&&project.layerId===selected&&project.document.paint.layers.some(l=>l.id===added?.id))project.selectLayer(added.id);
       }).catch(ctx.error);
     },{signal});
-    const modes=choice('交互模式',[['view','查看'],['object','物体模式'],['edit','编辑模式'],['paint','材质绘制'],['mask','蒙版绘制'],['fill','蒙版填充'],['place','贴花放置']],mode,next=>setMode(next));
+    const modes=choice('交互模式',[['view','查看'],['object','物体模式'],['edit','编辑模式'],['paint','材质绘制'],['mask','蒙版绘制'],['fill','蒙版填充'],['place','贴花放置']],mode,next=>void chooseMode(next));
     const component=choice('选择类型',[['vertex','点'],['edge','边'],['face','面']],state.element||'vertex',value=>{modeler.setElement(value);onChange();});
     function resetNumeric(){for(const i of axes){i.value=tool.value==='scale'?'1':'0';i.dispatchEvent(new Event('range-ui'));}}
     const tool=choice('变换工具',[['translate','移动'],['rotate','旋转'],['scale','缩放']],state.tool||'translate',value=>{modeler.setTool(value);resetNumeric();onChange();});
@@ -340,7 +340,9 @@ export function registerAreaEditors(registry,bridge){
       context:()=>{
         const doc=project.document,l=selectedLayer(project),origin={id:doc?.id,revision:doc?.revision,layerId:l?.id,target:mode==='paint'?'material':'mask'};
         const ready=!['object','edit'].includes(mode)&&view.dataset.state==='ready',brush=['paint','mask','fill'].includes(mode);
-        const strokeEnabled=ready&&!!l&&(!bridge.busy()||bridge.materialStrokes.saving)&&bridge.materialStrokes.accepts(ctx.areaId,origin);
+        const target=bridge.propertyTarget(),strokeEnabled=ready&&!!l&&target.layerId===l.id&&!target.multiple&&
+          (mode==='paint'?target.target==='material'&&l.kind==='paint':target.target==='mask'&&hasMaterialMask(l))&&
+          (!bridge.busy()||bridge.materialStrokes.saving)&&bridge.materialStrokes.accepts(ctx.areaId,origin);
         return {...origin,enabled:ready&&(!bridge.busy()||brush&&strokeEnabled),strokeEnabled,uvEnabled:false,
         brushColor:bridge.foreground(),sampledMaterial:currentSample(l),maskValue:bridge.maskInk(),maskTarget:['mask','fill'].includes(mode),layer:l?{...l,projectionCurrent:projectionIsCurrent(doc,l),visible:layerIsVisible(doc.paint.layers,l),locked:!!layerLockOwner(doc.paint.layers,l)}:null};},
       preview:(op,origin)=>{
@@ -400,9 +402,14 @@ export function registerAreaEditors(registry,bridge){
       resolution.textContent=bridge.materialStrokes.size?`${label}${label?' · ':''}${bridge.materialStrokes.size} 笔待保存`:label;
       if(display.channel&&!inspection&&view.dataset.state==='ready')
         status.textContent=(displayedChannel?'通道 · ':'等待通道 · ')+channelSpecs[display.channel].name;
+      else if(['paint','mask','fill'].includes(mode)&&view.dataset.state==='ready'&&selectedLayer(project)){
+        const layer=selectedLayer(project);
+        status.textContent=(mode==='paint'?'材质绘制':'蒙版')+' · '+layer.name+(mode!=='paint'&&layer.maskEnabled===false?' · 已停用':'');
+      }
       else if(!inModeling()&&!placement&&view.dataset.state==='ready')
         status.textContent=rendered?'路径追踪':textured&&frame?'实时材质':textured?textureMessage:'';
       else if(inModeling())showModelStatus();
+      status.title=status.textContent;
       resolution.title=rendered?cycles.text:preview?.message||'';
       retry.hidden=rendered?!cycles.retry:!(preview?.error||preview?.phase==='error');
     }
@@ -459,8 +466,21 @@ export function registerAreaEditors(registry,bridge){
     view.addEventListener('contextmenu',event=>{
       if(event.shiftKey&&event.target.matches('canvas')&&inModeling())event.preventDefault();
     },{signal});
+    async function chooseMode(next){
+      if(!['paint','mask','fill'].includes(next)){setMode(next);return;}
+      try{
+        if(await bridge.selectSurfaceTarget(project.layerId,next)){setMode(next);return;}
+      }catch(error){ctx.error(error);}
+      modes.value=mode;syncSelectMenu(modes);
+    }
+    function reconcilePaintTarget(){
+      if(!['paint','mask','fill'].includes(mode)||painter.isEditing())return;
+      const target=bridge.propertyTarget(),layer=!target.multiple&&project.document?.paint.layers.find(item=>item.id===target.layerId);
+      const next=target.target==='mask'&&hasMaterialMask(layer)?(mode==='fill'?'fill':'mask'):layer?.kind==='paint'?'paint':'view';
+      if(next!==mode)setMode(next);
+    }
     function setMode(next){
-      if(modeler.isDragging()||painter.isEditing()){modes.value=mode;return;}
+      if(modeler.isDragging()||painter.isEditing()){modes.value=mode;syncSelectMenu(modes);return;}
       marquee.cancel();cursorMenu.close();selectionMenu.close();meshMenu.close();
       modeGeneration++;mode=next;modes.value=next;picking=false;pickerMessage='';syncSelectMenu(modes);painter.setMode(['paint','mask','fill','place'].includes(mode)?mode:'orbit');
       if(view.dataset.state==='ready'){
@@ -519,6 +539,7 @@ export function registerAreaEditors(registry,bridge){
         return;
       }
       if(view.dataset.state!=='ready')return;
+      reconcilePaintTarget();
       display.setChannels(activePaintChannels(doc.paint));
       syncSceneCursor();
       frameButton.disabled=false;
@@ -572,7 +593,7 @@ export function registerAreaEditors(registry,bridge){
         event.preventDefault();event.stopPropagation();return;
       }
       if(['object','edit'].includes(mode)&&modeler.transformKey(event,lastPointer)){event.preventDefault();event.stopPropagation();resetNumeric();onChange();return;}
-      if(mod&&key==='z'){event.preventDefault();if(['object','edit'].includes(mode)){if(!modeler.cancelTransform())modeler.travel(event.shiftKey?'redo':'undo');}else void project.travel(event.shiftKey?'redo':'undo').catch(ctx.error);}
+      if(mod&&key==='z'){event.preventDefault();if(['object','edit'].includes(mode)){if(!modeler.cancelTransform())modeler.travel(event.shiftKey?'redo':'undo');}else if(!painter.isEditing()||event.shiftKey)void project.travel(event.shiftKey?'redo':'undo').catch(ctx.error);else painter.cancel({preserveMode:true});}
       else if(key==='tab'&&event.target.matches('canvas')&&!mod&&!event.altKey&&!event.shiftKey){event.preventDefault();setMode(mode==='edit'?'object':'edit');}
       else if(key==='escape'){modeler.cancelTransform();painter.cancel({preserveMode:true});if(placement){placement=null;setMode('view');}}
       else if(['x','d'].includes(key)&&['paint','mask','fill'].includes(mode)){sampledBrush=null;bridge.colorKey(key,['mask','fill'].includes(mode)?'mask':'paint');maskInk.value=String(Math.round(bridge.maskInk()));syncPicker();}
@@ -625,6 +646,7 @@ export function registerAreaEditors(registry,bridge){
     setMode(mode);viewportControllers.set(ctx.areaId,publishScene);
     viewport.setActive(true);void sync().catch(ctx.error);
     return {kind:'viewport',viewport,showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
+      editCommand(name){if(name==='undo'&&painter.isEditing())return painter.cancel({preserveMode:true});},
       getState(){rememberView();return {mode,element:component.value,tool:tool.value,orientation:orientation.value,pivot:transformPivot.value,
         ...display.getState(),projectViews:projectViews.snapshot()};},
       isEditing:()=>smoothing.isOpen()||modeler.isDragging()||painter.isEditing()||marquee.isDragging()||regionGesture.editing()||focusGesture.editing(),

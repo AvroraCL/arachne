@@ -70,6 +70,14 @@ try {
     node tests/windows-desktop-integration.mjs $executable
     if ($LASTEXITCODE -ne 0) { throw 'The installed application failed desktop acceptance' }
 
+    # Exercise the shared workbench and disk format with a separate project.
+    # The installed-window checks above keep using their own native profile.
+    if ($env:ARACHNE_DESKTOP_SCREENSHOTS) {
+        $env:ARACHNE_PRODUCTION_SCREENSHOTS = Join-Path $env:ARACHNE_DESKTOP_SCREENSHOTS 'production'
+    }
+    node tests/production-workflow-integration.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'The material, drawing and portable export workflow failed' }
+
     $settings = Join-Path $profile 'desktop.json'
     $projectId = (Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json).project
     $project = Join-Path $profile "data\projects\$projectId\project.json"
@@ -93,4 +101,5 @@ try {
     Write-Host 'PASS reinstall and uninstall preserve the project and desktop settings'
 } finally {
     Remove-Item Env:ARACHNE_DESKTOP_TEST_PROFILE -ErrorAction SilentlyContinue
+    Remove-Item Env:ARACHNE_PRODUCTION_SCREENSHOTS -ErrorAction SilentlyContinue
 }

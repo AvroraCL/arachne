@@ -111,8 +111,18 @@ import WebKit
             guard try await nodes() == baseline else { return false }
             return try await js("return document.getElementById('native-focus-probe').value") as? String == text
         }
+        let textRevision = try await project()?["revision"] as? Int
+        workbench.perform("undo")
+        try await waitFor("Undo in the focused text input without changing the graph") {
+            guard try await project()?["revision"] as? Int == textRevision else { return false }
+            return try await js("return document.getElementById('native-focus-probe').value") as? String == ""
+        }
+        workbench.perform("redo")
+        try await waitFor("Redo in the focused text input") {
+            try await js("return document.getElementById('native-focus-probe').value") as? String == text
+        }
         _ = try await js("document.getElementById('native-focus-probe').remove()")
-        print("PASS native WebKit node select/copy/paste/undo and focused Chinese text cut/paste")
+        print("PASS native WebKit node select/copy/paste/undo and focused Chinese text cut/paste/undo/redo")
         _ = try await js("document.querySelector('[data-area-mode=drawing]').click()")
         try await waitFor("Create a drawing from the Mac workbench") {
             try await js("""

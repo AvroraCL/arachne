@@ -169,10 +169,21 @@ async function verifyProceduralMasks(cubeId){
   const [edge,noise,copy]=copiedEffect.paint.layers[0].maskEffects;
   assert.notEqual(noise.id,copy.id);
   assert.deepEqual({...copy,id:noise.id},noise);
-  const copiedRow=wearPage.locator('[data-effect-id="'+copy.id+'"]');
+  const properties=wearPage.locator('.editor-area[data-editor=properties]').first();
+  const copiedRow=properties.locator('[data-effect-id="'+copy.id+'"]');
   await copiedRow.getByRole('checkbox',{name:'启用表面噪声',exact:true}).uncheck();
   await until(async()=>!(await api(wearRoute)).paint.layers[0].maskEffects[2].enabled);
-  await copiedRow.getByRole('button',{name:'下移表面噪声',exact:true}).click();
+  await until(async()=>await wearPage.locator('#project-save-state').textContent()==='已保存');
+  const grip=copiedRow.getByRole('button',{name:'拖动排序 · 表面噪声',exact:true});
+  const noiseRow=properties.locator('[data-effect-id="'+noise.id+'"] .mask-effect-row');
+  const source=await grip.boundingBox(),target=await noiseRow.boundingBox(),mouse=wearPage.mouse;
+  await mouse.move(source.x+source.width/2,source.y+source.height/2);await mouse.down();
+  await mouse.move(source.x+source.width/2,source.y+source.height/2+10,{steps:4});
+  await mouse.move(target.x+target.width*.45,target.y+target.height-4,{steps:12});
+  await mouse.move(target.x+target.width*.46,target.y+target.height-4);
+  await noiseRow.and(wearPage.locator('[data-effect-drop=below]')).waitFor({timeout:5000});
+  await wearPage.screenshot({path:path.join(data,'material-mask-effect-order.png')});
+  await mouse.up();
   const reordered=await until(async()=>{
     const current=await api(wearRoute);
     return current.paint.layers[0].maskEffects[1].id===copy.id&&current;
@@ -228,8 +239,20 @@ async function verifyProceduralMasks(cubeId){
     'import json,sys;from PIL import Image;im=Image.open(sys.argv[1]);print(json.dumps([im.size,im.getpixel((98,3072))]))',
     correctedFile],{encoding:'utf8'}));
   assert.deepEqual(correctedPixels,[[4096,4096],[24,37,55]]);
+  await wearPage.locator('.editor-viewport[data-state=ready]').first().waitFor();
+  const mode=wearPage.locator('.editor-area[data-editor=viewport]').first().getByRole('button',{name:'交互模式',exact:true});
+  const targetMask=wearPage.getByRole('button',{name:'绘制蒙版 · 金属磨边',exact:true});
+  await targetMask.and(wearPage.locator('[aria-pressed=true]')).waitFor();
+  await mode.filter({hasText:'蒙版绘制'}).waitFor();
+  await wearPage.locator('.editor-area[data-editor=layers]').getByRole('button',{name:'金属磨边',exact:true}).click();
+  await mode.filter({hasText:'查看'}).waitFor();
+  assert.equal(await targetMask.getAttribute('aria-pressed'),'false');
+  await mode.click();await wearPage.getByRole('option',{name:'蒙版填充',exact:true}).click();
+  await mode.filter({hasText:'蒙版填充'}).waitFor();
+  await targetMask.and(wearPage.locator('[aria-pressed=true]')).waitFor();
+  assert.equal((await api(wearRoute)).revision,redoCorrection.revision);
   await wearPage.close();
-  console.log('PASS live mesh wear, noise subtraction, compact effect controls, post-effect brush, 4K pixels, UV protection and undo/redo');
+  console.log('PASS live mesh wear, noise subtraction, effect drag order, exact 4K pixels, saved mask focus, viewport tool sync and undo/redo');
 
 }
 

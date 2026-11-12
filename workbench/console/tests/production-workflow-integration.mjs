@@ -12,6 +12,8 @@ import {primitiveGlb} from '../primitive-model.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
 
 const data=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-production-'));
+const evidence=process.env.ARACHNE_PRODUCTION_SCREENSHOTS||data;
+await fs.mkdir(evidence,{recursive:true});
 const profile=path.join(data,'工作工程'),restoredProfile=path.join(data,'恢复副本');
 const probe=path.join(data,'blender-probe'),marker=path.join(data,'blender-invoked');
 if(process.platform!=='win32')await fs.writeFile(probe,'#!/bin/sh\ntouch "$(dirname "$0")/blender-invoked"\nexit 42\n',{mode:0o700});
@@ -139,30 +141,42 @@ try{
   await until(async()=>wearState(await readDoc()).maskStrokeOrder==='after','手绘覆盖效果');
   await until(async()=>await page.locator('#project-save-state').textContent()==='已保存','材质参数已保存');
   const beforeStrokes=await readDoc(),strokeAttempts=[];
-  let releaseFirst;
+  let releaseFirst,undoGate;
   const firstGate=new Promise(resolve=>{releaseFirst=resolve;});
   await page.route(origin+paint+'/commands',async intercepted=>{
     const request=intercepted.request().postDataJSON();
     if(request?.operations?.[0]?.op!=='stroke'){await intercepted.continue();return;}
     strokeAttempts.push(request.strokeRequestId);
+    if(undoGate)await undoGate;
     if(strokeAttempts.length!==1){await intercepted.continue();return;}
     await firstGate;
     assert.equal((await intercepted.fetch()).status(),200);
     await intercepted.abort('connectionreset');
   });
+  const previewStart=performance.now();
+  const batchFrame=page.waitForResponse(response=>{
+    if(!response.url().endsWith('/paint/live')||response.status()!==200)return false;
+    const operations=response.request().postDataJSON()?.operations;
+    return operations?.length===2&&operations.every(op=>op.op==='stroke'&&op.target==='mask');
+  },{timeout:60000}).catch(error=>error);
   try{
     await brush(page,viewport(),[.48,.5],[.53,.5]);
     await until(()=>strokeAttempts.length===1,'第一笔正在保存');
     await brush(page,viewport(),[.49,.45],[.53,.45]);
     await until(()=>page.locator('#workspace').getAttribute('data-pending-material-strokes').then(value=>value==='2'),'连续两笔在队列中');
+    const preview=await batchFrame;
+    if(preview instanceof Error)throw preview;
+    assert.equal(preview.headers()['x-paint-resolution'],'256');
+    console.log('Material preview for two pending strokes: 256 px in '+Math.round(performance.now()-previewStart)+' ms on this runner');
   }finally{releaseFirst();}
   const recovery=page.locator('.material-stroke-recovery');
   await recovery.getByRole('alert').filter({hasText:'2 笔待保存'}).waitFor();
   assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'unsaved');
   assert.equal(wearState(await readDoc()).maskStrokes.length,1);
-  await page.screenshot({path:path.join(data,'01-material-save-recovery.png')});
+  await page.screenshot({path:path.join(evidence,'01-material-save-recovery.png')});
   await page.reload();
   await recovery.getByRole('alert').filter({hasText:'从此窗口恢复'}).waitFor();
+  await page.getByRole('button',{name:'绘制蒙版 · 旧化 · 磨痕',exact:true}).and(page.locator('[aria-pressed=true]')).waitFor();
   await recovery.getByRole('button',{name:'重试保存笔触',exact:true}).click();
   const wearing=await until(async()=>{const doc=await readDoc();return wearState(doc).maskStrokes?.length===2&&doc;},'重载后恢复三维笔触');
   assert.equal(wearing.revision,beforeStrokes.revision+2);
@@ -170,7 +184,21 @@ try{
   assert.ok(strokeAttempts.every(id=>wearing.strokeSaveReceipts.some(receipt=>receipt.id===id)));
   assert.ok(wearState(wearing).maskStrokes[0].stamps.length>0);
   await recovery.waitFor({state:'hidden'});await viewport().waitFor();
-  await page.screenshot({path:path.join(data,'01-material-mask.png')});
+  await page.locator('#workspace[data-preview-resolution="4096"]').waitFor({timeout:60000});
+  await page.screenshot({path:path.join(evidence,'01-material-mask.png')});
+  let releaseUndo;
+  undoGate=new Promise(resolve=>{releaseUndo=resolve;});
+  try{
+    await brush(page,viewport(),[.48,.55],[.53,.55]);
+    await until(()=>strokeAttempts.length===3,'第三笔还在写入');
+    assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('undo')),true);
+    assert.equal((await readDoc()).revision,wearing.revision);
+  }finally{releaseUndo();}
+  const afterQuickUndo=await until(async()=>{
+    const doc=await readDoc();return doc.revision===wearing.revision+2&&doc;
+  },'保存中的笔触落盘后撤销');
+  assert.deepEqual(wearState(afterQuickUndo),wearState(wearing));
+  await until(async()=>await page.locator('#project-save-state').textContent()==='已保存','撤销后的修订已保存');
   console.log('PASS imported uncached GLB with original UV, chose 4K texture, composed mask effects and recovered two real 3D strokes without a duplicate');
 
   await page.locator('[data-area-mode=drawing]').click();
@@ -232,7 +260,8 @@ try{
   const linked=await until(async()=>{
     const doc=await readDoc();return doc.paint.layers.find(item=>item.id===surface.id).documentMaps?.color===documentId&&doc;
   },'图像文档联动材质颜色');
-  await page.screenshot({path:path.join(data,'02-drawing-layers.png')});
+  await editor().locator('.document-image-stage[data-preview-size="4096"][data-preview-revision="'+linked.revision+'"]').waitFor({timeout:60000});
+  await page.screenshot({path:path.join(evidence,'02-drawing-layers.png')});
   assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('save')),true);
   await until(async()=>await page.locator('#project-save-state').textContent()==='已保存','保存反馈');
   assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'ready');
@@ -254,7 +283,7 @@ try{
   await archiveLink.waitFor({timeout:120000});
   const zip=path.join(data,'青灰合金 - 工程与贴图.zip');
   const [download]=await Promise.all([page.waitForEvent('download'),archiveLink.click()]);await download.saveAs(zip);
-  await page.screenshot({path:path.join(data,'03-texture-export.png')});
+  await page.screenshot({path:path.join(evidence,'03-texture-export.png')});
 
   const checked=JSON.parse(execFileSync(pythonExecutable(),['-B','-X','utf8','-c',[
     'import hashlib,io,json,sys,zipfile',
@@ -300,7 +329,8 @@ try{
   assert.deepEqual(await readDoc(),linked);
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   assert.deepEqual(pageErrors,[]);
-  await page.screenshot({path:path.join(data,'04-restored-continue.png')});
+  await editor().locator('.document-image-stage[data-preview-size="4096"][data-preview-revision="'+continued.revision+'"]').waitFor({timeout:60000});
+  await page.screenshot({path:path.join(evidence,'04-restored-continue.png')});
   console.log('PASS workbench draw, mask, batch copy/delete, undo/redo, link, save, process restart, portable 4K export and independent editable restore');
   console.log('Verified package:',JSON.stringify(checked));
 }catch(error){console.error(logs);throw error;}

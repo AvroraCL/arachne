@@ -322,36 +322,36 @@ try{
   assert.deepEqual(await waitFor(clipboardImageSize,'copying merged pixels from the Windows Edit menu'),copiedSize);
   console.log('PASS 125% Windows desktop scale and native clipboard image paste and copy');
   const textProbe='中文剪切验收';
+  const textRevision=(await read('/api/projects/'+id)).revision;
+  const editMenu=label=>desktop.evaluate(({Menu,BrowserWindow},name)=>{
+    const menu=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu;
+    const item=menu.items.find(item=>item.label===name);
+    item.click(item,BrowserWindow.getAllWindows()[0],{});
+  },label);
   await page.evaluate(text=>{
     const input=document.createElement('input');
     input.id='native-text-cut-check';
     input.value=text;
     document.body.append(input);input.select();
   },textProbe);
-  await desktop.evaluate(({Menu,BrowserWindow})=>{
-    const item=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu.items.find(item=>item.label==='剪切');
-    item.click(item,BrowserWindow.getAllWindows()[0],{});
-  });
+  await editMenu('剪切');
   await page.waitForFunction(()=>document.querySelector('#native-text-cut-check').value==='');
   assert.equal(await desktop.evaluate(({clipboard})=>clipboard.readText()),textProbe);
-  await desktop.evaluate(({Menu,BrowserWindow})=>{
-    const item=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu.items.find(item=>item.label==='粘贴');
-    item.click(item,BrowserWindow.getAllWindows()[0],{});
-  });
+  await editMenu('粘贴');
   await page.waitForFunction(text=>document.querySelector('#native-text-cut-check').value===text,textProbe);
+  await editMenu('撤销');
+  await page.waitForFunction(()=>document.querySelector('#native-text-cut-check').value==='');
+  await editMenu('重做');
+  await page.waitForFunction(text=>document.querySelector('#native-text-cut-check').value===text,textProbe);
+  assert.equal((await read('/api/projects/'+id)).revision,textRevision);
   await page.locator('#native-text-cut-check').evaluate(input=>input.remove());
-  console.log('PASS native Edit menu cuts and pastes selected Chinese text through the system clipboard');
+  console.log('PASS native Edit menu cuts, pastes, undoes and redoes focused Chinese text without editing the project');
   await page.locator('[data-area-mode=modeling]').click();
   const shader=page.locator('.editor-area[data-editor=shader]').first();
   await shader.getByRole('button',{name:'启用节点材质',exact:true}).click();
   const nodes=shader.locator('.shader-node'),nodeStage=shader.locator('.shader-stage');
   await nodes.first().waitFor();
   const baselineGraph=(await read('/api/projects/'+id)).paint.materialGraph;
-  const editMenu=label=>desktop.evaluate(({Menu,BrowserWindow},name)=>{
-    const menu=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu;
-    const item=menu.items.find(item=>item.label===name);
-    item.click(item,BrowserWindow.getAllWindows()[0],{});
-  },label);
   await nodeStage.focus();
   await editMenu('全选');
   await page.waitForFunction(count=>document.querySelectorAll('.shader-node.selected').length===count,baselineGraph.nodes.length);

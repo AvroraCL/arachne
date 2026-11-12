@@ -1,4 +1,9 @@
-let copied=null;
+const states=new WeakMap();
+function clipboardState(win){
+  let value=states.get(win);
+  if(!value){value={copied:null,writing:null};states.set(win,value);}
+  return value;
+}
 
 function bridge(win){
   const desktop=win.arachneDesktop;
@@ -10,12 +15,19 @@ function bridge(win){
 }
 
 export async function writeNodeClipboard(win,text){
-  copied=text;
-  try{await bridge(win).write(text);}catch{}
+  const state=clipboardState(win);
+  state.copied=text;
+  const write=async()=>{try{await bridge(win).write(text);}catch{}};
+  const task=state.writing?state.writing.then(write):write();
+  state.writing=task;
+  await task;
+  if(state.writing===task)state.writing=null;
 }
 
 export async function readNodeClipboard(win){
   // A successful read of an empty or non-node clipboard must not resurrect
   // a stale copy. Keep a window-local fallback only when permission failed.
-  try{return await bridge(win).read();}catch{return copied;}
+  const state=clipboardState(win);
+  while(state.writing)await state.writing;
+  try{return await bridge(win).read();}catch{return state.copied;}
 }

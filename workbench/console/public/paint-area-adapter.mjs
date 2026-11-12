@@ -31,7 +31,11 @@ export function setupPaintAreas(hooks){
   const project=createProjectState({
     write:(operations,origin)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/commands',{revision:origin.revision,operations,
       ...(origin.strokeRequestId?{strokeRequestId:origin.strokeRequestId}:{})})),
-    travel:async(direction,origin)=>{if(materialStrokes?.size)throw Error('请先保存或放弃待保存的材质笔触');const until=Date.now()+30000;while(hooks.busy()&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,25));const doc=hooks.read();if(doc?.id!==origin?.id)throw Error('工程已切换，撤销未执行');return write(()=>hooks.api('/api/projects/'+doc.id+'/paint/'+direction,{revision:doc.revision}));},
+    beforeTravel:async()=>{
+      if(materialStrokes.editing)throw Error('请先完成当前材质笔触');
+      if(materialStrokes.size&&!await materialStrokes.flush())throw Error('请先保存或放弃待保存的材质笔触');
+    },
+    travel:async(direction,origin)=>{const until=Date.now()+30000;while(hooks.busy()&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,25));const doc=hooks.read();if(doc?.id!==origin?.id)throw Error('工程已切换，撤销未执行');return write(()=>hooks.api('/api/projects/'+doc.id+'/paint/'+direction,{revision:doc.revision}));},
     draft:op=>{activePreview().update(op);hooks.draft(op);},
     selectLayer:id=>{if(applying)return;applying=true;try{hooks.selectLayer(id);}finally{applying=false;}},
     selectResource:t=>{if(applying)return;applying=true;try{if(t?.library==='materials'||t?.library==='brushes')hooks.selectResource(t);}finally{applying=false;}}
@@ -106,6 +110,7 @@ export function setupPaintAreas(hooks){
       project.draft(operation);
     },
     layerSelection:hooks.layerSelection,selectMaterialLayer:hooks.selectMaterialLayer,openMaterialLayerMenu:hooks.openMaterialLayerMenu,bindMaterialLayerDrag:hooks.bindMaterialLayerDrag,cameraChanged:hooks.cameraChanged,viewportDisplayChanged:updateMaterialDemand,
+    selectSurfaceTarget:hooks.selectSurfaceTarget,
     materialPreview:()=>({inspection,frame:inspectionFrame||project.frame,status:inspection?inspectionStatus:project.previewStatus}),
     clearMaterialInspection:hooks.clearMaterialInspection,toggleMaterialIsolation:hooks.toggleMaterialIsolation,
     clearLayerIsolation:hooks.clearLayerIsolation,
@@ -203,7 +208,7 @@ export function setupPaintAreas(hooks){
     },
     materialSelectionChanged(){project.selectedLayer(hooks.layerId(),undefined,{force:true});},
     brushSettings(){const editors=areas.editors(),target=preferredCanvas&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(editor=>['viewport','image','uv'].includes(editor.kind));return target?.getBrushSettings?.()||null;},
-    maskTarget({openViewport=true}={}){if(openViewport&&!materialViewport())areas.openEditor('viewport');materialViewport()?.setPaintMode('mask');project.setEditorDomain('material');},
+    maskTarget({openViewport=true,mode='mask'}={}){if(openViewport&&!materialViewport())areas.openEditor('viewport');materialViewport()?.setPaintMode(mode);project.setEditorDomain('material');},
     reproject(layerId){const target=targetViewport();if(!target)throw Error('请先打开三维视口');target.reproject(layerId);},
     openImage(documentId){if(documentId&&!areas.switchWorkspace('drawing'))return;areas.openEditor('image');if(documentId)project.selectImage({documentId,layerId:null,target:'pixels'});project.setEditorDomain('image');},
     openMaterialPainting(){areas.openEditor('viewport');materialViewport()?.setPaintMode('paint');project.setEditorDomain('material');},

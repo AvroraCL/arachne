@@ -1,5 +1,5 @@
 // Shared authoritative project and change notifications. Editor view state lives elsewhere.
-export function createProjectState({write,travel,draft,selectLayer,selectResource}){
+export function createProjectState({write,travel,draft,selectLayer,selectResource,beforeTravel}){
   let imageContext=null,imageEditor=null,editorDomain='material';
   let doc=null,layerId=null,resource=null,frame=null,scene=null,previewStatus=null,brushDraft=null,nodeDraft=null,epoch=0;
   let pending=Promise.resolve();
@@ -51,7 +51,13 @@ export function createProjectState({write,travel,draft,selectLayer,selectResourc
       return enqueue(async()=>{if(origin.id!==doc?.id||origin.revision!==doc.revision)throw Error('工程修订已变化，请重新编辑');const generation=epoch,result=await write(operations,origin);
       if(result===false)throw Error('工程修改未保存');if(generation===epoch&&result?.id===doc.id)document(result);return result;});
     },
-    async travel(direction){const origin=this.origin();return enqueue(async()=>{if(!origin||origin.id!==doc?.id)throw Error('工程已切换，撤销未执行');const result=await travel(direction,{...origin,revision:doc.revision});if(result?.id===doc?.id)document(result);return result;});},
+    async travel(direction){
+      const origin=this.origin();
+      // Wait before taking the shared write queue: a stroke save may still
+      // need to enqueue another command before undo can target its revision.
+      if(beforeTravel)await beforeTravel(origin);
+      return enqueue(async()=>{if(!origin||origin.id!==doc?.id)throw Error('工程已切换，撤销未执行');const result=await travel(direction,{...origin,revision:doc.revision});if(result?.id===doc?.id)document(result);return result;});
+    },
     draft(operation){if(operation)nodeDraft=null;if(operation||!nodeDraft)draft(operation);},
     listenerCount:()=>listeners.size
   };

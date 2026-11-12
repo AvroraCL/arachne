@@ -8,6 +8,7 @@ export const workspaceIcons = {
   importImage: svg('<rect x="2.5" y="3.5" width="15" height="13" rx="1.3"/><path d="m3 14 4-4 3 3 3-2 4 4"/><circle cx="13.5" cy="7" r="1.2"/>'),
   folder: svg('<path d="M3 15V5h5l2 2h7v8Z"/>'),
   chevron: svg('<path d="m8 5 5 5-5 5"/>'),
+  grip: svg('<path d="M7 5h.1M13 5h.1M7 10h.1M13 10h.1M7 15h.1M13 15h.1" stroke-width="2.3"/>'),
   moveUp: svg('<path d="M10 16V4m-5 5 5-5 5 5"/>'),
   moveDown: svg('<path d="M10 4v12m-5-5 5 5 5-5"/>'),
   trash: svg('<path d="M3.5 5.5h13m-11 0 .8 11h7.4l.8-11M7.5 5.5V3h5v2.5m-4 3v5m3-5v5"/>'),
