@@ -77,11 +77,12 @@
 .document-layer-filter input[type=search]:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
 .document-filter-count{grid-column:1/-1;color:#999;font-size:11px;font-variant-numeric:tabular-nums;min-width:0;overflow-wrap:anywhere}
 @container(max-width:185px){.document-layer-filter{grid-template-columns:minmax(0,1fr)}.document-layer-filter>.custom-select{width:100%}}
-.document-layer-controls{display:flex;gap:6px;align-items:center;margin-bottom:7px}.document-layer-controls>.custom-select{flex:1;min-width:60px}
+.document-layer-controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:7px}.document-layer-controls>.custom-select{flex:1;min-width:60px}
 .document-property{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px;font-size:13px}
 .document-property input:not([type=checkbox]){width:54%;min-width:40px;min-height:26px;background:#303030;border:1px solid #191919;border-radius:3px;padding:3px 6px;color:#ddd}
 .document-mask-actions,.document-property-actions{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}
-.document-layer-controls .document-property{flex:1;font-size:12px;gap:3px}.document-layer-controls .document-property input{width:52px}
+.document-layer-controls .document-property{flex:none;white-space:nowrap;font-size:12px;gap:4px}
+.document-layer-controls .document-property>:is(input,.workspace-range-field){flex:0 0 46px;width:46px;min-width:46px}
 .document-layer-row{
   position:relative;display:grid;grid-template-columns:24px 30px minmax(0,1fr) 22px;
   align-items:center;min-height:38px;gap:3px;border-radius:2px;
