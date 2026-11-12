@@ -627,8 +627,68 @@ try{
   await blurRadius.waitFor();
   assert.equal(await blurRadius.inputValue(),'64');
   console.log('PASS non-destructive Gaussian blur, selection mask, premultiplied 4K pixels, undo, redo and reopen');
-  const finishedBlur=await api(paintRoute+'/commands',{revision:redoBlur.revision,operations:[
-    {op:'image',action:'remove',documentId:blurDoc}
+  const sharpDoc='sharpen-document',sharpPixels='sharpen-pixels';
+  await api(paintRoute+'/commands',{revision:redoBlur.revision,operations:[
+    {op:'image',action:'remove',documentId:blurDoc},
+    {op:'image',action:'create',documentId:sharpDoc,patch:{name:'锐化验收'}},
+    {op:'image',action:'addLayer',documentId:sharpDoc,layerId:sharpPixels,kind:'pixel',patch:{name:'半透明对比边界'}},
+    ...['#606060','#a0a0a0'].map((color,index)=>({op:'image',action:'stroke',documentId:sharpDoc,layerId:sharpPixels,target:'pixels',
+      stroke:{uv:true,rect:[.25+index*.25,.25,.5+index*.25,.75],opacity:.5,color,erase:false}}))
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(sharpDoc,{force:true});
+  await page.getByRole('button',{name:'半透明对比边界',exact:true}).click();
+  await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+  await editor.getByRole('button',{name:'矩形选区',exact:true}).click();
+  await editor.getByRole('button',{name:'新建选区',exact:true}).click();
+  await drag([.4,.31],[.6,.5]);
+  await page.getByRole('button',{name:'新建调整图层',exact:true}).click();
+  await page.getByRole('menuitem',{name:'USM 锐化',exact:true}).click();
+  const sharpenedLayer=current=>current.paint.imageDocuments[sharpDoc].layers[1];
+  async function filterSetting(label,value){
+    const control=page.locator('input.workspace-number-input[aria-label="'+label+'"]'),field=control.locator('..');
+    await until(()=>control.isEnabled(),label+' 可修改');
+    await field.dblclick();
+    const entry=field.getByRole('spinbutton',{name:'输入数值'});
+    await entry.fill(String(value));
+    await entry.press('Enter');
+  }
+  await filterSetting('半径（像素）',32);
+  const sharpened=await until(async()=>{
+    const current=await api(projectRoute);
+    return sharpenedLayer(current)?.adjustment.radius===32&&current;
+  },'保存锐化半径');
+  assert.equal(sharpenedLayer(sharpened).maskBase,0);
+  const sharpenProbes=[[2040,1650],[2055,1650],[2040,2450],[2055,2450],[1220,1650],[820,1650]];
+  const [sharpDimensions,sharpValues]=rgba(await imagePng('masked-unsharp.png',sharpened.revision,sharpDoc),sharpenProbes);
+  assert.deepEqual(sharpDimensions,[4096,4096]);
+  assert.ok(sharpValues[0][0]<80&&sharpValues[1][0]>175);
+  assert.deepEqual(sharpValues.slice(2),[[96,96,96,128],[160,160,160,128],[96,96,96,128],[0,0,0,0]]);
+  assert.equal(sharpValues[0][3],128);
+  assert.equal(sharpValues[1][3],128);
+  await canvas.focus();
+  await page.keyboard.press('Control+d');
+  await page.screenshot({path:path.join(data,'masked-unsharp-workbench.png')});
+  await filterSetting('阈值',255);
+  const thresholded=await until(async()=>{
+    const current=await api(projectRoute);
+    return sharpenedLayer(current)?.adjustment.threshold===255&&current;
+  },'保存锐化阈值');
+  const [,baseValues]=rgba(await imagePng('threshold-unsharp.png',thresholded.revision,sharpDoc),sharpenProbes);
+  assert.deepEqual(baseValues.slice(0,2),[[96,96,96,128],[160,160,160,128]]);
+  await canvas.focus();
+  await page.keyboard.press('Control+z');
+  const undoThreshold=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>thresholded.revision&&sharpenedLayer(current).adjustment.threshold===0&&current;
+  },'撤销锐化阈值');
+  await page.reload();
+  await page.locator('input.workspace-number-input[aria-label="阈值"]').waitFor();
+  assert.deepEqual(rgba(await imagePng('reopen-unsharp.png',undoThreshold.revision,sharpDoc),sharpenProbes)[1],sharpValues);
+  console.log('PASS non-destructive Unsharp Mask, threshold, selection mask, unchanged 4K alpha, undo and reopen');
+  const finishedBlur=await api(paintRoute+'/commands',{revision:undoThreshold.revision,operations:[
+    {op:'image',action:'remove',documentId:sharpDoc}
   ]});
 
   const fillDoc='bucket-document',bucketLayer='bucket-pixels';

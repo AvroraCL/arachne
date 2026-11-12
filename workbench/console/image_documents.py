@@ -157,8 +157,8 @@ def shape_tiles(surface, layer, color):
 
 def apply_adjustment(result, layer, surface, linear, clipped=False):
     params, mode = layer['adjustment'], layer['blend']
-    if params['type'] == 'gaussianBlur':
-        apply_gaussian_blur(result, layer, surface, clipped)
+    if params['type'] in ('gaussianBlur', 'unsharpMask'):
+        apply_spatial_filter(result, layer, surface, linear, clipped)
         return
     if mode == 'normal' and neutral_adjustment(params):
         return
@@ -183,10 +183,26 @@ def apply_adjustment(result, layer, surface, linear, clipped=False):
         result[ids, :3] = back[:, :3] + (mixed - back[:, :3]) * opacity
 
 
-def apply_gaussian_blur(result, layer, surface, clipped):
+def sharpen_tile(back, blurred, params, linear, mode):
+    alpha, blurred_alpha = back[:, :, 3:], blurred[:, :, 3:]
+    base = np.divide(back[:, :, :3], alpha, out=np.zeros_like(back[:, :, :3]), where=alpha > 0)
+    low = np.divide(blurred[:, :, :3], blurred_alpha, out=base.copy(), where=blurred_alpha > 0)
+    signal, smooth = (base, low) if linear else (encode(base), encode(low))
+    detail = signal - smooth
+    if params['threshold']:
+        detail *= np.max(np.abs(detail), axis=2, keepdims=True) >= params['threshold'] / 255
+    sharpened = np.clip(signal + detail * (params['amount'] / 100), 0, 1)
+    color = sharpened if linear else decode(sharpened)
+    blurred[:, :, :3] = blend_rgb(base, color, mode) * alpha if mode != 'normal' else color * alpha
+    blurred[:, :, 3:] = alpha
+
+
+def apply_spatial_filter(result, layer, surface, linear, clipped):
+    params = layer['adjustment']
+    sharpen = params['type'] == 'unsharpMask'
     height, width = surface.uv_shape
-    radius = layer['adjustment']['radius'] * width / 4096
-    if radius <= 0:
+    radius = params['radius'] * width / 4096
+    if radius <= 0 or sharpen and (params['amount'] == 0 or params['threshold'] == 255):
         return
     half, edge = gaussian_box(radius)
     canvas = result.reshape(height, width, 4)
@@ -209,7 +225,9 @@ def apply_gaussian_blur(result, layer, surface, clipped):
                 rows = np.arange(top + start, top + start + len(back))
                 ids = (rows[:, None] * width + columns).ravel()
                 amount = opacity * mask_values(layer, mask, ids, surface).reshape(*back.shape[:2], 1)
-            if clipped or mode != 'normal':
+            if sharpen:
+                sharpen_tile(back, pixels, params, linear, mode)
+            elif clipped or mode != 'normal':
                 back_alpha, alpha = back[:, :, 3:], pixels[:, :, 3:]
                 base = np.divide(back[:, :, :3], back_alpha, out=np.zeros_like(back[:, :, :3]), where=back_alpha > 0)
                 color = np.divide(pixels[:, :, :3], alpha, out=base.copy(), where=alpha > 0)

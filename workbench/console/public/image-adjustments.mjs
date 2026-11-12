@@ -44,7 +44,12 @@ export const imageAdjustments=Object.freeze({
   }},
   invert:{label:'反相',fields:{}},
   posterize:{label:'色调分离',fields:{steps:number('色阶数',4,2,256)}},
-  gaussianBlur:{label:'高斯模糊',filter:true,fields:{radius:{...number('半径（像素）',12,0,256,.1),scrubSpeed:.5}}}
+  gaussianBlur:{label:'高斯模糊',filter:true,fields:{radius:{...number('半径（像素）',12,0,256,.1),scrubSpeed:.5}}},
+  unsharpMask:{label:'USM 锐化',filter:true,fields:{
+    amount:{...number('锐化数量',100,0,500),suffix:'%'},
+    radius:{...number('半径（像素）',2,.1,250,.1),scrubSpeed:.5},
+    threshold:number('阈值',0,0,255)
+  }}
 });
 
 export function newImageAdjustment(type){

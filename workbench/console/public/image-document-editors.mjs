@@ -1466,6 +1466,7 @@ export function createImagePanel(type,ctx){
             layerId:layer.id,patch:{adjustment:{...adjustment,[key]:value}}});
         });
       control.dataset.scrubSpeed=String(field.scrubSpeed??field.step);
+      if(field.suffix)control.dataset.scrubSuffix=field.suffix;
     }
     body.append(section);
   }
