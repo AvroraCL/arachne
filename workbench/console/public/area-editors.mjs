@@ -339,8 +339,13 @@ export function registerAreaEditors(registry,bridge){
       const enabled=shown&&display?.mode==='cycles'&&doc?.id===projectId&&view.dataset.state==='ready';
       const sampling=bridge.renderSettings?.readViewportSampling?.()||viewportSamplingDefaults;
       const suspended=enabled&&(!!bridge.materialPreview().inspection||modeler.isDragging()||painter.isEditing()||marquee.isDragging());
+      const rig=enabled&&display.projectLighting?{
+        lighting:doc.paint.renderLighting||null,appearance:doc.paint.renderAppearance||null,
+        transparent:bridge.renderSettings?.read().transparent===true
+      }:null;
+      if(enabled)view.dataset.renderLighting=rig?'project':'viewport';else delete view.dataset.renderLighting;
       viewport.setRenderPreview({enabled,paused:cyclesPaused,suspended,interacting:navigating||wheelTimer!==null,
-        samples:bridge.preferences().autoDetail?sampling.detailSamples:sampling.draftSamples},retry);
+        samples:bridge.preferences().autoDetail?sampling.detailSamples:sampling.draftSamples,project:rig},retry);
     }
     const unsubscribeCyclesSettings=bridge.renderSettings?.subscribe(syncCameraFrame);
     function syncPreviewStatus(){

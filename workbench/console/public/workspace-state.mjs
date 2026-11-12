@@ -100,7 +100,9 @@ export function joinAreas(tree,keep,remove){
 }
 export function workspacePreset(name){
   const leaf=(type,id,state)=>area(type,id,state),pair=(axis,a,b,r)=>split(axis,a,b,r);
-  const side=pair('y',leaf(name==='modeling'?'scene':name==='drawing'?'imageLayers':'layers','side-top'),leaf(name==='drawing'?'imageProperties':'properties','side-bottom'),.43);
+  const properties=name==='modeling'?leaf('renderSettings','side-bottom',{category:'object'}):
+    leaf(name==='drawing'?'imageProperties':'properties','side-bottom');
+  const side=pair('y',leaf(name==='modeling'?'scene':name==='drawing'?'imageLayers':'layers','side-top'),properties,.43);
   const main=name==='drawing'?leaf('image','main'):leaf('viewport','main',{mode:name==='modeling'?'object':'view'});
   const content=name==='modeling'?pair('y',main,leaf('shader','nodes'),.72):pair('y',main,leaf('library','assets'),.79);
   return pair('x',content,side,.79);

@@ -5,12 +5,7 @@ import {channelSpecs} from './paint-channels.mjs';
 import {createPathTracingEngine} from './path-tracing-engine.mjs';
 import {renderLightingDefaults} from './render-lighting.mjs';
 import {renderAppearanceDefaults} from './render-appearance.mjs';
-
-const profiles={
-  studio:{positions:[[1.2,1.7,1],[-1.1,.6,.5],[.4,1,-1.4]],intensities:[2.8,.8,2],sizes:[.8,1.2,.7]},
-  soft:{positions:[[1,2,1],[-1,1,.4],[.3,1.2,-1.5]],intensities:[2,1.4,1.2],sizes:[1.8,2,1.7]},
-  daylight:{positions:[[1,2.8,.8],[-1,1,0],[0,1.4,-1]],intensities:[3.3,.5,1],sizes:[.3,1.5,1]}
-};
+import {projectTone,projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
 
 async function loadModel(input){
   const gltf=await new GLTFLoader().loadAsync('/input/model.glb');
@@ -76,22 +71,12 @@ function makeCamera(settings,center,radius,optics,PhysicalCamera){
 }
 
 function setupLighting(scene,library,lighting,center,radius,transparent){
-  const {preset,environmentColor,lightStrength,environmentStrength,rotation}=lighting||renderLightingDefaults;
-  const profile=profiles[preset]||profiles.studio,angle=THREE.MathUtils.degToRad(rotation);
-  const environment=new library.GradientEquirectTexture(64);
-  environment.topColor.set(environmentColor);
-  environment.bottomColor.copy(environment.topColor).multiplyScalar(.45);
-  environment.update();
+  const {environmentColor,environmentStrength}=lighting||renderLightingDefaults;
+  const environment=projectEnvironment(library,lighting);
   scene.environment=environment;
   scene.environmentIntensity=environmentStrength;
   if(!transparent)scene.background=new THREE.Color(environmentColor);
-  for(const [i,position] of profile.positions.entries()){
-    const size=profile.sizes[i]*radius;
-    const light=new THREE.RectAreaLight(0xffffff,profile.intensities[i]*lightStrength,size,size);
-    light.position.fromArray(position).applyAxisAngle(THREE.Object3D.DEFAULT_UP,angle).multiplyScalar(radius).add(center);
-    light.lookAt(center);
-    scene.add(light);
-  }
+  for(const light of projectLightRig(lighting,center,radius))scene.add(light);
   return environment;
 }
 
@@ -165,11 +150,7 @@ export async function renderImage(input){
     const gl=renderer.getContext(),limit=gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
     if(settings.width>limit||settings.height>limit)throw Error('当前图形设备不支持所选输出分辨率');
     renderer.setSize(settings.width,settings.height,false);
-    renderer.toneMapping={
-      AgX:THREE.AgXToneMapping,Standard:THREE.LinearToneMapping,'Khronos PBR Neutral':THREE.NeutralToneMapping,
-      Filmic:THREE.ACESFilmicToneMapping,Raw:THREE.NoToneMapping
-    }[appearance.viewTransform];
-    renderer.toneMappingExposure=2**appearance.exposure;
+    Object.assign(renderer,projectTone(appearance));
     const backend=await createPathTracingEngine(renderer);
     engine=backend.engine;
     engine.tiles.set(4,4);

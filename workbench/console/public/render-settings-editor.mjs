@@ -1,7 +1,7 @@
 import {sameDeliveryCamera,renderBookmarkLimit} from './paint-delivery-options.mjs';
 import {syncSelectMenu} from './paint-select.mjs';
 import {createPropertyEditorFrame} from './property-editor.mjs';
-import {areaIcons} from './area-chrome.mjs';
+import {areaIcons,chromeButton} from './area-chrome.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {capturePropertyTarget,propertyTargetStatus} from './property-targets.mjs';
 import {createObjectPropertyEditor} from './object-property-editor.mjs';
@@ -11,7 +11,7 @@ import {viewportSamplingDefaults} from './cycles-viewport-sampling.mjs';
 import {renderOpticsDefaults,renderOpticsFields} from './render-optics.mjs';
 import {renderRegionPixels} from './render-region.mjs';
 import {renderAppearanceDefaults,renderAppearanceLimits,renderTransforms,renderLooks} from './render-appearance.mjs';
-import {renderLightingDefaults,renderLightingLimits,renderLightingPresets} from './render-lighting.mjs';
+import {presetRenderLights,renderLightingDefaults,renderLightingLimits,renderLightingPresets,renderLightLimit,renderLightRanges} from './render-lighting.mjs';
 
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 
@@ -141,8 +141,81 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   const environmentColor=el('input');environmentColor.type='color';environmentColor.setAttribute('aria-label','环境颜色');
   row(studioFields,'环境颜色',environmentColor);
   environmentColor.onchange=()=>void editLighting({environmentColor:environmentColor.value});
-  preset.onchange=()=>void editLighting({preset:preset.value});
+  preset.onchange=()=>{
+    const current=settings.projectLighting?.()||renderLightingDefaults;
+    void editLighting({preset:preset.value,...(preset.value==='custom'&&!current.lights?{lights:presetRenderLights(current.preset)}:{})});
+  };
   lightingOverride.onchange=()=>void editLighting(lightingOverride.checked?renderLightingDefaults:null);
+  const areaLights=el('div','render-area-lights');lightingFields.append(areaLights);
+  const lightToolbar=el('div','render-area-light-toolbar');
+  const lightSelect=el('select');lightSelect.setAttribute('aria-label','区域灯');
+  const lightAdd=chromeButton(el('button'),'plus','添加区域灯');
+  const lightRemove=chromeButton(el('button'),'trash','移除区域灯');
+  lightAdd.type=lightRemove.type='button';
+  lightToolbar.append(lightSelect,lightAdd,lightRemove);areaLights.append(lightToolbar);
+  const lightFields=el('div','render-light-edit');areaLights.append(lightFields);
+  let activeLight=typeof state.light==='string'?state.light:null,lightListKey='';
+  function lightPatch(patch){
+    const current=settings.projectLighting?.();
+    if(current?.preset!=='custom'||!current.lights.some(light=>light.id===activeLight))return;
+    return editLighting({lights:current.lights.map(light=>light.id===activeLight?{...light,...patch}:light)});
+  }
+  const lightName=el('input');lightName.type='text';lightName.maxLength=60;lightName.setAttribute('aria-label','灯光名称');
+  lightName.onchange=()=>void lightPatch({name:lightName.value});
+  row(lightFields,'名称',lightName);
+  const lightEnabled=check(lightFields,'enabled','启用灯光',lightPatch);
+  const lightColor=el('input');lightColor.type='color';lightColor.setAttribute('aria-label','灯光颜色');
+  lightColor.onchange=()=>void lightPatch({color:lightColor.value});row(lightFields,'颜色',lightColor);
+  const lightNumbers={
+    intensity:number(lightFields,'intensity','强度',...renderLightRanges.intensity,.03,.01,lightPatch),
+    width:number(lightFields,'width','灯宽',...renderLightRanges.size,.03,.01,lightPatch),
+    height:number(lightFields,'height','灯高',...renderLightRanges.size,.03,.01,lightPatch)
+  };
+  const lightPosition=['X','Y','Z'].map((axis,i)=>number(lightFields,axis,'相对位置 '+axis,...renderLightRanges.position,.03,.01,patch=>{
+    const light=settings.projectLighting?.()?.lights?.find(item=>item.id===activeLight);
+    if(light)void lightPatch({position:light.position.map((value,j)=>i===j?patch[axis]:value)});
+  }));
+  lightSelect.onchange=()=>{activeLight=lightSelect.value;syncLighting();onChange();};
+  lightAdd.onclick=()=>{
+    const lights=settings.projectLighting?.()?.lights||[];
+    if(lights.length>=renderLightLimit)return;
+    const angle=lights.length*2.4,id=crypto.randomUUID();
+    activeLight=id;
+    void editLighting({lights:[...lights,{id,name:'区域灯 '+(lights.length+1),enabled:true,
+      color:'#ffffff',position:[1.5*Math.cos(angle),1.5*Math.sin(angle),1.6],intensity:1,width:1,height:1}]});
+    onChange();
+  };
+  lightRemove.onclick=()=>{
+    const lights=settings.projectLighting?.()?.lights||[];
+    if(activeLight)void editLighting({lights:lights.filter(light=>light.id!==activeLight)});
+  };
+  function syncAreaLights(value){
+    areaLights.hidden=value.preset!=='custom';
+    if(areaLights.hidden)return;
+    const list=value.lights||[];
+    const key=JSON.stringify(list.map(({id,name,enabled})=>[id,name,enabled]));
+    if(key!==lightListKey){
+      lightListKey=key;
+      lightSelect.replaceChildren(...(list.length?list.map(light=>new Option(light.name+(light.enabled?'':' · 已停用'),light.id)):[new Option('无区域灯','')]));
+    }
+    const light=list.find(item=>item.id===activeLight)||list[0];
+    activeLight=light?.id??null;
+    lightSelect.value=activeLight||'';
+    lightSelect.disabled=lightRemove.disabled=lightingPending||!light;
+    lightAdd.disabled=lightingPending||list.length>=renderLightLimit;
+    syncSelectMenu(lightSelect);
+    lightFields.hidden=!light;
+    if(!light)return;
+    lightName.disabled=lightEnabled.disabled=lightColor.disabled=lightingPending;
+    if(document.activeElement!==lightName||lightingPending)lightName.value=light.name;
+    lightEnabled.checked=light.enabled;lightColor.value=light.color;
+    function syncNumber(input,value){
+      input.disabled=lightingPending;
+      if(!input.closest('.workspace-range-field')?.matches('[data-dragging],[data-editing]'))input.value=String(value);
+    }
+    for(const [key,input] of Object.entries(lightNumbers))syncNumber(input,light[key]);
+    lightPosition.forEach((input,i)=>syncNumber(input,light.position[i]));
+  }
   function syncLighting(){
     const lighting=lightingPending?pendingLighting:settings.projectLighting?.(),value=lighting||renderLightingDefaults;
     lightingOverride.checked=!!lighting;lightingOverride.disabled=lightingPending||!project.document;
@@ -154,6 +227,7 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
       const field=input.closest('.workspace-range-field');
       if(!field?.hasAttribute('data-dragging')&&!field?.hasAttribute('data-editing'))input.value=String(value[key]);
     }
+    syncAreaLights(value);
   }
   const output=section('output','output','输出');
   const {minDimension,maxDimension}=cyclesLimits;
@@ -513,6 +587,6 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   }
   const unsubscribe=settings.subscribe(sync),unsubscribeProject=project.subscribe(event=>event.kind==='project'?sync(event):observe(event));
   sync();
-  return {kind:'renderSettings',sync,getState:()=>({...frame.getState(),sections:{...openSections},cameraBookmark:bookmarkId,pins:structuredClone(pins),object:objectEditor.getState(),material:materialEditor.getState()}),
+  return {kind:'renderSettings',sync,getState:()=>({...frame.getState(),sections:{...openSections},cameraBookmark:bookmarkId,light:activeLight,pins:structuredClone(pins),object:objectEditor.getState(),material:materialEditor.getState()}),
     dispose(){unsubscribe();unsubscribeProject();materialEditor.dispose();drawingEditor.dispose();}};
 }

@@ -174,6 +174,10 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 
 .render-appearance-fields[hidden]{display:none}
 .render-lighting-fields input[type=color]{width:100%;min-width:0;height:25px;padding:0;border:0;background:transparent}
+.render-area-lights:not([hidden]){margin-top:5px;padding-top:5px;border-top:1px solid #ffffff13}
+.render-area-light-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:3px;margin-bottom:4px}
+.render-area-light-toolbar>.custom-select,.render-area-light-toolbar .custom-select-button,.render-light-edit input[type=text]{width:100%;min-width:0}
+.render-area-light-toolbar>button{min-width:24px;padding-inline:4px}
 .render-settings-check input{justify-self:start;width:15px;height:15px;margin:0}
 .property-editor-footer{max-width:600px;padding:10px 6px 2px 10px}
 .property-editor-footer p{margin:0 0 9px;color:#999;font-size:12px;line-height:1.45}
@@ -407,6 +411,7 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .viewport-display-fields:not([hidden]){display:grid;gap:3px}
 .viewport-display-check,.viewport-display-field{display:flex;align-items:center;gap:7px;min-height:26px;padding:2px 6px}
 .viewport-display-check{cursor:pointer}
+.viewport-display-check[hidden]{display:none}
 .viewport-display-check:hover{background:#363636;border-radius:3px}
 .viewport-display-field{justify-content:space-between}
 .viewport-display-field>span{display:flex;align-items:center;gap:5px;width:56%}

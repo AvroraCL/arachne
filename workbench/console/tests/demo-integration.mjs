@@ -485,6 +485,7 @@ try{
     personal=saved.state;
   }
   const libraryTarget=await api('/api/projects',{workflowType:'pbr_paint',name:'资源库导入工程'},201);
+  await browser.close();
   page=await browserPage();
   await page.goto(base+'/?project='+libraryTarget.id);
   await page.locator('.area-switch [data-area-mode=material]:enabled').click();
@@ -822,6 +823,9 @@ try{
   await page.locator('[data-area-mode=modeling]').click();
   const desktopView=page.locator('.editor-area[data-area-id=main][data-editor=viewport]');
   await desktopView.locator('.editor-viewport[data-state=ready]').waitFor();
+  await page.locator('.editor-area[data-area-id=side-top]').getByRole('button',{name:'编辑器类型',exact:true}).click();
+  await page.getByRole('option',{name:'AI 控制台',exact:true}).click();
+  await page.locator('[data-area-id=side-top][data-editor=console]').waitFor();
   await desktopView.getByRole('button',{name:'变换枢轴',exact:true}).click();
   await page.getByRole('option',{name:'活动元素',exact:true}).click();
   await page.locator('[data-area-mode=drawing]').click();

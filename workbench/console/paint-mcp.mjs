@@ -6,7 +6,7 @@ import {cyclesLimits} from './public/cycles-limits.mjs';
 import {cyclesLightPaths} from './public/cycles-light-paths.mjs';
 import {cyclesRenderPasses} from './public/cycles-render-passes.mjs';
 import {renderTransforms,renderLooks,renderAppearanceLimits} from './public/render-appearance.mjs';
-import {renderLightingPresets,renderLightingLimits} from './public/render-lighting.mjs';
+import {renderLightingPresets,renderLightingLimits,renderLightLimit,renderLightRanges} from './public/render-lighting.mjs';
 import {renderOpticsFields} from './public/render-optics.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,7 +43,14 @@ const renderAppearance={type:['object','null'],additionalProperties:false,requir
 const renderLighting={type:['object','null'],additionalProperties:false,required:['preset','lightStrength','environmentStrength','rotation','environmentColor'],properties:{
   preset:{enum:Object.keys(renderLightingPresets)},lightStrength:number(...renderLightingLimits.lightStrength),
   environmentStrength:number(...renderLightingLimits.environmentStrength),rotation:number(...renderLightingLimits.rotation),
-  environmentColor:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'}
+  environmentColor:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'},
+  lights:{type:'array',maxItems:renderLightLimit,items:{
+    type:'object',additionalProperties:false,required:['id','name','enabled','position','intensity','width','height','color'],properties:{
+      id,name:{type:'string',minLength:1,maxLength:60},enabled:{type:'boolean'},
+      position:tuple(3,...renderLightRanges.position),intensity:number(...renderLightRanges.intensity),
+      width:number(...renderLightRanges.size),height:number(...renderLightRanges.size),color:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'}
+    }
+  }}
 }};
 const renderOptics={type:['object','null'],additionalProperties:false,required:['enabled','focusMode',...Object.keys(renderOpticsFields)],properties:{
   enabled:{type:'boolean'},focusMode:{enum:['target','distance']},

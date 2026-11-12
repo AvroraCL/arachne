@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import {createPathTracingEngine} from './path-tracing-engine.mjs';
+import {projectTone,projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
+import {renderLightingDefaults} from './render-lighting.mjs';
 
 const off={phase:'off',text:'',retry:false};
 
 export function createViewportPathTracer({renderer,host,request,onStatus}){
   let options={enabled:false},status=off,engine=null,loading=false,failed=false,disposed=false;
-  let scene=null,environment=null,ground=null,lights=[],meshSignature='',materialSignature='',lightingSignature='',cameraSignature='';
+  let scene=null,library=null,environment=null,environmentKey='',ground=null,lights=[],meshSignature='',materialSignature='',lightingSignature='',cameraSignature='',renderTone=null;
 
   function publish(phase,text='',samples=0){
     if(status.phase===phase&&status.text===text)return;
@@ -27,9 +29,9 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
     environment?.dispose();
     ground?.geometry.dispose();
     ground?.material.dispose();
-    engine=scene=environment=ground=null;
+    engine=scene=library=environment=ground=renderTone=null;
     lights=[];
-    meshSignature=materialSignature=lightingSignature=cameraSignature='';
+    meshSignature=materialSignature=lightingSignature=cameraSignature=environmentKey='';
   }
 
   function fail(error){
@@ -42,16 +44,12 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
     if(loading||failed)return;
     loading=true;
     publish('loading','路径追踪 · 正在准备');
-    void createPathTracingEngine(renderer).then(({engine:prepared,library:{GradientEquirectTexture}})=>{
+    void createPathTracingEngine(renderer).then(({engine:prepared,library:backend})=>{
       if(disposed||!options.enabled){prepared.dispose();return;}
       engine=prepared;
+      library=backend;
       engine.tiles.set(2,2);
       scene=new THREE.Scene();
-      environment=new GradientEquirectTexture(64);
-      scene.environment=environment;
-      environment.topColor.set('#acb6c8');
-      environment.bottomColor.set('#4a4a4a');
-      environment.update();
       ground=new THREE.Mesh(new THREE.PlaneGeometry(1,1),
         new THREE.MeshStandardMaterial({side:THREE.DoubleSide}));
       ground.rotation.x=-Math.PI/2;
@@ -61,19 +59,46 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
     });
   }
 
-  function setupLighting(settings,bounds,sourceLights){
+  function setupLighting(settings,bounds,sourceLights,imported,project){
     const center=bounds.getCenter(new THREE.Vector3());
     const radius=Math.max(bounds.getSize(new THREE.Vector3()).length()/2,.001);
-    scene.environmentIntensity=settings.environmentStrength;
-    scene.background=settings.background==='solid'?new THREE.Color(settings.backgroundColor):null;
+    const lighting=project?.lighting||renderLightingDefaults;
+    const key=project?'project:'+lighting.environmentColor:'viewport';
+    if(key!==environmentKey){
+      environment?.dispose();
+      environmentKey=key;
+      environment=project?projectEnvironment(library,lighting):new library.GradientEquirectTexture(64);
+      if(!project){
+        environment.topColor.set('#acb6c8');environment.bottomColor.set('#4a4a4a');environment.update();
+      }
+      scene.environment=environment;
+    }
     for(const light of lights)light.removeFromParent();
-    lights=sourceLights.map(source=>{
-      const light=new THREE.RectAreaLight(source.color,source.intensity*.65,radius*1.3,radius*.9);
-      light.position.copy(source.position);
-      light.lookAt(center);
-      scene.add(light);
-      return light;
-    });
+    if(project){
+      scene.environmentIntensity=lighting.environmentStrength;
+      scene.background=project.transparent?null:new THREE.Color(lighting.environmentColor);
+      lights=projectLightRig(lighting,center,radius);
+      for(const source of imported){
+        const light=source.clone(false);
+        light.matrixAutoUpdate=false;
+        light.matrix.copy(source.matrixWorld);
+        if(source.target){
+          source.target.getWorldPosition(light.target.position);
+          light.target.updateMatrixWorld(true);
+        }
+        lights.push(light);
+      }
+    }else{
+      scene.environmentIntensity=settings.environmentStrength;
+      scene.background=settings.background==='solid'?new THREE.Color(settings.backgroundColor):null;
+      lights=sourceLights.map(source=>{
+        const light=new THREE.RectAreaLight(source.color,source.intensity*.65,radius*1.3,radius*.9);
+        light.position.copy(source.position);
+        light.lookAt(center);
+        return light;
+      });
+    }
+    for(const light of lights)scene.add(light);
     ground.material.color.set(settings.groundColor);
     ground.material.roughness=settings.groundRoughness;
     ground.position.set(center.x,bounds.min.y+settings.groundHeight*radius-radius*.003,center.z);
@@ -81,29 +106,33 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
   }
 
   function syncScene(root,camera,bounds,settings,sourceLights){
-    const meshes=[];
+    const meshes=[],imported=[],project=options.project;
+    const showGround=!project&&settings.ground;
     root.updateWorldMatrix(true,true);
     root.traverseVisible(object=>{
       if(object.isMesh)meshes.push(object);
+      else if(project&&(object.isDirectionalLight||object.isSpotLight||object.isPointLight||object.isRectAreaLight))imported.push(object);
     });
-    if(!meshes.length&&!settings.ground)return false;
-    const nextMesh=JSON.stringify(meshes.map(mesh=>[
+    if(!meshes.length&&!showGround)return false;
+    const nextMesh=JSON.stringify([showGround?[settings.groundColor,settings.groundHeight,settings.groundRoughness,bounds.min,bounds.max]:null,meshes.map(mesh=>[
       mesh.id,mesh.geometry.id,mesh.geometry.attributes.position.version,mesh.matrixWorld.elements,
       [mesh.material].flat().map(material=>material.id)
-    ]));
+    ])]);
     const materials=[...new Set(meshes.flatMap(mesh=>mesh.material))];
     const nextMaterial=JSON.stringify(materials.map(material=>[
       material.id,material.version,Object.values(material).filter(value=>value?.isTexture)
         .map(texture=>[texture.id,texture.version])
     ]));
-    const nextLighting=JSON.stringify([settings,bounds.min,bounds.max,
-      sourceLights.map(light=>[light.position,light.intensity])]);
-    if(nextLighting!==lightingSignature){
-      setupLighting(settings,bounds,sourceLights);
+    const nextLighting=JSON.stringify([bounds.min,bounds.max,project?[project.lighting,project.transparent,
+      imported.map(light=>[light.id,light.matrixWorld.elements,light.intensity,light.color])]:
+      [settings.environmentStrength,settings.background,settings.backgroundColor,sourceLights.map(light=>[light.position,light.intensity])]]);
+    const lightingChanged=nextLighting!==lightingSignature;
+    if(lightingChanged||nextMesh!==meshSignature&&showGround){
+      setupLighting(settings,bounds,sourceLights,imported,project);
       lightingSignature=nextLighting;
     }
     const nextCamera=JSON.stringify([camera.id,camera.matrixWorld.elements,camera.projectionMatrix.elements]);
-    if(nextMesh!==meshSignature||nextLighting!==scene.userData.lightingSignature){
+    if(nextMesh!==meshSignature){
       for(const child of [...scene.children])if(child.isMesh)child.removeFromParent();
       for(const mesh of meshes){
         const surface=new THREE.Mesh(mesh.geometry,mesh.material);
@@ -111,17 +140,29 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
         surface.matrix.copy(mesh.matrixWorld);
         scene.add(surface);
       }
-      if(settings.ground)scene.add(ground);
+      if(showGround)scene.add(ground);
       engine.setScene(scene,camera);
       meshSignature=nextMesh;
-      scene.userData.lightingSignature=nextLighting;
     }else{
+      if(lightingChanged){
+        scene.updateMatrixWorld(true);
+        engine.updateEnvironment();
+        engine.updateLights();
+      }
       if(nextMaterial!==materialSignature)engine.updateMaterials();
       if(nextCamera!==cameraSignature)engine.setCamera(camera);
     }
     materialSignature=nextMaterial;
     cameraSignature=nextCamera;
     return true;
+  }
+
+  function present(){
+    if(!renderTone){engine.renderSample();return;}
+    const {toneMapping,toneMappingExposure}=renderer;
+    Object.assign(renderer,renderTone);
+    try{engine.renderSample();}
+    finally{Object.assign(renderer,{toneMapping,toneMappingExposure});}
   }
 
   return {
@@ -135,7 +176,7 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
       if(retry){release();failed=false;}
       if(retry||previous.enabled!==next.enabled||previous.paused!==next.paused||
          previous.interacting!==next.interacting||previous.suspended!==next.suspended||
-         previous.samples!==next.samples)request();
+         previous.samples!==next.samples||JSON.stringify(previous.project)!==JSON.stringify(next.project))request();
     },
     render(root,camera,bounds,settings,sourceLights){
       if(!options.enabled||!root||failed)return false;
@@ -143,7 +184,7 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
         const samples=Math.floor(engine?.samples||0);
         publish('paused','路径追踪 · 已暂停',samples);
         if(samples<1)return false;
-        try{engine.pausePathTracing=true;engine.renderSample();return true;}
+        try{engine.pausePathTracing=true;present();return true;}
         catch(error){fail(error);return false;}
       }
       if(options.suspended||options.interacting){
@@ -160,8 +201,9 @@ export function createViewportPathTracer({renderer,host,request,onStatus}){
           return false;
         }
         const target=options.samples??settings.samples;
+        renderTone=options.project?projectTone(options.project.appearance||undefined):null;
         engine.pausePathTracing=engine.samples>=target;
-        engine.renderSample();
+        present();
         const samples=Math.floor(engine.samples);
         publish(samples>=target?'ready':'sampling',`路径追踪 · ${samples} / ${target} 采样`,samples);
         if(engine.samples<target)request();

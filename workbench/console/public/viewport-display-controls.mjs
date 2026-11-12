@@ -34,6 +34,7 @@ function menu(group,label){
 function check(parent,label,value,onChange){
   const row=el('label','viewport-display-check'),input=document.createElement('input');input.type='checkbox';input.checked=value;
   input.onchange=()=>onChange(input.checked);row.append(input,label);parent.append(row);
+  return row;
 }
 function field(source,key){
   const label=source.querySelector(`[data-scene="${key}"]`).closest('label');
@@ -49,7 +50,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     const container=el('div','viewport-display-group');container.setAttribute('role','group');container.setAttribute('aria-label',label);
     root.append(container);return container;
   };
-  let mode=Object.hasOwn(modes,state.display)?state.display:'material',xray=state.xray===true;
+  let mode=Object.hasOwn(modes,state.display)?state.display:'material',xray=state.xray===true,projectLighting=state.projectLighting!==false;
   let overlays=state.overlays!==false,gizmos=state.gizmos!==false,axis=state.axis!==false,transform=state.transformGizmo!==false;
   const gizmoGroup=group('操纵器');
   const gizmoButton=toggle('显示操纵器',icons.gizmos,()=>{gizmos=!gizmos;update();});
@@ -81,6 +82,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     buttons.set(value,button);shading.append(button);
   }
   const shadingMenu=menu(shading,'着色设置');
+  const useProject=check(shadingMenu.content,'使用工程布光',projectLighting,value=>{projectLighting=value;update();onMode();});
   root.append(renderPlayback);
   const fields=el('div','viewport-display-fields');
   for(const key of ['environment','rotation','exposure','environmentStrength','background','ground'])fields.append(field(source,key));
@@ -95,7 +97,8 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     pressed(gizmoButton,gizmos);pressed(overlayButton,overlays);pressed(xrayButton,canXray&&xray);
     xrayButton.disabled=!canXray;
     for(const [value,button] of buttons)pressed(button,mode===value);
-    renderSettings.hidden=mode!=='cycles';
+    renderSettings.hidden=useProject.hidden=mode!=='cycles';
+    fields.hidden=mode==='cycles'&&projectLighting;
     view.dataset.shading=mode;
     change({mode,xray:canXray&&xray,overlays,axis:gizmos&&axis,transform:gizmos&&transform});
   }
@@ -107,7 +110,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     if(shadingMenu.details.open)shadingMenu.details.open=false;
     else openChromeMenu(shadingMenu.details);
   },{signal});
-  return {get mode(){return mode;},refresh,getState:()=>({display:mode,xray,overlays,gizmos,axis,transformGizmo:transform,scene:scene.getSettings()}),
+  return {get mode(){return mode;},get projectLighting(){return projectLighting;},refresh,getState:()=>({display:mode,xray,overlays,gizmos,axis,transformGizmo:transform,projectLighting,scene:scene.getSettings()}),
     close(){for(const details of root.querySelectorAll('details[open]'))details.open=false;},
     dispose(){lifecycle.abort();scene.dispose();root.remove();}};
 }
