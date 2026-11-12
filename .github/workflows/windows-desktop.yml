@@ -42,7 +42,7 @@ jobs:
         env:
           ARACHNE_PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/arachne-windows
         run: npm run package:win
-      - name: Verify the extracted desktop package
+      - name: Verify the Windows installer and installed desktop
         working-directory: workbench/console
         timeout-minutes: 12
         env:
@@ -58,7 +58,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Desktop ZIP extraction failed' }
           Write-Host 'Desktop ZIP checksum and extraction verified'
           $executable = Join-Path (Join-Path $extracted $archive.BaseName) 'Arachne.exe'
-          node tests/windows-desktop-integration.mjs $executable
+          $compiler = Get-Command makensis -ErrorAction SilentlyContinue
+          if ($compiler) { $env:ARACHNE_MAKENSIS = $compiler.Source }
+          else {
+            $env:ARACHNE_MAKENSIS = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+            if (!(Test-Path -LiteralPath $env:ARACHNE_MAKENSIS)) {
+              choco install nsis --no-progress -y
+              if ($LASTEXITCODE -ne 0) { throw 'Unable to install NSIS' }
+            }
+          }
+          npm run package:win:installer
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to build the Windows installer' }
+          $installer = Get-ChildItem -Path $env:ARACHNE_PACKAGE_OUTPUT_DIR -Filter '*-setup.exe' | Select-Object -First 1
+          if (!$installer) { throw 'Windows installer is missing' }
+          $installerHash = (Get-Content ($installer.FullName + '.sha256')).Split(' ')[0]
+          if ((Get-FileHash $installer.FullName -Algorithm SHA256).Hash -ne $installerHash) { throw 'Installer checksum mismatch' }
+          ./tests/windows-installer-integration.ps1 -Installer $installer.FullName -PortableExecutable $executable
       - uses: actions/upload-artifact@v6
         if: always()
         with:
