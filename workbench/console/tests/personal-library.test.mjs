@@ -30,3 +30,21 @@ test('stale clients, broken dependencies, corruption and unsafe paths never chan
   fs.writeFileSync(library.assetFile(saved.item.id,asset.id),'corrupt');assert.throws(()=>library.importResource({projectId:'b',projectRevision:0,revision:1,id:saved.item.id}),/指纹/);assert.deepEqual(docs.get('b'),before);assert.equal(library.read().revision,1);
   docs.get('a').paint.materials.coat.graph.nodes.find(n=>n.type==='image').params.asset='missing';assert.throws(()=>library.save({projectId:'a',projectRevision:0,revision:1,kind:'materials',resourceId:'coat'}));assert.equal(library.read().revision,1);assert.equal(fs.existsSync(args.projectFolder('b')),false);
 });
+
+test('personal resource metadata is versioned, normalized and separate from the saved graph',t=>{
+  const {library,args}=fixture(t);
+  const {item}=library.save({projectId:'a',projectRevision:0,revision:0,kind:'materials',resourceId:'coat'});
+  const updated=library.update({revision:1,id:item.id,patch:{favorite:true,tags:[' Metal ','ＭＥＴＡＬ','涂层']}});
+  assert.deepEqual(updated.items[item.id].tags,['Metal','涂层']);
+  assert.equal(updated.items[item.id].favorite,true);
+  assert.deepEqual(updated.items[item.id].graph,item.graph);
+  assert.deepEqual(updated.items[item.id].assets,item.assets);
+  assert.deepEqual(createPersonalLibrary(args).read(),updated);
+  assert.throws(()=>library.update({revision:1,id:item.id,patch:{favorite:false}}),failure=>failure.status===409);
+  assert.throws(()=>library.update({revision:2,id:item.id,patch:{graph:{}}}),/属性无效/);
+  assert.throws(()=>library.update({revision:2,id:item.id,patch:{tags:['无效,标签']}}),/标签须/);
+  assert.equal(library.update({revision:2,id:item.id,patch:{favorite:true}}).revision,2);
+  const cleared=library.update({revision:2,id:item.id,patch:{favorite:false,tags:[]}});
+  assert.equal(cleared.items[item.id].favorite,undefined);
+  assert.equal(cleared.items[item.id].tags,undefined);
+});

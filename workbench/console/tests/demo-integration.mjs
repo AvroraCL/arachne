@@ -496,6 +496,29 @@ try{
   assert.equal(await aluminum.getAttribute('aria-pressed'),'true');
   await page.keyboard.press('End');
   assert.equal(await primer.evaluate(node=>document.activeElement===node),true);
+  await aluminum.click();
+  await shelf.getByRole('button',{name:'收藏资源',exact:true}).click();
+  await shelf.getByRole('button',{name:'取消收藏',exact:true}).waitFor();
+  const onlyFavorites=shelf.getByRole('button',{name:'仅显示收藏',exact:true});
+  await onlyFavorites.click();
+  assert.equal(await onlyFavorites.getAttribute('aria-pressed'),'true');
+  await primer.waitFor({state:'hidden'});
+  assert.equal(await shelf.locator('.personal-favorite-badge').count(),1);
+  await onlyFavorites.click();
+  await primer.waitFor();
+  await shelf.getByRole('button',{name:'编辑个人资源',exact:true}).click();
+  const resourceEditor=page.getByRole('dialog',{name:'编辑个人资源',exact:true});
+  await resourceEditor.getByLabel('资源标签').fill('航空，金属，Metal，ＭＥＴＡＬ');
+  await resourceEditor.getByRole('button',{name:'保存',exact:true}).click();
+  await resourceEditor.waitFor({state:'hidden'});
+  personal=await api('/api/personal-library');
+  const tagged=Object.values(personal.items).find(item=>item.name==='Aluminum 7075');
+  assert.deepEqual(tagged.tags,['航空','金属','Metal']);
+  assert.equal(tagged.favorite,true);
+  await primary.getByRole('searchbox',{name:'搜索资源'}).fill('航空 metal');
+  await primer.waitFor({state:'hidden'});
+  await aluminum.waitFor();
+
   await primary.getByRole('searchbox',{name:'搜索资源'}).fill('ＡＬＵ  7075');
   assert.equal(await shelf.locator('.library-tile').count(),1);
   await aluminum.dblclick();
@@ -514,7 +537,7 @@ try{
   assert.equal(applied.paint.layers.length,1);
   assert.deepEqual((await api(project(libraryOrigin.id))).paint.materials,librarySource.paint.materials);
   assert.deepEqual(await api('/api/personal-library'),personal);
-  console.log('PASS resource grid keyboard focus, normalized search, double-click personal import and double-click material application');
+  console.log('PASS personal library favorites, tag search, keyboard focus and independent double-click import');
   await page.locator('.area-switch [data-area-mode=material]:enabled').waitFor();
   await page.keyboard.press('F3');
   await page.locator('#command-search').fill('后台任务');

@@ -6,6 +6,17 @@ import {compileLibraryMaterial,evaluateBrushGraph,libraryOperation} from './publ
 const kinds=['materials','brushes','images'],sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const failure=(message,status=400,extra={})=>Object.assign(Error(message),{status,...extra});
 const label=value=>{if(typeof value!=='string'||!value.trim()||value.length>100)throw failure('资源名称须为 1–100 个字符');return value.trim();};
+function tags(value){
+  if(!Array.isArray(value)||value.length>12)throw failure('每项资源最多 12 个标签');
+  const seen=new Set(),result=[];
+  for(const item of value){
+    const tag=typeof item==='string'?item.trim():'';
+    if(!tag||tag.length>24||/[\u0000-\u001f\u007f,，、;；]/.test(tag))throw failure('标签须为 1–24 个字符');
+    const canonical=tag.normalize('NFKC').toLowerCase();
+    if(!seen.has(canonical)){seen.add(canonical);result.push(tag);}
+  }
+  return result;
+}
 const key=value=>{if(typeof value!=='string'||!/^[\w-]{1,100}$/.test(value))throw failure('资源编号无效');return value;};
 export function createPersonalLibrary({root,readProject,projectFolder,commitProject}){
   const index=path.join(root,'index.json'),blobs=path.join(root,'assets');
@@ -39,8 +50,26 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
     },'从个人库导入独立资源副本');
     return {document,resource:{kind:entry.kind,id:resourceId}};
   }
-  function rename({revision,id,name}){const state=expected(revision),entry=resource(state,id);entry.name=label(name);entry.updated=new Date().toISOString();return write(state);}
+  function update({revision,id,patch}){
+    const state=expected(revision),entry=resource(state,id);
+    if(!patch||typeof patch!=='object'||Array.isArray(patch)||!Object.keys(patch).length||
+       Object.keys(patch).some(field=>!['name','tags','favorite'].includes(field)))throw failure('个人资源属性无效');
+    const next={...entry};
+    if(Object.hasOwn(patch,'name'))next.name=label(patch.name);
+    if(Object.hasOwn(patch,'tags')){
+      const checked=tags(patch.tags);
+      if(checked.length)next.tags=checked;else delete next.tags;
+    }
+    if(Object.hasOwn(patch,'favorite')){
+      if(typeof patch.favorite!=='boolean')throw failure('收藏状态无效');
+      if(patch.favorite)next.favorite=true;else delete next.favorite;
+    }
+    if(JSON.stringify(next)===JSON.stringify(entry))return state;
+    state.items[entry.id]={...next,updated:new Date().toISOString()};
+    return write(state);
+  }
+  function rename({revision,id,name}){return update({revision,id,patch:{name}});}
   function remove({revision,id}){const state=expected(revision);resource(state,id);delete state.items[id];return write(state);}
   function assetFile(id,assetId){const entry=resource(read(),id);key(assetId);const asset=Object.hasOwn(entry.assets,assetId)&&entry.assets[assetId];if(!asset)throw failure('资源图片不存在',404);const file=path.join(blobs,path.basename(asset.file));assetBytes(asset,file);return file;}
-  return {read,save,importResource,rename,remove,assetFile};
+  return {read,save,importResource,rename,update,remove,assetFile};
 }

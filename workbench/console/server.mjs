@@ -201,7 +201,7 @@ const server=http.createServer(async(req,res)=>{
     if(parts[1]==='personal-library'){
       if(req.method==='GET'&&parts.length===2){send(res,200,personalLibrary.read());return;}
       if(req.method==='GET'&&parts.length===5&&parts[3]==='assets'){file(res,personalLibrary.assetFile(parts[2],parts[4]));return;}
-      if(req.method==='POST'&&parts.length===3&&['save','rename','remove'].includes(parts[2])){send(res,200,personalLibrary[parts[2]](await body(req)));return;}
+      if(req.method==='POST'&&parts.length===3&&['save','rename','update','remove'].includes(parts[2])){send(res,200,personalLibrary[parts[2]](await body(req)));return;}
       send(res,404,{error:'个人库操作不存在'});return;
     }
     if(parts[1]==='health'){send(res,200,{ok:true,version:APP_VERSION,packageVersion:PACKAGE_VERSION,product:'Arachne',localOnly:true,interactiveCycles:interactiveCyclesAvailable,...(process.env.ARACHNE_BUILD_ID?{buildId:process.env.ARACHNE_BUILD_ID}:{})});return;}
