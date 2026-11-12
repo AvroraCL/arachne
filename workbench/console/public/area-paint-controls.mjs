@@ -20,7 +20,7 @@ export function surfaceControls(host){
 }
 export function selectionControls(elements,toolbar,stage){
   const svg=tag=>document.createElementNS('http://www.w3.org/2000/svg',tag),overlay=elements['uv-selection-overlay']=svg('svg');overlay.classList.add('area-selection-overlay');overlay.hidden=true;
-  for(const [id,tag] of [['uv-selection-border','polygon'],['uv-lasso-border','polygon'],['uv-selection-handles','g']]){elements[id]=svg(tag);elements[id].classList.add(id);overlay.append(elements[id]);}stage.append(overlay);
+  for(const [id,tag] of [['uv-selection-base','path'],['uv-selection-border','polygon'],['uv-lasso-border','path'],['uv-selection-handles','g']]){elements[id]=svg(tag);elements[id].classList.add(id);overlay.append(elements[id]);}stage.append(overlay);
   const options=elements['uv-transform-options']=el('form','editor-toolbar');options.hidden=true;
   for(const [key,label,min,max] of [['x','X',-8192,8192],['y','Y',-8192,8192],['sx','宽 %',5,800],['sy','高 %',5,800],['angle','旋转',-360,360]]){const l=el('label','',label),i=el('input');Object.assign(i,{type:'number',step:'any',min,max});i.dataset.transformField=key;i.setAttribute('aria-label',label);l.append(i);options.append(l);}
   for(const [id,label] of [['uv-flip-x','水平翻转'],['uv-flip-y','垂直翻转'],['uv-transform-cancel','取消']]){elements[id]=button(label,()=>{});options.append(elements[id]);}

@@ -28,6 +28,7 @@ import {checkRenderVisibility,updateRenderVisibility} from './public/render-visi
 import {checkRenderOptics} from './public/render-optics.mjs';
 import {checkRenderRegion,renderRegionPixels} from './public/render-region.mjs';
 import {layerParent,layerChildren,layerTreeOrder,layerLockOwner} from './public/paint-layer-tree.mjs';
+import {uvShapeFields,uvShapePayload,uvRegionLimits} from './public/uv-selection-region.mjs';
 
 export const PAINT='pbr_paint';
 const archiveFormat='arachne-pbr-paint-project';
@@ -93,12 +94,25 @@ function checkProjector(p){
 function validUVRect(rect){
   return vector(rect,4,1)&&rect.every(unit)&&rect[2]-rect[0]>=1/4096&&rect[3]-rect[1]>=1/4096;
 }
-function validUVPolygon(polygon,rect){
+function validUVPolygon(polygon,rect,limit=256){
   if(polygon===undefined)return true;
-  if(!validUVRect(rect)||!Array.isArray(polygon)||polygon.length<3||polygon.length>256)return false;
+  if(!validUVRect(rect)||!Array.isArray(polygon)||polygon.length<3||polygon.length>limit)return false;
   const [left,top,right,bottom]=rect,tolerance=1e-9;
   return polygon.every(point=>vector(point,2,1)&&point.every(unit)&&
     ranged(point[0],left-tolerance,right+tolerance)&&ranged(point[1],top-tolerance,bottom+tolerance));
+}
+function validUVSelection(shape,rect){
+  const {polygon,regions}=shape;
+  if(regions===undefined)return validUVPolygon(polygon,rect);
+  if(polygon!==undefined||!validUVRect(rect)||!Array.isArray(regions)||!regions.length||regions.length>uvRegionLimits.rings)return false;
+  let rings=0,points=0;
+  for(const region of regions){
+    if(!Array.isArray(region)||!region.length||(rings+=region.length)>uvRegionLimits.rings)return false;
+    for(const ring of region){
+      if(!Array.isArray(ring)||(points+=ring.length)>uvRegionLimits.points||!validUVPolygon(ring,rect,uvRegionLimits.points))return false;
+    }
+  }
+  return true;
 }
 function validBrushStamp(stamp,uv){
   if(!Array.isArray(stamp))return false;
@@ -117,15 +131,15 @@ function checkStroke(s,isMask){
   const validInk=stroke=>isMask?unit(stroke.value):
     channelFlags(stroke.channels)&&materialValues(stroke.values)&&typeof stroke.erase==='boolean';
   if(s?.rect!==undefined){
-    fields(s,['uv','rect','polygon','opacity',...inkFields]);
-    if(s.uv!==true||!validUVRect(s.rect)||!validUVPolygon(s.polygon,s.rect)||!unit(s.opacity)||!validInk(s))
+    fields(s,['uv','rect',...uvShapeFields,'opacity',...inkFields]);
+    if(s.uv!==true||!validUVRect(s.rect)||!validUVSelection(s,s.rect)||!unit(s.opacity)||!validInk(s))
       throw Error('选区填充参数无效');
     return;
   }
-  fields(s,['radius','hardness','opacity','stamps','mirrorX','uv','clip','polygon','surfaceBinding',...inkFields]);
+  fields(s,['radius','hardness','opacity','stamps','mirrorX','uv','clip',...uvShapeFields,'surfaceBinding',...inkFields]);
   const uv=s.uv===true;
   if((s.uv!==undefined&&!uv)||(uv&&s.mirrorX!==undefined)||
-     (s.clip!==undefined&&(!uv||!validUVRect(s.clip)))||!validUVPolygon(s.polygon,s.clip)||
+     (s.clip!==undefined&&(!uv||!validUVRect(s.clip)))||!validUVSelection(s,s.clip)||
      !(uv?ranged(s.radius,1/4096,.125):ranged(s.radius,.01,2))||
      !unit(s.hardness)||!unit(s.opacity)||!Array.isArray(s.stamps)||!s.stamps.length||s.stamps.length>1024||
      s.stamps.some(stamp=>!validBrushStamp(stamp,uv))||
@@ -330,14 +344,14 @@ function arrangeLayers(layers,items,{parentId=null,anchorId=null,placement}){
   return remaining;
 }
 function checkedUVTransform(value){
-  const {rect,polygon,offset,scale,angle,copy,interpolation}=
-    fields(value,['rect','polygon','offset','scale','angle','copy','interpolation']);
-  if(!validUVRect(rect)||!validUVPolygon(polygon,rect)||
+  const {rect,offset,scale,angle,copy,interpolation}=
+    fields(value,['rect',...uvShapeFields,'offset','scale','angle','copy','interpolation']);
+  if(!validUVRect(rect)||!validUVSelection(value,rect)||
      !vector(offset,2,2)||!vector(scale,2,8)||!scale.every(n=>Math.abs(n)>=.05)||!ranged(angle,-360,360)||
      (copy!==undefined&&typeof copy!=='boolean')||
      (interpolation!==undefined&&!['linear','nearest'].includes(interpolation)))
     throw Error('选区变换参数无效');
-  return {rect,polygon,offset,scale,angle,copy,interpolation};
+  return {rect,...uvShapePayload(value),offset,scale,angle,copy,interpolation};
 }
 function applyOperations(next,operations,sourceVisibility){
   if(!Array.isArray(operations)||!operations.length||operations.length>128)throw Error('需要 1–128 条制作命令');
@@ -462,12 +476,12 @@ function applyOperations(next,operations,sourceVisibility){
       if(item.kind!=='paint'||!item.strokes?.length)throw Error('请选择已有笔触的绘制层');
       if(item.strokes.length>=400)throw Error('此图层的笔触数量达到首版上限');
       if(op==='clearUV'){
-        if(!validUVRect(o.rect)||!validUVPolygon(o.polygon,o.rect))throw Error('选区参数无效');
-        item.strokes.push({clearUV:o.rect,...(o.polygon?{polygon:o.polygon}:{})});
+        if(!validUVRect(o.rect)||!validUVSelection(o,o.rect))throw Error('选区参数无效');
+        item.strokes.push({clearUV:o.rect,...uvShapePayload(o)});
         continue;
       }
-      const {rect,polygon,offset,scale,angle,copy,interpolation='linear'}=checkedUVTransform(o.transform);
-      item.strokes.push({transformUV:{rect,...(polygon?{polygon}:{}),offset,scale,angle,interpolation,...(copy?{copy:true}:{})}});
+      const {copy,interpolation='linear',...transform}=checkedUVTransform(o.transform);
+      item.strokes.push({transformUV:{...transform,interpolation,...(copy?{copy:true}:{})}});
     }else if(op==='stroke'){
       if(item.kind==='group')throw Error('请选择文件夹内的图层进行绘制');
       if(!['material','mask'].includes(o.target))throw Error('请选择材质或蒙版作为笔触目标');
@@ -577,13 +591,13 @@ export function imageDocumentInput(doc,{revision,documentId,operation,inspectMas
   };
 }
 export function imageClipboardInput(doc,request){
-  const {revision,documentId,layerId,rect,polygon}=fields(request,['revision','documentId','layerId','rect','polygon']);
-  if(!validUVRect(rect)||!validUVPolygon(polygon,rect))throw Error('图像复制选区无效');
+  const {revision,documentId,layerId,rect}=fields(request,['revision','documentId','layerId','rect',...uvShapeFields]);
+  if(!validUVRect(rect)||!validUVSelection(request,rect))throw Error('图像复制选区无效');
   const documents=doc.paint.imageDocuments??{};
   const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId);
   if(!layer||!layer.visible||!layer.opacity)throw Error('请选择可见的图像图层');
   const input=imageDocumentInput(doc,{revision,documentId,isolatedImageLayer:layerId,resolution:4096});
-  return {...input,clipboardRegion:{rect,polygon}};
+  return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
 }
 export function imageExportInput(doc,request){
   const {revision,documentId}=fields(request,['revision','documentId']);
@@ -773,8 +787,8 @@ function validateRestoredLayers(layers){
           fields(stroke,['transformUV']);
           checkedUVTransform(stroke.transformUV);
         }else if(!isMask&&stroke?.clearUV!==undefined){
-          fields(stroke,['clearUV','polygon']);
-          if(!validUVRect(stroke.clearUV)||!validUVPolygon(stroke.polygon,stroke.clearUV))throw Error('选区参数无效');
+          fields(stroke,['clearUV',...uvShapeFields]);
+          if(!validUVRect(stroke.clearUV)||!validUVSelection(stroke,stroke.clearUV))throw Error('选区参数无效');
         }else checkStroke(stroke,isMask);
       }
     }

@@ -25,7 +25,7 @@ class ImageSurface(Surface):
         self.uv_shape=(size,size)
         self.allowed=np.ones(size*size,dtype=bool)
         self.live=False
-        self.uv_polygon=None
+        self.uv_selection_cache=None
 
 
 def converted(stroke):
@@ -40,12 +40,7 @@ def mask_values(layer,mask,ids,surface):
     gradient=layer.get('maskGradient')
     if gradient is not None:
         clip=gradient.get('clip')
-        if clip is None:
-            valid=slice(None)
-        elif 'polygon' in gradient:
-            valid=surface._polygon_contains(ids,clip,gradient['polygon'])
-        else:
-            valid=surface._inside_uv(*surface._texel_uv(ids),clip)
+        valid = slice(None) if clip is None else surface._selection_contains(ids,clip,gradient)
         t=gradient_amount(surface,gradient,ids[valid])
         first,last=(int(ink[1:3],16)/255 for ink in gradient['colors'])
         a,b=gradient['alpha']
@@ -86,15 +81,15 @@ def gradient_tiles(surface, gradient, color):
     first, last = (np.r_[color(ink)*alpha, alpha].astype(np.float32)
                    for ink, alpha in zip(gradient['colors'], gradient['alpha']))
     rect = gradient.get('clip', (0, 0, 1, 1))
-    polygon = gradient.get('polygon')
+    shaped = 'polygon' in gradient or 'regions' in gradient
     row0, row1, col0, col1 = surface._uv_pixel_rect(rect)
     cols = np.arange(col0, col1)
     rows_per_tile = max(1, 131072 // max(1, len(cols)))
     for start in range(row0, row1, rows_per_tile):
         rows = np.arange(start, min(start+rows_per_tile, row1))
         ids = (rows[:, None]*size + cols).ravel()
-        if polygon:
-            ids = ids[surface._polygon_contains(ids, rect, polygon)]
+        if shaped:
+            ids = ids[surface._selection_contains(ids, rect, gradient)]
         t = gradient_amount(surface,gradient,ids)[:, None]
         yield ids, first + (last-first)*t
 
@@ -151,11 +146,11 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
 def clipboard_png(pixels, region):
     height, width = pixels.shape[:2]
     surface = ImageSurface(width)
-    rect, polygon = region['rect'], region.get('polygon')
+    rect = region['rect']
     row0, row1, col0, col1 = surface._uv_pixel_rect(rect)
     cropped = pixels[height-row1:height-row0, col0:col1].copy()
-    if polygon:
-        cropped[~surface._polygon_tile(rect, polygon)[::-1]] = 0
+    if 'polygon' in region or 'regions' in region:
+        cropped[~surface._selection_tile(rect, region)[::-1]] = 0
     if not cropped.size or not cropped[:, :, 3].any():
         raise ValueError('选区内没有可复制的像素')
     return png_bytes(cropped)

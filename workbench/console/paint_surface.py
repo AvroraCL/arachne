@@ -125,7 +125,7 @@ class Surface:
         self.projections = OrderedDict()
         self.strokes = OrderedDict()
         self.brush_prefix = None
-        self.uv_polygon = None
+        self.uv_selection_cache = None
 
     def project(self, projector, image_shape):
         if not self.live:
@@ -168,7 +168,7 @@ class Surface:
             return self._rect_stroke(stroke)
         if stroke.get('uv'):
             key = ('uv', stroke['radius'], stroke['hardness'], stroke['opacity'],
-                   tuple(stroke.get('clip', ())), tuple(map(tuple, stroke.get('polygon', ()))),
+                   tuple(stroke.get('clip', ())), self._selection_key(stroke),
                    tuple(map(tuple, stroke['stamps'])))
             return self._uv_stroke(stroke, key)
         if not self.live:
@@ -190,32 +190,48 @@ class Surface:
         min_row,max_row = (height-math.ceil(edge*height-.5) for edge in (bottom,top))
         return min_row,max_row,min_col,max_col
 
-    def _polygon_tile(self, rect, polygon):
-        key = tuple(rect),tuple(map(tuple,polygon))
-        if self.uv_polygon is not None and self.uv_polygon[0] == key:
-            return self.uv_polygon[1]
+    @staticmethod
+    def _selection_key(shape):
+        regions = shape.get('regions')
+        if regions is None:
+            polygon = shape.get('polygon')
+            regions = [[polygon]] if polygon is not None else []
+        return tuple(tuple(tuple(map(tuple, ring)) for ring in region) for region in regions)
+
+    def _selection_tile(self, rect, shape):
+        regions = self._selection_key(shape)
+        key = tuple(rect),regions
+        if self.uv_selection_cache is not None and self.uv_selection_cache[0] == key:
+            return self.uv_selection_cache[1]
         height,width = self.uv_shape
         row0,row1,col0,col1 = self._uv_pixel_rect(rect)
-        mask = np.zeros((row1-row0,col1-col0),dtype=bool)
-        x,y = np.asarray(polygon).T
-        next_x,next_y = np.roll(x,-1),np.roll(y,-1)
-        # Pair intersections at each texel row for even-odd lasso fill.
-        for row in range(row0,row1):
-            v = 1-(row+.5)/height
-            crossed = (y>v)!=(next_y>v)
-            xs = x[crossed]+(v-y[crossed])*(next_x[crossed]-x[crossed])/(next_y[crossed]-y[crossed])
-            columns = np.clip(np.ceil(np.sort(xs)*width-.5).astype(int),col0,col1)-col0
-            for left,right in zip(columns[::2],columns[1::2]):
-                mask[row-row0,left:right] = True
-        self.uv_polygon = key,mask
+        mask = np.full((row1-row0,col1-col0), not regions, dtype=bool)
+        # Each polygon uses even-odd fill for its outer contour and holes.
+        # Multiple polygons contribute to the same selection.
+        for region in regions:
+            rings = [np.asarray(ring) for ring in region]
+            x,y = np.concatenate(rings).T
+            next_x,next_y = np.concatenate([np.roll(ring,-1,axis=0) for ring in rings]).T
+            first_row = max(row0, height-math.ceil(y.max()*height-.5))
+            last_row = min(row1, height-math.ceil(y.min()*height-.5))
+            for row in range(first_row,last_row):
+                v = 1-(row+.5)/height
+                crossed = (y>v)!=(next_y>v)
+                xs = x[crossed]+(v-y[crossed])*(next_x[crossed]-x[crossed])/(next_y[crossed]-y[crossed])
+                columns = np.clip(np.ceil(np.sort(xs)*width-.5).astype(int),col0,col1)-col0
+                for left,right in zip(columns[::2],columns[1::2]):
+                    mask[row-row0,left:right] = True
+        self.uv_selection_cache = key,mask
         return mask
 
-    def _polygon_contains(self, ids, rect, polygon):
+    def _selection_contains(self, ids, rect, shape):
+        if 'polygon' not in shape and 'regions' not in shape:
+            return self._inside_uv(*self._texel_uv(ids),rect)
         width = self.uv_shape[1]
         row0,row1,col0,col1 = self._uv_pixel_rect(rect)
         rows,cols = np.divmod(ids,width)
         in_tile = (rows>=row0)&(rows<row1)&(cols>=col0)&(cols<col1)
-        mask = self._polygon_tile(rect,polygon)
+        mask = self._selection_tile(rect,shape)
         result = in_tile.copy()
         result[in_tile] = mask[rows[in_tile]-row0,cols[in_tile]-col0]
         return result
@@ -224,8 +240,8 @@ class Surface:
         height, width = self.uv_shape
         min_row,max_row,min_col,max_col = self._uv_pixel_rect(stroke['rect'])
         tile = self.allowed.reshape(height,width)[min_row:max_row,min_col:max_col]
-        if 'polygon' in stroke:
-            tile = tile & self._polygon_tile(stroke['rect'],stroke['polygon'])
+        if 'polygon' in stroke or 'regions' in stroke:
+            tile = tile & self._selection_tile(stroke['rect'],stroke)
         rows, cols = np.nonzero(tile)
         ids = ((rows+min_row)*width+cols+min_col).astype(np.int32)
         return ids,np.full(len(ids),stroke['opacity'],dtype=np.float32)
@@ -278,11 +294,11 @@ class Surface:
             tile = weights[bottom-row_origin:top-row_origin,left-col_origin:right-col_origin]
             np.maximum(tile,alpha,out=tile)
         flat = weights.ravel()
-        polygon = stroke.get('polygon')
+        shaped = 'polygon' in stroke or 'regions' in stroke
         if self.live:
             ids = np.flatnonzero((flat>0) & self.allowed).astype(np.int32)
-            if polygon is not None:
-                ids = ids[self._polygon_contains(ids,stroke['clip'],polygon)]
+            if shaped:
+                ids = ids[self._selection_contains(ids,stroke['clip'],stroke)]
             result = ids,flat[ids]
             self.brush_prefix = key, weights
             self.strokes[key] = result
@@ -293,8 +309,8 @@ class Surface:
         rows,cols = np.divmod(local,weights.shape[1])
         ids = (rows+row_origin)*width+cols+col_origin
         eligible = self.allowed[ids]
-        if polygon is not None:
-            eligible &= self._polygon_contains(ids,stroke['clip'],polygon)
+        if shaped:
+            eligible &= self._selection_contains(ids,stroke['clip'],stroke)
         return ids[eligible].astype(np.int32),flat[local[eligible]]
 
     def _prepare_hit_bounds(self):
@@ -435,11 +451,7 @@ class Surface:
                 continue
             affected, paint = self._paint_strokes(batch, channels, color, affected, paint, sampler)
             if clear is not None:
-                polygon = stroke.get('polygon')
-                if polygon is None:
-                    selected = self._inside_uv(*self._texel_uv(affected),clear)
-                else:
-                    selected = self._polygon_contains(affected,clear,polygon)
+                selected = self._selection_contains(affected,clear,stroke)
                 keep = ~selected
                 affected, paint = self._subset_paint(affected, paint, keep)
             else:
@@ -513,9 +525,7 @@ class Surface:
         angle = math.radians(transform['angle'])
         c,s = math.cos(angle),math.sin(angle)
         x, y = self._texel_uv(affected)
-        polygon = transform.get('polygon')
-        inside = (self._inside_uv(x,y,transform['rect']) if polygon is None else
-                  self._polygon_contains(affected,transform['rect'],polygon))
+        inside = self._selection_contains(affected,transform['rect'],transform)
         ink = np.logical_or.reduce([alpha>0 for alpha,_ in paint.values()])
         selected = inside & ink
         if not np.any(selected):

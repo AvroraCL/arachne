@@ -181,6 +181,9 @@ const server=http.createServer(async(req,res)=>{
          parts.slice(2).join('/')==='build/index.module.js'){
         file(res,path.join(ROOT,'node_modules',parts[1],'build','index.module.js'));return;
       }
+      if(url.pathname==='/vendor/polygon-clipping/dist/polygon-clipping.umd.min.js'){
+        file(res,path.join(ROOT,'node_modules','polygon-clipping','dist','polygon-clipping.umd.min.js'));return;
+      }
       if(url.pathname==='/'){
         const page='/paint.html';
         if(!url.searchParams.has('project')){

@@ -165,6 +165,27 @@ export function createDocumentEditor(ctx,bridge){
   const brushBinding=createBrushBinding({project,painter});
   selectionControls(elements,parameters,stage);
   elements['uv-ellipse-tool']=button(selectionNames.ellipse);
+  const selectionModes=el('div','document-selection-modes');
+  selectionModes.setAttribute('role','group');
+  selectionModes.setAttribute('aria-label','选区模式');
+  elements.selectionModes=[
+    ['replace','新建选区','marquee',''],
+    ['add','添加到选区','marqueeAdd','Shift'],
+    ['subtract','从选区减去','marqueeSubtract','Alt / Option'],
+    ['intersect','与选区相交','marqueeIntersect','Shift + Alt / Option']
+  ].map(([mode,label,icon,shortcut])=>{
+    const control=chromeButton(button(label,()=>{}),icon);
+    control.dataset.selectionMode=mode;
+    control.title=shortcut?label+' · '+shortcut:label;
+    selectionModes.append(control);
+    return control;
+  });
+  const invertSelectionButton=button('反选',()=>{});
+  invertSelectionButton.title='反选 · Ctrl Shift I / ⌘⇧I';
+  invertSelectionButton.setAttribute('aria-keyshortcuts','Control+Shift+I Meta+Shift+I');
+  elements['uv-selection-inverse']=invertSelectionButton;
+  elements['uv-selection-fill-material'].textContent='填充前景色';
+  elements['uv-selection-options'].prepend(selectionModes);
   const transformOptions=elements['uv-transform-options'];
   for(const field of transformOptions.querySelectorAll('[data-transform-field]')){
     field.dataset.scrubNumber='';
@@ -176,11 +197,12 @@ export function createDocumentEditor(ctx,bridge){
   fitSelectionButton.setAttribute('aria-keyshortcuts','Control+Shift+0 Meta+Shift+0');
   fitSelectionButton.disabled=true;
   elements['uv-selection-fit']=fitSelectionButton;
-  elements['uv-selection-options'].append(fitSelectionButton);
+  elements['uv-selection-options'].append(invertSelectionButton,fitSelectionButton);
   parameters.append(transformOptions,elements['uv-selection-options'],sampleNotice);
   selection=bridge.createSelection({pane:stage,canvas,elements,isHandHeld:()=>space||!!nav,
     context:()=>{const l=currentLayer(project),origin=imageOrigin(),editable=!!l&&!l.locked&&!bridge.busy(),pixels=project.imageContext?.target!=='mask';return {...origin,id:l?.id,projectId:origin.id,active:!!currentDocument(project),interactive:!painter.isEditing()&&!nav,image:l?.kind==='image'?{x:l.x,y:l.y,scale:l.scale,rotation:l.rotation,stretch:l.stretch,size:[project.document.paint.assets[l.asset].width,project.document.paint.assets[l.asset].height]}:null,canTransform:editable&&pixels&&(l.kind==='image'||l.kind==='pixel'&&!!l.strokes?.length),canClear:editable&&pixels&&l.kind==='pixel',canFillMaterial:editable&&pixels&&l.kind==='pixel',canFillMask:editable};},
-    activate:()=>{setMode('select');return true;},onTransformState:syncToolName,preview:op=>draft(op),commit:(op,origin)=>save(op,{...origin,id:origin.projectId}),fillOperation:(rect,target,value,polygon)=>painter.fillUV(rect,target,value,polygon)});
+    activate:()=>{setMode('select');return true;},onTransformState:syncToolName,selectionMode:state.selectionMode,onMode:ctx.onChange,onError:ctx.error,
+    preview:op=>draft(op),commit:(op,origin)=>save(op,{...origin,id:origin.projectId}),fillOperation:(rect,target,value,shape)=>painter.fillUV(rect,target,value,shape)});
   for(const [id,label,icon,key] of [['uv-select-tool',selectionNames.rect,'marquee','M'],['uv-ellipse-tool',selectionNames.ellipse,'ellipseMarquee','Shift+M'],['uv-lasso-tool',selectionNames.lasso,'lasso','L'],['uv-transform-tool','自由变换','transform','V'],['surface-orbit','抓手','hand','H'],['surface-paint','画笔','brush','B'],['uv-eraser-tool','橡皮擦','eraser','E'],['surface-sample','取样','eyedropper','I']]){
     const control=elements[id];control.textContent=label;chromeButton(control,icon,label);
     control.title=label+' · '+key;control.setAttribute('aria-keyshortcuts',key);rail.append(control);
@@ -360,7 +382,8 @@ export function createDocumentEditor(ctx,bridge){
     let handled=true;
     if(mod&&!event.altKey){
       if(key==='c'&&!event.shiftKey)handled=copySelection();
-      else if(key==='i'&&!event.shiftKey){
+      else if(key==='i'&&event.shiftKey)handled=selection.invert();
+      else if(key==='i'){
         const layer=currentLayer(project);
         handled=project.imageContext?.target==='mask'&&hasImageLayerMask(layer)&&!layer.locked&&
           (!!pendingImageEdit||!bridge.busy())&&!selection.isTransforming();
@@ -376,6 +399,7 @@ export function createDocumentEditor(ctx,bridge){
       }
       else if(key==='z')void project.travel(event.shiftKey?'redo':'undo').catch(ctx.error);
       else if(key==='a')selection.selectAll(selectionShape);
+      else if(key==='d'&&event.shiftKey)handled=selection.reselect();
       else if(key==='d')selection.clear();
       else if(key==='t')selection.start();
       else if(event.code==='Digit0'&&event.shiftKey)handled=fitSelection();
@@ -439,7 +463,7 @@ export function createDocumentEditor(ctx,bridge){
     picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||writing();gradientButton.disabled=!image||writing()||c?.target==='mask'&&!!layer?.locked;empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,gradient:gradientTool.getState(),eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||painter.isEditing()||gradientTool.isEditing()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,selectionMode:selection.getCombination(),gradient:gradientTool.getState(),eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||painter.isEditing()||gradientTool.isEditing()||selection.isDragging()||selection.isTransforming(),
     setVisible(visible){
       if(shown===visible)return;
       shown=visible;live.setVisible(visible);

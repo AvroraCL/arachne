@@ -265,14 +265,14 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     const values=sampled||{...effectiveValues(layer.values),color:state.brushColor||layer.values.color};
     return {values,channels,erase:$('brush-erase').checked};
   }
-  function fillUV(rect,target,maskValue,polygon){
+  function fillUV(rect,target,maskValue,shape={}){
     const state=context();
     if(!state.uvEnabled||!state.layer?.visible||state.layer.locked||target==='material'&&state.layer.kind!=='paint')return null;
     const params=target==='mask'?{value:maskValue}:strokeInk(state.layer,target,state);
     if(!params)return null;
     if(target==='material')params.erase=false;
     return {op:'stroke',id:state.layer.id,target,stroke:{
-      uv:true,rect,...(polygon?{polygon}:{}),opacity:Number($('brush-opacity').value),...params}};
+      uv:true,rect,...shape,opacity:Number($('brush-opacity').value),...params}};
   }
   function beginStroke(event,uv=false){
     const state=context();

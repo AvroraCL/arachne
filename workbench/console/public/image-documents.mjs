@@ -1,5 +1,6 @@
 // Independent RGBA image documents. Material layers reference their composite by ID.
 import {paintChannels} from './paint-channels.mjs';
+import {uvShapeFields,uvShapePayload} from './uv-selection-region.mjs';
 const record=o=>o&&typeof o==='object'&&!Array.isArray(o),id=s=>typeof s==='string'&&/^[\w-]{1,100}$/.test(s),unit=n=>Number.isFinite(n)&&n>=0&&n<=1;
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
@@ -8,14 +9,14 @@ const layerFields=['name','visible','locked','opacity','blend','maskEnabled','ma
 const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充'};
 const pair=(values,check)=>Array.isArray(values)&&values.length===2&&values.every(check);
 function checkGradient(gradient,checkStroke,mask=false){
-  if(!exact(gradient,['kind','start','end','colors','alpha','clip','polygon'])||
+  if(!exact(gradient,['kind','start','end','colors','alpha','clip',...uvShapeFields])||
      !['linear','radial'].includes(gradient.kind)||!pair(gradient.start,unit)||!pair(gradient.end,unit)||
      Math.hypot(gradient.start[0]-gradient.end[0],gradient.start[1]-gradient.end[1])<1/4096||
      !pair(gradient.colors,ink)||!pair(gradient.alpha,unit)||
      mask&&!gradient.colors.every(color=>/^#([a-f\d]{2})\1\1$/i.test(color)))
     throw Error('渐变方向或颜色无效');
-  if(gradient.clip!==undefined||gradient.polygon!==undefined)
-    checkStroke({uv:true,rect:gradient.clip,polygon:gradient.polygon,opacity:1,value:1},true);
+  if(gradient.clip!==undefined||uvShapeFields.some(key=>Object.hasOwn(gradient,key)))
+    checkStroke({uv:true,rect:gradient.clip,...uvShapePayload(gradient),opacity:1,value:1},true);
 }
 export const imageLayerDefaults={visible:true,locked:false,opacity:1,blend:'normal',maskEnabled:false,maskBase:1};
 export const imageDocumentLimit=16;
@@ -31,7 +32,7 @@ export function surfaceToImageCommand(op,documentId){
   }
   if(op.op==='update'){const {uvScale,...patch}=op.patch;return {op:'image',action:'updateLayer',documentId,layerId:op.id,patch:{...patch,...(uvScale?{stretch:uvScale}:{})}};}
   if(op.op==='transformUV')return {op:'image',action:'transform',documentId,layerId:op.id,transform:op.transform};
-  if(op.op==='clearUV')return {op:'image',action:'clear',documentId,layerId:op.id,rect:op.rect,...(op.polygon?{polygon:op.polygon}:{})};
+  if(op.op==='clearUV')return {op:'image',action:'clear',documentId,layerId:op.id,rect:op.rect,...uvShapePayload(op)};
   throw Error('图像编辑命令无效');
 }
 export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,validateText}){
@@ -54,9 +55,9 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
         for(const stroke of strokes){
           if(!record(stroke))throw Error('图像笔触无效');
           if(stroke.transformUV){if(!exact(stroke,['transformUV'])||mask)throw Error('图像变换无效');checkedUVTransform(stroke.transformUV);}
-          else if(stroke.clearUV){if(!exact(stroke,['clearUV','polygon'])||mask)throw Error('图像清除无效');checkStroke({uv:true,rect:stroke.clearUV,...(stroke.polygon?{polygon:stroke.polygon}:{}),opacity:1,value:0},true);}
+          else if(stroke.clearUV){if(!exact(stroke,['clearUV',...uvShapeFields])||mask)throw Error('图像清除无效');checkStroke({uv:true,rect:stroke.clearUV,...uvShapePayload(stroke),opacity:1,value:0},true);}
           else{
-            const keys=['uv','radius','hardness','opacity','stamps','clip','polygon','rect',...(mask?['value']:['color','erase'])];
+            const keys=['uv','radius','hardness','opacity','stamps','clip',...uvShapeFields,'rect',...(mask?['value']:['color','erase'])];
             if(!exact(stroke,keys)||stroke.uv!==true||!mask&&!ink(stroke.color))throw Error('图像只接受二维 RGB 笔触');
             checkStroke(imageStrokeToMaterial(stroke,mask),mask);
           }
@@ -81,7 +82,7 @@ function duplicateImageName(documents,source){
   return name;
 }
 export function imageDocumentOperation(paint,o,{requireUnlocked}){
-  if(!exact(o,['op','action','documentId','newDocumentId','layerId','patch','kind','target','stroke','transform','rect','polygon','index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
+  if(!exact(o,['op','action','documentId','newDocumentId','layerId','patch','kind','target','stroke','transform','rect',...uvShapeFields,'index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
   const documents=paint.imageDocuments??={},doc=Object.hasOwn(documents,o.documentId)?documents[o.documentId]:null;
   if(o.action==='create'){
     if(doc||!exact(o.patch??{},['name','colorSpace']))throw Error('图像文档已存在或参数无效');
@@ -143,6 +144,6 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     if(!['pixels','mask'].includes(o.target)||o.target==='pixels'&&layer.kind!=='pixel')throw Error('请在像素层或蒙版上绘制');
     const key=o.target==='mask'?'maskStrokes':'strokes';if(o.target==='mask')layer.maskEnabled=true;(layer[key]??=[]).push(structuredClone(o.stroke));
   }else if(o.action==='transform'||o.action==='clear'){
-    if(layer.kind!=='pixel')throw Error('请选择像素层');(layer.strokes??=[]).push(o.action==='transform'?{transformUV:structuredClone(o.transform)}:{clearUV:o.rect,...(o.polygon?{polygon:o.polygon}:{})});
+    if(layer.kind!=='pixel')throw Error('请选择像素层');(layer.strokes??=[]).push(o.action==='transform'?{transformUV:structuredClone(o.transform)}:{clearUV:o.rect,...uvShapePayload(o)});
   }else throw Error('不支持的图像命令');
 }

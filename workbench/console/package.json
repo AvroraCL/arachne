@@ -12,6 +12,7 @@
     "package:win": "node scripts/package-windows.mjs",
     "package:win:installer": "node scripts/package-windows-installer.mjs",
     "verify:demo": "node tests/demo-integration.mjs",
+    "verify:drawing": "node tests/drawing-integration.mjs",
     "verify:model-import": "node tests/model-import-integration.mjs",
     "verify:blend-migration": "node tests/blend-migration-integration.mjs"
   },
@@ -20,6 +21,7 @@
   },
   "dependencies": {
     "playwright-core": "1.58.2",
+    "polygon-clipping": "0.15.7",
     "three": "0.180.0",
     "three-gpu-pathtracer": "0.0.24",
     "three-mesh-bvh": "0.9.1",

@@ -1,3 +1,5 @@
+import {uvShapePayload} from './uv-selection-region.mjs';
+
 const resolution=4096;
 const listeners=new Set();
 let clipboard=null,request=null;
@@ -19,14 +21,15 @@ export async function clipboardPngSize(file){
   return [width,height];
 }
 
-export function copyImagePixels(origin,{clip,polygon}){
+export function copyImagePixels(origin,region){
+  const {clip}=region;
   request?.abort();
   const controller=request=new AbortController();
   const [left,top,right,bottom]=bounds(clip);
   const copied=(async()=>{
     const response=await fetch('/api/projects/'+origin.id+'/paint/image-clipboard',{
       method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-      body:JSON.stringify({revision:origin.revision,documentId:origin.documentId,layerId:origin.layerId,rect:clip,polygon})
+      body:JSON.stringify({revision:origin.revision,documentId:origin.documentId,layerId:origin.layerId,rect:clip,...uvShapePayload(region)})
     });
     if(response.status===204)throw Error('图像已变化，请重新复制');
     if(!response.ok)throw Error((await response.json()).error||'复制图像失败');

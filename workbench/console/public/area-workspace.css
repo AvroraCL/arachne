@@ -305,8 +305,11 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .editor-layer-row .chrome-icon{width:15px;height:15px}.editor-layer-row button{padding:4px 7px}
 .area-selection-overlay{position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;overflow:hidden}
 .area-selection-overlay[hidden]{display:none}
-.area-selection-overlay polygon{fill:transparent;stroke:#fff;stroke-width:1;stroke-dasharray:4 3;filter:drop-shadow(0 0 1px #111)}
-.area-selection-overlay[data-transforming] polygon{stroke-dasharray:none;pointer-events:all;cursor:move}
+.area-selection-overlay :is(polygon,path){fill:transparent;fill-rule:evenodd;stroke:#fff;stroke-width:1;stroke-dasharray:4 3;filter:drop-shadow(0 0 1px #111)}
+.area-selection-overlay[data-polygon]:not([data-transforming])>.uv-selection-border{display:none}
+.area-selection-overlay[data-move-selection]>:is(.uv-selection-border,.uv-lasso-border){pointer-events:fill;cursor:move}
+.area-selection-overlay[data-combining]>:is(.uv-selection-border,.uv-lasso-border){stroke:#82bbf0}
+.area-selection-overlay[data-transforming]>.uv-selection-border{stroke-dasharray:none;pointer-events:all;cursor:move}
 .area-selection-overlay circle{pointer-events:all;cursor:nwse-resize;fill:#ddd;stroke:#222;stroke-width:1}
 .editor-image-stage[data-uv-brush-cursor]{cursor:none}
 .editor-image-stage>.area-uv-cursor{

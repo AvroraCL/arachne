@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="/render-result-editor.css">
 <link rel="stylesheet" href="/image-documents.css">
 <link rel="icon" href="/arachne-mark.svg" type="image/svg+xml">
-<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/","three/examples/jsm/":"/vendor/three/examples/jsm/","three-gpu-pathtracer":"/vendor/three-gpu-pathtracer/build/index.module.js","three-mesh-bvh":"/vendor/three-mesh-bvh/build/index.module.js"}}</script>
+<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/","three/examples/jsm/":"/vendor/three/examples/jsm/","three-gpu-pathtracer":"/vendor/three-gpu-pathtracer/build/index.module.js","three-mesh-bvh":"/vendor/three-mesh-bvh/build/index.module.js","polygon-clipping":"/polygon-clipping-browser.mjs"}}</script>
 </head>
 <body>
 <header class="paint-menubar">
@@ -245,7 +245,7 @@
       <img id="texture" alt="UV 贴图" draggable="false">
       <canvas id="live-uv" aria-label="实时 UV 贴图" width="256" height="256" hidden></canvas>
       <canvas id="uv-guide" aria-hidden="true" width="256" height="256" hidden></canvas>
-      <svg id="uv-selection-overlay" aria-hidden="true" hidden><polygon id="uv-selection-border"></polygon><polygon id="uv-lasso-border"></polygon><g id="uv-selection-handles"></g></svg>
+      <svg id="uv-selection-overlay" aria-hidden="true" hidden><polygon id="uv-selection-border"></polygon><path id="uv-lasso-border"></path><g id="uv-selection-handles"></g></svg>
       <span id="uv-brush-cursor" class="brush-cursor" aria-hidden="true" hidden></span>
       <div id="uv-wipe-overlay" hidden><img id="uv-wipe-texture" alt="当前 UV 贴图" draggable="false"></div>
       <span id="uv-pin" aria-hidden="true" hidden></span>

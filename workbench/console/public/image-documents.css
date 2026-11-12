@@ -13,6 +13,12 @@
   overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
 }
 .document-sample-status{color:#bdbdbd;font-size:12px}
+.document-selection-modes{
+  display:flex;align-items:center;gap:2px;padding-inline-end:6px;border-inline-end:1px solid #ffffff14;
+}
+#workspace .document-selection-modes>button{width:26px;min-width:26px;padding:0}
+#workspace .document-selection-modes>button[aria-pressed=true]{background:var(--chrome-selected,#454545)}
+.document-selection-modes .chrome-icon{width:15px;height:15px}
 #workspace .document-tool-parameters>.editor-toolbar{
   flex:none;flex-wrap:nowrap;gap:6px;height:var(--chrome-control);min-height:0;
   padding:0;border:0;background:transparent;
