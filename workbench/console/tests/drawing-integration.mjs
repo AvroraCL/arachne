@@ -420,8 +420,72 @@ try{
   await page.reload();
   await canvas.waitFor();
   assert.equal((await api(projectRoute)).revision,released.revision);
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS clipping mask from menu and Option-click, adjustment clipping, exact alpha, hidden base, release and reopen');
+
+  const featherDoc='feather-document',featherLayer='feather-pixels';
+  const featherSeed=await api(paintRoute+'/commands',{revision:released.revision,operations:[
+    {op:'image',action:'create',documentId:featherDoc,patch:{name:'羽化验收'}},
+    {op:'image',action:'addLayer',documentId:featherDoc,layerId:featherLayer,kind:'pixel',patch:{name:'软边测试'}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(featherDoc,{force:true});
+  await page.getByRole('button',{name:'软边测试',exact:true}).click();
+  await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+  await editor.getByRole('button',{name:'矩形选区',exact:true}).click();
+  await editor.getByRole('button',{name:'新建选区',exact:true}).click();
+  await drag([.24,.25],[.42,.75]);
+  await setBrushOption('选区羽化',64);
+  await editor.getByLabel('图像前景色',{exact:true}).fill('#478cde');
+  await canvas.focus();
+  await page.keyboard.press('Alt+Backspace');
+  const featherState=(current)=>current.paint.imageDocuments[featherDoc].layers[0];
+  const filled=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>featherSeed.revision&&featherState(current).strokes?.length&&current;
+  },'快捷键填充羽化选区');
+  const fillStroke=featherState(filled).strokes[0];
+  assert.equal(fillStroke.feather,64);
+  assert.equal(fillStroke.opacity,1);
+  const left=Math.ceil(fillStroke.rect[0]*4096-.5),middle=2048;
+  const featherSamples=[-220,-32,0,32,220].map(dx=>[left+dx,middle]);
+  const [,featherPixels]=rgba(await imagePng('feather-fill.png',filled.revision,featherDoc),featherSamples);
+  const alpha=featherPixels.map(pixel=>pixel[3]);
+  assert.equal(alpha[0],0);
+  assert.equal(alpha.at(-1),255);
+  assert.ok(alpha[1]>0&&alpha[1]<alpha[2]&&alpha[2]>110&&alpha[2]<145&&alpha[3]>alpha[2]&&alpha[3]<255);
+  assert.deepEqual(featherPixels[2].slice(0,3),[71,140,222]);
+  await until(()=>editor.getByRole('button',{name:'画笔',exact:true}).isEnabled(),'羽化填充保存后继续复制');
+  const [softCopy]=await Promise.all([
+    page.waitForResponse(response=>response.url().endsWith('/paint/image-clipboard')),
+    page.keyboard.press('Control+c')
+  ]);
+  assert.equal(softCopy.status(),200);
+  assert.equal(softCopy.request().postDataJSON().feather,64);
+  await page.waitForFunction(async id=>(await import('/image-clipboard.mjs')).copiedImage()?.documentId===id,featherDoc);
+  const softClipboard=await page.evaluate(async()=>{const {copiedImage}=await import('/image-clipboard.mjs');const entry=copiedImage();return {
+    width:entry.width,height:entry.height,bytes:Array.from(new Uint8Array(await entry.file.arrayBuffer()))
+  };});
+  const softCopyFile=path.join(data,'feather-copy.png');
+  await fs.writeFile(softCopyFile,Buffer.from(softClipboard.bytes));
+  const padding=193,top=Math.ceil(fillStroke.rect[1]*4096-.5);
+  assert.equal(softClipboard.width,Math.ceil(fillStroke.rect[2]*4096-.5)-left+2*padding);
+  const [,copiedFeather]=rgba(softCopyFile,[[padding,middle-top+padding]]);
+  assert.ok(Math.abs(copiedFeather[0][3]-Math.round(alpha[2]**2/255))<=1);
+
+  const transformed=await api(paintRoute+'/commands',{revision:filled.revision,operations:[
+    {op:'image',action:'transform',documentId:featherDoc,layerId:featherLayer,
+      transform:{rect:fillStroke.rect,feather:64,offset:[.35,0],scale:[1,1],angle:0,interpolation:'linear'}}
+  ]});
+  const [,movedFeather]=rgba(await imagePng('feather-transform.png',transformed.revision,featherDoc),
+    [xy(.33,.5),xy(.68,.5),[left+Math.round(.35*4096),middle]]);
+  assert.deepEqual(movedFeather.slice(0,2),[[0,0,0,0],[71,140,222,255]]);
+  assert.ok(movedFeather[2][3]>45&&movedFeather[2][3]<90);
+  await page.reload();
+  await canvas.waitFor();
+  assert.equal(await option('选区羽化').inputValue(),'64');
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS feathered keyboard fill, exact soft coverage and clipboard bounds, linear transform and persisted tool setting');
 }catch(error){
   console.error(logs);
   throw error;

@@ -41,11 +41,13 @@ def mask_values(layer,mask,ids,surface):
     gradient=layer.get('maskGradient')
     if gradient is not None:
         clip=gradient.get('clip')
-        valid = slice(None) if clip is None else surface._selection_contains(ids,clip,gradient)
+        coverage = None if clip is None else surface._selection_weights(ids,clip,gradient)
+        valid = slice(None) if coverage is None else coverage>0
         t=gradient_amount(surface,gradient,ids[valid])
         first,last=(int(ink[1:3],16)/255 for ink in gradient['colors'])
         a,b=gradient['alpha']
-        result[valid]=(1-t)*(first*a+base*(1-a))+t*(last*b+base*(1-b))
+        values=(1-t)*(first*a+base*(1-a))+t*(last*b+base*(1-b))
+        result[valid]=values if coverage is None else base+(values-base)*coverage[valid]
     if mask is not None and len(mask[0]) and len(ids):
         affected,alpha,value=mask
         i=np.searchsorted(affected,ids);found=(i<len(affected))&(affected[np.minimum(i,len(affected)-1)]==ids)
@@ -84,17 +86,21 @@ def gradient_tiles(surface, gradient, color):
     first, last = (np.r_[color(ink)*alpha, alpha].astype(np.float32)
                    for ink, alpha in zip(gradient['colors'], gradient['alpha']))
     rect = gradient.get('clip', (0, 0, 1, 1))
-    shaped = 'polygon' in gradient or 'regions' in gradient
-    row0, row1, col0, col1 = surface._uv_pixel_rect(rect)
+    shaped = 'polygon' in gradient or 'regions' in gradient or gradient.get('feather')
+    row0, row1, col0, col1 = surface._selection_bounds(rect, gradient)
     cols = np.arange(col0, col1)
     rows_per_tile = max(1, 131072 // max(1, len(cols)))
     for start in range(row0, row1, rows_per_tile):
         rows = np.arange(start, min(start+rows_per_tile, row1))
         ids = (rows[:, None]*size + cols).ravel()
+        weight = 1
         if shaped:
-            ids = ids[surface._selection_contains(ids, rect, gradient)]
+            coverage = surface._selection_weights(ids, rect, gradient)
+            keep = coverage>0
+            ids = ids[keep]
+            weight = coverage[keep, None]
         t = gradient_amount(surface,gradient,ids)[:, None]
-        yield ids, first + (last-first)*t
+        yield ids, (first + (last-first)*t)*weight
 
 
 def apply_adjustment(result, layer, surface, linear):
@@ -235,9 +241,13 @@ def clipboard_png(pixels, region, color_space):
     height, width = pixels.shape[:2]
     surface = ImageSurface(width)
     rect = region['rect']
-    row0, row1, col0, col1 = surface._uv_pixel_rect(rect)
+    row0, row1, col0, col1 = surface._selection_bounds(rect, region)
     cropped = pixels[height-row1:height-row0, col0:col1].copy()
-    if 'polygon' in region or 'regions' in region:
+    if region.get('feather'):
+        coverage = surface._feathered_selection(rect, region)[::-1]
+        cropped[:, :, 3] = (cropped[:, :, 3].astype(np.uint16)*coverage+127)//255
+        cropped[cropped[:, :, 3] == 0] = 0
+    elif 'polygon' in region or 'regions' in region:
         cropped[~surface._selection_tile(rect, region)[::-1]] = 0
     if not cropped.size or not cropped[:, :, 3].any():
         raise ValueError('选区内没有可复制的像素')

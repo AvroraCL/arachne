@@ -4,8 +4,10 @@ const resolution=4096;
 const listeners=new Set();
 let clipboard=null,request=null;
 
-function bounds(rect){
-  return rect.map(value=>Math.ceil(value*resolution-.5));
+function bounds({clip,feather}){
+  const pad=feather?Math.ceil(3*feather)+1:0;
+  return clip.map((value,index)=>Math.max(0,Math.min(resolution,
+    Math.ceil(value*resolution-.5)+(index<2?-pad:pad))));
 }
 
 export function imageClipboardPlacement(width,height,center=[.5,.5]){
@@ -25,7 +27,7 @@ export function copyImagePixels(origin,region,{merged=false}={}){
   const {clip}=region;
   request?.abort();
   const controller=request=new AbortController();
-  const [left,top,right,bottom]=bounds(clip);
+  const [left,top,right,bottom]=bounds(region);
   const copied=(async()=>{
     const response=await fetch('/api/projects/'+origin.id+'/paint/image-clipboard',{
       method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,

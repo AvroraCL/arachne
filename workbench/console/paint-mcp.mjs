@@ -9,7 +9,7 @@ import {renderTransforms,renderLooks,renderAppearanceLimits} from './public/rend
 import {renderLightingPresets,renderLightingLimits,renderLightLimit,renderLightRanges} from './public/render-lighting.mjs';
 import {renderOpticsFields} from './public/render-optics.mjs';
 import {renderBookmarkLimit} from './public/paint-delivery-options.mjs';
-import {uvRegionLimits} from './public/uv-selection-region.mjs';
+import {uvRegionLimits,maxUVFeather} from './public/uv-selection-region.mjs';
 import {imageAdjustments} from './public/image-adjustments.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -73,6 +73,7 @@ const uvRegions={type:'array',minItems:1,maxItems:uvRegionLimits.rings,
   items:{type:'array',minItems:1,maxItems:uvRegionLimits.rings,
     items:{type:'array',items:tuple(2,0,1),minItems:3,maxItems:uvRegionLimits.points}},
   description:'组合选区，每项是一个多边形的外轮廓及其孔洞。与 polygon 互斥，所有坐标位于选区包围框内。'};
+const uvFeather={type:'integer',minimum:0,maximum:maxUVFeather,description:'按 4096² 图像计算的选区羽化半径，单位为像素'};
 const canvasPlacement={type:'object',additionalProperties:false,required:['x','y'],properties:{
   x:{type:'number',minimum:0,maximum:1,description:'从画布左边起的比例'},
   y:{type:'number',minimum:0,maximum:1,description:'从画布顶边起的比例'},
@@ -83,7 +84,7 @@ const uvTransform={
   type:'object',
   properties:{
     rect:{...uvRect,description:'画布左上角为原点的 [左,上,右,下]，归一化到 0–1'},
-    polygon:uvPolygon,regions:uvRegions,
+    polygon:uvPolygon,regions:uvRegions,feather:uvFeather,
     offset:{...tuple(2,-2,2),description:'按整张贴图宽高归一化的 [水平,垂直] 位移'},
     scale:{...tuple(2,-8,8),description:'[水平,垂直] 缩放倍数，绝对值至少 .05，负数翻转对应方向'},
     angle:{type:'number',minimum:-360,maximum:360,description:'顺时针角度，围绕原选区中心旋转'},
@@ -137,12 +138,12 @@ const tools=[
     'baseChannels 用 patch:{通道名:boolean} 启用／关闭底层通道，保留已存参数；底层关闭时使用中性默认值，上方图层继续正常合成。图层通道通过 update 的 patch.channels 修改。stroke 用 id、target、stroke，笔触含 {radius,hardness,opacity,stamps}。三维 stamp 为 [x,y,z,nx,ny,nz]，末尾可追加 pressure，也可用 mirrorX:true 沿 Blender X=0 镜像。二维笔触指定 uv:true，stamp 为从画布左上角归一化的 [u,v] 或 [u,v,pressure]。pressure 为 0–1 的强度系数。二维半径为整张贴图宽度的比例，clip:[左,上,右,下] 限制写入范围。材质笔触另需 {values,channels,erase}；values 和 channels 支持 color、metallic、roughness、normal、height、emission、alpha、ao，前三项为兼容必需字段，扩展项可选。color/emission 为 sRGB 十六进制颜色，normal 为 OpenGL 切线法线的线性 RGB 十六进制编码，其余值为 0–1。height 用于凹凸而非几何置换，alpha 与整层 opacity 分开；蒙版笔触另需 value（0 遮盖、1 恢复）。均匀填充可传 {uv:true,rect:[左,上,右,下],opacity} 及对应通道与材质值或蒙版值。笔刷裁切和填充都可追加 polygon 顶点数组作为套索。',
     '按几何填充蒙版可传 {region,hit,value,opacity}，region 为 triangle、polygon、mesh 或 island，hit 格式同一个三维 stamp。maskBase 为 0–1，maskEnabled 可停用蒙版。maskEffects 按数组顺序应用，支持 invert、levels {black,white,gamma}、height/facing {axis,center,feather,blend}，每项都有 kind/enabled/opacity。',
     'transformUV 用 id 与 transform 移动、旋转、缩放、翻转或复制当前绘制层在选区内的笔触。clearUV 用 id 和 rect 清除选区内已有的材质笔触。两者都可追加 polygon 顶点数组，保留套索外的内容。',
-    '选区可用 regions 描述多个区域和孔洞。每个多边形包含一个外轮廓与可选的孔洞轮廓。用于组合选区的笔触、渐变、清除和变换。'
+    '选区可用 regions 描述多个区域和孔洞。每个多边形包含一个外轮廓与可选的孔洞轮廓。可追加 feather（0–256 像素）设置软边，用于笔触、填充、渐变、清除、变换与新建蒙版。'
   ].join('\n'),{
     ...edit,operations:{type:'array',items:{type:'object',properties:{op:{enum:['base','baseChannels','add','update','move','remove','duplicate','stroke','group','arrange','transformUV','clearUV','shader','library','image','renderCamera','renderBookmark','renderAppearance','renderLighting','renderPreset','renderVisibility','renderOptics','renderRegion']},camera,appearance:renderAppearance,lighting:renderLighting,preset:renderPreset,optics:renderOptics,region:renderRegion,visibility:{type:'object',minProperties:1,maxProperties:4096,additionalProperties:{type:'boolean'}},graph:{type:['object','null']},library:{enum:['materials','brushes']},action:{enum:['add','create','update','remove','duplicate','addLayer','updateLayer','removeLayer','duplicateLayer','moveLayer','stroke','transform','clear','bind','createMask','transferMask','invertMask','removeMask','setClipping']},documentId:id,newDocumentId:id,layerId:id,newLayerId:id,materialLayerId:id,sourceLayerId:id,reveal:{type:'boolean'},copy:{type:'boolean'},clipped:{type:'boolean'},channel:{enum:paintChannels},id,ids:{type:'array',items:id,minItems:1,maxItems:64,uniqueItems:true},
       kind:{enum:['fill','decal','paint','group','pixel','image','gradient','adjustment']},parentId:{type:['string','null']},anchorId:{type:['string','null']},
       placement:{enum:['above','below']},index:{type:'integer'},patch:{type:'object'},
-      target:{enum:['material','mask','pixels']},stroke:{type:'object'},transform:uvTransform,rect:uvRect,polygon:uvPolygon,regions:uvRegions},required:['op']},minItems:1}
+      target:{enum:['material','mask','pixels']},stroke:{type:'object'},transform:uvTransform,rect:uvRect,polygon:uvPolygon,regions:uvRegions,feather:uvFeather},required:['op']},minItems:1}
   },['projectId','revision','operations'],true],
   ['undo','撤销一个或多个步骤，只生成一个工程修订',{...edit,steps:{type:'integer',minimum:1,maximum:50}},['projectId','revision'],true],
   ['redo','重做一个或多个步骤，只生成一个工程修订',{...edit,steps:{type:'integer',minimum:1,maximum:50}},['projectId','revision'],true],

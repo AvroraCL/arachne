@@ -14,7 +14,7 @@ import {hasAssetDrag,readAssetDrag} from './paint-asset-drag.mjs';
 import {createImageEditorSelection} from './image-editor-selection.mjs';
 import {pauseImageThumbnail,updateImageThumbnail} from './image-layer-thumbnails.mjs';
 import {createImageGradientTool} from './image-gradient-tool.mjs';
-import {uvShapePayload} from './uv-selection-region.mjs';
+import {uvShapePayload,maxUVFeather} from './uv-selection-region.mjs';
 import {imageAdjustments,newImageAdjustment,imageBlendGroups} from './image-adjustments.mjs';
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 function button(text,action,label=text){const b=el('button','',text);b.type='button';b.onclick=action;b.setAttribute('aria-label',label);b.title=label;return b;}
@@ -193,7 +193,16 @@ export function createDocumentEditor(ctx,bridge){
   invertSelectionButton.setAttribute('aria-keyshortcuts','Control+Shift+I Meta+Shift+I');
   elements['uv-selection-inverse']=invertSelectionButton;
   elements['uv-selection-fill-material'].textContent='填充前景色';
-  elements['uv-selection-options'].prepend(selectionModes);
+  const featherLabel=el('label','','羽化'),featherInput=el('input');
+  Object.assign(featherInput,{type:'number',min:0,max:maxUVFeather,step:1,value:0});
+  featherInput.setAttribute('aria-label','选区羽化');
+  featherInput.dataset.scrubNumber='';
+  featherInput.dataset.scrubSpeed='1';
+  featherInput.dataset.scrubSuffix=' px';
+  featherLabel.title='按图像像素软化选区边缘';
+  featherLabel.append(featherInput);
+  elements['uv-selection-feather']=featherInput;
+  elements['uv-selection-options'].prepend(selectionModes,featherLabel);
   const transformOptions=elements['uv-transform-options'];
   for(const field of transformOptions.querySelectorAll('[data-transform-field]')){
     field.dataset.scrubNumber='';
@@ -209,8 +218,9 @@ export function createDocumentEditor(ctx,bridge){
   parameters.append(transformOptions,elements['uv-selection-options'],sampleNotice);
   selection=bridge.createSelection({pane:stage,canvas,elements,isHandHeld:()=>space||!!nav,
     context:()=>{const l=currentLayer(project),origin=imageOrigin(),editable=!!l&&!l.locked&&!bridge.busy(),pixels=project.imageContext?.target!=='mask';return {...origin,id:l?.id,projectId:origin.id,active:!!currentDocument(project),interactive:!painter.isEditing()&&!nav,image:l?.kind==='image'?{x:l.x,y:l.y,scale:l.scale,rotation:l.rotation,stretch:l.stretch,size:[project.document.paint.assets[l.asset].width,project.document.paint.assets[l.asset].height]}:null,canTransform:editable&&pixels&&(l.kind==='image'||l.kind==='pixel'&&!!l.strokes?.length),canClear:editable&&pixels&&l.kind==='pixel',canFillMaterial:editable&&pixels&&l.kind==='pixel',canFillMask:editable};},
-    activate:()=>{setMode('select');return true;},onTransformState:syncToolName,selectionMode:state.selectionMode,onMode:ctx.onChange,onError:ctx.error,
-    preview:op=>draft(op),commit:(op,origin)=>save(op,{...origin,id:origin.projectId}),fillOperation:(rect,target,value,shape)=>painter.fillUV(rect,target,value,shape)});
+    activate:()=>{setMode('select');return true;},onTransformState:syncToolName,selectionMode:state.selectionMode,selectionFeather:state.selectionFeather,onMode:ctx.onChange,onError:ctx.error,
+    preview:op=>draft(op),commit:(op,origin)=>save(op,{...origin,id:origin.projectId}),
+    fillOperation:(rect,target,value,shape)=>painter.fillUV(rect,target,value,shape,{opacity:1})});
   for(const [id,label,icon,key] of [['uv-select-tool',selectionNames.rect,'marquee','M'],['uv-ellipse-tool',selectionNames.ellipse,'ellipseMarquee','Shift+M'],['uv-lasso-tool',selectionNames.lasso,'lasso','L'],['uv-transform-tool','自由变换','transform','V'],['surface-orbit','抓手','hand','H'],['surface-paint','画笔','brush','B'],['uv-eraser-tool','橡皮擦','eraser','E'],['surface-sample','取样','eyedropper','I']]){
     const control=elements[id];control.textContent=label;chromeButton(control,icon,label);
     control.title=label+' · '+key;control.setAttribute('aria-keyshortcuts',key);rail.append(control);
@@ -390,7 +400,14 @@ export function createDocumentEditor(ctx,bridge){
       event.preventDefault();event.stopPropagation();return true;
     }
     let handled=true;
-    if(mod&&!event.altKey){
+    if((event.altKey!==mod)&&!event.shiftKey&&(key==='backspace'||key==='delete')){
+      const {clip,...shape}=selection.clip()||{clip:[0,0,1,1]};
+      const mask=colorTarget()==='mask',slot=event.altKey?'foreground':'background';
+      const color=bridge.colorPair(colorTarget())[slot];
+      const op=!selection.isTransforming()&&painter.fillUV(clip,mask?'mask':'material',maskGray(color),shape,{opacity:1,color});
+      handled=!!op;
+      if(op)void save(op,imageOrigin());
+    }else if(mod&&!event.altKey){
       if(key==='c')handled=copySelection(event.shiftKey);
       else if(key==='i'&&event.shiftKey)handled=selection.invert();
       else if(key==='i'){
@@ -480,7 +497,7 @@ export function createDocumentEditor(ctx,bridge){
     picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||writing();gradientButton.disabled=!image||writing()||c?.target==='mask'&&!!layer?.locked;empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,selectionMode:selection.getCombination(),gradient:gradientTool.getState(),eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||painter.isEditing()||gradientTool.isEditing()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||painter.isEditing()||gradientTool.isEditing()||selection.isDragging()||selection.isTransforming(),
     canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
     getSelection(origin){return shown&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&
       !selection.isDragging()&&!selection.isTransforming()?selection.clip():null;},

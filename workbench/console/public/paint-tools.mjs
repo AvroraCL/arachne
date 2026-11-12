@@ -302,14 +302,15 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     const values=sampled||{...effectiveValues(layer.values),color:state.brushColor||layer.values.color};
     return {values,channels,erase:eraseControl.checked};
   }
-  function fillUV(rect,target,maskValue,shape={}){
+  function fillUV(rect,target,maskValue,shape={},options={}){
     const state=context();
     if(!state.uvEnabled||!state.layer?.visible||state.layer.locked||target==='material'&&state.layer.kind!=='paint')return null;
     const params=target==='mask'?{value:maskValue}:strokeInk(state.layer,target,state);
     if(!params)return null;
     if(target==='material')params.erase=false;
+    if(target==='material'&&options.color)params.values={...params.values,color:options.color};
     return {op:'stroke',id:state.layer.id,target,stroke:{
-      uv:true,rect,...shape,opacity:amount(opacity),...params}};
+      uv:true,rect,...shape,opacity:options.opacity??amount(opacity),...params}};
   }
   function beginStroke(event,uv=false){
     const state=context();

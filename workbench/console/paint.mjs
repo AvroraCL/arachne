@@ -28,7 +28,7 @@ import {checkRenderVisibility,updateRenderVisibility} from './public/render-visi
 import {checkRenderOptics} from './public/render-optics.mjs';
 import {checkRenderRegion,renderRegionPixels} from './public/render-region.mjs';
 import {layerParent,layerChildren,layerTreeOrder,layerLockOwner} from './public/paint-layer-tree.mjs';
-import {uvShapeFields,uvShapePayload,uvRegionLimits} from './public/uv-selection-region.mjs';
+import {uvShapeFields,uvShapePayload,uvRegionLimits,maxUVFeather} from './public/uv-selection-region.mjs';
 
 export const PAINT='pbr_paint';
 const archiveFormat='arachne-pbr-paint-project';
@@ -102,7 +102,8 @@ function validUVPolygon(polygon,rect,limit=256){
     ranged(point[0],left-tolerance,right+tolerance)&&ranged(point[1],top-tolerance,bottom+tolerance));
 }
 function validUVSelection(shape,rect){
-  const {polygon,regions}=shape;
+  const {polygon,regions,feather}=shape;
+  if(feather!==undefined&&(!validUVRect(rect)||!Number.isInteger(feather)||!ranged(feather,0,maxUVFeather)))return false;
   if(regions===undefined)return validUVPolygon(polygon,rect);
   if(polygon!==undefined||!validUVRect(rect)||!Array.isArray(regions)||!regions.length||regions.length>uvRegionLimits.rings)return false;
   let rings=0,points=0;

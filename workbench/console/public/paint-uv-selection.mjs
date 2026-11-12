@@ -1,4 +1,4 @@
-import {uvShapePayload} from './uv-selection-region.mjs';
+import {uvShapePayload,maxUVFeather} from './uv-selection-region.mjs';
 import {canvasUVRect,uvBounds,uvCorners,uvSelectionModes,selectionContours,combineUVSelections,offsetUVSelection} from './uv-selection-geometry.mjs';
 
 const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
@@ -24,13 +24,14 @@ function imageBounds(image){
 }
 
 export function createUVSelection({pane,canvas,context,isHandHeld,activate,preview,commit,fillOperation,onTransformState=()=>{},
-  selectionMode='replace',onMode=()=>{},onError=()=>{},elements=null}) {
+  selectionMode='replace',selectionFeather=0,onMode=()=>{},onError=()=>{},elements=null}) {
   const $=id=>elements?.[id]||document.getElementById(id);
   const overlay=$('uv-selection-overlay'), border=$('uv-selection-border'), handles=$('uv-selection-handles');
   const lassoBorder=$('uv-lasso-border');
   const baseBorder=elements?.['uv-selection-base'];
   const modeControls=elements?.selectionModes||[];
   const inverseButton=elements?.['uv-selection-inverse'];
+  const featherControl=elements?.['uv-selection-feather'];
   const selectTool=$('uv-select-tool'),lassoTool=$('uv-lasso-tool'),transformTool=$('uv-transform-tool');
   const ellipseTool=elements?.['uv-ellipse-tool'];
   const options=$('uv-transform-options'), selectionOptions=$('uv-selection-options');
@@ -47,11 +48,14 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   });
   let tool='none',region=null,owner=null,draft=null,gesture=null,lastDeselected=null;
   let combination=uvSelectionModes.includes(selectionMode)?selectionMode:'replace';
+  let feather=featherControl&&Number.isInteger(selectionFeather)?clamp(selectionFeather,0,maxUVFeather):0;
+  if(featherControl)featherControl.value=feather;
   const selecting=()=>['rect','ellipse','lasso'].includes(tool);
   const sameOwner=(a,b)=>!!a&&!!b&&a.projectId===b.projectId&&
     (a.imageDocumentId||b.imageDocumentId?a.imageDocumentId===b.imageDocumentId:a.id===b.id);
   const sameEditOwner=(a,b)=>sameOwner(a,b)&&a.id===b.id;
   const assign=(next,state)=>{region=next;owner=next?state:null;};
+  const softened=next=>next&&feather?{...next,feather}:next;
   const selectedRegion=state=>sameOwner(owner,state)?region:null;
   function point(event){
     const box=canvas.getBoundingClientRect();
@@ -70,7 +74,8 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
         uvScale:image.stretch.map((n,i)=>Math.sign(n*scale[i])*clamp(Math.abs(n*scale[i]),.05,8))
       }};
     }
-    return {op:'transformUV',id:owner.id,transform:{rect:region.rect,...uvShapePayload(region),offset,scale,angle,copy}};
+    return {op:'transformUV',id:owner.id,transform:{rect:region.rect,...uvShapePayload(region),offset,scale,angle,copy,
+      ...(owner.imageDocumentId?{interpolation:'linear'}:{})}};
   }
   function offsetRange(state,i){
     const image=state.owner.image;
@@ -107,6 +112,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
       control.setAttribute('aria-pressed',String(combination===control.dataset.selectionMode));
       control.disabled=!!gesture;
     }
+    if(featherControl)featherControl.disabled=!!gesture||!!draft||!state.active;
     $('uv-selection-size').textContent=selected
       ? Math.round((rect[2]-rect[0])*resolution)+' × '+Math.round((rect[3]-rect[1])*resolution)+' px'
       : {lasso:'沿边缘拖动，松开闭合选区',ellipse:'拖出椭圆 · Shift 正圆',rect:'拖出矩形 · Shift 正方形'}[tool]||'';
@@ -214,7 +220,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     const state=context();
     if(!state.active||!state.interactive||gesture||draft)return false;
     const selected=selectedRegion(state),full={rect:canvasUVRect};
-    try{assign(selected?combineUVSelections(full,selected,'subtract'):full,state);}
+    try{assign(selected?softened(combineUVSelections(full,selected,'subtract')):full,state);}
     catch(error){onError(error);return false;}
     render();return true;
   }
@@ -296,6 +302,20 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   $('uv-transform-cancel').onclick=cancel;
   $('uv-selection-clear').onclick=()=>clear(true);
   if(inverseButton)inverseButton.onclick=invert;
+  if(featherControl){
+    featherControl.oninput=()=>{
+      const value=featherControl.valueAsNumber;
+      if(!featherControl.validity.valid||!Number.isFinite(value))return;
+      feather=value;
+      const state=context(),selected=selectedRegion(state);
+      if(selected){
+        const {feather:previous,...geometry}=selected;
+        assign(softened(geometry),state);
+      }
+      render();
+    };
+    featherControl.onchange=onMode;
+  }
   for(const control of modeControls)control.onclick=()=>setCombination(control.dataset.selectionMode);
   eraseButton.onclick=erase;
   fillMaterial.onclick=()=>fill('material');
@@ -425,7 +445,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
         assign(before.region,before.owner);
         if(mode==='replace')clear(true);
       }else{
-        try{assign(combineUVSelections(before.region,region,mode),owner);}
+        try{assign(softened(combineUVSelections(before.region,region,mode)),owner);}
         catch(error){assign(before.region,before.owner);onError(error);}
       }
       render();
@@ -439,6 +459,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   for(const name of ['pointerup','pointercancel','lostpointercapture'])pane.addEventListener(name,end,true);
   const observer=new ResizeObserver(render);observer.observe(pane);
   return {dispose(){cancel();observer.disconnect();},choose,selectAll,invert,reselect,start,clear:()=>clear(true),erase,fill,nudge,stop,cancel,apply,sync,render,
+    getFeather:()=>feather,
     clip:()=>{const selected=selectedRegion(context());return selected?{clip:selected.rect.slice(),...uvShapePayload(selected)}:null;},
     getCombination:()=>combination,hasSelection:()=>!!region,isTransforming:()=>!!draft,isDragging:()=>!!gesture};
 }

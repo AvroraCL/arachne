@@ -40,5 +40,6 @@ export function offsetUVSelection(selection,[dx,dy]){
   const translate=ring=>ring.map(([x,y])=>[Math.max(0,Math.min(1,x+dx)),Math.max(0,Math.min(1,y+dy))]);
   return {rect:selection.rect.map((n,i)=>Math.max(0,Math.min(1,n+(i%2?dy:dx)))),
     ...(selection.polygon?{polygon:translate(selection.polygon)}:{}),
-    ...(selection.regions?{regions:selection.regions.map(polygon=>polygon.map(translate))}:{})};
+    ...(selection.regions?{regions:selection.regions.map(polygon=>polygon.map(translate))}:{}),
+    ...(selection.feather?{feather:selection.feather}:{})};
 }

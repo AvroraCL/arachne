@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
+from PIL import Image, ImageFilter
 
 
 def drawing_brush_stamps(stroke):
@@ -194,6 +195,7 @@ class Surface:
         if stroke.get('uv'):
             key = ('uv', stroke['radius'], stroke['hardness'], stroke['opacity'],
                    tuple(stroke.get('clip', ())), self._selection_key(stroke),
+                   stroke.get('feather', 0),
                    stroke.get('flow'), stroke.get('spacing'), tuple(stroke.get('breaks', ())),
                    tuple(map(tuple, stroke['stamps'])))
             return self._uv_stroke(stroke, key)
@@ -262,15 +264,58 @@ class Surface:
         result[in_tile] = mask[rows[in_tile]-row0,cols[in_tile]-col0]
         return result
 
+    def _selection_bounds(self, rect, shape):
+        row0, row1, col0, col1 = self._uv_pixel_rect(rect)
+        if not shape.get('feather'):
+            return row0, row1, col0, col1
+        height, width = self.uv_shape
+        pad = math.ceil(3 * shape['feather'] * width / 4096) + 1
+        return max(0, row0-pad), min(height, row1+pad), max(0, col0-pad), min(width, col1+pad)
+
+    def _feathered_selection(self, rect, shape):
+        key = tuple(rect), self._selection_key(shape), shape['feather']
+        previous = getattr(self, 'uv_feather_cache', None)
+        if previous and previous[0] == key:
+            return previous[1]
+        row0, row1, col0, col1 = self._selection_bounds(rect, shape)
+        inner_row0, inner_row1, inner_col0, inner_col1 = self._uv_pixel_rect(rect)
+        pixels = np.zeros((row1-row0, col1-col0), dtype=np.uint8)
+        inner = self._selection_tile(rect, shape)
+        pixels[inner_row0-row0:inner_row1-row0, inner_col0-col0:inner_col1-col0] = inner * np.uint8(255)
+        radius = shape['feather'] * self.uv_shape[1] / 4096
+        softened = np.asarray(Image.fromarray(pixels).filter(ImageFilter.GaussianBlur(radius)))
+        self.uv_feather_cache = key, softened
+        return softened
+
+    def _selection_weights(self, ids, rect, shape):
+        if not shape.get('feather'):
+            return self._selection_contains(ids, rect, shape)
+        row0, row1, col0, col1 = self._selection_bounds(rect, shape)
+        rows, cols = np.divmod(ids, self.uv_shape[1])
+        in_tile = (rows>=row0)&(rows<row1)&(cols>=col0)&(cols<col1)
+        coverage = np.zeros(len(ids), dtype=np.float32)
+        if np.any(in_tile):
+            mask = self._feathered_selection(rect, shape)
+            coverage[in_tile] = mask[rows[in_tile]-row0, cols[in_tile]-col0] / 255
+        return coverage
+
     def _rect_stroke(self, stroke):
         height, width = self.uv_shape
-        min_row,max_row,min_col,max_col = self._uv_pixel_rect(stroke['rect'])
+        rect = stroke['rect']
+        min_row,max_row,min_col,max_col = self._selection_bounds(rect, stroke)
         tile = self.allowed.reshape(height,width)[min_row:max_row,min_col:max_col]
-        if 'polygon' in stroke or 'regions' in stroke:
-            tile = tile & self._selection_tile(stroke['rect'],stroke)
+        soft = None
+        if stroke.get('feather'):
+            soft = self._feathered_selection(rect, stroke)
+            tile = tile & (soft > 0)
+        elif 'polygon' in stroke or 'regions' in stroke:
+            tile = tile & self._selection_tile(rect,stroke)
         rows, cols = np.nonzero(tile)
         ids = ((rows+min_row)*width+cols+min_col).astype(np.int32)
-        return ids,np.full(len(ids),stroke['opacity'],dtype=np.float32)
+        opacity = np.full(len(ids),stroke['opacity'],dtype=np.float32)
+        if soft is not None:
+            opacity *= soft[rows, cols] / 255
+        return ids, opacity
 
     def _uv_stroke(self, stroke, key):
         if self.live and key in self.strokes:
@@ -287,7 +332,7 @@ class Surface:
             count = len(previous[-1])
             if key[:-1] == previous[:-1] and key[-1][:count] == previous[-1]:
                 stamps, weights = stamps[count:], known.copy()
-        min_row,max_row,min_col,max_col = self._uv_pixel_rect(stroke.get('clip', (0,0,1,1)))
+        min_row,max_row,min_col,max_col = self._selection_bounds(stroke.get('clip', (0,0,1,1)), stroke)
         row_origin,col_origin = 0,0
         if not self.live:
             # A 4K brush normally touches a small part of the atlas. Only
@@ -325,12 +370,15 @@ class Surface:
             else:
                 tile += (1-tile)*falloff*(flow*pressure)
         flat = weights.ravel()
-        shaped = 'polygon' in stroke or 'regions' in stroke
+        shaped = 'polygon' in stroke or 'regions' in stroke or stroke.get('feather')
         if self.live:
             ids = np.flatnonzero((flat>0) & self.allowed).astype(np.int32)
+            coverage = 1
             if shaped:
-                ids = ids[self._selection_contains(ids,stroke['clip'],stroke)]
-            result = ids,flat[ids] if flow is None else flat[ids]*opacity
+                coverage = self._selection_weights(ids,stroke['clip'],stroke)
+                keep = coverage>0
+                ids, coverage = ids[keep], coverage[keep]
+            result = ids,flat[ids]*coverage*(1 if flow is None else opacity)
             self.brush_prefix = key, weights
             self.strokes[key] = result
             if len(self.strokes)>128:
@@ -340,10 +388,13 @@ class Surface:
         rows,cols = np.divmod(local,weights.shape[1])
         ids = (rows+row_origin)*width+cols+col_origin
         eligible = self.allowed[ids]
+        coverage = 1
         if shaped:
-            eligible &= self._selection_contains(ids,stroke['clip'],stroke)
-        alpha = flat[local[eligible]]
-        return ids[eligible].astype(np.int32),alpha if flow is None else alpha*opacity
+            coverage = self._selection_weights(ids,stroke['clip'],stroke)
+            eligible &= coverage>0
+            coverage = coverage[eligible]
+        alpha = flat[local[eligible]]*coverage*(1 if flow is None else opacity)
+        return ids[eligible].astype(np.int32),alpha
 
     def _prepare_hit_bounds(self):
         triangles = self.target_triangles
@@ -483,8 +534,13 @@ class Surface:
                 continue
             affected, paint = self._paint_strokes(batch, channels, color, affected, paint, sampler)
             if clear is not None:
-                selected = self._selection_contains(affected,clear,stroke)
-                keep = ~selected
+                selected = self._selection_weights(affected,clear,stroke)
+                keep = selected < 1
+                if stroke.get('feather'):
+                    remainder = 1-selected
+                    for alpha,value in paint.values():
+                        alpha *= remainder
+                        value *= remainder[:,None]
                 affected, paint = self._subset_paint(affected, paint, keep)
             else:
                 affected, paint = self._transform_paint(affected, paint, transform)
@@ -557,9 +613,10 @@ class Surface:
         angle = math.radians(transform['angle'])
         c,s = math.cos(angle),math.sin(angle)
         x, y = self._texel_uv(affected)
-        inside = self._selection_contains(affected,transform['rect'],transform)
+        coverage = self._selection_weights(affected,transform['rect'],transform)
+        soft = bool(transform.get('feather'))
         ink = np.logical_or.reduce([alpha>0 for alpha,_ in paint.values()])
-        selected = inside & ink
+        selected = (coverage>0) & ink
         if not np.any(selected):
             return affected,paint
 
@@ -580,22 +637,27 @@ class Surface:
             u,v = (ids%width+.5)/width-cx-dx,1-(ids//width+.5)/height-cy-dy
             src_x,src_y = (u*c+v*s)/sx+cx,(-u*s+v*c)/sy+cy
             if linear:
-                present,incoming = self._sample_uv_paint(src_x,src_y,affected,selected,paint)
+                present,incoming = self._sample_uv_paint(src_x,src_y,affected,selected,paint,coverage if soft else None)
                 if np.any(present):
                     tiles.append((ids[present],{name:(a[present],v[present]) for name,(a,v) in incoming.items()}))
             else:
-                keep = (src_x>=left)&(src_x<right)&(src_y>=top)&(src_y<bottom)
+                bounds = (0,0,1,1) if soft else (left,top,right,bottom)
+                keep = self._inside_uv(src_x, src_y, bounds)
                 src = np.minimum(height-1,((1-src_y[keep])*height).astype(int))*width+(src_x[keep]*width).astype(int)
                 index = np.minimum(len(affected)-1,np.searchsorted(affected,src))
                 found = (affected[index]==src)&selected[index]
                 if np.any(found):
                     lookup = index[found]
-                    tiles.append((ids[keep][found],{name:(a[lookup],v[lookup]) for name,(a,v) in paint.items()}))
+                    weight = coverage[lookup] if soft else np.ones(len(lookup), dtype=np.float32)
+                    tiles.append((ids[keep][found],{name:(a[lookup]*weight,v[lookup]*weight[:,None]) for name,(a,v) in paint.items()}))
         dest = np.concatenate([ids for ids,_ in tiles]).astype(np.int32) if tiles else np.empty(0,dtype=np.int32)
         combined,paint = self._expand_paint(affected,paint,dest)
         removed = np.searchsorted(combined,affected[selected]) if not transform.get('copy') else []
+        remainder = 1-coverage[selected].astype(np.float32)
         for name,(alpha,value) in paint.items():
-            alpha[removed],value[removed] = 0,0
+            if not transform.get('copy'):
+                alpha[removed] *= remainder
+                value[removed] *= remainder[:,None]
             for ids,tile in tiles:
                 dst = np.searchsorted(combined,ids)
                 incoming_alpha,incoming_value = tile[name]
@@ -604,7 +666,7 @@ class Surface:
         used = np.logical_or.reduce([alpha>0 for alpha,_ in paint.values()])
         return self._subset_paint(combined, paint, used)
 
-    def _sample_uv_paint(self, u, v, affected, selected, paint):
+    def _sample_uv_paint(self, u, v, affected, selected, paint, coverage=None):
         # Interpolate premultiplied material values against transparent pixels
         # beyond the selection, so rotations cannot pull colors across the cut.
         height,width = self.uv_shape
@@ -624,6 +686,8 @@ class Surface:
                 found = (affected[lookup]==ids)&selected[lookup]
                 target,source = valid[found],lookup[found]
                 contribution = weight[target].astype(np.float32)
+                if coverage is not None:
+                    contribution *= coverage[source]
                 present[target] = True
                 for name,(alpha,value) in paint.items():
                     a,premult = samples[name]
