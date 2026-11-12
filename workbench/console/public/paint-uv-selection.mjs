@@ -96,7 +96,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     const visible=!!(selected||draft)&&state.active;
     pane.dataset.selectionTool=state.active?tool:'none';
     if(state.active)$('surface-orbit').setAttribute('aria-pressed',
-      String(tool==='none'&&$('viewport').dataset.tool==='orbit'&&!pane.matches('[data-text-placement],[data-gradient-tool]')));
+      String(tool==='none'&&$('viewport').dataset.tool==='orbit'&&!pane.matches('[data-text-placement],[data-gradient-tool],[data-shape-tool],[data-fill-tool]')));
     selectTool.setAttribute('aria-pressed',String(tool==='rect'&&state.active));
     lassoTool.setAttribute('aria-pressed',String(tool==='lasso'&&state.active));
     ellipseTool?.setAttribute('aria-pressed',String(tool==='ellipse'&&state.active));

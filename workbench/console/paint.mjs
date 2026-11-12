@@ -536,7 +536,7 @@ export function paintInput(doc,binding=paintBinding(doc)){
 }
 function liveOperationAllowed(doc,operation){
   if(operation.op==='image')return ['stroke','transform','clear','updateLayer'].includes(operation.action)||
-    operation.action==='addLayer'&&operation.kind==='gradient';
+    operation.action==='addLayer'&&['gradient','shape'].includes(operation.kind);
   if(operation.op==='shader')return true;
   if(operation.op==='library')return operation.library==='materials'&&operation.action==='update'&&Object.hasOwn(doc.paint.materials??{},operation.id);
   if(['stroke','transformUV'].includes(operation.op))return true;

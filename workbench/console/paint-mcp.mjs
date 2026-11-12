@@ -133,6 +133,7 @@ const tools=[
     '二维图像笔刷可同时指定 flow（0.01–1）与 spacing（笔尖直径的 0.05–2 倍）。这时 stamps 表示连续轨迹，按图像空间的固定间距盖印，并在单笔 opacity 上限内逐步积累流量。breaks 可指定提笔后新轨迹段的起始下标。',
     '油漆桶用 action:stroke、target:pixels 和 stroke:{uv:true,color,erase:false,opacity,flood:{point:[u,v],tolerance,contiguous}}。容差为 0–255，取样当前层该笔之前的像素，可用 clip、regions 和 feather 限制写入。',
     '仿制笔触在二维像素笔刷参数上追加 clone:{offset:[du,dv]}，相对目标位置取样当前层落笔前的 RGBA 像素。偏移归一化到 −1 至 1，可按相同偏移继续后续笔触。',
+    '形状图层用 action:addLayer、kind:shape 和 patch:{x,y,scale,rotation,stretch,shape:{kind,width,height,fill,stroke,strokeWidth,cornerRadius}}。形状 kind 为 rectangle 或 ellipse，宽高与描边圆角按文档像素计，fill、stroke 为十六进制颜色或 null。可用 updateLayer 继续修改。',
     '原子图层命令。add 用 kind/patch，可用 parentId 指定文件夹。group 用 id 或同级 ids 收进新文件夹。arrange 用 id 或同级 ids 与 parentId/anchorId/placement 移动图层，parentId 为 null 时移到根层。remove 可解散文件夹，保留子层。base/update 用 patch，move 用 index，duplicate 用 id。图层顺序从底到顶。',
     'update 的 patch.locked 锁定图层或文件夹。文件夹锁覆盖子层，仍可切换显隐。锁定冲突会拒绝整批命令。',
     '三维贴花 patch.projector 为 {center,normal,up,size,depth,rotation}，坐标使用 Blender 世界坐标，normal 朝投影来源。',
@@ -143,7 +144,7 @@ const tools=[
     '选区可用 regions 描述多个区域和孔洞。每个多边形包含一个外轮廓与可选的孔洞轮廓。可追加 feather（0–256 像素）设置软边，用于笔触、填充、渐变、清除、变换与新建蒙版。'
   ].join('\n'),{
     ...edit,operations:{type:'array',items:{type:'object',properties:{op:{enum:['base','baseChannels','add','update','move','remove','duplicate','stroke','group','arrange','transformUV','clearUV','shader','library','image','renderCamera','renderBookmark','renderAppearance','renderLighting','renderPreset','renderVisibility','renderOptics','renderRegion']},camera,appearance:renderAppearance,lighting:renderLighting,preset:renderPreset,optics:renderOptics,region:renderRegion,visibility:{type:'object',minProperties:1,maxProperties:4096,additionalProperties:{type:'boolean'}},graph:{type:['object','null']},library:{enum:['materials','brushes']},action:{enum:['add','create','update','remove','duplicate','addLayer','updateLayer','removeLayer','duplicateLayer','moveLayer','stroke','transform','clear','bind','createMask','transferMask','invertMask','removeMask','setClipping']},documentId:id,newDocumentId:id,layerId:id,newLayerId:id,materialLayerId:id,sourceLayerId:id,reveal:{type:'boolean'},copy:{type:'boolean'},clipped:{type:'boolean'},channel:{enum:paintChannels},id,ids:{type:'array',items:id,minItems:1,maxItems:64,uniqueItems:true},
-      kind:{enum:['fill','decal','paint','group','pixel','image','gradient','adjustment']},parentId:{type:['string','null']},anchorId:{type:['string','null']},
+      kind:{enum:['fill','decal','paint','group','pixel','image','gradient','adjustment','shape']},parentId:{type:['string','null']},anchorId:{type:['string','null']},
       placement:{enum:['above','below']},index:{type:'integer'},patch:{type:'object'},
       target:{enum:['material','mask','pixels']},stroke:{type:'object'},transform:uvTransform,rect:uvRect,polygon:uvPolygon,regions:uvRegions,feather:uvFeather},required:['op']},minItems:1}
   },['projectId','revision','operations'],true],

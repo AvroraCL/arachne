@@ -2,12 +2,13 @@
 import {paintChannels} from './paint-channels.mjs';
 import {uvShapeFields,uvShapePayload} from './uv-selection-region.mjs';
 import {checkImageAdjustment,imageBlendModes} from './image-adjustments.mjs';
+import {validImageShape} from './image-shapes.mjs';
 const record=o=>o&&typeof o==='object'&&!Array.isArray(o),id=s=>typeof s==='string'&&/^[\w-]{1,100}$/.test(s),unit=n=>Number.isFinite(n)&&n>=0&&n<=1;
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
 const ink=s=>typeof s==='string'&&/^#[a-f\d]{6}$/i.test(s);
-const layerFields=['name','visible','locked','opacity','blend','maskEnabled','maskBase','maskGradient','asset','x','y','scale','rotation','stretch','gradient','adjustment','clipped'];
-const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层'};
+const layerFields=['name','visible','locked','opacity','blend','maskEnabled','maskBase','maskGradient','asset','x','y','scale','rotation','stretch','gradient','adjustment','clipped','shape'];
+const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层',shape:'形状层'};
 const pair=(values,check)=>Array.isArray(values)&&values.length===2&&values.every(check);
 function checkGradient(gradient,checkStroke,mask=false){
   if(!exact(gradient,['kind','start','end','colors','alpha','clip',...uvShapeFields])||
@@ -87,9 +88,11 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
       else if(layer.gradient!==undefined)throw Error('请选择渐变填充层');
       if(layer.kind==='adjustment')checkImageAdjustment(layer.adjustment);
       else if(layer.adjustment!==undefined)throw Error('请选择调整图层');
+      if(layer.kind==='shape'?!validImageShape(layer.shape):layer.shape!==undefined)throw Error('图像形状参数无效');
       if(layer.maskGradient!==undefined)checkGradient(layer.maskGradient,checkStroke,true);
       if(layer.text!==undefined&&(layer.kind!=='image'||!validateText?.(layer.text)))throw Error('图像文字参数无效');
-      if(layer.kind==='image'&&(!Object.hasOwn(paint.assets,layer.asset)||![layer.x,layer.y,layer.scale,layer.rotation].every(Number.isFinite)||!unit(layer.x)||!unit(layer.y)||layer.scale<1/4096||layer.scale>4||Math.abs(layer.rotation)>360||!Array.isArray(layer.stretch)||layer.stretch.length!==2||!layer.stretch.every(n=>Number.isFinite(n)&&Math.abs(n)>=.05&&Math.abs(n)<=8)))throw Error('图像层素材或变换无效');
+      if(layer.kind==='image'&&!Object.hasOwn(paint.assets,layer.asset))throw Error('图像素材无效');
+      if(['image','shape'].includes(layer.kind)&&(![layer.x,layer.y,layer.scale,layer.rotation].every(Number.isFinite)||!unit(layer.x)||!unit(layer.y)||layer.scale<1/4096||layer.scale>4||Math.abs(layer.rotation)>360||!Array.isArray(layer.stretch)||layer.stretch.length!==2||!layer.stretch.every(n=>Number.isFinite(n)&&Math.abs(n)>=.05&&Math.abs(n)<=8)))throw Error('图像层变换无效');
       for(const [field,mask] of [['strokes',false],['maskStrokes',true]]){
         const strokes=layer[field]??[];if(!Array.isArray(strokes)||strokes.length>400||field==='strokes'&&layer.kind!=='pixel'&&strokes.length)throw Error('图像笔触无效');
         for(const stroke of strokes){
@@ -164,7 +167,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     const index=o.index??doc.layers.length;
     if(!id(o.layerId)||doc.layers.some(l=>l.id===o.layerId)||typeof o.kind!=='string'||!Object.hasOwn(layerNames,o.kind)||!exact(o.patch??{},layerFields)||
        !Number.isInteger(index)||index<0||index>doc.layers.length)throw Error('图像图层参数无效');
-    const defaults=o.kind==='image'?{x:.5,y:.5,scale:1,rotation:0,stretch:[1,1]}:o.kind==='adjustment'?{maskEnabled:true}:{};
+    const defaults=['image','shape'].includes(o.kind)?{x:.5,y:.5,scale:1,rotation:0,stretch:[1,1]}:o.kind==='adjustment'?{maskEnabled:true}:{};
     const clipped=doc.layers[index]?.clipped&&imageClippingBase(doc.layers,index);
     doc.layers.splice(index,0,{id:o.layerId,kind:o.kind,name:layerNames[o.kind],...imageLayerDefaults,...defaults,
       ...(clipped?{clipped:true}:{}),...o.patch});

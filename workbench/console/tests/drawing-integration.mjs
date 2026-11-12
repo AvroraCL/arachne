@@ -717,8 +717,78 @@ try{
     return current.revision===rapidlyUndone.revision+1&&rapidStrokes(current)?.length===5&&current;
   },'重做独立恢复第五笔');
   await editor.locator('.document-image-stage[data-preview-size="4096"][data-preview-revision="'+rapidlyRedone.revision+'"]').waitFor();
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS rapid consecutive strokes under delayed writes, merged live draft, independent undo/redo and automatic 4K');
+
+  const shapesDoc='shape-document';
+  const shapesSeed=await api(paintRoute+'/commands',{revision:rapidlyRedone.revision,operations:[
+    {op:'image',action:'create',documentId:shapesDoc,patch:{name:'形状层验收'}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(shapesDoc,{force:true});
+  await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+  await canvas.focus();
+  await page.keyboard.press('u');
+  await editor.getByRole('checkbox',{name:'形状描边',exact:true}).check();
+  await setBrushOption('形状描边宽度',32);
+  await setBrushOption('形状圆角',220);
+  await editor.getByLabel('图像前景色',{exact:true}).fill('#155ed4');
+  await editor.getByLabel('图像背景色',{exact:true}).fill('#f5d454');
+  const shapeDraft=page.waitForResponse(response=>response.url().endsWith('/paint/image-live')&&
+    response.request().postDataJSON()?.operation?.kind==='shape');
+  await page.keyboard.down('Shift');
+  await page.mouse.move(...await point([.2,.2]));
+  await page.mouse.down();
+  await page.mouse.move(...await point([.52,.38]),{steps:5});
+  assert.equal((await shapeDraft).status(),200);
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  const shapes=current=>current.paint.imageDocuments[shapesDoc].layers;
+  const rectangle=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>shapesSeed.revision&&shapes(current)[0]?.shape?.kind==='rectangle'&&current;
+  },'Shift 绘制可编辑圆角正方形');
+  const rectangleLayer=shapes(rectangle)[0];
+  assert.equal(rectangleLayer.shape.width,rectangleLayer.shape.height);
+  assert.equal(rectangleLayer.shape.cornerRadius,220);
+  const leftShape=rectangleLayer.x-rectangleLayer.scale/2,topShape=rectangleLayer.y-rectangleLayer.scale/2;
+  const squareSamples=[[rectangleLayer.x,rectangleLayer.y],[leftShape+10/4096,rectangleLayer.y],
+    [leftShape+10/4096,topShape+10/4096]].map(([x,y])=>xy(x,y));
+  assert.deepEqual(rgba(await imagePng('vector-rectangle.png',rectangle.revision,shapesDoc),squareSamples)[1],
+    [[21,94,212,255],[245,212,84,255],[0,0,0,0]]);
+  const fillColor=page.getByLabel('填充颜色',{exact:true});
+  await fillColor.fill('#2299b7');
+  const restyled=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>rectangle.revision&&shapes(current)[0].shape.fill==='#2299b7'&&current;
+  },'从图像属性更改形状填充色');
+  await canvas.focus();
+  await page.keyboard.press('Control+t');
+  await editor.locator('form.editor-toolbar [data-transform-field=angle]').waitFor();
+  await setBrushOption('旋转',30);
+  await editor.getByRole('button',{name:'应用',exact:true}).click();
+  const rotated=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>restyled.revision&&shapes(current)[0].rotation===30&&current;
+  },'自由变换仍保留形状参数');
+  assert.equal(shapes(rotated)[0].shape.width,rectangleLayer.shape.width);
+  await until(()=>editor.getByRole('button',{name:'形状工具',exact:true}).isEnabled(),'自由变换已保存');
+  await canvas.focus();
+  await page.keyboard.press('Shift+u');
+  await page.keyboard.down('Alt');
+  await drag([.75,.68],[.87,.76]);
+  await page.keyboard.up('Alt');
+  const ellipseShape=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>rotated.revision&&shapes(current)[1]?.shape?.kind==='ellipse'&&current;
+  },'从中心创建可编辑椭圆');
+  assert.ok(Math.abs(shapes(ellipseShape)[1].x-.75)<.004&&Math.abs(shapes(ellipseShape)[1].y-.68)<.004);
+  await page.screenshot({path:path.join(data,'shape-tools.png')});
+  await page.reload();
+  await canvas.waitFor();
+  assert.equal(shapes(await api(projectRoute))[0].rotation,30);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS editable shape layers, rounded stroke, Shift square, Alt-centered ellipse, recolor, transform and reopen');
 }catch(error){
   console.error(logs);
   throw error;

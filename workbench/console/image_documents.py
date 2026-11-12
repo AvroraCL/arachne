@@ -104,6 +104,54 @@ def gradient_tiles(surface, gradient, color):
         yield ids, (first + (last-first)*t)*weight
 
 
+def shape_tiles(surface, layer, color):
+    shape = layer['shape']
+    fill, stroke = shape['fill'], shape['stroke']
+    stroke_width = shape['strokeWidth'] if stroke else 0
+    if fill is None and not stroke_width:
+        return
+    width, height = shape['width'], shape['height']
+    half_width, half_height = width/2, height/2
+    scale = layer['scale']/max(width, height)
+    stretch_x, stretch_y = layer['stretch']
+    a, b = half_width*scale*abs(stretch_x), half_height*scale*abs(stretch_y)
+    angle = np.radians(layer['rotation'])
+    c, s = np.cos(angle), np.sin(angle)
+    size = surface.uv_shape[0]
+    horizontal = abs(c)*a+abs(s)*b+1/size
+    vertical = abs(s)*a+abs(c)*b+1/size
+    cx, cy = layer['x'], layer['y']
+    bounds = (max(0, cx-horizontal), max(0, cy-vertical), min(1, cx+horizontal), min(1, cy+vertical))
+    row0, row1, col0, col1 = surface._uv_pixel_rect(bounds)
+    columns = np.arange(col0, col1)
+    rows_per_tile = max(1, 131072//max(1, len(columns)))
+    aa = max(.001, 1/(size*scale*min(abs(stretch_x), abs(stretch_y))))
+    radius = min(shape['cornerRadius'], half_width, half_height)
+    fill_color = color(fill) if fill else np.zeros(3, dtype=np.float32)
+    stroke_color = color(stroke) if stroke_width else np.zeros(3, dtype=np.float32)
+    for start in range(row0, row1, rows_per_tile):
+        rows = np.arange(start, min(start+rows_per_tile, row1))
+        ids = (rows[:, None]*size+columns).ravel()
+        u, v = surface._texel_uv(ids)
+        u, v = u-cx, v-cy
+        x = (c*u+s*v)/(scale*stretch_x)
+        y = (-s*u+c*v)/(scale*stretch_y)
+        if shape['kind']=='rectangle':
+            x, y = np.abs(x)-half_width+radius, np.abs(y)-half_height+radius
+            distance = np.minimum(np.maximum(x, y), 0)+np.hypot(np.maximum(x, 0), np.maximum(y, 0))-radius
+        else:
+            u, v = x/half_width, y/half_height
+            distance = (u*u+v*v-1)/np.maximum(2*np.hypot(u/half_width, v/half_height), 1e-8)
+        outer = np.clip(.5-distance/aa, 0, 1).astype(np.float32)
+        inner = np.clip(.5-(distance+stroke_width)/aa, 0, 1).astype(np.float32) if stroke_width else outer
+        outline = outer-inner
+        interior = inner if fill is not None else 0
+        alpha = outline+interior
+        keep = alpha > 0
+        premult = fill_color*np.asarray(interior)[..., None]+stroke_color*outline[:, None]
+        yield ids[keep], np.column_stack((premult[keep], alpha[keep]))
+
+
 def apply_adjustment(result, layer, surface, linear):
     params, mode = layer['adjustment'], layer['blend']
     if mode == 'normal' and neutral_adjustment(params):
@@ -182,6 +230,8 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
         ranges = pixel_tiles(ids, alpha, premult)
     elif layer['kind']=='gradient':
         ranges = gradient_tiles(surface, layer['gradient'], color)
+    elif layer['kind']=='shape':
+        ranges = shape_tiles(surface, layer, color)
     else:
         ranges = image_tiles(image_pixels(layer, assets, surface.uv_shape[0], linear))
     mask = surface.mask(layer.get('maskStrokes', [])) if layer['maskEnabled'] else None
