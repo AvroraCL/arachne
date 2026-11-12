@@ -265,6 +265,35 @@ try{
   assert.deepEqual((await api('/api/personal-library')).items[recipe.id],recipe);
   console.log('PASS smart material saved and applied in the browser, different model, editable copies, 4K wear, atomic undo and clean ZIP restore');
 
+  const parentFolder=await api(newRoute+'/paint/commands',{revision:changed.revision,operations:[
+    {op:'add',kind:'group',patch:{name:'拖入智能材质'}}
+  ]});
+  const parent=parentFolder.paint.layers.at(-1);
+  await packedPage.reload();
+  await packedPage.locator('[data-area-mode=material]').click();
+  await packedShelf.getByRole('tab',{name:'智能材质',exact:true}).click();
+  const folderRow=packedPage.locator('[data-layer-id="'+parent.id+'"]');
+  const rowBounds=await folderRow.boundingBox();
+  await smartTile.dragTo(folderRow,{targetPosition:{x:rowBounds.width/2,y:rowBounds.height/2}});
+  const dropped=await until(async()=>{
+    const project=await api(newRoute);
+    return project.paint.layers.some(layer=>layer.parentId===parent.id)&&project;
+  },'dragging a smart material into the target folder');
+  const nested=dropped.paint.layers.find(layer=>layer.parentId===parent.id);
+  assert.equal(nested.name,smartName);
+  assert.equal(dropped.paint.layers.filter(layer=>layer.parentId===nested.id).length,2);
+  assert.equal(dropped.revision,parentFolder.revision+1);
+  const locked=await api(newRoute+'/paint/commands',{revision:dropped.revision,operations:[
+    {op:'update',id:parent.id,patch:{locked:true}}
+  ]});
+  const rejected=await fetch(origin+newRoute+'/paint/library-import',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({revision:locked.revision,id:recipe.id,libraryRevision:1,placement:{targetId:parent.id,zone:'inside'}})
+  });
+  assert.equal(rejected.status,400);
+  assert.deepEqual((await api(newRoute)).paint,locked.paint);
+  console.log('PASS dragging smart materials into a folder with atomic placement and lock checks');
+
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
 }finally{
   await browser?.close();

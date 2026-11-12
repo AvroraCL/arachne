@@ -1,4 +1,5 @@
 import {layerChildren,layerLockOwner,layerParent} from './paint-layer-tree.mjs';
+import {draggedSmartMaterial,smartMaterialDragType,smartMaterialPlacement} from './smart-material-placement.mjs';
 
 const mime='application/x-arachne-material-layer';
 
@@ -26,7 +27,7 @@ export function materialLayerDrop(layers,ids,targetId,zone){
   return {op:'arrange',ids,parentId,...(inside?{}:{anchorId:target.id}),placement:inside?'above':zone};
 }
 
-export function createMaterialLayerDrag({read,selection,canDrag,commit}){
+export function createMaterialLayerDrag({read,selection,canDrag,commit,importSmartMaterial}){
   let session=null,marker=null;
   function clearMarker(){
     if(marker)delete marker.dataset.layerDrop;
@@ -37,6 +38,10 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit}){
     session=null;
     clearMarker();
   }
+  function dropZone(event,row,target){
+    const bounds=row.getBoundingClientRect(),position=(event.clientY-bounds.top)/bounds.height;
+    return target.kind==='group'&&position>=.25&&position<=.75?'inside':position<.5?'above':'below';
+  }
   function findDrop(event,row,id){
     if(!session||!event.dataTransfer.types.includes(mime))return null;
     const doc=read();
@@ -46,10 +51,14 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit}){
     }
     const target=doc.paint.layers.find(layer=>layer.id===id);
     if(!target)return null;
-    const bounds=row.getBoundingClientRect(),position=(event.clientY-bounds.top)/bounds.height;
-    const zone=target.kind==='group'&&position>=.25&&position<=.75?'inside':position<.5?'above':'below';
+    const zone=dropZone(event,row,target);
     if(session.last?.id===id&&session.last.zone===zone)return session.last;
     return session.last={id,zone,operation:materialLayerDrop(doc.paint.layers,session.ids,id,zone)};
+  }
+  function findSmartDrop(event,row,id){
+    if(!importSmartMaterial||!canDrag())return null;
+    const doc=read(),target=doc?.paint.layers.find(layer=>layer.id===id);
+    return target&&smartMaterialPlacement(doc.paint.layers,id,dropZone(event,row,target));
   }
   function bind(handle,row,id,openFolder){
     handle.ondragstart=event=>{
@@ -69,11 +78,13 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit}){
     };
     handle.ondragend=cancel;
     row.ondragenter=row.ondragover=event=>{
-      const drop=findDrop(event,row,id);
-      if(marker&&(!drop?.operation||marker!==row))clearMarker();
-      if(!drop?.operation)return;
+      const smart=event.dataTransfer.types.includes(smartMaterialDragType);
+      const drop=smart?findSmartDrop(event,row,id):findDrop(event,row,id);
+      const valid=smart?!!drop:!!drop?.operation;
+      if(marker&&(!valid||marker!==row))clearMarker();
+      if(!valid)return;
       event.preventDefault();
-      event.dataTransfer.dropEffect='move';
+      event.dataTransfer.dropEffect=smart?'copy':'move';
       if(row.dataset.layerDrop!==drop.zone)row.dataset.layerDrop=drop.zone;
       marker=row;
     };
@@ -81,6 +92,17 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit}){
       if(marker===row&&!row.contains(event.relatedTarget))clearMarker();
     };
     row.ondrop=event=>{
+      if(event.dataTransfer.types.includes(smartMaterialDragType)){
+        const placement=findSmartDrop(event,row,id),resource=draggedSmartMaterial(event.dataTransfer),doc=read();
+        clearMarker();
+        if(!placement||!resource||!doc)return;
+        event.preventDefault();
+        const origin={id:doc.id,revision:doc.revision};
+        void importSmartMaterial(resource,placement,origin).then(saved=>{
+          if(saved&&placement.zone==='inside'&&read()?.id===origin.id)openFolder?.(id);
+        });
+        return;
+      }
       const drop=findDrop(event,row,id);
       if(!drop?.operation)return;
       event.preventDefault();

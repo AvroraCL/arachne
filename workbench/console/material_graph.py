@@ -1,5 +1,8 @@
 """Evaluate the validated PBR instruction plan in bounded-size linear-light tiles."""
 from paint_channels import CHANNELS, DEFAULTS, RGB, SRGB
+from contextlib import ExitStack
+import mmap
+import tempfile
 import numpy as np
 from PIL import Image
 
@@ -9,19 +12,41 @@ def decode(c):
 
 
 class MaterialImages:
-    def __init__(self, assets):
+    def __init__(self, assets, memory_limit=64 * 1024 * 1024):
         self.assets = assets
         self.images = {}
         self.pixel_count = 0
+        self.memory_limit = memory_limit
+        self.spills = None
+
+    def __enter__(self):
+        self.spills = ExitStack()
+        return self
+
+    def __exit__(self, *error):
+        self.images.clear()
+        self.spills.__exit__(*error)
+        self.spills = None
 
     def load(self, asset):
         if asset not in self.images:
             with Image.open(self.assets[asset]) as image:
                 pixels = image.width * image.height
-                if self.pixel_count + pixels > 64 * 1024 * 1024:
-                    raise ValueError('当前可见材质的图像超过 64 Mi 像素，请缩小素材或隐藏暂时不用的图层')
-                self.images[asset] = np.asarray(image.convert('RGBA'))
-                self.pixel_count += pixels
+                rgba = np.asarray(image.convert('RGBA'))
+                if self.pixel_count + pixels <= self.memory_limit:
+                    self.images[asset] = rgba
+                    self.pixel_count += pixels
+                elif self.spills is not None:
+                    # Large stacks share disk-backed RGBA data between graph
+                    # tiles instead of keeping every decoded map in memory.
+                    file = self.spills.enter_context(tempfile.TemporaryFile())
+                    file.truncate(rgba.nbytes)
+                    mapping = self.spills.enter_context(mmap.mmap(file.fileno(), rgba.nbytes))
+                    stored = np.ndarray(rgba.shape, dtype=np.uint8, buffer=mapping)
+                    stored[:] = rgba
+                    self.images[asset] = stored
+                else:
+                    raise ValueError('材质图像总像素超过 64 Mi 像素')
         return self.images[asset]
 
 

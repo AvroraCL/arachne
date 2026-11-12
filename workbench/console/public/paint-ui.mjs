@@ -92,7 +92,18 @@ const materialLayerDrag=createMaterialLayerDrag({
   read:()=>doc,
   selection:()=>[...selection],
   canDrag:()=>!busy&&!maskEditor.isOpen()&&!surfaceTools.isEditing(),
-  commit:(operation,{id,revision})=>run(()=>api('/api/projects/'+id+'/paint/commands',{revision,operations:[operation]}))
+  commit:(operation,{id,revision})=>run(()=>api('/api/projects/'+id+'/paint/commands',{revision,operations:[operation]})),
+  importSmartMaterial:async(resource,placement,{id,revision})=>{
+    const generation=layerSelectionGeneration;
+    let imported;
+    const saved=await run(async()=>{imported=await api('/api/projects/'+id+'/paint/library-import',{
+      revision,libraryRevision:resource.revision,id:resource.id,placement
+    });});
+    if(saved&&doc?.id===id&&generation===layerSelectionGeneration){
+      setSelection([imported.resource.id]);render(true);areaSystem?.materialSelectionChanged();
+    }
+    return saved;
+  }
 });
 function syncBusyControls(){
   libraryUI?.sync();shaderEditor?.sync();historyPanel?.sync();areaSystem?.busyChanged();taskMonitor?.sync();

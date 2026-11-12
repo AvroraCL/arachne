@@ -372,7 +372,7 @@ const server=http.createServer(async(req,res)=>{
           res.end(result.image);return;
         }finally{res.off('close',disconnect);}
       }
-      if(operation==='library-import'){send(res,200,personalLibrary.importResource({projectId:id,projectRevision:b.revision,revision:b.libraryRevision,id:b.id}));return;}
+      if(operation==='library-import'){send(res,200,personalLibrary.importResource({projectId:id,projectRevision:b.revision,revision:b.libraryRevision,id:b.id,placement:b.placement}));return;}
       if(operation==='model-prepare'){void preparePaintGeometry(doc).catch(()=>{});send(res,202,modelGeometryStatus(doc));return;}
       if(operation==='model'){send(res,200,saveProjectModel(doc,b));return;}
       if(operation==='commands'){

@@ -277,6 +277,11 @@ def mask_effects(coverage, effects, generated, surface, ids):
 
 
 def composite(cfg, step):
+    with MaterialImages(cfg['assets']) as material_images:
+        return composite_layers(cfg, step, material_images)
+
+
+def composite_layers(cfg, step, material_images):
     source, paint = cfg['source'], cfg['paint']
     surface, protected, conflict, valid, uv, shape = geometry(
         source['cacheRun'],source['bundle'],source['material'],cfg['bindingFingerprint'],step)
@@ -304,7 +309,6 @@ def composite(cfg, step):
     isolated = cfg.get('isolatedLayer')
     layers = []
     fill_graphs = {}
-    material_images = MaterialImages(cfg['assets'])
     has_generator = False
     folder_visibility = {}
     def art(asset, kind):

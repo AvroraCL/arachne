@@ -52,8 +52,10 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
     if(presetBytes)ensure(presetFile(entry.id),presetBytes);
     state.items[entry.id]=entry;return {state:write(state),item:entry};
   }
-  function importResource({projectId,projectRevision,revision,id}){
+  function importResource({projectId,projectRevision,revision,id,placement}){
     const state=expected(revision),entry=resource(state,id),doc=project(projectId,projectRevision),copies=[];
+    if(placement!==undefined&&(entry.kind!=='smartMaterials'||!placement||typeof placement.targetId!=='string'||!['above','below','inside'].includes(placement.zone)))
+      throw failure('智能材质的放置位置无效');
     for(const asset of Object.values(entry.assets)){const bytes=assetBytes(asset,path.join(blobs,path.basename(asset.file)));const existing=doc.paint.assets[asset.id];if(existing&&(existing.sha256!==asset.sha256||existing.file!==asset.file))throw failure('项目素材编号冲突');copies.push([entry.kind==='images'?{...asset,name:entry.name}:asset,bytes]);}
     let resourceId=entry.kind==='images'?entry.image:crypto.randomUUID(),preset;
     if(entry.kind==='smartMaterials'){
@@ -64,7 +66,7 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
     const document=commitProject(doc.id,projectRevision,next=>{
       for(const [asset] of copies)next.paint.assets[asset.id]??=structuredClone(asset);
       if(preset){
-        resourceId=applySmartMaterial(next.paint,preset,entry.name);
+        resourceId=applySmartMaterial(next.paint,preset,entry.name,placement);
         validatePaint(next);
       }else if(entry.kind!=='images')libraryOperation(next.paint,{library:entry.kind,id:resourceId,action:'create',patch:{name:entry.name,graph:structuredClone(entry.graph)}});
       for(const [asset,bytes] of copies)ensure(path.join(projectFolder(doc.id),'assets',asset.file),bytes);

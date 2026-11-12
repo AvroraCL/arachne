@@ -1,6 +1,7 @@
 import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
+import {smartMaterialDragType} from './smart-material-placement.mjs';
 let state=null,pending=null;
 const listeners=new Set(),channel=typeof BroadcastChannel==='function'?new BroadcastChannel('arachne-personal-library'):null;
 function publish(next){if(next&&(!state||next.revision>state.revision)){state=next;for(const listener of listeners)listener();}return state;}
@@ -118,6 +119,14 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
         tile.type='button';tile.dataset.resourceId=item.id;tile.setAttribute('aria-label',item.name);
         tile.onclick=()=>{picked=item.id;sync();};
         tile.ondblclick=()=>{picked=item.id;void act(()=>importItem(item));};
+        if(item.kind==='smartMaterials'){
+          tile.draggable=true;
+          tile.ondragstart=event=>{
+            if(working||!canEdit()||!Object.hasOwn(state?.items??{},item.id)){event.preventDefault();return;}
+            event.dataTransfer.setData(smartMaterialDragType,JSON.stringify({id:item.id,revision:state.revision}));
+            event.dataTransfer.effectAllowed='copy';
+          };
+        }
         tile.title=[item.name,...(item.tags||[]),item.kind==='smartMaterials'?'双击应用到工程':'双击导入项目'].join(' · ');
         tile.append(resourcePreview(kind,item,id=>'/api/personal-library/'+item.id+'/assets/'+id),el('span','library-name',item.name));
         if(item.favorite){

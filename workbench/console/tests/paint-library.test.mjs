@@ -91,6 +91,12 @@ with tempfile.TemporaryDirectory() as directory:
     result=a.evaluate(np.zeros((4,14)),np.arange(4),2,2)
     for name,expected in [('metallic',.2),('ao',.4),('roughness',.4)]:
         assert np.allclose(result[:,CHANNELS[name]],expected),result
+    with MaterialImages(assets,memory_limit=1) as spill:
+        graph=MaterialGraph(config['plan'],assets,spill)
+        assert spill.pixel_count==0 and graph.images[config['asset']] is spill.load(config['asset'])
+        assert np.array_equal(graph.evaluate(np.zeros((4,14)),np.arange(4),2,2),result)
+        del graph
+    assert not spill.images and spill.spills is None
 `],{input:JSON.stringify({asset:packed,plan:compileLibraryMaterial(hdrp,assets)}),
     cwd:new URL('../',import.meta.url),encoding:'utf8'});
   assert.equal(run.status,0,run.stderr);
