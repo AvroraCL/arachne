@@ -14,10 +14,12 @@ import {hasAssetDrag,readAssetDrag} from './paint-asset-drag.mjs';
 import {createImageEditorSelection} from './image-editor-selection.mjs';
 import {pauseImageThumbnail,updateImageThumbnail} from './image-layer-thumbnails.mjs';
 import {createImageGradientTool} from './image-gradient-tool.mjs';
+import {uvShapePayload} from './uv-selection-region.mjs';
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 function button(text,action,label=text){const b=el('button','',text);b.type='button';b.onclick=action;b.setAttribute('aria-label',label);b.title=label;return b;}
 function choice(label,items,value,change){const s=el('select');s.setAttribute('aria-label',label);for(const [id,name] of items)s.append(new Option(name,id));s.value=value;s.onchange=()=>change(s.value);return s;}
 const selectionNames={rect:'矩形选区',ellipse:'椭圆选区',lasso:'套索'};
+const imageDragTypes={layer:'application/x-arachne-image-layer',mask:'application/x-arachne-image-mask'};
 const currentDocument=project=>{const documents=project.document?.paint.imageDocuments??{},id=project.imageContext?.documentId;return Object.hasOwn(documents,id)?documents[id]:null;};
 const currentLayer=project=>currentDocument(project)?.layers.find(l=>l.id===project.imageContext?.layerId);
 function selectImage(project,patch){
@@ -464,6 +466,8 @@ export function createDocumentEditor(ctx,bridge){
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
   return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,selectionMode:selection.getCombination(),gradient:gradientTool.getState(),eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||painter.isEditing()||gradientTool.isEditing()||selection.isDragging()||selection.isTransforming(),
+    getSelection(origin){return shown&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&
+      !selection.isDragging()&&!selection.isTransforming()?selection.clip():null;},
     setVisible(visible){
       if(shown===visible)return;
       shown=visible;live.setVisible(visible);
@@ -507,7 +511,9 @@ export function createImagePanel(type,ctx){
       const action=footerStack[index];
       if(action?.enabled)void run(action.run);
     }),icon)):[];
-  const addMask=type==='layers'?chromeButton(button('添加蒙版',()=>selectLayerMask(currentLayer(project))),'mask'):null;
+  const addMask=type==='layers'?chromeButton(button('添加蒙版',event=>
+    selectLayerMask(currentLayer(project),undefined,{reveal:!event.altKey})),'mask'):null;
+  if(addMask)addMask.title='添加蒙版 · 显示选区 · Alt / Option 隐藏选区';
   const add=type==='layers'?chromeButton(button('新建像素层',()=>{
     const origin=imageSelectionOrigin(project);
     resetFilter();filterChanged();void run(()=>addPixel(project,origin));
@@ -590,29 +596,38 @@ export function createImagePanel(type,ctx){
     dropRow=null;
   }
   function reorderTarget(event,view){
-    if(!reorder||!event.dataTransfer.types.includes('application/x-arachne-image-layer')||view.row.hidden)return null;
-    const {origin,layerId}=reorder,document=project.document,image=currentDocument(project);
+    if(!reorder||!event.dataTransfer.types.includes(imageDragTypes[reorder.kind])||view.row.hidden)return null;
+    const {origin,layerId,kind}=reorder,document=project.document,image=currentDocument(project);
     if(ctx.busy?.()||origin.id!==document?.id||origin.revision!==document.revision||
        origin.documentId!==project.imageContext?.documentId||layerId===view.item.id||!image)return null;
     const from=image.layers.findIndex(item=>item.id===layerId),to=image.layers.findIndex(item=>item.id===view.item.id);
-    if(from<0||to<0||image.layers[from].locked)return null;
+    if(from<0||to<0)return null;
+    const source=image.layers[from];
+    if(kind==='mask'){
+      const copy=event.altKey||source.locked;
+      if(view.item.locked||!hasImageLayerMask(source))return null;
+      return {edge:'mask',copy};
+    }
+    if(source.locked)return null;
     const rect=view.row.getBoundingClientRect(),above=event.clientY<rect.top+rect.height/2;
     const index=to+(above?1:0)-(from<to?1:0);
     return index===from?null:{index,edge:above?'above':'below'};
   }
   function bindReorder(view){
-    const {row,select,name}=view;
-    const startDrag=event=>{
-      if(view.item.locked||ctx.busy?.()||renaming){event.preventDefault();return;}
+    const {row,select,name,mask}=view;
+    const startDrag=(event,kind)=>{
+      if((kind==='layer'&&view.item.locked)||(kind==='mask'&&!hasImageLayerMask(view.item))||ctx.busy?.()||renaming){
+        event.preventDefault();return;
+      }
       clearDrag();
       menu.close();
-      reorder={origin:imageSelectionOrigin(project),layerId:view.item.id,row};
+      reorder={origin:imageSelectionOrigin(project),layerId:view.item.id,row,kind};
       row.dataset.dragging='';
-      event.dataTransfer.setData('application/x-arachne-image-layer',view.item.id);
-      event.dataTransfer.effectAllowed='move';
+      event.dataTransfer.setData(imageDragTypes[kind],view.item.id);
+      event.dataTransfer.effectAllowed=kind==='layer'?'move':view.item.locked?'copy':'copyMove';
     };
-    for(const source of [select,name]){
-      source.ondragstart=startDrag;
+    for(const [source,kind] of [[select,'layer'],[name,'layer'],[mask,'mask']]){
+      source.ondragstart=event=>startDrag(event,kind);
       source.ondragend=clearDrag;
     }
     row.ondragenter=row.ondragover=event=>{
@@ -623,7 +638,7 @@ export function createImagePanel(type,ctx){
       }
       if(!target)return;
       event.preventDefault();
-      event.dataTransfer.dropEffect='move';
+      event.dataTransfer.dropEffect=target.copy?'copy':'move';
       if(row.dataset.dropEdge!==target.edge)row.dataset.dropEdge=target.edge;
       dropRow=row;
     };
@@ -636,9 +651,18 @@ export function createImagePanel(type,ctx){
       const target=reorderTarget(event,view);
       if(!target)return;
       event.preventDefault();
-      const {origin,layerId}=reorder;
+      const {origin,layerId,kind}=reorder,targetLayerId=view.item.id;
       clearDrag();
-      void run(()=>commandAt(project,origin,{action:'moveLayer',layerId,index:target.index}));
+      if(kind==='layer'){
+        void run(()=>commandAt(project,origin,{action:'moveLayer',layerId,index:target.index}));
+        return;
+      }
+      void run(async()=>{
+        await commandAt(project,origin,{action:'transferMask',layerId:targetLayerId,sourceLayerId:layerId,copy:target.copy});
+        const current=project.imageContext;
+        if(project.document?.id===origin.id&&current?.documentId===origin.documentId&&current?.layerId===origin.layerId)
+          selectImage(project,{layerId:targetLayerId,target:'mask'});
+      });
     };
   }
   function stackActions(item,index,last,origin,editable){
@@ -654,12 +678,14 @@ export function createImagePanel(type,ctx){
   function editText(item,origin=imageSelectionOrigin(project)){
     if(item?.text&&!item.locked&&!ctx.busy?.())ctx.openImageText?.(origin,item);
   }
-  function selectLayerMask(item,origin=imageSelectionOrigin(project),inspect=false){
+  function selectLayerMask(item,origin=imageSelectionOrigin(project),{inspect=false,reveal=true}={}){
     if(!item||ctx.busy?.())return;
     const hasMask=hasImageLayerMask(item);
     if(item.locked&&!hasMask)return;
+    const selection=hasMask?null:ctx.imageSelection?.(origin);
     void run(async()=>{
-      if(!hasMask)await commandAt(project,origin,{action:'updateLayer',layerId:item.id,patch:{maskEnabled:true}});
+      if(!hasMask)await commandAt(project,origin,{action:'createMask',layerId:item.id,reveal,
+        ...(selection?{rect:selection.clip,...uvShapePayload(selection)}:{})});
       const current=project.imageContext;
       if(project.document?.id===origin.id&&current?.documentId===origin.documentId&&
          current?.layerId===origin.layerId&&current?.target===origin.target){
@@ -693,11 +719,12 @@ export function createImagePanel(type,ctx){
       null,up,down,null,
       {label:hasMask?'选择蒙版':'添加蒙版',icon:'mask',enabled:editable||hasMask,run:()=>selectLayerMask(item,origin)},
       ...(hasMask?[
-        {label:'单独查看蒙版',icon:'eye',shortcut:'Alt',run:()=>selectLayerMask(item,origin,true)},
+        {label:'单独查看蒙版',icon:'eye',shortcut:'Alt',run:()=>selectLayerMask(item,origin,{inspect:true})},
         {label:item.maskEnabled?'停用蒙版':'启用蒙版',icon:'mask',enabled:editable,run:update({maskEnabled:!item.maskEnabled})},
         {label:'反相蒙版',icon:'invert',enabled:editable,run:maskAction('invertMask')},
         {label:'删除蒙版',icon:'trash',enabled:editable,run:maskAction('removeMask')}
-      ]:[]),
+      ]:[{label:ctx.imageSelection?.(origin)?'用蒙版隐藏选区':'用蒙版隐藏全部',icon:'mask',enabled:editable,
+        shortcut:'Alt 点击蒙版按钮',run:()=>selectLayerMask(item,origin,{reveal:false})}]),
       null,remove
     ]);
   }
@@ -726,7 +753,7 @@ export function createImagePanel(type,ctx){
     const mask=button('',event=>{
       const layer=view.item;
       if(event.shiftKey){if(!layer.locked)setLayer({maskEnabled:!layer.maskEnabled});return;}
-      selectLayerMask(layer,imageSelectionOrigin(project),event.altKey);
+      selectLayerMask(layer,imageSelectionOrigin(project),{inspect:event.altKey});
     });
     mask.className='document-layer-mask';
     row.dataset.imageLayerId=item.id;
@@ -774,7 +801,7 @@ export function createImagePanel(type,ctx){
     labelButton(eye,(item.visible?'隐藏 ':'显示 ')+item.name,item.visible?'eye':'hidden');
     labelButton(lock,(item.locked?'解锁 ':'锁定 ')+item.name,item.locked?'lock':'unlock');
     labelButton(mask,'选择蒙版 '+item.name);
-    mask.title='选择蒙版 · Alt 单独查看 · Shift 启用或停用';
+    mask.title='选择蒙版 · Alt 单独查看 · Shift 启用或停用 · 拖动移动 · Alt 拖动复制';
     if(hasMask&&!mask.contains(maskPreview))mask.replaceChildren(maskPreview);
     else if(!hasMask&&mask.contains(maskPreview)){
       pauseImageThumbnail(maskPreview);
@@ -782,6 +809,7 @@ export function createImagePanel(type,ctx){
     }
     for(const control of [eye,select,lock])control.disabled=busy;
     mask.disabled=busy;
+    mask.draggable=hasMask&&!busy;
     name.draggable=select.draggable=!busy&&!item.locked;
     view.item=item;
     view.previewContext=context;

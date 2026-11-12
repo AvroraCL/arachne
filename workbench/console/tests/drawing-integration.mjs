@@ -141,6 +141,64 @@ try{
   assert.deepEqual(edited.map(pixel=>pixel[3]),[0,255,255,0,0]);
   assert.equal(cleared.paint.imageDocuments[documentId].layers.at(-1).strokes.at(-1).regions.length,2);
 
+  const imageLayers=current=>Object.fromEntries(current.paint.imageDocuments[documentId].layers.map(layer=>[layer.id,layer]));
+  const maskButton=page.getByRole('button',{name:'添加蒙版',exact:true});
+  await maskButton.click();
+  const reveal=await until(async()=>{
+    const current=await api(projectRoute),layer=imageLayers(current)[layerId];
+    return layer.maskStrokes?.[0]?.regions&&current;
+  },'通过组合选区显示蒙版');
+  const originalMask=imageLayers(reveal)[layerId];
+  assert.equal(originalMask.maskBase,0);
+  assert.deepEqual(originalMask.maskStrokes[0].regions,regions);
+  async function inspectMask(revision,layer){
+    const size=256,response=await fetch(origin+paintRoute+'/image-live',{method:'POST',
+      headers:{Origin:origin,'Content-Type':'application/json'},
+      body:JSON.stringify({revision,documentId,inspectMask:layer,resolution:size})});
+    assert.equal(response.status,200,response.ok?'':await response.text());
+    const pixels=new Uint8Array(await response.arrayBuffer());
+    assert.equal(pixels.length,size*size*4);
+    return checks.map(([x,y])=>pixels[(Math.floor(y*size)*size+Math.floor(x*size))*4]);
+  }
+  assert.deepEqual(await inspectMask(reveal.revision,layerId),[255,0,0,255,255]);
+
+  await page.getByRole('button',{name:'备用层',exact:true}).click();
+  await maskButton.click({modifiers:['Alt']});
+  const hide=await until(async()=>{
+    const current=await api(projectRoute),layer=imageLayers(current)[otherLayerId];
+    return layer.maskStrokes?.[0]?.value===0&&current;
+  },'通过组合选区隐藏蒙版');
+  assert.equal(imageLayers(hide)[otherLayerId].maskBase,1);
+  assert.deepEqual(await inspectMask(hide.revision,otherLayerId),[0,255,255,0,0]);
+
+  const sourceMask=page.getByRole('button',{name:'选择蒙版 颜色层',exact:true});
+  const maskTarget=page.locator('[data-image-layer-id="'+otherLayerId+'"]');
+  await page.keyboard.down('Alt');
+  await sourceMask.dragTo(maskTarget);
+  await page.keyboard.up('Alt');
+  const copiedMask=await until(async()=>{
+    const current=await api(projectRoute),layers=imageLayers(current);
+    return layers[otherLayerId].maskBase===0&&layers[layerId].maskEnabled&&current;
+  },'Alt 拖动复制蒙版');
+  assert.deepEqual(imageLayers(copiedMask)[otherLayerId].maskStrokes,originalMask.maskStrokes);
+  await sourceMask.dragTo(maskTarget);
+  const movedMask=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>copiedMask.revision&&!imageLayers(current)[layerId].maskEnabled&&current;
+  },'拖动移动蒙版');
+  assert.equal(imageLayers(movedMask)[layerId].maskStrokes,undefined);
+  assert.deepEqual(imageLayers(movedMask)[otherLayerId].maskStrokes,originalMask.maskStrokes);
+  await canvas.focus();
+  await page.keyboard.press('Control+z');
+  const maskUndo=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>movedMask.revision&&imageLayers(current)[layerId].maskEnabled&&current;
+  },'撤销蒙版移动');
+  assert.deepEqual(imageLayers(maskUndo)[layerId].maskStrokes,originalMask.maskStrokes);
+  console.log('PASS reveal and hide selection masks, 4K source shape, Alt-copy, move and undo');
+
+  await page.getByRole('button',{name:'颜色层',exact:true}).click();
+  await editor.getByRole('button',{name:'矩形选区',exact:true}).click();
   await editor.getByRole('button',{name:'与选区相交',exact:true}).click();
   await drag([.12,.12],[.48,.55]);
   assert.equal((await shape.getAttribute('d')).match(/M/g).length,2);

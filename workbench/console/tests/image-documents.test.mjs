@@ -59,6 +59,27 @@ test('mask inversion preserves soft brush coverage and deletion resets only the 
  assert.equal(layer.maskBase,1);
  assert.throws(()=>edit(paint,'invertMask',origin),/没有蒙版/);
 });
+test('masks can be created from a selection and transferred without aliasing the source',()=>{
+ const paint=defaults();edit(paint,'create');
+ edit(paint,'addLayer',{layerId:'first',kind:'pixel'});edit(paint,'addLayer',{layerId:'second',kind:'pixel'});
+ const [first,second]=paint.imageDocuments.doc.layers;
+ const rect=[.1,.1,.8,.7],polygon=[[.1,.1],[.8,.1],[.5,.7]];
+ edit(paint,'createMask',{layerId:'first',reveal:true,rect,polygon});
+ assert.equal(first.maskBase,0);assert.deepEqual(first.maskStrokes,[{uv:true,rect,polygon,opacity:1,value:1}]);
+ edit(paint,'createMask',{layerId:'second',reveal:false});
+ assert.equal(second.maskBase,0);assert.equal(second.maskStrokes,undefined);
+ edit(paint,'updateLayer',{layerId:'first',patch:{locked:true}});
+ assert.throws(()=>edit(paint,'transferMask',{layerId:'second',sourceLayerId:'first',copy:false}),/锁定/);
+ edit(paint,'transferMask',{layerId:'second',sourceLayerId:'first',copy:true});
+ assert.deepEqual(second.maskStrokes,first.maskStrokes);
+ edit(paint,'invertMask',{layerId:'second'});
+ assert.equal(first.maskStrokes[0].value,1);assert.equal(second.maskStrokes[0].value,0);
+ edit(paint,'updateLayer',{layerId:'first',patch:{locked:false}});
+ edit(paint,'transferMask',{layerId:'second',sourceLayerId:'first',copy:false});
+ assert.equal(hasImageLayerMask(first),false);
+ assert.equal(second.maskStrokes[0].value,1);
+ validateImageDocuments(paint,checks);
+});
 test('gradient masks preserve brush strokes and invert the entire mask',()=>{
  const paint=defaults();edit(paint,'create');edit(paint,'addLayer',{layerId:'pixel',kind:'pixel'});
  const layer=paint.imageDocuments.doc.layers[0],origin={layerId:'pixel'};

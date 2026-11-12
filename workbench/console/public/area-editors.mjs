@@ -644,7 +644,7 @@ export function registerAreaEditors(registry,bridge){
   }
   registry.register('properties',ctx=>materialPanel(ctx,materialProperties));
   registry.register('layers',ctx=>materialPanel(ctx,inner=>legacy('layers',inner)||createMaterialLayerEditor(inner,bridge)));
-  registry.register('imageLayers',ctx=>createImagePanel('layers',{...ctx,busy:bridge.busy,openImageText:bridge.openImageText}));
+  registry.register('imageLayers',ctx=>createImagePanel('layers',{...ctx,busy:bridge.busy,openImageText:bridge.openImageText,imageSelection:bridge.imageSelection}));
   registry.register('imageProperties',ctx=>createImagePanel('properties',{...ctx,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText}));
   registry.register('library',ctx=>legacy('library',ctx)||createLibraryEditor(ctx,bridge));
   registry.register('scene',ctx=>createSceneEditor(ctx));

@@ -21,6 +21,12 @@ function checkGradient(gradient,checkStroke,mask=false){
 export const imageLayerDefaults={visible:true,locked:false,opacity:1,blend:'normal',maskEnabled:false,maskBase:1};
 export const imageDocumentLimit=16;
 export const hasImageLayerMask=layer=>!!layer&&(layer.maskEnabled||Array.isArray(layer.maskStrokes)||!!layer.maskGradient);
+function resetMask(layer){
+  layer.maskEnabled=false;
+  layer.maskBase=1;
+  delete layer.maskStrokes;
+  delete layer.maskGradient;
+}
 export function imageStrokeToMaterial(s,mask=false){
   if(s.transformUV||s.clearUV)return structuredClone(s);
   const {color,...stroke}=s;return mask?stroke:{...stroke,channels:{color:true,metallic:false,roughness:false},values:{color,metallic:0,roughness:.5}};
@@ -82,7 +88,7 @@ function duplicateImageName(documents,source){
   return name;
 }
 export function imageDocumentOperation(paint,o,{requireUnlocked}){
-  if(!exact(o,['op','action','documentId','newDocumentId','layerId','patch','kind','target','stroke','transform','rect',...uvShapeFields,'index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
+  if(!exact(o,['op','action','documentId','newDocumentId','layerId','sourceLayerId','reveal','copy','patch','kind','target','stroke','transform','rect',...uvShapeFields,'index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
   const documents=paint.imageDocuments??={},doc=Object.hasOwn(documents,o.documentId)?documents[o.documentId]:null;
   if(o.action==='create'){
     if(doc||!exact(o.patch??{},['name','colorSpace']))throw Error('图像文档已存在或参数无效');
@@ -123,6 +129,25 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     Object.assign(layer,o.patch);
     if(layer.maskGradient===null)delete layer.maskGradient;
   }
+  else if(o.action==='createMask'){
+    if(hasImageLayerMask(layer))throw Error('图像图层已有蒙版');
+    if(typeof o.reveal!=='boolean')throw Error('请选择显示或隐藏蒙版');
+    const selection=o.rect!==undefined||uvShapeFields.some(key=>Object.hasOwn(o,key));
+    layer.maskEnabled=true;
+    layer.maskBase=Number(selection?!o.reveal:o.reveal);
+    if(selection)layer.maskStrokes=[{uv:true,rect:o.rect,...uvShapePayload(o),opacity:1,value:Number(o.reveal)}];
+  }
+  else if(o.action==='transferMask'){
+    const source=doc.layers.find(item=>item.id===o.sourceLayerId);
+    if(typeof o.copy!=='boolean'||source===layer||!hasImageLayerMask(source))throw Error('请选择另一个图层的蒙版');
+    if(source.locked&&!o.copy)throw Object.assign(Error('源图层已锁定'),{status:423});
+    resetMask(layer);
+    layer.maskEnabled=source.maskEnabled;
+    layer.maskBase=source.maskBase;
+    if(source.maskStrokes)layer.maskStrokes=structuredClone(source.maskStrokes);
+    if(source.maskGradient)layer.maskGradient=structuredClone(source.maskGradient);
+    if(!o.copy)resetMask(source);
+  }
   else if(o.action==='invertMask'||o.action==='removeMask'){
     if(!hasImageLayerMask(layer))throw Error('图像图层没有蒙版');
     if(o.action==='invertMask'){
@@ -130,12 +155,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
       if(layer.maskGradient)layer.maskGradient.colors=layer.maskGradient.colors.map(color=>
         '#'+(255-parseInt(color.slice(1,3),16)).toString(16).padStart(2,'0').repeat(3));
       for(const stroke of layer.maskStrokes??[])stroke.value=1-stroke.value;
-    }else{
-      layer.maskEnabled=false;
-      layer.maskBase=1;
-      delete layer.maskStrokes;
-      delete layer.maskGradient;
-    }
+    }else resetMask(layer);
   }
   else if(o.action==='removeLayer')doc.layers.splice(index,1);
   else if(o.action==='duplicateLayer'){if(!id(o.patch?.id)||doc.layers.some(l=>l.id===o.patch.id))throw Error('图像副本编号无效');doc.layers.splice(index+1,0,{...structuredClone(layer),id:o.patch.id,name:(layer.name.slice(0,90)+' 副本')});}
