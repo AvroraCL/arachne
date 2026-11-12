@@ -14,7 +14,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 
 // This module displays registered UV color only; it never pretends the 2D board is already baked.
 export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect=()=>{},onRenderPreviewStatus=()=>{},onModelingPick,animateAxes=false,localUI=false}){
-  let resizeObserver;let disposed=false;
+  let resizeObserver;let disposed=false,sceneCursor=null,cursorMark=null;
   let renderer,scene,camera,controls,model,previewModel,manifest,doc,sequence=0,active=false,pending=false;
   let scalarTextures={},texture,maskPreview=null,textureOverride=null,textureSequence=0,wireframe=false,unlit=false,orthographic=false,solo=false,selected=null;
   let livePaint=null,paintFrame=null,axisMotion=null,liveUsageKey='';
@@ -141,7 +141,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
         host.dataset.renderedPaintResolution=String(paintFrame.size);
         host.dataset.renderedPaintDraft=String(paintFrame.draft);
       }else clearRenderedPaint();
-      drawAxis();updateViewLabel();
+      drawAxis();updateSceneCursor();updateViewLabel();
       renderer.domElement.dataset.frames=String(++frameCount);
       if(axisMotion)request();
     });
@@ -417,6 +417,39 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if(Math.abs(point.x)>1||Math.abs(point.y)>1||Math.abs(point.z)>1)return null;
     return [(point.x+1)*host.clientWidth/2,(1-point.y)*host.clientHeight/2];
   }
+  function setSceneCursor(position){
+    if(JSON.stringify(sceneCursor)===JSON.stringify(position))return;
+    sceneCursor=position;
+    if(position&&!cursorMark){
+      cursorMark=document.createElement('span');
+      cursorMark.className='viewport-scene-cursor';cursorMark.setAttribute('aria-hidden','true');cursorMark.hidden=true;
+      cursorMark.innerHTML='<svg viewBox="0 0 22 22"><path d="M11 0v22M0 11h22" stroke="#181818" stroke-width="2"/><path d="M11 0v22M0 11h22" stroke="#f5f5f5"/><circle cx="11" cy="11" r="6" fill="none" stroke="#fafafa" stroke-width="2"/><circle cx="11" cy="11" r="6" fill="none" stroke="#db5757" stroke-width="2" stroke-dasharray="4 4"/></svg>';
+      host.append(cursorMark);
+    }
+    updateSceneCursor();request();
+  }
+  function updateSceneCursor(){
+    if(!cursorMark)return;
+    const screen=showOverlays&&sceneCursor&&screenPoint(sceneCursor);
+    cursorMark.hidden=!screen;
+    if(screen)cursorMark.style.transform=`translate(${screen[0]}px,${screen[1]}px) translate(-50%,-50%)`;
+  }
+  function cursorPointAt(clientX,clientY){
+    if(!model||host.dataset.state!=='ready')return null;
+    const rect=renderer.domElement.getBoundingClientRect(),root=previewModel||model;
+    if(!rect.width||!rect.height)return null;
+    uvPointer.set((clientX-rect.left)/rect.width*2-1,1-(clientY-rect.top)/rect.height*2);
+    root.updateMatrixWorld(true);camera.updateMatrixWorld();
+    uvRay.setFromCamera(uvPointer,camera);
+    for(const hit of uvRay.intersectObject(root,true)){
+      let object=hit.object;
+      while(object&&object!==root&&object.visible)object=object.parent;
+      if(object===root&&root.visible)return fromView(hit.point);
+    }
+    const plane=new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()),controls.target);
+    const point=uvRay.ray.intersectPlane(plane,new THREE.Vector3());
+    return point?fromView(point):null;
+  }
   function releaseLivePaint(){
     if(!livePaint)return false;
     for(const map of new Set(Object.values(livePaint)))map.dispose();
@@ -496,5 +529,5 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     (localUI?host.querySelector('[data-vp-ortho]'):document.getElementById('vp-ortho'))?.setAttribute('aria-pressed', String(orthographic));
     size();
   }
-  return {readCamera:()=>camera&&cameraState(),dispose(){if(disposed)return;disposed=true;sequence++;textureSequence++;active=false;resizeObserver?.disconnect();controls?.dispose();pathTracer?.dispose();disposeModel();objectOutline?.dispose();environment?.dispose();solidMaterial.dispose();wireMaterial.dispose();renderer?.dispose();renderer?.domElement.remove();},modelingContext,applyCamera,navigate,pickTargetUV,focusDistanceAt,viewFrame,screenPoint,showLivePaint,showMaskCanvas,setRenderPreview,renderPreviewState:()=>pathTracer?.state(),setDisplay,setOverlays,setEnvironment(raw){displaySettings=sceneOptions(raw);syncEnvironment();},capture(){if(!renderer||!camera||host.dataset.state!=='ready')throw Error('请等待模型载入');updateDepthRange();renderObserved();notifyCamera();const data=renderer.domElement.toDataURL('image/png');request();return data;},getRenderSettings(samples=64){if(!manifest||host.dataset.state!=='ready'||!camera)throw Error('请等待三维模型与贴图载入');const aspect=host.clientWidth/Math.max(host.clientHeight,1),width=Math.round(Math.min(1200,1200*aspect)),height=Math.round(width/aspect);const match=manifest.textureUrl.match(/\/jobs\/([^/]+)\/files\//);return {samples,width:Math.max(128,width),height:Math.max(128,Math.min(2048,height)),textureJobId:match?.[1]||null,camera:cameraState()};},loadProject,focusSelected,setActive(value){active=value;if(!active&&axisMotion)applyCamera(axisMotion.end);else size();},fit:frameAll,direction,projection,select,setWireframe(value){wireframe=value;paintMaterials();},setUnlit:shade,setSolo(value){solo=value;paintMaterials();},syncDocument(next){if(doc?.id!==next.id)return loadProject(next);const changed=JSON.stringify(doc.modeling)!==JSON.stringify(next.modeling),visibilityChanged=JSON.stringify(doc.paint?.renderVisibility)!==JSON.stringify(next.paint?.renderVisibility);doc=next;if(visibilityChanged)request();if(changed&&model&&!previewModel){applyModelState(model,doc.modeling);updateModelBounds();request();}textureStatus();},async setTextureSource(source){textureOverride=source;await this.refreshTexture();},async reload(){if(doc)return loadProject(doc);},async refreshTexture(){if(!doc||!manifest||host.dataset.state==='error')return;const token=sequence,textureToken=++textureSequence;try{const r=await fetch(`/api/projects/${doc.id}/viewport`);if(!r.ok)throw Error('贴图来源请求失败');const next=resolvedTexture(await r.json());if(token!==sequence||textureToken!==textureSequence)return;if(next.status==='ready'&&(next.textureUrl!==manifest.textureUrl||JSON.stringify(next.materialUrls)!==JSON.stringify(manifest.materialUrls)))await applyTexture(next,token,textureToken);else{manifest=next;textureStatus();}}catch(e){state('贴图更新失败：'+e.message,'error');}},getState(){return {projectId:doc?.id,modelRadius:radius,meshCount:host.dataset.meshes,frames:frameCount,clipping:camera?{near:camera.near,far:camera.far}:null,selected,wireframe,unlit,orthographic,position:camera?.position.toArray(),materialUrls:manifest?.materialUrls,textureUrl:manifest?.textureUrl,textureRevision:manifest?.textureRevision};}};
+  return {readCamera:()=>camera&&cameraState(),dispose(){if(disposed)return;disposed=true;sequence++;textureSequence++;active=false;resizeObserver?.disconnect();controls?.dispose();pathTracer?.dispose();disposeModel();objectOutline?.dispose();environment?.dispose();solidMaterial.dispose();wireMaterial.dispose();renderer?.dispose();renderer?.domElement.remove();cursorMark?.remove();},modelingContext,applyCamera,navigate,pickTargetUV,focusDistanceAt,viewFrame,screenPoint,setSceneCursor,cursorPointAt,showLivePaint,showMaskCanvas,setRenderPreview,renderPreviewState:()=>pathTracer?.state(),setDisplay,setOverlays,setEnvironment(raw){displaySettings=sceneOptions(raw);syncEnvironment();},capture(){if(!renderer||!camera||host.dataset.state!=='ready')throw Error('请等待模型载入');updateDepthRange();renderObserved();notifyCamera();const data=renderer.domElement.toDataURL('image/png');request();return data;},getRenderSettings(samples=64){if(!manifest||host.dataset.state!=='ready'||!camera)throw Error('请等待三维模型与贴图载入');const aspect=host.clientWidth/Math.max(host.clientHeight,1),width=Math.round(Math.min(1200,1200*aspect)),height=Math.round(width/aspect);const match=manifest.textureUrl.match(/\/jobs\/([^/]+)\/files\//);return {samples,width:Math.max(128,width),height:Math.max(128,Math.min(2048,height)),textureJobId:match?.[1]||null,camera:cameraState()};},loadProject,focusSelected,setActive(value){active=value;if(!active&&axisMotion)applyCamera(axisMotion.end);else size();},fit:frameAll,direction,projection,select,setWireframe(value){wireframe=value;paintMaterials();},setUnlit:shade,setSolo(value){solo=value;paintMaterials();},syncDocument(next){if(doc?.id!==next.id)return loadProject(next);const changed=JSON.stringify(doc.modeling)!==JSON.stringify(next.modeling),visibilityChanged=JSON.stringify(doc.paint?.renderVisibility)!==JSON.stringify(next.paint?.renderVisibility);doc=next;if(visibilityChanged)request();if(changed&&model&&!previewModel){applyModelState(model,doc.modeling);updateModelBounds();request();}textureStatus();},async setTextureSource(source){textureOverride=source;await this.refreshTexture();},async reload(){if(doc)return loadProject(doc);},async refreshTexture(){if(!doc||!manifest||host.dataset.state==='error')return;const token=sequence,textureToken=++textureSequence;try{const r=await fetch(`/api/projects/${doc.id}/viewport`);if(!r.ok)throw Error('贴图来源请求失败');const next=resolvedTexture(await r.json());if(token!==sequence||textureToken!==textureSequence)return;if(next.status==='ready'&&(next.textureUrl!==manifest.textureUrl||JSON.stringify(next.materialUrls)!==JSON.stringify(manifest.materialUrls)))await applyTexture(next,token,textureToken);else{manifest=next;textureStatus();}}catch(e){state('贴图更新失败：'+e.message,'error');}},getState(){return {projectId:doc?.id,modelRadius:radius,meshCount:host.dataset.meshes,frames:frameCount,clipping:camera?{near:camera.near,far:camera.far}:null,selected,wireframe,unlit,orthographic,position:camera?.position.toArray(),materialUrls:manifest?.materialUrls,textureUrl:manifest?.textureUrl,textureRevision:manifest?.textureRevision};}};
 }

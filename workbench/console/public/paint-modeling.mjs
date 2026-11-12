@@ -262,14 +262,15 @@ export function createPaintModeling(report, project = {}) {
     return [...byMesh].map(([mesh,indices])=>({mesh:mesh.userData.modelingMesh,vertices:[...indices]}));
   }
 
-  function selectionCenter() {
+  function selectionCenter(kind=pivotMode) {
+    if(kind==='cursor')return new THREE.Vector3(...(project.read?.()?.paint.sceneCursor||[0,0,0])).applyQuaternion(worldAxes);
     if (mode === 'object') {
-      if(pivotMode==='active'&&object)return object.getWorldPosition(new THREE.Vector3());
-      if(pivotMode==='bounds')return modelPivotPoint([...selectedObjects].map(node=>node.getWorldPosition(new THREE.Vector3())),pivotMode);
+      if(kind==='active'&&object)return object.getWorldPosition(new THREE.Vector3());
+      if(kind==='bounds')return modelPivotPoint([...selectedObjects].map(node=>node.getWorldPosition(new THREE.Vector3())),kind);
       return objectOriginCenter(selectedObjects);
     }
-    const entries=pivotMode==='active'?[...selected.values()].slice(-1):selected.values();
-    return modelPivotPoint(selectedPositions(entries),pivotMode);
+    const entries=kind==='active'?[...selected.values()].slice(-1):selected.values();
+    return modelPivotPoint(selectedPositions(entries),kind);
   }
 
   function* selectedPositions(entries){
@@ -1077,6 +1078,11 @@ export function createPaintModeling(report, project = {}) {
       context.request();
     },
     syncCamera(){ if (active) gizmo.camera = context.getCamera(); },
+    syncPivot(){if(active&&pivotMode==='cursor'&&!gesture&&!saving)updateSelection();},
+    selectionOrigin(){
+      if(!active||!object||mode==='edit'&&!selected.size)return null;
+      return selectionCenter('median').applyQuaternion(worldAxes.clone().invert()).toArray();
+    },
     toggleMode(){ if (active) this.setMode(mode === 'object' ? 'edit' : 'object'); },
     setMode(next){
       if (!active || gesture || saving || next === mode) return;

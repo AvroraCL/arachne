@@ -4,7 +4,7 @@ import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
 import {paintChannels,channelSpecs,renderChannel,liveStride} from './paint-channels.mjs';
-import {headerControls,chromeButton,areaIcons} from './area-chrome.mjs';
+import {headerControls,chromeButton,areaIcons,createContextActions} from './area-chrome.mjs';
 import {projectionIsCurrent} from './paint-surface-state.mjs';
 import {createViewport} from './viewport3d.mjs';
 import {modelPivotLabels} from './paint-model-transform.mjs';
@@ -93,8 +93,13 @@ export function registerAreaEditors(registry,bridge){
     });
     const transformPivot=choice('变换枢轴',Object.entries(modelPivotLabels),Object.hasOwn(modelPivotLabels,state.pivot)?state.pivot:'median',value=>{
       if(!modeler.setPivot(value)){transformPivot.value=modelState?.pivotMode||'median';syncSelectMenu(transformPivot);return;}
-      resetNumeric();onChange();
+      resetNumeric();syncSceneCursor();onChange();
     });
+    const cursorMenu=createContextActions('三维游标',ctx.error);
+    const cursorButton=chromeButton(button('三维游标',openCursorMenu),'pivot');
+    cursorButton.title='三维游标 · Shift + S · Shift + 右键放置';
+    cursorButton.setAttribute('aria-haspopup','menu');
+    let cursorPointer=null,cursorKey='';
     const foreground=el('input');foreground.type='color';foreground.value=bridge.foreground();foreground.setAttribute('aria-label','前景色');
     foreground.oninput=()=>{sampledBrush=null;bridge.setForeground(foreground.value);syncPicker();};
     const materialPicker=button('材质取样',()=>setPicking(!picking),'材质取样 · I');
@@ -116,7 +121,7 @@ export function registerAreaEditors(registry,bridge){
     chromeButton(boxSelect,'marquee','框选');boxSelect.setAttribute('aria-keyshortcuts','B');boxSelect.setAttribute('aria-pressed','false');
     const frameButton=button('相机取景框',()=>toggleCameraFrame(),'相机取景框 · 小键盘 0');
     chromeButton(frameButton,'renderSettings');frameButton.setAttribute('aria-pressed','false');
-    toolbar.append(modes,component,tool,orientation,transformPivot,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
+    toolbar.append(modes,component,tool,orientation,transformPivot,cursorButton,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
       button('适应',()=>{markCameraFree();viewport.fit();}),
       button('正交',()=>{markCameraFree();viewport.projection(!viewport.getState().orthographic);onChange();}),frameButton);
     transformPivot.dataset.searchable='false';
@@ -211,7 +216,7 @@ export function registerAreaEditors(registry,bridge){
       if(next.modal&&modelState?.modal){modelState=next;status.textContent=next.summary;return;}
       modelState=next;view.dataset.objectSelection=JSON.stringify(next.selectedIds);view.dataset.activeObject=String(next.activeId??'');numeric.hidden=!['object','edit'].includes(mode);visible(component,mode==='edit');visible(tool,['object','edit'].includes(mode));
       view.dataset.transformOrientation=next.orientation;visible(orientation,['object','edit'].includes(mode));orientation.disabled=next.dragging;syncSelectMenu(orientation);
-      view.dataset.transformPivot=next.pivotMode;visible(transformPivot,inModeling());transformPivot.disabled=next.dragging;syncSelectMenu(transformPivot);
+      view.dataset.transformPivot=next.pivotMode;visible(transformPivot,inModeling());transformPivot.disabled=cursorButton.disabled=next.dragging;syncSelectMenu(transformPivot);
       view.dataset.modalTransform=next.modal?.tool||'';
       previewBar.classList.toggle('is-transforming',!!next.modal);
       if(tool.value!==next.tool){tool.value=next.tool;resetNumeric();}
@@ -341,16 +346,56 @@ export function registerAreaEditors(registry,bridge){
       retry.hidden=rendered?!cycles.retry:!(preview?.error||preview?.phase==='error');
     }
     elements['brush-mirror-enabled'].onchange=()=>{const settings=painter.getSettings();painter.setSettings({...settings,mirror:elements['brush-mirror-enabled'].checked});onChange();};
+    function syncSceneCursor(){
+      const saved=project.document?.paint.sceneCursor;
+      const position=inModeling()?(saved||(transformPivot.value==='cursor'?[0,0,0]:null)):null;
+      viewport.setSceneCursor(position);
+      const next=JSON.stringify(saved||null);
+      if(next!==cursorKey){cursorKey=next;modeler.syncPivot();}
+    }
+    function canPlaceCursor(){
+      return inModeling()&&view.dataset.state==='ready'&&!bridge.busy()&&!modeler.isDragging()&&
+        !painter.isEditing()&&!marquee.isArmed()&&!focusGesture.armed()&&!regionGesture.armed();
+    }
+    async function saveSceneCursor(position){
+      if(!canPlaceCursor())return;
+      const previous=project.document?.paint.sceneCursor||null;
+      if(JSON.stringify(previous)===JSON.stringify(position))return;
+      await project.commands([{op:'sceneCursor',position}],project.origin());
+    }
+    function openCursorMenu(){
+      if(!canPlaceCursor())return false;
+      const anchor=cursorButton.getBoundingClientRect(),selected=modeler.selectionOrigin();
+      cursorMenu.open({clientX:anchor.left,clientY:anchor.bottom},'三维游标',[
+        {label:'游标到选中项',icon:'focus',enabled:!!selected,run:()=>saveSceneCursor(selected)},
+        {label:'游标到世界原点',icon:'pivot',enabled:!!project.document?.paint.sceneCursor,run:()=>saveSceneCursor(null)}
+      ]);
+      return true;
+    }
+    view.addEventListener('pointerdown',event=>{
+      if(event.button!==2||!event.shiftKey||!event.target.matches('canvas')||!canPlaceCursor())return;
+      event.preventDefault();event.stopImmediatePropagation();
+      cursorPointer=event.pointerId;
+      const position=viewport.cursorPointAt(event.clientX,event.clientY);
+      if(position)void saveSceneCursor(position).catch(ctx.error);
+    },{capture:true,signal});
+    for(const type of ['pointerup','pointercancel'])view.addEventListener(type,event=>{
+      if(event.pointerId!==cursorPointer)return;
+      cursorPointer=null;event.stopImmediatePropagation();
+    },{capture:true,signal});
+    view.addEventListener('contextmenu',event=>{
+      if(event.shiftKey&&event.target.matches('canvas')&&inModeling())event.preventDefault();
+    },{signal});
     function setMode(next){
       if(modeler.isDragging()||painter.isEditing()){modes.value=mode;return;}
-      marquee.cancel();
+      marquee.cancel();cursorMenu.close();
       modeGeneration++;mode=next;modes.value=next;picking=false;pickerMessage='';syncSelectMenu(modes);painter.setMode(['paint','mask','fill','place'].includes(mode)?mode:'orbit');
       if(view.dataset.state==='ready'){
         if(['object','edit'].includes(mode)){modeler.open(viewport.modelingContext(),project.document.id);modeler.setMode(mode);modeler.setElement(component.value);modeler.setTool(tool.value);modeler.setOrientation(orientation.value);modeler.setPivot(transformPivot.value);}
         else modeler.close();
       }
-      foreground.hidden=mode!=='paint';visible(maskInk,['mask','fill'].includes(mode));numeric.hidden=!inModeling();controls.bar.hidden=!['paint','mask'].includes(mode);visible(component,mode==='edit');visible(tool,inModeling());visible(orientation,inModeling());visible(transformPivot,inModeling());boxSelect.hidden=!inModeling();boxSelect.disabled=!canBoxSelect();syncPicker();onChange();
-      syncRenderPreview();
+      foreground.hidden=mode!=='paint';visible(maskInk,['mask','fill'].includes(mode));numeric.hidden=!inModeling();controls.bar.hidden=!['paint','mask'].includes(mode);visible(component,mode==='edit');visible(tool,inModeling());visible(orientation,inModeling());visible(transformPivot,inModeling());cursorButton.hidden=!inModeling();boxSelect.hidden=!inModeling();boxSelect.disabled=!canBoxSelect();syncPicker();onChange();
+      syncSceneCursor();syncRenderPreview();
     }
     function releaseFrame(){
       if(!frame)return;
@@ -394,6 +439,7 @@ export function registerAreaEditors(registry,bridge){
         return;
       }
       if(view.dataset.state!=='ready')return;
+      syncSceneCursor();
       frameButton.disabled=false;
       if(doc.revision!==revision&&!modeler.isDragging()&&!painter.isEditing()){marquee.cancel();revision=doc.revision;viewport.syncDocument(doc);modeler.syncDocument();}
       brushBinding.sync(reselect);
@@ -439,6 +485,9 @@ export function registerAreaEditors(registry,bridge){
       }
       if(marquee.isArmed()){
         if(key==='escape'||key==='b'&&!event.repeat)marquee.cancel();
+        event.preventDefault();event.stopPropagation();return;
+      }
+      if(inModeling()&&!mod&&!event.altKey&&event.shiftKey&&key==='s'&&openCursorMenu()){
         event.preventDefault();event.stopPropagation();return;
       }
       if(['object','edit'].includes(mode)&&modeler.transformKey(event,lastPointer)){event.preventDefault();event.stopPropagation();resetNumeric();onChange();return;}
@@ -499,7 +548,7 @@ export function registerAreaEditors(registry,bridge){
         if(visible)void sync().catch(ctx.error);
         else{display.close();navigating=false;marquee.cancel();regionGesture.cancel();focusGesture.cancel();setPicking(false);releaseFrame();syncRenderPreview();}
       },
-      dispose(){disposed=true;clearTimeout(wheelTimer);marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
+      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
   });
 
   registry.register('shader',ctx=>{

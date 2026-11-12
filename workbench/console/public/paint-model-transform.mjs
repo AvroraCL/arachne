@@ -9,7 +9,7 @@ export function modelOrientation(object,orientation='global'){
   return rotation.normalize().multiply(worldAxes);
 }
 
-export const modelPivotLabels={median:'中值点',bounds:'边界中心',active:'活动元素'};
+export const modelPivotLabels={median:'中值点',bounds:'边界中心',active:'活动元素',cursor:'三维游标'};
 
 export function modelPivotPoint(points,mode){
   const center=new THREE.Vector3(),bounds=mode==='bounds'?new THREE.Box3():null;

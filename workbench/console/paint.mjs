@@ -205,7 +205,12 @@ function editRenderBookmark(paint,operation){
   if(bookmarks.length)paint.renderBookmarks=checkedRenderBookmarks(bookmarks);
   else delete paint.renderBookmarks;
 }
+function checkedSceneCursor(position){
+  if(!vector(position,3,1e6))throw Error('三维游标坐标无效');
+  return position.slice();
+}
 function validate(doc){
+  if(doc.paint.sceneCursor!==undefined)checkedSceneCursor(doc.paint.sceneCursor);
   validateObjectNames(doc.paint.objectNames);
   if(doc.paint.renderVisibility!==undefined)checkRenderVisibility(doc.paint.renderVisibility);
   if(doc.paint.renderCamera!==undefined)checkedRenderCamera(doc.paint.renderCamera);
@@ -335,6 +340,12 @@ function applyOperations(next,operations,sourceVisibility){
       fields(o,['op','visibility']);
       const visibility=updateRenderVisibility(sourceVisibility,p.renderVisibility,o.visibility);
       if(Object.keys(visibility).length)p.renderVisibility=visibility;else delete p.renderVisibility;
+      continue;
+    }
+    if(op==='sceneCursor'){
+      fields(o,['op','position']);
+      if(o.position===null)delete p.sceneCursor;
+      else p.sceneCursor=checkedSceneCursor(o.position);
       continue;
     }
     if(op==='renderBookmark'){editRenderBookmark(p,o);continue;}
@@ -478,7 +489,7 @@ export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
     'paint_worker.py','paint_channels.py','paint_surface.py','material_graph.py','image_documents.py','project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
     '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
   ].map(file=>hash(path.join(ROOT,file))))).digest('hex');
-  const {objectNames,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,...content}=doc.paint;
+  const {objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,...content}=doc.paint;
   return crypto.createHash('sha256').update(JSON.stringify([compositorFingerprint,binding,content])).digest('hex');
 }
 export function materialFingerprint(doc){
@@ -780,7 +791,7 @@ export async function restorePaint(archive,scratch){
      (!projectOnly&&(typeof manifest.previewId!=='string'||!/^[\w-]{1,100}$/.test(manifest.previewId)||
        !sha256(geometry.uvSha256))))
     throw Error('涂装 ZIP 的可编辑清单无效');
-  const {base,baseChannels,layers,assets,surfaceBindings,materialGraph,materials,brushes,imageDocuments,objectNames,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility}=fields(manifest.paint,['base','baseChannels','layers','assets','surfaceBindings','materialGraph','materials','brushes','imageDocuments','objectNames','renderCamera','renderBookmarks','renderAppearance','renderLighting','renderOptics','renderPreset','renderRegion','renderVisibility']);
+  const {base,baseChannels,layers,assets,surfaceBindings,materialGraph,materials,brushes,imageDocuments,objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility}=fields(manifest.paint,['base','baseChannels','layers','assets','surfaceBindings','materialGraph','materials','brushes','imageDocuments','objectNames','sceneCursor','renderCamera','renderBookmarks','renderAppearance','renderLighting','renderOptics','renderPreset','renderRegion','renderVisibility']);
   validateRestoredLayers(layers);
   const paint={base,...(imageDocuments?{imageDocuments}:{}),...(baseChannels!==undefined?{baseChannels}:{}),layers,assets:{},...(materials?{materials}:{}),...(brushes?{brushes}:{}),...(materialGraph?{materialGraph}:{}),...(surfaceBindings?{surfaceBindings}:{})};
   for(const [id,item] of Object.entries(assets)){
@@ -795,6 +806,7 @@ export async function restorePaint(archive,scratch){
   if(objectNames!==undefined){validateObjectNames(objectNames);paint.objectNames=objectNames;}
   if(renderCamera!==undefined)paint.renderCamera=checkedRenderCamera(renderCamera);
   if(renderBookmarks!==undefined)paint.renderBookmarks=checkedRenderBookmarks(renderBookmarks);
+  if(sceneCursor!==undefined)paint.sceneCursor=checkedSceneCursor(sceneCursor);
   if(renderAppearance!==undefined)paint.renderAppearance=checkRenderAppearance(renderAppearance);
   if(renderLighting!==undefined)paint.renderLighting=checkRenderLighting(renderLighting);
   if(renderOptics!==undefined)paint.renderOptics=checkRenderOptics(renderOptics);
@@ -864,7 +876,7 @@ function prepareEditableFiles(doc,out,files){
     registrationSha256:registrationFingerprint(doc.source),...(doc.modeling?{modelFingerprint:modelFingerprint(doc)}:{})};
   const manifest={
     format:archiveFormat,version:1,name:doc.name,revision:doc.revision,geometry,...(doc.modeling?{modeling:doc.modeling}:{}),
-    paint:{base:doc.paint.base,...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
+    paint:{base:doc.paint.base,...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.sceneCursor?{sceneCursor:doc.paint.sceneCursor}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
   };
   if(Buffer.byteLength(JSON.stringify(manifest,null,2)+'\n')>16*1024*1024)throw Error('可编辑工程清单超过 16 MiB，无法生成可恢复的 ZIP');
   atomic(files[manifestPath],manifest);
