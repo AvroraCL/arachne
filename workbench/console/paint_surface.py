@@ -522,14 +522,15 @@ class Surface:
             self.brush_prefix = key,weights
         return np.fromiter(weights.keys(),dtype=np.int32), np.fromiter(weights.values(),dtype=np.float32)
 
-    def paint(self, strokes, channels, color, sampler=None):
+    def paint(self, strokes, channels, color, sampler=None, raster_edit=None):
         affected = np.empty(0,dtype=np.int32)
         paint = {}
         batch = []
         for stroke in strokes:
             transform = stroke.get('transformUV')
             clear = stroke.get('clearUV')
-            if transform is None and clear is None:
+            raster = raster_edit is not None and 'flood' in stroke
+            if transform is None and clear is None and not raster:
                 batch.append(stroke)
                 continue
             affected, paint = self._paint_strokes(batch, channels, color, affected, paint, sampler)
@@ -542,8 +543,10 @@ class Surface:
                         alpha *= remainder
                         value *= remainder[:,None]
                 affected, paint = self._subset_paint(affected, paint, keep)
-            else:
+            elif transform is not None:
                 affected, paint = self._transform_paint(affected, paint, transform)
+            else:
+                affected, paint = raster_edit(affected, paint, stroke)
             batch = []
         return self._paint_strokes(batch, channels, color, affected, paint, sampler)
 

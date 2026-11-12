@@ -96,6 +96,16 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
           if(!record(stroke))throw Error('图像笔触无效');
           if(stroke.transformUV){if(!exact(stroke,['transformUV'])||mask)throw Error('图像变换无效');checkedUVTransform(stroke.transformUV);}
           else if(stroke.clearUV){if(!exact(stroke,['clearUV',...uvShapeFields])||mask)throw Error('图像清除无效');checkStroke({uv:true,rect:stroke.clearUV,...uvShapePayload(stroke),opacity:1,value:0},true);}
+          else if(stroke.flood!==undefined){
+            const fill=stroke.flood;
+            if(mask||!exact(stroke,['uv','flood','opacity','clip',...uvShapeFields,'color','erase'])||
+              stroke.uv!==true||stroke.erase!==false||!ink(stroke.color)||!unit(stroke.opacity)||
+              !exact(fill,['point','tolerance','contiguous'])||!pair(fill.point,unit)||
+              !Number.isInteger(fill.tolerance)||fill.tolerance<0||fill.tolerance>255||typeof fill.contiguous!=='boolean')
+              throw Error('油漆桶填充参数无效');
+            if(stroke.clip!==undefined||uvShapeFields.some(key=>Object.hasOwn(stroke,key)))
+              checkStroke({uv:true,rect:stroke.clip,...uvShapePayload(stroke),opacity:1,value:0},true);
+          }
           else{
             const keys=['uv','radius','hardness','opacity','flow','spacing','stamps','breaks','clip',...uvShapeFields,'rect',...(mask?['value']:['color','erase'])];
             if(!exact(stroke,keys)||stroke.uv!==true||!mask&&!ink(stroke.color))throw Error('图像只接受二维 RGB 笔触');

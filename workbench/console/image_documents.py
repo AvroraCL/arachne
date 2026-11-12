@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image, PngImagePlugin
 from paint_surface import Surface
 from image_adjustments import adjust_rgb, blend_rgb, neutral_adjustment
+from image_raster_tools import flood_layer
 
 
 def decode(c):
@@ -169,7 +170,8 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
         apply_adjustment(result, layer, surface, linear)
         return
     if layer['kind']=='pixel':
-        ids, paint = surface.paint([converted(s) for s in layer.get('strokes', [])], {'color':True}, color)
+        ids, paint = surface.paint([converted(s) for s in layer.get('strokes', [])], {'color':True}, color,
+                                  raster_edit=lambda ids,paint,stroke:flood_layer(surface,ids,paint,stroke,color,None if linear else encode))
         if 'color' not in paint:
             return
         alpha, premult = paint['color']

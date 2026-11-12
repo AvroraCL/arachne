@@ -568,9 +568,57 @@ try{
   },'撤销恢复曲线控制点');
   await page.reload();
   await graph.waitFor();
-  assert.equal(curvesLayer(await api(projectRoute)).adjustment.points.red[1][1],152);
-  assert.deepEqual(pageErrors,[]);
+  const restoredCurve=await api(projectRoute);
+  assert.equal(curvesLayer(restoredCurve).adjustment.points.red[1][1],152);
   console.log('PASS curve histogram, live point drag, independent RGB and red controls, exact numeric input, 4K alpha and undo');
+
+  const fillDoc='bucket-document',bucketLayer='bucket-pixels';
+  const swatches=[
+    [[.1,.25,.24,.75],'#202040'],[[.36,.25,.5,.75],'#242640'],
+    [[.66,.25,.8,.75],'#282444'],[[.86,.25,.96,.75],'#806040']
+  ];
+  const bucketSeed=await api(paintRoute+'/commands',{revision:restoredCurve.revision,operations:[
+    {op:'image',action:'create',documentId:fillDoc,patch:{name:'油漆桶验收'}},
+    {op:'image',action:'addLayer',documentId:fillDoc,layerId:bucketLayer,kind:'pixel',patch:{name:'色块'}},
+    ...swatches.map(([rect,color])=>({op:'image',action:'stroke',documentId:fillDoc,layerId:bucketLayer,target:'pixels',
+      stroke:{uv:true,rect,opacity:1,color,erase:false}}))
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(fillDoc,{force:true});
+  await page.getByRole('button',{name:'色块',exact:true}).click();
+  await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+  await editor.getByRole('button',{name:'渐变工具',exact:true}).click();
+  await page.keyboard.press('Shift+g');
+  const bucket=editor.getByRole('button',{name:'油漆桶',exact:true});
+  assert.equal(await bucket.getAttribute('aria-pressed'),'true');
+  await setBrushOption('油漆桶容差',12);
+  await editor.getByLabel('图像前景色',{exact:true}).fill('#f3b529');
+  await page.mouse.click(...await point([.17,.5]));
+  const bucketStrokes=current=>current.paint.imageDocuments[fillDoc].layers[0].strokes;
+  const contiguousFill=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>bucketSeed.revision&&bucketStrokes(current).at(-1).flood?.contiguous&&current;
+  },'填充连续色块');
+  const bucketSamples=[.17,.42,.7,.9,.55].map(x=>xy(x,.5));
+  assert.deepEqual(rgba(await imagePng('bucket-contiguous.png',contiguousFill.revision,fillDoc),bucketSamples)[1],
+    [[243,181,41,255],[36,38,64,255],[40,36,68,255],[128,96,64,255],[0,0,0,0]]);
+  await until(()=>bucket.isEnabled(),'油漆桶可再次填充');
+  await editor.getByRole('checkbox',{name:'只填充连续区域'}).uncheck();
+  await editor.getByLabel('图像前景色',{exact:true}).fill('#249ed8');
+  await page.mouse.click(...await point([.42,.5]));
+  const globalFill=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>contiguousFill.revision&&bucketStrokes(current).at(-1).flood?.contiguous===false&&current;
+  },'填充不相邻的相似色块');
+  assert.deepEqual(rgba(await imagePng('bucket-global.png',globalFill.revision,fillDoc),bucketSamples)[1],
+    [[243,181,41,255],[36,158,216,255],[36,158,216,255],[128,96,64,255],[0,0,0,0]]);
+  await page.reload();
+  await canvas.waitFor();
+  assert.equal(await bucket.getAttribute('aria-pressed'),'true');
+  assert.equal(await editor.getByRole('checkbox',{name:'只填充连续区域'}).isChecked(),false);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS Paint Bucket, G tool group, tolerance, connected and disconnected pixels, transparency and reopen');
 }catch(error){
   console.error(logs);
   throw error;
