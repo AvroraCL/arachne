@@ -9,7 +9,9 @@ import {demoProjectId} from '../demo-source.mjs';
 
 const [executable,appFolder]=process.argv.slice(2);
 if(!executable)throw Error('Specify the packaged desktop executable');
-const profile=await fs.mkdtemp(path.join(os.tmpdir(),'阿拉克涅 桌面验收-'));
+const suppliedProfile=process.env.ARACHNE_DESKTOP_TEST_PROFILE;
+const profile=suppliedProfile?path.resolve(suppliedProfile):await fs.mkdtemp(path.join(os.tmpdir(),'阿拉克涅 桌面验收-'));
+await fs.mkdir(profile,{recursive:true});
 const screenshots=process.env.ARACHNE_DESKTOP_SCREENSHOTS;
 const withoutBlender=process.env.ARACHNE_TEST_WITH_BLENDER!=='1'||process.env.ARACHNE_TEST_WITHOUT_BLENDER==='1';
 const env={...process.env,ARACHNE_USER_DATA_DIR:profile,ARACHNE_CYCLES_INTERACTIVE:'0'};
@@ -35,7 +37,7 @@ async function launch(){
   console.log('Launching packaged desktop from',path.resolve(executable));
   desktop=await electron.launch({executablePath:path.resolve(executable),env,
     args:[...(appFolder?[path.resolve(appFolder)]:[]),
-      ...(process.platform==='win32'?['--use-angle=swiftshader','--enable-unsafe-swiftshader']:[])],
+      ...(process.platform==='win32'?['--use-angle=swiftshader','--enable-unsafe-swiftshader','--force-device-scale-factor=1.25']:[])],
     timeout:60000});
   const page=await desktop.firstWindow({timeout:60000});
   console.log('Packaged desktop window created');
@@ -66,6 +68,7 @@ try{
     return response.json();
   };
   assert.equal((await read('/api/health')).localOnly,true);
+  if(process.platform==='win32')assert.equal(await page.evaluate(()=>window.devicePixelRatio),1.25);
   assert.deepEqual(await read('/api/desktop-activity'),{state:'ready'});
   const blenderRequests=[];
   const watchRenderer=request=>{
@@ -196,6 +199,27 @@ try{
   assert.equal(cancelled.status(),200,cancelled.ok()?'':await cancelled.text());
   await waitFor(async()=> (await read('/api/desktop-activity')).state==='ready','renderer cleanup');
   console.log('PASS native quit checks active jobs in other projects');
+  await page.locator('[data-area-mode=drawing]').click();
+  const editor=page.locator('.editor-area[data-editor=image]').first();
+  await editor.getByRole('button',{name:'新建贴图',exact:true}).click();
+  const drawing=await waitFor(async()=>{
+    const doc=await read('/api/projects/'+id);
+    return Object.values(doc.paint.imageDocuments??{}).length&&doc;
+  },'native clipboard test document');
+  const imageId=Object.keys(drawing.paint.imageDocuments)[0];
+  await editor.getByLabel('图像文档画布').focus();
+  await desktop.evaluate(({BrowserWindow,clipboard,nativeImage},encoded)=>{
+    clipboard.writeImage(nativeImage.createFromBuffer(Buffer.from(encoded,'base64')));
+    BrowserWindow.getAllWindows()[0].webContents.paste();
+  },bytes.toString('base64'));
+  const pasted=await waitFor(async()=>{
+    const doc=await read('/api/projects/'+id),layer=doc.paint.imageDocuments[imageId].layers.find(layer=>layer.kind==='image');
+    return layer&&{doc,layer};
+  },'Windows image clipboard');
+  assert.equal(pasted.doc.paint.assets[pasted.layer.asset].width,256);
+  assert.equal(pasted.doc.paint.assets[pasted.layer.asset].height,192);
+  console.log('PASS 125% Windows desktop scale and native image clipboard');
+  await page.locator('[data-area-mode=modeling]').click();
   const bounds=await desktop.evaluate(({BrowserWindow,screen})=>{
     const area=screen.getPrimaryDisplay().workArea;
     const win=BrowserWindow.getAllWindows()[0];
@@ -210,10 +234,12 @@ try{
   assert.equal(await fetch(origin+'/api/health',{signal:AbortSignal.timeout(1000)}).then(()=>true,()=>false),false);
   page=await launch();
   assert.equal(new URL(page.url()).searchParams.get('project'),id);
-  assert.equal((await read('/api/projects/'+id)).name,name);
+  const resumed=await read('/api/projects/'+id);
+  assert.equal(resumed.name,name);
+  assert.deepEqual(resumed.paint.imageDocuments[imageId],pasted.doc.paint.imageDocuments[imageId]);
   assert.deepEqual(await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNormalBounds()),bounds);
   await close();
-  await fs.rm(profile,{recursive:true,force:true,maxRetries:4,retryDelay:250});
+  if(!suppliedProfile)await fs.rm(profile,{recursive:true,force:true,maxRetries:4,retryDelay:250});
   console.log('PASS desktop GPU path tracing, formal PNG, project and window reopen, Chinese path, 4K bake, native ZIP save, '+
     (withoutBlender?'GLB export without Blender':'Cycles render')+' and service shutdown');
 }catch(error){
