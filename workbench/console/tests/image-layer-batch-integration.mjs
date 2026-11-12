@@ -142,6 +142,50 @@ try{
   assert.deepEqual(errors,[]);
   await page.screenshot({path:path.join(data,'batch-restored.png')});
   console.log('PASS batch move with drop feedback, group and clip order, inherited locks, keyboard copy, menu delete, undo/redo, reopen and exact 4K alpha');
+  const scrollId='long-layer-list',scrollOp=(action,fields={})=>({...op(action,fields),documentId:scrollId});
+  const seeded=await api(paint+'/commands',{revision:redo.revision,operations:[
+    scrollOp('create',{patch:{name:'长图层列表'}}),
+    scrollOp('addLayer',{layerId:'destination',kind:'group',patch:{name:'目标文件夹'}}),
+    ...Array.from({length:27},(_,i)=>scrollOp('addLayer',{layerId:'long-'+i,kind:'pixel',patch:{name:'像素层 '+(i+1)}}))
+  ]});
+  await page.setViewportSize({width:900,height:630});
+  await page.reload();
+  await panel.getByRole('button',{name:'图像图层文档',exact:true}).click();
+  await page.getByRole('option',{name:'长图层列表',exact:true}).click();
+  await select('long-26').click();await select('long-25').click({modifiers:[modifier]});
+  const scroller=panel.locator('.document-panel.editor-scroll');
+  const sourceRow=await select('long-26').boundingBox(),port=await scroller.boundingBox();
+  const startX=sourceRow.x+sourceRow.width/2,startY=sourceRow.y+sourceRow.height/2,endY=port.y+port.height-8;
+  await mouse.move(startX,startY);await mouse.down();
+  try{
+    await mouse.move(startX,startY+8,{steps:4});
+    await mouse.move(startX,endY,{steps:10});
+    let step=0;
+    await until(async()=>{
+      // Some native drag implementations stop emitting dragover if the
+      // pointer is completely still at the window edge.
+      await mouse.move(startX+(step++%2),endY);
+      return scroller.evaluate(list=>list.scrollTop+list.clientHeight>=list.scrollHeight-3);
+    },'拖动多选时滚动到列表底部',9000);
+    const folder=await row('destination').boundingBox();
+    await mouse.move(folder.x+folder.width/2,folder.y+folder.height/2,{steps:6});
+    await panel.getByRole('status').filter({hasText:'移动 2 项 · 放入「目标文件夹」'}).waitFor();
+    await page.screenshot({path:path.join(data,'batch-long-list.png')});
+  }finally{await mouse.up();}
+  const scrolled=await atRevision(seeded.revision+1,'跨长列表移动多选');
+  assert.deepEqual(scrolled.paint.imageDocuments[scrollId].layers.filter(layer=>layer.parentId==='destination').map(layer=>layer.id),
+    ['long-25','long-26']);
+  await select('long-26').focus();
+  await select('long-26').press('Shift+F10');
+  await page.getByRole('menuitem',{name:'移动到…',exact:true}).click();
+  await page.getByRole('menuitem',{name:'顶层',exact:true}).click();
+  const top=await atRevision(scrolled.revision+1,'用菜单移动同一批所选图层到顶层');
+  assert.deepEqual(top.paint.imageDocuments[scrollId].layers.slice(-2).map(layer=>[layer.id,layer.parentId]),
+    [['long-25',undefined],['long-26',undefined]]);
+  assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('undo')),true);
+  const undoMenu=await atRevision(top.revision+1,'一次撤销菜单中的整批移动');
+  assert.deepEqual(undoMenu.paint.imageDocuments[scrollId],scrolled.paint.imageDocuments[scrollId]);
+  console.log('PASS dragging two layers through a long scrollable stack, keyboard context move to root and one-step undo');
 }catch(error){console.error(logs);throw error;}
 finally{
   await browser?.close();

@@ -64,6 +64,29 @@ try{
       await page.screenshot({path:path.join(evidence,workspace+'-'+size+'.png')});
     }
   }
+  const imageEditor=page.locator('.editor-area[data-editor=image]').first();
+  const toolOptions=imageEditor.getByRole('group',{name:'图像工具选项',exact:true});
+  const measureToolbar=()=>toolOptions.evaluate(control=>({height:control.clientHeight,top:control.getBoundingClientRect().top}));
+  const brushGeometry=await measureToolbar();
+  for(const tool of ['橡皮擦','矩形选区','多边形套索','渐变工具','形状工具','抓手','画笔']){
+    await imageEditor.getByRole('button',{name:tool,exact:true}).click();
+    assert.deepEqual(await measureToolbar(),brushGeometry,tool+' must not resize the toolbar');
+  }
+  const tip=imageEditor.getByRole('button',{name:'笔尖参数',exact:true});
+  await tip.click();
+  const tipOptions=imageEditor.getByRole('dialog',{name:'笔尖参数',exact:true});
+  await tipOptions.waitFor();
+  await tipOptions.getByRole('spinbutton',{name:'流量',exact:true}).waitFor();
+  await page.screenshot({path:path.join(evidence,'drawing-narrow-brush-tip.png')});
+  await page.keyboard.press('Escape');
+  await tipOptions.waitFor({state:'hidden'});
+  const modifier=process.platform==='darwin'?'Meta':'Control';
+  await canvas.focus();await page.keyboard.press(modifier+'+a');await page.keyboard.press(modifier+'+t');
+  await toolOptions.locator('.document-current-tool').filter({hasText:'自由变换'}).waitFor();
+  assert.deepEqual(await measureToolbar(),brushGeometry);
+  await page.screenshot({path:path.join(evidence,'drawing-narrow-transform.png')});
+  await page.keyboard.press('Escape');
+  assert.equal((await api(route)).revision,project.revision+1);
 
   await page.setViewportSize({width:1200,height:800});
   await show('modeling');
@@ -112,6 +135,7 @@ try{
   assert.equal(await ratio(),pendingRatio);
   assert.deepEqual(errors,[]);
   console.log('PASS all three workspaces at 1440 and 900 px; viewport reallocates its buffer at 125%, 200% and 100% without a CSS resize');
+  console.log('PASS narrow drawing toolbar keeps its height across eight tools and transform, with reachable brush settings');
   console.log('PASS custom layout reload, browser quota error, quit protection and retry without losing the layout');
 }catch(error){console.error(logs);throw error;}
 finally{

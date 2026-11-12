@@ -97,6 +97,7 @@ export function createContextActions(label,onError){
       if(!item){menu.append(document.createElement('hr'));continue;}
       const button=document.createElement('button'),icon=document.createElement('span'),text=document.createElement('span'),shortcut=document.createElement('kbd');
       button.type='button';button.setAttribute('role','menuitem');button.setAttribute('aria-label',item.label);button.disabled=item.enabled===false;
+      if(item.title)button.title=item.title;
       icon.className='scene-menu-icon';icon.innerHTML=workspaceIcons[item.icon]||areaIcons[item.icon]||'';text.className='scene-menu-label';text.textContent=item.label;shortcut.textContent=item.shortcut||'';shortcut.setAttribute('aria-hidden','true');button.append(icon,text,shortcut);
       button.onclick=()=>{close();Promise.resolve().then(item.run).catch(onError);};menu.append(button);
     }

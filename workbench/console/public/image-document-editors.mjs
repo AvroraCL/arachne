@@ -1266,13 +1266,7 @@ export function createImagePanel(type,ctx){
       const {origin,layerId,kind,ids,count}=reorder,targetLayerId=view.item.id;
       clearDrag();
       if(kind==='layer'){
-        void run(async()=>{
-          await commandAt(project,origin,{action:'moveLayers',layerIds:ids,anchorId:targetLayerId,placement:target.edge});
-          if(!disposed&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId){
-            if(target.edge==='inside')changeGroup(targetLayerId,true);
-            noteBatch('已移动 '+count+' 项');
-          }
-        });
+        void run(()=>moveLayerSelection(origin,ids,{anchorId:targetLayerId,placement:target.edge},count));
         return;
       }
       void run(async()=>{
@@ -1282,6 +1276,33 @@ export function createImagePanel(type,ctx){
           selectImage(project,{layerId:targetLayerId,target:'mask'});
       });
     };
+  }
+  async function moveLayerSelection(origin,ids,target,count){
+    await commandAt(project,origin,{action:'moveLayers',layerIds:ids,...target});
+    if(disposed||project.document?.id!==origin.id||project.imageContext?.documentId!==origin.documentId)return;
+    if(target.placement==='inside')changeGroup(target.anchorId,true);
+    noteBatch('已移动 '+count+' 项');
+  }
+  function layerMoveMenu(layers,origin,position){
+    const ids=[...selectedRows],batch=imageBatchSelection(layers,ids),count=batch.affected.length;
+    const byId=new Map(layers.map(layer=>[layer.id,layer]));
+    function folderPath(item){
+      const parts=[item.name];
+      for(let parent=byId.get(layerParent(item));parent;parent=byId.get(layerParent(parent)))parts.unshift(parent.name);
+      return parts.join(' / ');
+    }
+    const destinations=[];
+    function add(label,target){
+      try{
+        if(!planImageLayerMove(layers,ids,target).changed)return;
+        destinations.push({label,icon:'folder',title:label,run:()=>run(()=>moveLayerSelection(origin,ids,target,count))});
+      }catch{/* Locked groups, self destinations and broken clip relationships are not available. */}
+    }
+    const top=layerChildren(layers,null).filter(layer=>!batch.removed.has(layer.id)).at(-1);
+    if(top)add('顶层',{anchorId:top.id,placement:'above'});
+    for(const layer of batch.ordered)if(layer.kind==='group')add(folderPath(layer),{anchorId:layer.id,placement:'inside'});
+    return {label:'移动到…',icon:'folder',enabled:destinations.length>0,
+      run:()=>menu.open(position,'移动 '+count+' 项到',destinations)};
   }
   function stackActions(item,layers,origin,editable){
     if(!item)return [];
@@ -1297,8 +1318,7 @@ export function createImagePanel(type,ctx){
       return {label:actionName(label),icon,shortcut,enabled:!!result,reason,run:()=>execute(result)};
     };
     const move=(label,icon,shortcut,direction)=>guarded(label,icon,shortcut,()=>imageLayerMoveStep(layers,ids,direction),async placement=>{
-      await apply('moveLayers',placement);
-      if(sameImage())noteBatch('已移动 '+count+' 项');
+      await moveLayerSelection(origin,ids,placement,count);
     });
     const duplicate=guarded('复制','copy','⌘ / Ctrl + J',()=>checkImageLayerDuplicate(layers,ids),async plan=>{
       const copyIds=plan.roots.map(()=>crypto.randomUUID());
@@ -1365,10 +1385,11 @@ export function createImagePanel(type,ctx){
     // A right-click can open the popover before the pointer is released.
     // Keep the pointer just inside the menu so the release does not dismiss it.
     const position=anchor??{clientX:event.clientX-2,clientY:event.clientY-2};
+    const destination=layerMoveMenu(layers,origin,position);
     if(selectedRows.size>1){
       menu.open(position,'已选 '+selectedRows.size+' 个图层',[
         {label:'将所选图层成组',icon:'folder',shortcut:'⌘ / Ctrl + G',enabled:editable,run:()=>createGroup(true)},
-        null,up,down,copy,remove
+        null,up,down,destination,copy,remove
       ]);
       return;
     }
@@ -1382,7 +1403,7 @@ export function createImagePanel(type,ctx){
       {label:item.locked?'解锁':'锁定',icon:item.locked?'unlock':'lock',enabled:!view.lockOwner||view.lockOwner===item,run:update({locked:!item.locked})},
       ...(item.kind==='pixel'?[{label:item.alphaLocked?'解锁透明像素':'锁定透明像素',icon:'alphaLock',
         enabled:editable,run:update({alphaLocked:!item.alphaLocked})}]:[]),
-      null,up,down,null,
+      null,up,down,destination,null,
       ...(item.kind==='group'?[]:[{label:item.clipped?'释放剪贴蒙版':'创建剪贴蒙版',icon:'clippingMask',shortcut:'⌥⌘G',
         enabled:editable&&!!imageClippingBase(layers,index),
         run:()=>commandAt(project,origin,{action:'setClipping',layerId:item.id,clipped:!item.clipped})}]),
