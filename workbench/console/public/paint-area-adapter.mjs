@@ -177,6 +177,14 @@ export function setupPaintAreas(hooks){
   function materialViewport(){const editors=areas.editors();return preferredViewport&&editors.includes(preferredViewport)?preferredViewport:editors.find(e=>e.kind==='viewport');}
   function targetViewport(){const target=materialViewport();return target?.isReady()?target:areas.editors().find(e=>e.kind==='viewport'&&e.isReady());}
   return {project,areas,
+    editorCommand(action,focused){
+      const editor=areas.editorFor(focused)??areas.active;
+      const handled=editor?.editCommand?.(action);
+      if(handled!==undefined)return handled;
+      if(editor?.kind==='imageLayers'&&action==='selectAll')return false;
+      if(!['image','imageLayers','imageProperties'].includes(editor?.kind))return undefined;
+      return imageEditor()?.editCommand?.(action);
+    },
     imageCommand(action){
       if(project.editorDomain!=='image')return false;
       return imageEditor()?.[action]?.()??false;

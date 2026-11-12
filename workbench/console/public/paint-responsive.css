@@ -1,0 +1,59 @@
+/* A compact sidebar still shows an editor's document and layer names. */
+@container (max-width: 235px) {
+  #workspace .editor-area:is([data-editor=imageLayers],[data-editor=imageProperties])>.area-header>.area-caption{display:none}
+  #workspace .editor-area:is([data-editor=imageLayers],[data-editor=imageProperties]) .area-header-controls{
+    flex:1 1 0;min-width:0;gap:3px
+  }
+  #workspace .editor-area:is([data-editor=imageLayers],[data-editor=imageProperties]) .area-header-controls>.custom-select{
+    flex:1 1 0;min-width:0;max-width:none
+  }
+  #workspace .editor-area:is([data-editor=imageLayers],[data-editor=imageProperties]) .area-header-controls>button{
+    flex:none;width:25px;min-width:25px
+  }
+  #workspace .editor-area:is([data-editor=imageLayers],[data-editor=imageProperties]) .area-header-controls .custom-select-button{
+    width:100%;text-overflow:ellipsis;white-space:nowrap;overflow:hidden
+  }
+  #workspace .editor-scene-search input:not(:focus)::placeholder,
+  #workspace .property-editor-search input:not(:focus)::placeholder{color:transparent}
+
+  #workspace #drawing-layer-settings{flex-wrap:nowrap;gap:5px;padding:4px 0}
+  #workspace #drawing-layer-settings>.custom-select{min-width:42px}
+  #workspace #drawing-layer-settings .workspace-range-field{width:47px;min-width:47px}
+  #workspace #drawing-opacity-label{display:none}
+  #workspace #layers .layer-row{
+    grid-template-columns:21px minmax(0,1fr) 18px 27px;gap:2px
+  }
+  #workspace #layers .layer-row[data-folder]{
+    grid-template-columns:21px 13px minmax(0,1fr) 18px 27px
+  }
+  #workspace #layers .layer-row:not([data-has-mask]){
+    grid-template-columns:21px minmax(0,1fr) 18px
+  }
+  #workspace #layers .layer-row[data-folder]:not([data-has-mask]){
+    grid-template-columns:21px 13px minmax(0,1fr) 18px
+  }
+  #workspace #layers .layer-row:not([data-has-mask])>.layer-mask{display:none}
+  #workspace #layers .layer-select{gap:4px;padding-inline:3px}
+  #workspace #layers .layer-select>small:empty{display:none}
+  #workspace #layers .layer-thumb{width:21px;height:21px}
+
+  #workspace .property-target-type{display:none}
+  #workspace .property-inspector .property-section-body{padding:4px 7px 6px}
+  #workspace .property-inspector .property-section-title{padding-inline:7px}
+  #workspace .property-inspector .property-channel>label.property-channel-value{
+    min-height:25px;grid-template-columns:minmax(60px,42%) minmax(0,1fr);gap:4px
+  }
+  #workspace .property-inspector .property-channel>label.property-color-control.property-channel-value{
+    grid-template-columns:minmax(60px,42%) 23px minmax(0,1fr)
+  }
+  #workspace .property-inspector .property-color-control input[type=color]{width:23px;height:24px;min-height:24px}
+  #workspace .property-inspector .property-color-value{font-size:12px;padding-inline:3px}
+  #workspace .property-inspector .property-channel .workspace-range-field{height:25px;min-height:25px}
+}
+
+/* Horizontal scrolling remains available by wheel, trackpad, middle drag and Tab. */
+.area-header-tools:not(:focus-within)[data-more-right]{mask-image:linear-gradient(to right,#000 calc(100% - 13px),transparent)}
+.area-header-tools:not(:focus-within)[data-more-left]{mask-image:linear-gradient(to right,transparent,#000 11px)}
+.area-header-tools:not(:focus-within)[data-more-left][data-more-right]{
+  mask-image:linear-gradient(to right,transparent,#000 11px,#000 calc(100% - 13px),transparent)
+}

@@ -663,6 +663,13 @@ export function createDocumentEditor(ctx,bridge){
     });
     return true;
   }
+  function editCommand(name){
+    if(!shown||disposed)return false;
+    if(name==='copy')return copySelection();
+    if(name==='cut')return cutSelection();
+    if(name==='paste'&&typeof window.arachneDesktop?.readImageClipboard==='function')return pasteSystemImage();
+    if(name==='selectAll')return !writing()&&!drawingGesture()&&selection.selectAll(selectionShape);
+  }
   const stopClipboard=onImageClipboardChange(syncClipboard);
   host.addEventListener('copy',event=>{
     if(!event.target.closest('input,textarea,[contenteditable]')&&copySelection()){
@@ -855,7 +862,7 @@ export function createDocumentEditor(ctx,bridge){
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
   return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
     strokeSaveStatus:()=>({pending:strokeQueue.size,saving:strokeQueue.saving,failure:strokeQueue.failure}),retryStrokeSave,
-    canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
+    editCommand,canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
     canCut,cutSelection,pasteSystemImage,canPasteInPlace:()=>canPaste()&&canInsertImage(project)&&!!copiedImage(),pasteInPlace:()=>pasteSelection(true),
     getSelection(origin){return shown&&project.document?.id===origin.id&&project.imageContext?.documentId===origin.documentId&&
       !selection.isDragging()&&!selection.isTransforming()?selection.clip():null;},
@@ -1081,6 +1088,9 @@ export function createImagePanel(type,ctx){
     if(event.defaultPrevented||compositionKey(event)||event.altKey||
        event.target.closest('input,select,textarea,[contenteditable],dialog[open]'))return;
     const key=event.key.toLowerCase(),mod=event.ctrlKey||event.metaKey;
+    if(mod&&!event.shiftKey&&key==='a'&&selectAllRows()){
+      event.preventDefault();event.stopPropagation();return;
+    }
     const slot=!event.shiftKey&&(mod?{']':0,'[':1,j:2}[key]:['delete','backspace'].includes(key)?3:undefined);
     if(slot!==false&&slot!==undefined){
       const action=footerStack[slot];
@@ -1097,6 +1107,12 @@ export function createImagePanel(type,ctx){
     if(event.shiftKey)void ungroup(item);
     else void createGroup(true);
   });
+  function selectAllRows(){
+    if(type!=='layers'||ctx.busy?.()||!renderedRows.length)return false;
+    const ids=renderedRows.map(row=>row.layer.id),active=project.imageContext?.layerId;
+    setRowSelection(ids,ids.includes(active)?active:ids[0]);
+    return true;
+  }
   function openAdjustments(){
     const image=currentDocument(project);
     if(!image||ctx.busy?.())return;
@@ -1814,6 +1830,7 @@ export function createImagePanel(type,ctx){
   sync();
   return {
     sync,kind:type==='layers'?'imageLayers':'imageProperties',domain:'image',
+    editCommand:name=>name==='selectAll'&&type==='layers'?selectAllRows():undefined,
     getState:()=>toggle?{layerFilterOpen:filterOpen,layerQuery:search.value,layerKind:kind.value,collapsedImageGroups:[...collapsedGroups].slice(-256)}:{curveChannel},
     isEditing:()=>!!renaming||!!reorder||!!adjustmentEditing||!!groupDialog?.open,
     activate(){project.setEditorDomain('image');},

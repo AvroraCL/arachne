@@ -7,7 +7,8 @@ export function propertyHeading(form,{name,type,icon='fillLayer',scope}){
   const header=el('div','property-target'),symbol=el('span','property-target-icon');
   symbol.innerHTML=workspaceIcons[icon];
   const text=el('div','property-target-text');
-  text.append(el('span','property-target-type','属性 · '+type),el('strong','property-target-name',name));
+  const title=el('strong','property-target-name',name);title.title=name;
+  text.append(el('span','property-target-type','属性 · '+type),title);
   header.append(symbol,text);
   if(scope){const badge=el('span','property-target-scope',scope);header.append(badge);}
   form.append(header);

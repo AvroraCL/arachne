@@ -6,6 +6,8 @@ import {scrubNumber} from './studio-fields.mjs';
 import {nodeTypes as materialNodeTypes,portNames as materialPortNames,makeGraphNode,defaultMaterialGraph as defaultOutputGraph,compileNodeGraph,resolveGraphSockets} from './material-graph.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
+import {compositionKey} from './text-input.mjs';
+import {readNodeClipboard,writeNodeClipboard} from './node-clipboard.mjs';
 
 const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',pressure:'压感',mirror:'镜像 X',red:'红色',green:'绿色',blue:'蓝色'};
 const operations={add:'加',subtract:'减',multiply:'乘',divide:'除',minimum:'最小值',maximum:'最大值'};
@@ -21,7 +23,7 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
   const makeNode=(type,x,y)=>makeGraphNode(graph,type,x,y);
   const currentOrigin=()=>{const doc=read(),t=readTarget();return doc?{id:doc.id,revision:doc.revision,...(t?{target:{library:t.library,id:t.id}}:{})}:null;};
   const originCurrent=value=>JSON.stringify(currentOrigin())===JSON.stringify(value);
-  let origin=null,graph=null,key='',selected=null,selection=new Set(),gesture=null,writing=false,clipboard=null,cursor=null,scope='示例模型 · 共用材质';
+  let origin=null,graph=null,key='',selected=null,selection=new Set(),gesture=null,writing=false,cursor=null,scope='示例模型 · 共用材质';
   const toolbar=el('div','shader-toolbar'),toggle=el('button','shader-collapse','▾'),title=el('strong','shader-editor-title','着色器编辑器');
   toggle.type='button';toggle.title='折叠着色器编辑器';
   const material=el('span','shader-material',scope),enable=el('button','','启用节点材质'),add=el('select'),frame=el('button','','全部显示'),actions=el('select');
@@ -136,21 +138,39 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
     try{const result=duplicateMaterialNodes(graph,selection,read().paint.assets);select(result.selection);if(await commit(result.graph))reveal(result.selection);}catch(e){showError(e);}
   }
   function copySelection(){
-    if(!graph||!selection.size)return;
-    const fragment=copyMaterialNodes(graph,selection);if(!fragment.nodes.length)return;
-    clipboard=materialClipboardPrefix+JSON.stringify(fragment);
-    navigator.clipboard?.writeText(clipboard).catch(()=>{});
+    if(!graph||!selection.size)return false;
+    const fragment=copyMaterialNodes(graph,selection);if(!fragment.nodes.length)return false;
+    void writeNodeClipboard(window,materialClipboardPrefix+JSON.stringify(fragment));
     showError(`已复制 ${fragment.nodes.length} 个节点`);
+    return true;
   }
   async function pasteSelection(){
     if(!allowed()||!graph)return;
     try{
       const target={...origin};
-      let text=clipboard;try{text=await navigator.clipboard.readText();}catch{}
+      const text=await readNodeClipboard(window);
       if(!originCurrent(target)||!allowed())throw Error('工程已变化，请在当前工程重新粘贴');
       const result=pasteMaterialNodes(graph,parseMaterialClipboard(text),read().paint.assets,cursor||{x:(stage.clientWidth/2-pose.x)/pose.scale,y:(50-pose.y)/pose.scale});
       select(result.selection);if(await commit(result.graph))reveal(result.selection);
     }catch(e){showError(e);}
+  }
+  function editCommand(name){
+    if(name==='undo'||name==='redo'){
+      if(gesture&&name==='undo'){cancelGesture();return true;}
+      return undefined;
+    }
+    if(!['copy','paste','cut','selectAll'].includes(name))return undefined;
+    if(!graph||stage.hidden||gesture)return false;
+    if(name==='copy')return copySelection();
+    if(name==='selectAll'){select(graph.nodes.map(node=>node.id));return true;}
+    if(!allowed())return false;
+    if(name==='paste'){void pasteSelection();return true;}
+    if(!canRemove())return false;
+    try{
+      const next=removeMaterialNodes(graph,selection,read().paint.assets);
+      if(!copySelection())return false;
+      void commit(next);return true;
+    }catch(error){showError(error);return false;}
   }
 
   function socket(node,port,direction,type,linked=false){
@@ -453,16 +473,16 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
   stage.onpointercancel=e=>{if(gesture?.pointer===e.pointerId)cancelGesture();};
   stage.onlostpointercapture=e=>{if(e.target===stage&&gesture?.pointer===e.pointerId)cancelGesture();};
   stage.onkeydown=e=>{
-    if(e.target.closest('input,select,.custom-select,.workspace-range-field,.shader-image-open,.shader-image-preview'))return;
+    if(compositionKey(e)||e.target.closest('input,textarea,select,[contenteditable],.custom-select,.workspace-range-field,.shader-image-open,.shader-image-preview'))return;
     const k=e.key.toLowerCase(),modifier=e.metaKey||e.ctrlKey;
     if(gesture&&k!=='escape'){if(modifier&&k==='z'){cancelGesture();return;}e.preventDefault();e.stopPropagation();return;}
     if(k===' '){space=true;e.preventDefault();}
     if(k==='escape'){cancelGesture();key='';sync();draft(null);e.preventDefault();}
     if(k==='delete'||k==='backspace'){removeSelection();e.preventDefault();}
     if(k==='home'){frame.click();e.preventDefault();}
-    if(modifier&&k==='a'){select(graph.nodes.map(node=>node.id));e.preventDefault();}
-    if(modifier&&k==='c'){copySelection();e.preventDefault();}
-    if(modifier&&k==='v'){void pasteSelection();e.preventDefault();}
+    if(modifier&&!e.shiftKey&&['a','c','v','x'].includes(k)){
+      editCommand({a:'selectAll',c:'copy',v:'paste',x:'cut'}[k]);e.preventDefault();
+    }
     if(e.shiftKey&&!modifier&&k==='d'){void cloneSelection();e.preventDefault();}
     if(e.shiftKey&&!modifier&&k==='a'){add.closest('.custom-select').querySelector('button').click();e.preventDefault();}
     if(e.defaultPrevented||!modifier)e.stopPropagation();
@@ -492,5 +512,5 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
     if(target===undefined)return;e.preventDefault();e.stopPropagation();resizeHeight(target);rememberHeight();
   };
   const observer=new ResizeObserver(()=>lines());observer.observe(stage);
-  return {sync,frameAll:()=>frameNodes(),getViewState:()=>({pose:{...pose},collapsed}),dispose(){rememberPose();cancelGesture();cancelResize();disposed=true;lifecycle.abort();clearTimeout(poseTimer);observer.disconnect();host.replaceChildren();},setScope(text){scope=text;if(!target){material.textContent=text;material.title=text;}controls();},isEditing:()=>!!gesture||writing};
+  return {sync,editCommand,frameAll:()=>frameNodes(),getViewState:()=>({pose:{...pose},collapsed}),dispose(){rememberPose();cancelGesture();cancelResize();disposed=true;lifecycle.abort();clearTimeout(poseTimer);observer.disconnect();host.replaceChildren();},setScope(text){scope=text;if(!target){material.textContent=text;material.title=text;}controls();},isEditing:()=>!!gesture||writing};
 }

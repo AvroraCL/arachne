@@ -129,7 +129,7 @@ try{
   const inputs=await stageWorkbench(path.join(resources,'workspace'));
   const native=path.join(root,'release-support/windows'),app=path.join(resources,'app');
   await copy(path.join(native,'app.json'),path.join(app,'package.json'));
-  for(const name of ['main.mjs','preload.cjs','window-state.mjs','download-target.mjs'])await copy(path.join(native,name),path.join(app,name));
+  for(const name of ['main.mjs','preload.cjs','window-state.mjs','download-target.mjs','close-check.mjs'])await copy(path.join(native,name),path.join(app,name));
   await stageIcon(staging,app);
   const mcp=await fs.readFile(path.join(native,'ArachneMCP.cmd'),'utf8');
   await fs.writeFile(path.join(bundle,'ArachneMCP.cmd'),mcp.replace(/\r?\n/g,'\r\n'));

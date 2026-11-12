@@ -1179,7 +1179,7 @@ function renderLayer(l,depth,channel,filtering){
     else if(folder){thumbnail.classList.add('folder-thumb');thumbnail.innerHTML=workspaceIcons.folder;}
     else if(l.kind==='paint'||l.materialId){const canvas=element('canvas');canvas.width=canvas.height=64;canvas.dataset.layerPreview='';canvas.setAttribute('aria-hidden','true');thumbnail.append(canvas);}
     else thumbnail.style.background=l.values.color;
-    const title=element('span',l.name);title.className='layer-title';
+    const title=element('span',l.name);title.className='layer-title';title.title=l.name;
     node.append(thumbnail,title,element('small',l.visible?'':'隐藏'));
     node.title=channel
       ?(l.channels?.[channel]?names[channel]+' · '+Number(((l.channelOpacity?.[channel]??1)*100).toFixed(2))+'%':names[channel]+' · 未启用')
@@ -1231,6 +1231,7 @@ function renderLayer(l,depth,channel,filtering){
       row.insertBefore(disclosure,node);
     }
     const hasMask=hasLayerMask(l);
+    row.toggleAttribute('data-has-mask',hasMask);
     if(folder&&!hasMask){materialLayerDrag.bind(node,row,l.id,expand);return row;}
     const maskButton=localButton(hasMask?'':'＋',event=>{
       if(busy||maskEditor.isOpen()||surfaceTools.isEditing())return;
@@ -2939,6 +2940,7 @@ async function saveWorkbench(){
   if(desktopWorkspace){areaSystem?.areas.save();if(desktopWorkspace.failure)await desktopWorkspace.retry();}
 }
 Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,imageCommand:action=>areaSystem?.imageCommand(action),
+  editorCommand:(action,focused)=>areaSystem?.editorCommand(action,focused),
   save:()=>void saveWorkbench(),flush:async()=>{
   if(desktopWorkspace){areaSystem?.areas.save();return desktopWorkspace.flush();}
 },status:()=>{

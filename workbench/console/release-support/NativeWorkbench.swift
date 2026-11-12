@@ -63,7 +63,7 @@ struct NativeDownloadTarget {
 
 // The workbench continues to use the local project service. WebKit never gets
 // a general-purpose native file or shell bridge.
-final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler {
+final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler, WKScriptMessageHandlerWithReply {
     let window: NSWindow
     private let webView: WKWebView
     private let origin: URL
@@ -86,6 +86,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
                           backing: .buffered, defer: false)
         super.init()
         configuration.userContentController.add(self, name: "arachne")
+        configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "arachneNodeClipboard")
         #if ARACHNE_DEV
         let diagnostic="""
         window.addEventListener('error', e => window.webkit.messageHandlers.arachne.postMessage({type:'diagnostic',message:String(e.message||'script error').slice(0,500)}));
@@ -210,6 +211,25 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         onProject?(id, name)
     }
 
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
+                               replyHandler: @escaping (Any?, String?) -> Void) {
+        guard message.name == "arachneNodeClipboard", trusted(message.frameInfo), window.isKeyWindow,
+              let body = message.body as? [String: Any], let action = body["action"] as? String else {
+            replyHandler(nil, "剪贴板需要工作台处于前台"); return
+        }
+        func isNodeText(_ text: String) -> Bool {
+            text.hasPrefix("arachne-material-nodes/v1\n") && text.utf16.count <= 128*1024
+        }
+        let pasteboard = NSPasteboard.general
+        if action == "read" {
+            let value = pasteboard.string(forType: .string).flatMap { isNodeText($0) ? $0 : nil }
+            replyHandler(value as Any? ?? NSNull(), nil)
+        } else if action == "write", let text = body["text"] as? String, isNodeText(text) {
+            pasteboard.clearContents()
+            replyHandler(pasteboard.setString(text, forType: .string), nil)
+        } else { replyHandler(false, nil) }
+    }
+
     #if ARACHNE_DEV
     func webView(_ webView:WKWebView, didFinish navigation:WKNavigation!) {
         guard webView === self.webView else { return }
@@ -221,11 +241,12 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
 
     func perform(_ command: String) {
         // The enum is fixed here, so no user string is interpolated into JS.
-        let allowed = ["newProject", "openProject", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo", "cut", "copyMerged", "pasteInPlace"]
+        let allowed = ["newProject", "openProject", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo", "cut", "copy", "paste", "selectAll", "copyMerged", "pasteInPlace"]
         guard allowed.contains(command), sameOrigin(webView.url) else { NSSound.beep(); return }
         webView.evaluateJavaScript("window.arachneNativeHost?.command('\(command)', {nativeEdit:true}) ?? false") { value, error in
-            if command == "cut", value as? String == "native-text",
-               NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil) { return }
+            if value as? String == "native-text",
+               let action = ["cut":"cut:", "copy":"copy:", "paste":"paste:", "selectAll":"selectAll:"][command],
+               NSApp.sendAction(Selector(action), to: nil, from: nil) { return }
             if error != nil || (value as? Bool) != true { NSSound.beep() }
         }
     }

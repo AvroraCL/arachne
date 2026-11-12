@@ -1215,6 +1215,7 @@ try{
   await row(parent.id).getByRole('button',{name:'图层组',exact:true}).click();
   await layersPanel.getByRole('button',{name:'新建图层组',exact:true}).click();
   const nested=await until(async()=>Object.values(await groupLayers()).find(layer=>layer.kind==='group'&&layer.parentId===parent.id),'创建子组');
+  await until(async()=>await rightButton.getAttribute('draggable')==='true','新组保存完成，图层重新可拖动');
   await rightButton.dragTo(row(nested.id));
   await until(async()=>(await groupLayers())[rightLayer].parentId===nested.id,'拖入子组');
   await row(parent.id).getByRole('button',{name:'图层组',exact:true}).click();

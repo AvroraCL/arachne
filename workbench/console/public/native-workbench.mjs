@@ -6,36 +6,43 @@ const commands={newProject:'new',openProject:'open-projects',saveProjectCopy:'op
   importArchive:'open-paint-import',migrateModel:'open-glb-migration',searchCommands:'open-command-picker',workspaceLayouts:'open-workspace-layouts',createBackup:'create-paint-backup',downloadBackup:'download-paint-backup',
   export:'open-delivery',history:'open-history',renderTasks:'open-task-monitor',renderSettings:'open-render-settings',settings:'open-settings'};
 
-export function createNativeWorkbench({window,document,status,flush,imageCommand,save}){
+const textTarget='textarea,[contenteditable]:not([contenteditable="false"]),input:is(:not([type]),[type=text],[type=search],[type=url],[type=email],[type=tel],[type=password],[type=number])';
+const clipboardActions=new Set(['cut','copy','paste','selectAll']);
+
+export function createNativeWorkbench({window,document,status,flush,imageCommand,editorCommand,save}){
   const composing=trackTextComposition(document);
   function command(name,{nativeEdit=false}={}){
     if(composing())return false;
     const focused=document.activeElement;
+    const text=focused?.matches?.(textTarget),modal=document.querySelector('dialog[open]');
     if(name==='save'){
-      if(document.querySelector('dialog[open]'))return false;
-      if(focused?.matches?.('input,textarea,[contenteditable="true"]'))focused.blur();
+      if(modal)return false;
+      if(text)focused.blur();
       save?.();
       return true; // Project writes are automatic; blur commits an active field.
     }
     if(name==='undo'||name==='redo'){
-      if(focused?.matches?.('input,textarea,[contenteditable="true"]'))return document.execCommand(name);
-      if(document.querySelector('dialog[open]'))return false;
+      if(text)return document.execCommand(name);
+      if(modal)return false;
+      const handled=editorCommand?.(name,focused);
+      if(handled!==undefined)return handled;
       const control=document.getElementById(name);
       if(!control||control.disabled)return false;
       control.click();return true;
     }
-    if(name==='paste'){
-      if(!nativeEdit)return false;
-      if(focused?.matches?.('input,textarea,[contenteditable="true"]')||document.querySelector('dialog[open]'))return 'native-text';
-      return imageCommand?.('pasteSystemImage')===true?true:'native-text';
+    if(clipboardActions.has(name)){
+      const fallback=()=>nativeEdit?'native-text':document.execCommand(name);
+      if(text)return fallback();
+      if(modal)return name==='paste'&&nativeEdit?'native-text':false;
+      const handled=editorCommand?.(name,focused);
+      if(handled!==undefined)return handled;
+      if(name==='cut')return imageCommand?.('cutSelection')===true;
+      if(name==='paste'&&nativeEdit)return imageCommand?.('pasteSystemImage')===true?true:'native-text';
+      return name==='copy'&&window.getSelection?.()?.toString()?fallback():false;
     }
-    if(['cut','copyMerged','pasteInPlace'].includes(name)){
-      if(focused?.matches?.('input,textarea,[contenteditable="true"]')){
-        if(name!=='cut')return false;
-        return nativeEdit?'native-text':document.execCommand('cut');
-      }
-      if(document.querySelector('dialog[open]'))return false;
-      return imageCommand?.(name==='cut'?'cutSelection':name)===true;
+    if(['copyMerged','pasteInPlace'].includes(name)){
+      if(text||modal)return false;
+      return imageCommand?.(name)===true;
     }
     const id=commands[name];
     if(!id||document.querySelector('dialog[open]'))return false;
@@ -47,7 +54,7 @@ export function createNativeWorkbench({window,document,status,flush,imageCommand
     if(composing())return {state:'editing'};
     if(document.querySelector('dialog[open]'))return status();
     const focused=document.activeElement;
-    if(focused?.matches?.('input,textarea,[contenteditable="true"]')){
+    if(focused?.matches?.(textTarget)){
       if(focused.validity&&!focused.validity.valid)return {state:'editing'};
       focused.blur();
     }

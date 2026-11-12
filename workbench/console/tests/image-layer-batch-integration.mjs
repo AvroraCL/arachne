@@ -64,6 +64,12 @@ try{
   const select=id=>row(id).locator('.document-layer-select');
   const modifier=process.platform==='darwin'?'Meta':'Control';
   await select('source').waitFor();
+  await select('source').click();
+  await select('child2').dragTo(row('target'));
+  const singlyMoved=await atRevision(seed.revision+1,'未选中单层也可直接拖入组');
+  assert.equal(layerBy(list(singlyMoved),'child2').parentId,'target');
+  const initial=await api(paint+'/undo',{revision:singlyMoved.revision});
+  await page.reload();await select('child2').waitFor();
   await row('target').getByRole('button',{name:'收起 目标图层组'}).click();
   await select('target-child').waitFor({state:'hidden'});
   await select('source').click();
@@ -72,7 +78,7 @@ try{
     ['base','child','clip','source']);
 
   await row('child2').getByRole('button',{name:'锁定 子图层二'}).click();
-  const locked=await atRevision(seed.revision+1,'锁定组内未单独选中的子层');
+  const locked=await atRevision(initial.revision+1,'锁定组内未单独选中的子层');
   const deleteSelected=panel.getByRole('button',{name:'删除 5 项',exact:true});
   await until(async()=>await deleteSelected.isDisabled(),'锁定使整批删除不可用');
   await row('child2').getByRole('button',{name:'解锁 子图层二'}).click();

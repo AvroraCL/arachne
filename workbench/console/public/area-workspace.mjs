@@ -13,6 +13,21 @@ const showDividerRatio=(element,handle,ratio)=>{
 };
 function enableHeaderScrolling(tools){
   const overflow=()=>tools.scrollWidth>tools.clientWidth;
+  const indicate=()=>{
+    tools.toggleAttribute('data-more-left',tools.scrollLeft>1);
+    tools.toggleAttribute('data-more-right',tools.scrollWidth-tools.clientWidth-tools.scrollLeft>1);
+  };
+  const resize=new ResizeObserver(indicate);resize.observe(tools);
+  const changes=new MutationObserver(indicate);
+  changes.observe(tools,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden']});
+  tools.addEventListener('scroll',indicate,{passive:true});
+  tools.addEventListener('focusin',event=>{
+    if(!overflow())return;
+    const item=event.target.getBoundingClientRect(),port=tools.getBoundingClientRect();
+    if(item.left<port.left)tools.scrollLeft+=item.left-port.left-2;
+    else if(item.right>port.right)tools.scrollLeft+=item.right-port.right+2;
+    indicate();
+  });
   tools.addEventListener('wheel',event=>{
     if(event.ctrlKey||Math.abs(event.deltaX)>=Math.abs(event.deltaY)||!overflow())return;
     const left=tools.scrollLeft;
@@ -35,6 +50,7 @@ function enableHeaderScrolling(tools){
     if(tools.hasPointerCapture(event.pointerId))tools.releasePointerCapture(event.pointerId);
   }
   for(const type of ['pointerup','pointercancel','lostpointercapture'])tools.addEventListener(type,end);
+  return ()=>{resize.disconnect();changes.disconnect();};
 }
 export function createAreaWorkspace({host,registry,project,initial='material',restoreActive=true,desktopWorkspace=null,canChange=()=>true,onActivate=()=>{},onWorkspace=()=>{},onVisibleEditors=()=>{},onSaveState=()=>{}}){
   const key='arachne-area-workspaces-v1',views=new Map(),layouts={};let name=initial,active=null,gesture=null,maximized=null,timer=null,disposed=false,hoverPoint=null;
@@ -112,7 +128,7 @@ export function createAreaWorkspace({host,registry,project,initial='material',re
   function moveEditor(id,target){
     if(mutate(tree=>swapAreas(tree,id,target)))activate(id);
   }
-  function disposeView(id){const view=views.get(id);if(!view)return;view.instance.dispose();view.section.remove();views.delete(id);}
+  function disposeView(id){const view=views.get(id);if(!view)return;view.stopHeader();view.instance.dispose();view.section.remove();views.delete(id);}
   function menuFor(id){
     const menu=el('details','area-menu'),summary=el('summary');summary.innerHTML=areaIcons.more;summary.title='区域操作';summary.setAttribute('aria-label','区域操作');
     const content=el('div','area-menu-content');
@@ -160,7 +176,7 @@ export function createAreaWorkspace({host,registry,project,initial='material',re
     if(!maximized&&restoreFocused)view.summary.focus({preventScroll:true});
   }
   function createView(area){
-    const section=el('section','editor-area');section.dataset.areaId=area.id;section.dataset.editor=area.editor;section.setAttribute('aria-label','编辑器区域 '+area.id);
+    const section=el('section','editor-area');section.dataset.areaId=area.id;section.dataset.editor=area.editor;section.setAttribute('aria-label',editorNames[area.editor]);
     const header=el('header','area-header'),select=el('select'),body=el('div','area-content');
     select.setAttribute('aria-label','编辑器类型');select.dataset.searchable='false';
     for(const [label,ids] of [['视图',['viewport','image','uv','renderResult']],['制作',['shader','layers','properties','imageLayers','imageProperties']],['工程',['scene','renderSettings','library','console']]]){const group=el('optgroup');group.label=label;for(const id of ids)group.append(new Option(editorNames[id],id));select.append(group);}select.value=area.editor;
@@ -172,10 +188,10 @@ export function createAreaWorkspace({host,registry,project,initial='material',re
     select.title=editorNames[area.editor]+' · 切换编辑器';
     enhanceSelectMenu(select,{menuClass:'editor-type-menu',optionIcon:option=>areaIcons[option.value],iconOnly:true});
     select.closest('.custom-select').classList.add('area-editor-picker');
-    enableHeaderScrolling(tools);
+    const stopHeader=enableHeaderScrolling(tools);
     const context={host:body,root:section,header,tools,title,maximize:()=>maximize(area.id),areaId:area.id,workspaceName:name,state:structuredClone(area.states[area.editor]||{}),project,onChange:stateChanged,
       activate:()=>activate(area.id),error:showError};
-    const instance=registry.create(area.editor,context),view={section,select,body,instance,restore,summary:actions.querySelector('summary'),type:area.editor};views.set(area.id,view);
+    const instance=registry.create(area.editor,context),view={section,select,body,instance,restore,stopHeader,summary:actions.querySelector('summary'),type:area.editor};views.set(area.id,view);
     select.onchange=()=>{if(!mutate(tree=>changeEditor(tree,area.id,select.value))){select.value=area.editor;syncSelectMenu(select);}};
     section.addEventListener('pointerdown',event=>{if(!event.target.closest('.area-menu,.area-corner'))activate(area.id,event);},true);
     section.addEventListener('focusin',()=>{if(active!==area.id)activate(area.id);});
@@ -359,6 +375,10 @@ export function createAreaWorkspace({host,registry,project,initial='material',re
     exportLayouts:()=>workspaceLayoutFile(layouts),replaceLayouts,
     save:persist,getState(){capture();return {workspace:name,tree:structuredClone(layouts[name]),active};},
     editors:()=>[...views.values()].map(v=>v.instance),
+    editorFor(element){
+      const section=element?.closest?.('.editor-area'),view=views.get(section?.dataset.areaId);
+      return view&&view.section===section&&!section.closest('[inert]')?view.instance:undefined;
+    },
     get active(){return views.get(active)?.instance;},get name(){return name;},
     dispose(){if(disposed)return;persist();disposed=true;abort.abort();cancelGesture();clearTimeout(timer);for(const id of [...views.keys()])disposeView(id);root.remove();notice.remove();recovery.remove();}
   };

@@ -59,6 +59,37 @@ async function close(){
   await exited;
   desktop=null;
 }
+async function verifyUnresponsiveClose(page){
+  // Deliberately block only this disposable renderer. Main-process dialogs
+  // are intercepted so CI can choose both cancel and force without desktop automation.
+  await page.evaluate(()=>{setTimeout(()=>{
+    const end=performance.now()+18000;while(performance.now()<end){}
+  },50);});
+  await delay(250);
+  async function requestClose(response){
+    return Promise.race([desktop.evaluate(({dialog,BrowserWindow},choice)=>new Promise(resolve=>{
+      const original=dialog.showMessageBox,win=BrowserWindow.getAllWindows()[0],started=Date.now();
+      dialog.showMessageBox=(_parent,options)=>{
+        dialog.showMessageBox=original;
+        resolve({elapsed:Date.now()-started,detail:options.detail,buttons:options.buttons,defaultId:options.defaultId});
+        return new Promise(done=>setTimeout(()=>done({response:choice}),300));
+      };
+      win.close();
+    }),response),delay(9000,null,{ref:false})]);
+  }
+  const first=await requestClose(0);
+  assert.match(first?.detail||'',/在 4 秒内没有响应/);
+  assert.deepEqual(first.buttons,['继续工作','强制退出']);
+  assert.equal(first.defaultId,0);
+  assert.ok(first.elapsed>=3600&&first.elapsed<8500,JSON.stringify(first));
+  await delay(400);
+  assert.equal(await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length),1);
+  const exited=desktop.waitForEvent('close',{timeout:16000});
+  assert.match((await requestClose(1))?.detail||'',/无法确认保存状态/);
+  await exited;
+  desktop=null;
+  console.log('PASS a stalled Windows renderer times out, cancellation keeps the window, and explicit force closes it');
+}
 try{
   let page=await launch();
   const origin=new URL(page.url()).origin;
@@ -69,7 +100,22 @@ try{
     return response.json();
   };
   assert.equal((await read('/api/health')).localOnly,true);
-  if(process.platform==='win32')assert.equal(await page.evaluate(()=>window.devicePixelRatio),1.25);
+  if(process.platform==='win32'){
+    assert.equal(await page.evaluate(()=>window.devicePixelRatio),1.25);
+    const cdp=await page.context().newCDPSession(page);
+    const size=await page.evaluate(()=>({width:innerWidth,height:innerHeight}));
+    const readViewport=()=>page.locator('.editor-viewport').first().evaluate(host=>({
+      cssWidth:host.clientWidth,pixelWidth:host.querySelector('canvas').width,ratio:Number(host.dataset.pixelRatio)
+    }));
+    await cdp.send('Emulation.setDeviceMetricsOverride',{...size,deviceScaleFactor:2,mobile:false});
+    const high=await waitFor(async()=>{const value=await readViewport();return value.ratio===2&&value;},'200% viewport scale');
+    assert.equal(high.pixelWidth,Math.floor(high.cssWidth*2));
+    await cdp.send('Emulation.clearDeviceMetricsOverride');
+    const restored=await waitFor(async()=>{const value=await readViewport();return value.ratio===1.25&&value;},'restored 125% viewport scale');
+    assert.equal(restored.pixelWidth,Math.floor(restored.cssWidth*1.25));
+    await cdp.detach();
+    console.log('PASS Windows 125% to 200% viewport buffer update and scale restoration');
+  }
   assert.deepEqual(await read('/api/desktop-activity'),{state:'ready'});
   const blenderRequests=[];
   const watchRenderer=request=>{
@@ -252,7 +298,10 @@ try{
   const clipboardCanvas=editor.getByLabel('图像文档画布');
   await desktop.evaluate(({clipboard})=>clipboard.clear());
   await clipboardCanvas.focus();
-  await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.copy());
+  await desktop.evaluate(({BrowserWindow,Menu})=>{
+    const item=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu.items.find(item=>item.label==='复制');
+    item.click(item,BrowserWindow.getAllWindows()[0],{});
+  });
   const clipboardImageSize=()=>desktop.evaluate(async({clipboard,nativeImage,ClipboardItem})=>{
     let image;
     if(ClipboardItem){
@@ -293,6 +342,34 @@ try{
   await page.locator('#native-text-cut-check').evaluate(input=>input.remove());
   console.log('PASS native Edit menu cuts and pastes selected Chinese text through the system clipboard');
   await page.locator('[data-area-mode=modeling]').click();
+  const shader=page.locator('.editor-area[data-editor=shader]').first();
+  await shader.getByRole('button',{name:'启用节点材质',exact:true}).click();
+  const nodes=shader.locator('.shader-node'),nodeStage=shader.locator('.shader-stage');
+  await nodes.first().waitFor();
+  const baselineGraph=(await read('/api/projects/'+id)).paint.materialGraph;
+  const editMenu=label=>desktop.evaluate(({Menu,BrowserWindow},name)=>{
+    const menu=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu;
+    const item=menu.items.find(item=>item.label===name);
+    item.click(item,BrowserWindow.getAllWindows()[0],{});
+  },label);
+  await nodeStage.focus();
+  await editMenu('全选');
+  await page.waitForFunction(count=>document.querySelectorAll('.shader-node.selected').length===count,baselineGraph.nodes.length);
+  await editMenu('复制');
+  const nodeText=await waitFor(async()=>await desktop.evaluate(({clipboard})=>{
+    const text=clipboard.readText();return text.startsWith('arachne-material-nodes/v1\n')?text:null;
+  }),'native menu copied graph nodes');
+  assert.equal(JSON.parse(nodeText.split('\n').slice(1).join('\n')).nodes.length,baselineGraph.nodes.length-1);
+  await editMenu('粘贴');
+  const pastedGraph=await waitFor(async()=>{
+    const graph=(await read('/api/projects/'+id)).paint.materialGraph;
+    return graph.nodes.length===2*baselineGraph.nodes.length-1&&graph;
+  },'native menu pasted into the focused graph');
+  assert.ok(pastedGraph.links.length>baselineGraph.links.length);
+  await editMenu('撤销');
+  await waitFor(async()=>JSON.stringify((await read('/api/projects/'+id)).paint.materialGraph)===JSON.stringify(baselineGraph),
+    'native undo restored the graph as one edit');
+  console.log('PASS native Edit menu selects, copies and pastes nodes in the focused shader editor');
   await desktop.evaluate(({BrowserWindow,screen})=>{
     const area=screen.getPrimaryDisplay().workArea;
     const win=BrowserWindow.getAllWindows()[0];
@@ -346,7 +423,7 @@ try{
     assert.ok(Math.abs(windowState.bounds[key]-expected[key])<=tolerance,
       key+' differs after 125% DIP rounding '+JSON.stringify({stored:stored.window,expected,...windowState}));
   }
-  await close();
+  await verifyUnresponsiveClose(page);
   if(!suppliedProfile)await fs.rm(profile,{recursive:true,force:true,maxRetries:4,retryDelay:250});
   console.log('PASS desktop GPU path tracing, formal PNG, project and window reopen, Chinese path, 4K bake, native ZIP save, '+
     (withoutBlender?'GLB export without Blender':'Cycles render')+' and service shutdown');

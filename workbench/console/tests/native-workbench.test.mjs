@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {createNativeWorkbench,notifyNativeProject} from '../public/native-workbench.mjs';
 import {compositionKey} from '../public/text-input.mjs';
 
-function fixture(flush,imageCommand){
+function fixture(flush,imageCommand,editorCommand){
   const calls=[],controls=new Map(),listeners=new Map();let modal=false,focused=null,state='ready';
   for(const id of ['new','open-projects','open-paint-import','open-glb-migration','open-command-picker','open-workspace-layouts','open-delivery','undo','redo'])
     controls.set(id,{disabled:false,hidden:false,click(){calls.push(id);}});
   const document={get activeElement(){return focused;},querySelector:()=>modal?{}:null,getElementById:id=>controls.get(id),execCommand:name=>(calls.push('text-'+name),true),
     addEventListener:(name,listener)=>listeners.set(name,listener)};
-  const bridge=createNativeWorkbench({window:{},document,status:()=>({state}),flush,imageCommand});
+  const bridge=createNativeWorkbench({window:{},document,status:()=>({state}),flush,imageCommand,editorCommand});
   return {bridge,calls,controls,focus:value=>focused=value,modal:value=>modal=value,state:value=>state=value,
     event:(name,target=focused)=>listeners.get(name)({target})};
 }
@@ -107,4 +107,26 @@ test('native paste reads the image only in the active drawing editor and respect
   assert.equal(f.bridge.command('paste',{nativeEdit:true}),false);
   f.event('compositionend');
   assert.equal(attempted,2);
+});
+
+test('native copy, paste and select all route to the focused editor without stealing text or IME input',()=>{
+  const shader={matches:()=>false},canvas={matches:()=>false},text={matches:()=>true};
+  const editorCalls=[],f=fixture(undefined,undefined,(action,focused)=>{
+    editorCalls.push([action,focused]);
+    if(action==='undo')return undefined;
+    return true;
+  });
+  f.focus(shader);
+  assert.equal(f.bridge.command('copy',{nativeEdit:true}),true);
+  assert.equal(f.bridge.command('paste',{nativeEdit:true}),true);
+  f.focus(canvas);
+  assert.equal(f.bridge.command('selectAll',{nativeEdit:true}),true);
+  assert.equal(f.bridge.command('undo',{nativeEdit:true}),true);
+  f.focus(text);
+  assert.equal(f.bridge.command('copy',{nativeEdit:true}),'native-text');
+  assert.equal(f.bridge.command('selectAll',{nativeEdit:true}),'native-text');
+  f.event('compositionstart');
+  assert.equal(f.bridge.command('paste',{nativeEdit:true}),false);
+  assert.deepEqual(editorCalls,[['copy',shader],['paste',shader],['selectAll',canvas],['undo',canvas]]);
+  assert.deepEqual(f.calls,['undo']);
 });

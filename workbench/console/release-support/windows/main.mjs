@@ -2,10 +2,10 @@ import {app,BrowserWindow,clipboard,dialog,ipcMain,Menu,nativeImage,nativeTheme,
 import {createRequire} from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import {setTimeout as delay} from 'node:timers/promises';
 import {startRelease,userRoot} from '../workspace/workbench/console/scripts/release-runtime.mjs';
 import {restoreWindowState} from './window-state.mjs';
 import {downloadTarget} from './download-target.mjs';
+import {checkRendererClose} from './close-check.mjs';
 
 const appName='阿拉克涅',projectId=/^[\w-]{1,100}$/;
 const {ClipboardItem}=createRequire(import.meta.url)('electron');
@@ -14,6 +14,7 @@ const icon=path.join(import.meta.dirname,'arachne.ico');
 const controller=new AbortController();
 const downloads=new Set();
 const clipboardImageLimit=24*1024*1024;
+const isNodeClipboard=text=>typeof text==='string'&&text.length<=128*1024&&text.startsWith('arachne-material-nodes/v1\n');
 let service,starting,main,origin,checkingClose=false,closing=false,quitStarted=false,quitReady=false;
 let state={},windowSaveTimer;
 
@@ -50,7 +51,9 @@ function buildMenus(){
       void contents.executeJavaScript('window.arachneNativeHost?.command('+JSON.stringify(name)+',{nativeEdit:true})').then(result=>{
         if(result!=='native-text'||contents.isDestroyed()||!sameOrigin(contents.getURL()))return;
         if(name==='cut')contents.cut();
+        if(name==='copy')contents.copy();
         if(name==='paste')contents.paste();
+        if(name==='selectAll')contents.selectAll();
       }).catch(console.error);
   }});
   const separator={type:'separator'};
@@ -64,9 +67,9 @@ function buildMenus(){
     ]},
     {label:'编辑',submenu:[
       command('撤销','undo','CmdOrCtrl+Z'),command('重做','redo','CmdOrCtrl+Shift+Z'),separator,
-      command('剪切','cut','CmdOrCtrl+X'),{label:'复制',role:'copy'},command('粘贴','paste','CmdOrCtrl+V'),
+      command('剪切','cut','CmdOrCtrl+X'),command('复制','copy','CmdOrCtrl+C'),command('粘贴','paste','CmdOrCtrl+V'),
       command('合并复制','copyMerged','CmdOrCtrl+Shift+C'),
-      command('原位粘贴','pasteInPlace','CmdOrCtrl+Shift+V'),{label:'全选',role:'selectAll'},
+      command('原位粘贴','pasteInPlace','CmdOrCtrl+Shift+V'),command('全选','selectAll','CmdOrCtrl+A'),
       separator,command('历史记录…','history'),command('搜索命令…','searchCommands','CmdOrCtrl+K'),command('设置…','settings')
     ]},
     {label:'渲染',submenu:[command('渲染设置…','renderSettings'),command('后台任务…','renderTasks')]},
@@ -78,13 +81,8 @@ function buildMenus(){
 async function canClose(win){
   let status='unavailable';
   if(sameOrigin(win.webContents.getURL())){
-    try{
-      for(let n=0;n<20;n++){
-        status=(await win.webContents.executeJavaScript('(async()=>{const host=window.arachneNativeHost;return (host?.prepareToCloseAsync?await host.prepareToCloseAsync():host?.prepareToClose())?.state;})()'))||'unavailable';
-        if(status!=='saving')break;
-        await delay(100);
-      }
-    }catch{status='unavailable';}
+    status=await checkRendererClose(()=>win.webContents.executeJavaScript(
+      '(async()=>{const host=window.arachneNativeHost;return (host?.prepareToCloseAsync?await host.prepareToCloseAsync():host?.prepareToClose())?.state;})()'));
   }
   if(['ready','jobs'].includes(status)){
     if(!service.owned)status='ready';
@@ -95,16 +93,18 @@ async function canClose(win){
       status=['ready','saving','jobs'].includes(activity)?activity:'unavailable';
     }catch{status='unavailable';}
   }
-  if(downloads.size&&!['saving','editing','unsaved'].includes(status))status='downloads';
-  if(status==='ready')return true;
+  const force=['unresponsive','unavailable'].includes(status);
+  if(downloads.size&&!['saving','editing','unsaved','unresponsive'].includes(status))status='downloads';
+  if(status==='ready')return 'close';
   const block=['saving','editing','unsaved'].includes(status);
   const detail={
     saving:'正在保存或导入工程，请等待当前操作完成。',error:'工程最近一次保存失败。',editing:'请先确认或取消当前编辑。',
-    jobs:'退出会中断由此应用启动的后台任务。',downloads:'文件正在下载。',unsaved:'请先在工作台恢复待保存的笔触或布局。'
+    jobs:'退出会中断由此应用启动的后台任务。',downloads:'文件正在下载。',unsaved:'请先在工作台恢复待保存的笔触或布局。',
+    unresponsive:'工作台在 4 秒内没有响应，无法确认保存状态。强制退出可能丢失未保存的修改。'
   }[status]||'无法检查保存或任务状态。退出可能丢失未保存的修改。';
   const {response}=await dialog.showMessageBox(win,{type:'warning',message:block?'请先完成当前操作':'退出阿拉克涅？',detail,
-    buttons:block?['继续工作']:['继续工作','退出'],defaultId:0,cancelId:0,noLink:true});
-  return !block&&response===1;
+    buttons:block?['继续工作']:['继续工作',force?'强制退出':'退出'],defaultId:0,cancelId:0,noLink:true});
+  return !block&&response===1?(force?'destroy':'close'):false;
 }
 
 function configureSession(){
@@ -206,8 +206,11 @@ async function start(){
     event.preventDefault();
     if(checkingClose)return;
     checkingClose=true;
-    void canClose(win).then(approved=>{
-      if(approved&&!win.isDestroyed()){rememberWindow(win);closing=true;win.close();}
+    void canClose(win).then(action=>{
+      if(action&&!win.isDestroyed()){
+        rememberWindow(win);closing=true;
+        if(action==='destroy')win.destroy();else win.close();
+      }
     }).catch(console.error).finally(()=>checkingClose=false);
   });
   win.on('closed',()=>{clearTimeout(windowSaveTimer);main=null;app.quit();});
@@ -222,6 +225,15 @@ async function start(){
     if(state.project!==id){state.project=id;saveState();}
   });
   const trustedClipboard=event=>event.sender===win.webContents&&event.senderFrame===win.webContents.mainFrame&&sameOrigin(event.senderFrame?.url);
+  ipcMain.handle('arachne:clipboard-nodes',(event,text)=>{
+    if(!trustedClipboard(event)||!win.isFocused()||!isNodeClipboard(text))return false;
+    clipboard.writeText(text);return true;
+  });
+  ipcMain.handle('arachne:read-clipboard-nodes',event=>{
+    if(!trustedClipboard(event)||!win.isFocused())return null;
+    const text=clipboard.readText();
+    return isNodeClipboard(text)?text:null;
+  });
   ipcMain.handle('arachne:clipboard-image',async(event,bytes)=>{
     if(!trustedClipboard(event)||!(bytes instanceof ArrayBuffer)||bytes.byteLength<24||bytes.byteLength>clipboardImageLimit)return false;
     const png=Buffer.from(bytes);

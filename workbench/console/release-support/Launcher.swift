@@ -65,9 +65,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         let edit=group("编辑")
         command(edit,"撤销","undo","z");command(edit,"重做","redo","z",[.command,.shift]);edit.addItem(.separator())
         command(edit,"剪切","cut","x")
-        for (title,selector,key) in [("拷贝","copy:","c"),("粘贴","paste:","v"),("全选","selectAll:","a")] {
-            edit.addItem(withTitle:title,action:Selector(selector),keyEquivalent:key)
-        }
+        command(edit,"拷贝","copy","c");command(edit,"粘贴","paste","v");command(edit,"全选","selectAll","a")
         command(edit,"合并复制","copyMerged","c",[.command,.shift])
         command(edit,"原位粘贴","pasteInPlace","v",[.command,.shift])
         edit.addItem(.separator());command(edit,"历史记录…","history");command(edit,"搜索命令…","searchCommands","k")

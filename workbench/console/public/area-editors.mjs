@@ -639,7 +639,7 @@ export function registerAreaEditors(registry,bridge){
       target.value=pin?(pin.library==='output'?'output':JSON.stringify({library:pin.library,id:pin.id})):'follow';syncSelectMenu(target);
       editor.sync();ctx.title.textContent=resource()?.name||'工程输出';if(!framed&&(resource()?.graph||doc.paint.materialGraph)){framed=true;requestAnimationFrame(()=>{if(!disposed)editor.frameAll();});}
     }
-    const unsub=project.subscribe(sync);sync();return {kind:'shader',sync,getState:()=>({...targetState.snapshot(),view:editor.getViewState()}),isEditing:editor.isEditing,dispose(){disposed=true;unsub();project.setBrushDraft(ctx.areaId,null,null);project.setNodeDraft(ctx.areaId,null,null);editor.dispose();}};
+    const unsub=project.subscribe(sync);sync();return {kind:'shader',sync,editCommand:editor.editCommand,getState:()=>({...targetState.snapshot(),view:editor.getViewState()}),isEditing:editor.isEditing,dispose(){disposed=true;unsub();project.setBrushDraft(ctx.areaId,null,null);project.setNodeDraft(ctx.areaId,null,null);editor.dispose();}};
   });
 
   const leased=new Set();

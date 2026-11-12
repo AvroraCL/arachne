@@ -44,7 +44,10 @@ export function createObjectOutline({renderer,scene}){
         pass.overlayMaterial.needsUpdate=true;
       }
       renderer.getDrawingBufferSize(size);
-      if(size.x!==width||size.y!==height){width=size.x;height=size.y;pass.setSize(width,height);}
+      const scale=Math.max(1,renderer.getPixelRatio());
+      if(size.x!==width||size.y!==height||pass.downSampleRatio!==scale){
+        width=size.x;height=size.y;pass.downSampleRatio=scale;pass.setSize(width,height);
+      }
       pass.renderCamera=camera;
       const helpersVisible=excluded?.visible,target=renderer.getRenderTarget(),autoClear=renderer.autoClear;
       const background=scene.background,override=scene.overrideMaterial,clear=renderer.getClearColor(new THREE.Color()),alpha=renderer.getClearAlpha();
