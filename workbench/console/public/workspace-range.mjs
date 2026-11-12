@@ -26,7 +26,8 @@ export function setupRangeControls(root=document){
     if(!presentation)return;
     presentation.field.style.setProperty('--range-fill',value);
     if(numeric(input)){
-      const label=numericReadout(input.valueAsNumber);
+      const number=numericReadout(input.valueAsNumber);
+      const label=number?number+(input.dataset.scrubSuffix||''):'';
       if(presentation.readout.textContent!==label)presentation.readout.textContent=label;
     }else if(presentation.owned){
       const step=input.step||'1',places=step.includes('e-')?Number(step.split('e-')[1]):(step.split('.')[1]||'').length;

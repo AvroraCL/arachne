@@ -8,6 +8,31 @@ from pathlib import Path
 import numpy as np
 
 
+def drawing_brush_stamps(stroke):
+    points = stroke['stamps']
+    sections = [0, *stroke.get('breaks', ()), len(points)]
+    paths = [points[a:b] for a, b in zip(sections, sections[1:])]
+    length = sum(math.hypot(b[0]-a[0], b[1]-a[1]) for path in paths for a, b in zip(path, path[1:]))
+    diameter = 2 * stroke['radius']
+    # Use document-space spacing at every preview size. Bound raster work for
+    # very long strokes with large tips while keeping spacing uniform.
+    stamp_budget = max(256, min(16000, 128_000_000 / (diameter * 4096)**2))
+    spacing = max(1 / 4096, diameter * stroke['spacing'], length / stamp_budget)
+    for path in paths:
+        yield path[0]
+        remaining = spacing
+        for a, b in zip(path, path[1:]):
+            dx, dy = b[0]-a[0], b[1]-a[1]
+            distance = math.hypot(dx, dy)
+            pressure_a = a[2] if len(a) == 3 else 1
+            pressure_b = b[2] if len(b) == 3 else 1
+            while remaining <= distance:
+                t = remaining / distance
+                yield (a[0]+dx*t, a[1]+dy*t, pressure_a+(pressure_b-pressure_a)*t)
+                remaining += spacing
+            remaining -= distance
+
+
 @lru_cache(maxsize=2)
 def registered_surface(bundle, faces_path, binding):
     with np.load(Path(bundle)/'surfaces.npz') as archive:
@@ -169,6 +194,7 @@ class Surface:
         if stroke.get('uv'):
             key = ('uv', stroke['radius'], stroke['hardness'], stroke['opacity'],
                    tuple(stroke.get('clip', ())), self._selection_key(stroke),
+                   stroke.get('flow'), stroke.get('spacing'), tuple(stroke.get('breaks', ())),
                    tuple(map(tuple, stroke['stamps'])))
             return self._uv_stroke(stroke, key)
         if not self.live:
@@ -254,7 +280,9 @@ class Surface:
         radius = stroke['radius']
         weights = None
         stamps = stroke['stamps']
-        if self.live and self.brush_prefix is not None:
+        flow = stroke.get('flow')
+        opacity = stroke['opacity']
+        if flow is None and self.live and self.brush_prefix is not None:
             previous, known = self.brush_prefix
             count = len(previous[-1])
             if key[:-1] == previous[:-1] and key[-1][:count] == previous[-1]:
@@ -277,7 +305,7 @@ class Surface:
             weights = np.zeros((max_row-min_row,max_col-min_col),dtype=np.float32)
         elif weights is None:
             weights = np.zeros((height,width),dtype=np.float32)
-        for stamp in stamps:
+        for stamp in drawing_brush_stamps(stroke) if flow is not None else stamps:
             u,y = stamp[:2]
             pressure = stamp[2] if len(stamp)==3 else 1
             if pressure==0:
@@ -290,16 +318,19 @@ class Surface:
             xs = (np.arange(left,right,dtype=np.float32)+.5)/width-u
             ys = (np.arange(bottom,top,dtype=np.float32)+.5)/height-v
             distance = np.hypot(xs,ys[:,None])/radius
-            alpha = np.clip((1-distance)/max(.001,1-stroke['hardness']),0,1)*(stroke['opacity']*pressure)
             tile = weights[bottom-row_origin:top-row_origin,left-col_origin:right-col_origin]
-            np.maximum(tile,alpha,out=tile)
+            falloff = np.clip((1-distance)/max(.001,1-stroke['hardness']),0,1)
+            if flow is None:
+                np.maximum(tile, falloff*(opacity*pressure), out=tile)
+            else:
+                tile += (1-tile)*falloff*(flow*pressure)
         flat = weights.ravel()
         shaped = 'polygon' in stroke or 'regions' in stroke
         if self.live:
             ids = np.flatnonzero((flat>0) & self.allowed).astype(np.int32)
             if shaped:
                 ids = ids[self._selection_contains(ids,stroke['clip'],stroke)]
-            result = ids,flat[ids]
+            result = ids,flat[ids] if flow is None else flat[ids]*opacity
             self.brush_prefix = key, weights
             self.strokes[key] = result
             if len(self.strokes)>128:
@@ -311,7 +342,8 @@ class Surface:
         eligible = self.allowed[ids]
         if shaped:
             eligible &= self._selection_contains(ids,stroke['clip'],stroke)
-        return ids[eligible].astype(np.int32),flat[local[eligible]]
+        alpha = flat[local[eligible]]
+        return ids[eligible].astype(np.int32),alpha if flow is None else alpha*opacity
 
     def _prepare_hit_bounds(self):
         triangles = self.target_triangles

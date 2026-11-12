@@ -66,9 +66,9 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
           if(stroke.transformUV){if(!exact(stroke,['transformUV'])||mask)throw Error('图像变换无效');checkedUVTransform(stroke.transformUV);}
           else if(stroke.clearUV){if(!exact(stroke,['clearUV',...uvShapeFields])||mask)throw Error('图像清除无效');checkStroke({uv:true,rect:stroke.clearUV,...uvShapePayload(stroke),opacity:1,value:0},true);}
           else{
-            const keys=['uv','radius','hardness','opacity','stamps','clip',...uvShapeFields,'rect',...(mask?['value']:['color','erase'])];
+            const keys=['uv','radius','hardness','opacity','flow','spacing','stamps','breaks','clip',...uvShapeFields,'rect',...(mask?['value']:['color','erase'])];
             if(!exact(stroke,keys)||stroke.uv!==true||!mask&&!ink(stroke.color))throw Error('图像只接受二维 RGB 笔触');
-            checkStroke(imageStrokeToMaterial(stroke,mask),mask);
+            checkStroke(imageStrokeToMaterial(stroke,mask),mask,true);
           }
           stamps+=stroke.stamps?.length??1;
         }

@@ -120,7 +120,7 @@ function validBrushStamp(stamp,uv){
   return (stamp.length===6||stamp.length===7&&unit(stamp[6]))&&
     vector(stamp.slice(0,6),6,1000)&&normal(stamp.slice(3,6));
 }
-function checkStroke(s,isMask){
+function checkStroke(s,isMask,image=false){
   if(isMask&&s?.region!==undefined){
     fields(s,['region','hit','value','opacity','surfaceBinding']);
     if(!['triangle','polygon','mesh','island'].includes(s.region)||!vector(s.hit,6,1000)||
@@ -136,13 +136,18 @@ function checkStroke(s,isMask){
       throw Error('选区填充参数无效');
     return;
   }
-  fields(s,['radius','hardness','opacity','stamps','mirrorX','uv','clip',...uvShapeFields,'surfaceBinding',...inkFields]);
+  fields(s,['radius','hardness','opacity','stamps','mirrorX','uv','clip',...uvShapeFields,'surfaceBinding',...inkFields,
+    ...(image?['flow','spacing','breaks']:[])]);
   const uv=s.uv===true;
+  const brushPath=s.flow!==undefined||s.spacing!==undefined||s.breaks!==undefined;
   if((s.uv!==undefined&&!uv)||(uv&&s.mirrorX!==undefined)||
      (s.clip!==undefined&&(!uv||!validUVRect(s.clip)))||!validUVSelection(s,s.clip)||
      !(uv?ranged(s.radius,1/4096,.125):ranged(s.radius,.01,2))||
-     !unit(s.hardness)||!unit(s.opacity)||!Array.isArray(s.stamps)||!s.stamps.length||s.stamps.length>1024||
+     !unit(s.hardness)||!unit(s.opacity)||!Array.isArray(s.stamps)||!s.stamps.length||s.stamps.length>(brushPath?2048:1024)||
      s.stamps.some(stamp=>!validBrushStamp(stamp,uv))||
+     brushPath&&(!image||!uv||!ranged(s.flow,.01,1)||!ranged(s.spacing,.05,2)||
+       s.breaks!==undefined&&(!Array.isArray(s.breaks)||s.breaks.length>64||
+         !s.breaks.every((index,i)=>Number.isInteger(index)&&index>(s.breaks[i-1]??0)&&index<s.stamps.length)))||
      (s.mirrorX!==undefined&&typeof s.mirrorX!=='boolean')||
      !validInk(s))
     throw Error('表面笔触参数无效');

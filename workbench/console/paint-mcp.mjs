@@ -128,6 +128,7 @@ const tools=[
     'op:image、action:duplicate、documentId 和 newDocumentId 可复制整张贴图，保留图层、笔触、蒙版与色彩空间。已有材质引用继续指向原文档。',
     '图像蒙版用 action:createMask、layerId 与 reveal:boolean 创建，可加 rect 和选区轮廓。transferMask 用 sourceLayerId 和目标 layerId 在同文档转移蒙版，copy:true 复制。反相和删除使用 invertMask 和 removeMask。',
     '调整图层用 op:image、action:addLayer、kind:adjustment 和 patch.adjustment 创建。可用 updateLayer 修改。支持 '+Object.keys(imageAdjustments).join('、')+'，影响下方图层，并可使用蒙版和不透明度。',
+    '二维图像笔刷可同时指定 flow（0.01–1）与 spacing（笔尖直径的 0.05–2 倍）。这时 stamps 表示连续轨迹，按图像空间的固定间距盖印，并在单笔 opacity 上限内逐步积累流量。breaks 可指定提笔后新轨迹段的起始下标。',
     '原子图层命令。add 用 kind/patch，可用 parentId 指定文件夹。group 用 id 或同级 ids 收进新文件夹。arrange 用 id 或同级 ids 与 parentId/anchorId/placement 移动图层，parentId 为 null 时移到根层。remove 可解散文件夹，保留子层。base/update 用 patch，move 用 index，duplicate 用 id。图层顺序从底到顶。',
     'update 的 patch.locked 锁定图层或文件夹。文件夹锁覆盖子层，仍可切换显隐。锁定冲突会拒绝整批命令。',
     '三维贴花 patch.projector 为 {center,normal,up,size,depth,rotation}，坐标使用 Blender 世界坐标，normal 朝投影来源。',

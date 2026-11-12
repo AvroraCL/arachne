@@ -84,11 +84,11 @@ export function createDocumentEditor(ctx,bridge){
   const sampleNotice=el('span','document-sample-status');
   sampleNotice.setAttribute('role','status');sampleNotice.hidden=true;
   rail.setAttribute('aria-label','图像绘制工具');canvas.setAttribute('aria-label','图像文档画布');canvas.tabIndex=0;stage.tabIndex=0;stage.append(canvas,empty);empty.append(el('strong','','图像文档'),el('span','','新建贴图，或从材质通道打开已有图像文档。'),button('新建贴图',()=>create.click(),'创建第一个图像文档'));
-  const controls=surfaceControls(el('div')),elements=controls.elements;
+  const controls=surfaceControls(el('div'),{drawing:true}),elements=controls.elements;
   elements['brush-erase'].checked=state.eraser===true;
   elements['brush-radius'].closest('label').hidden=true;
   elements['brush-mirror-enabled'].closest('label').hidden=true;
-  for(const [key,speed] of [['brush-uv-radius',1],['brush-hardness',.005],['brush-opacity',.005]]){
+  for(const [key,speed] of [['brush-uv-radius',1],['brush-hardness',.5],['brush-opacity',.5],['brush-flow',.5],['brush-spacing',.5]]){
     const input=elements[key];
     input.dataset.scrubNumber='';
     input.dataset.scrubSpeed=String(speed);

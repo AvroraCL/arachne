@@ -286,8 +286,87 @@ try{
   await page.reload();
   await canvas.waitFor();
   assert.equal(currentAdjustment(await api(projectRoute)).adjustment.brightness,40);
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS masked adjustment, live scrub and Escape, double-click edit, preserved alpha, merged copy and reopen');
+
+  const brushDoc='brush-document',brushLayer='brush-pixels';
+  const brushSeed=await api(paintRoute+'/commands',{revision:adjusted.revision,operations:[
+    {op:'image',action:'create',documentId:brushDoc,patch:{name:'画笔验收'}},
+    {op:'image',action:'addLayer',documentId:brushDoc,layerId:brushLayer,kind:'pixel',patch:{name:'画笔底稿'}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(brushDoc,{force:true});
+  await page.getByRole('button',{name:'画笔底稿',exact:true}).click();
+  const brushTool=editor.getByRole('button',{name:'画笔',exact:true});
+  const eraserTool=editor.getByRole('button',{name:'橡皮擦',exact:true});
+  const option=label=>editor.locator('input.workspace-number-input[aria-label="'+label+'"]');
+  async function setBrushOption(label,value){
+    const control=option(label),wrapper=control.locator('..');
+    await wrapper.dblclick();
+    const entry=wrapper.getByRole('spinbutton',{name:'输入数值'});
+    await entry.fill(String(value));
+    await entry.press('Enter');
+    assert.equal(Number(await control.inputValue()),value);
+  }
+  async function brushRevision(previous,check){
+    const current=await until(async()=>{
+      const doc=await api(projectRoute);
+      return doc.revision>previous&&doc;
+    },'保存画笔轨迹');
+    check(current.paint.imageDocuments[brushDoc].layers[0]);
+    await until(()=>brushTool.isEnabled(),'绘制控件可继续操作');
+    return current;
+  }
+  await brushTool.click();
+  await setBrushOption('像素半径',64);
+  await setBrushOption('不透明度',60);
+  await setBrushOption('流量',25);
+  await setBrushOption('间距',20);
+  await page.keyboard.press('d');
+  await page.mouse.click(...await point([.28,.3]));
+  const dot=await brushRevision(brushSeed.revision,layer=>{
+    assert.equal(layer.strokes[0].flow,.25);
+    assert.equal(layer.strokes[0].spacing,.2);
+    assert.equal(layer.strokes[0].stamps.length,1);
+  });
+  await page.keyboard.down('Shift');
+  await page.mouse.click(...await point([.72,.3]));
+  await page.keyboard.up('Shift');
+  const straight=await brushRevision(dot.revision,layer=>{
+    assert.equal(layer.strokes[1].stamps.length,2);
+    assert.deepEqual(layer.strokes[0].stamps[0],layer.strokes[1].stamps[0]);
+  });
+  await page.keyboard.press('Control+=');
+  await drag([.28,.7],[.72,.7]);
+  const zoomed=await brushRevision(straight.revision,layer=>{
+    assert.ok(layer.strokes[2].stamps.length>=2);
+  });
+  const xy=(x,y)=>[Math.floor(x*4096),Math.floor(y*4096)];
+  const [,brushPixels]=rgba(await imagePng('brush-flow.png',zoomed.revision,brushDoc),
+    [xy(.5,.3),xy(.5,.7),xy(.5,.5),xy(.28,.3)]);
+  assert.ok(brushPixels[0][3]>38&&brushPixels[0][3]<=153);
+  assert.ok(Math.abs(brushPixels[0][3]-brushPixels[1][3])<=2);
+  assert.equal(brushPixels[2][3],0);
+  await eraserTool.click();
+  assert.equal(await option('流量').inputValue(),'100');
+  await setBrushOption('像素半径',42);
+  await page.mouse.click(...await point([.5,.7]));
+  const erased=await brushRevision(zoomed.revision,layer=>{
+    assert.equal(layer.strokes[3].erase,true);
+    assert.equal(layer.strokes[3].radius,42/4096);
+    assert.equal(layer.strokes[3].opacity,1);
+  });
+  assert.equal(rgba(await imagePng('brush-erased.png',erased.revision,brushDoc),[xy(.5,.7)])[1][0][3],0);
+  await brushTool.click();
+  assert.equal(await option('流量').inputValue(),'25');
+  assert.equal(await option('像素半径').inputValue(),'64');
+  await eraserTool.click();
+  assert.equal(await option('像素半径').inputValue(),'42');
+  await page.mouse.move(...await point([.5,.7]));
+  await editor.locator('.area-uv-cursor').waitFor({state:'visible'});
+  await page.screenshot({path:path.join(data,'brush-options.png')});
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS opacity and flow, document-space spacing, Shift-click line, zoomed stroke, separate eraser and radius cursor');
 }catch(error){
   console.error(logs);
   throw error;
