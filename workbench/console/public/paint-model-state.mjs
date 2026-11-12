@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {writeVertexPositions} from './model-edit-steps.mjs';
 
 // Keep an immutable browser baseline: modeling and material preview replay the
 // same world-space commands, including vertices split at UV/material seams.
@@ -30,6 +31,15 @@ export function applyModelState(root,state){
   root.updateMatrixWorld(true);
   const edited=new Set();
   for(const step of state?.steps||[]){
+    if(step.type==='vertexPositions'){
+      for(const target of step.targets){
+        const node=baseline.meshes[target.mesh];
+        if(!node)throw Error('工程建模命令与模型绑定不一致');
+        writeVertexPositions(node.geometry.attributes.position,target);
+        edited.add(node);
+      }
+      continue;
+    }
     const delta=new THREE.Matrix4().fromArray(step.matrix);
     // Capture every target before changing any parent or split primitive.
     const captures=step.targets.map(target=>{

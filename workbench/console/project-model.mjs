@@ -23,6 +23,7 @@ const invalid=()=>{throw Error('建模命令或模型绑定无效');};
 export function saveProjectModel(doc,{revision,modeling}){
   if(revision!==doc.revision)throw Object.assign(Error('工程修订已变化'),{status:409,currentRevision:doc.revision});
   validateModelState(modeling);
+  if(modeling.version===2&&doc.source.format!=='glb')invalid();
   const model=registeredViewportModel(doc),folder=path.dirname(model.file);
   if(viewportManifest(doc).key!==modeling.binding||model.sha256!==modeling.modelSha256)invalid();
   const bytes=fs.readFileSync(model.file),glb=JSON.parse(bytes.toString('utf8',20,20+bytes.readUInt32LE(12)));

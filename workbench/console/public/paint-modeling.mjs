@@ -6,6 +6,8 @@ import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {axisColors} from './viewport-colors.mjs';
 import {createObjectOrigins,objectOriginCenter} from './viewport-origins.mjs';
 import {loadModelTopology,primitiveTopology,mergePrimitiveAliases,connectedVertexGroups} from './paint-model-topology.mjs';
+import {modelStepForSource,writeVertexPositions} from './model-edit-steps.mjs';
+import {smoothSelectedVertices} from './mesh-smoothing.mjs';
 import {projectMarqueeVertices,vertexInMarquee,edgeInMarquee,faceCenterInMarquee,meshInMarquee,visitTriangles}
   from './paint-model-marquee.mjs';
 
@@ -695,7 +697,10 @@ export function createPaintModeling(report, project = {}) {
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
     });
-    for (const step of undo) apply(capture(step.targets),new THREE.Matrix4().fromArray(step.matrix),true);
+    for (const step of undo) {
+      if(step.type==='vertexPositions')applyVertexPositions(step.targets);
+      else apply(capture(step.targets),new THREE.Matrix4().fromArray(step.matrix),true);
+    }
     context.updateModelBounds();
     updateSelection();
   }
@@ -729,30 +734,18 @@ export function createPaintModeling(report, project = {}) {
       try {
         const raw = JSON.stringify(nextUndo);
         if (project.save) {
-          const nativeSteps=[];
           let topology=topologyMeta;
           if(nextUndo.some(step=>step.targets.some(target=>target.mesh!==undefined))&&!topology)
             topology=(await loadModelTopology(currentProject)).primitives;
-          for(const step of nextUndo){
-            const targets=new Map();
-            for(const target of step.targets){
-              const node=target.id!==undefined?objects.get(target.id):ownerOf(meshes[target.mesh]);
-              const original=node?.userData.original;
-              const name=original?.userData.modelingLabel;
-              if(!name)throw Error('无法识别原模型物体，修改未保存');
-              if(target.id!==undefined)targets.set(name,{object:name});
-              else{
-                const mesh=meshes[target.mesh],primitive=mesh.userData.original.userData.modelingPrimitive;
-                const ids=target.vertices.map(id=>topology?.[primitive]?.vertices[id]);
-                if(ids.some(id=>!Number.isInteger(id)||id<0))throw Error('原拓扑尚未就绪，修改未保存');
-                const item=targets.get(name)||{object:name,vertices:[]};
-                for(const id of ids)item.vertices.push(id);targets.set(name,item);
-              }
-            }
-            nativeSteps.push({matrix:step.matrix,targets:[...targets.values()].map(target=>
-              target.vertices?{...target,vertices:[...new Set(target.vertices)]}:target)});
-          }
-          await project.save({version:1,binding:context.binding,modelSha256:context.modelSha256,steps:nextUndo,nativeSteps},expectedRevision,expectedProject);
+          const nativeSteps=nextUndo.map(step=>modelStepForSource(step,target=>{
+            const mesh=meshes[target.mesh],node=target.id!==undefined?objects.get(target.id):ownerOf(mesh);
+            const object=node?.userData.original?.userData.modelingLabel;
+            if(target.id!==undefined)return {object};
+            const primitive=mesh.userData.original.userData.modelingPrimitive;
+            return {object,vertices:target.vertices.map(id=>topology?.[primitive]?.vertices[id])};
+          }));
+          const version=nextUndo.some(step=>step.type==='vertexPositions')?2:1;
+          await project.save({version,binding:context.binding,modelSha256:context.modelSha256,steps:nextUndo,nativeSteps},expectedRevision,expectedProject);
           // Local cache is optional after the authoritative project commit.
           try{localStorage.setItem(storageKey,raw);}catch{}
         }else localStorage.setItem(storageKey,raw);
@@ -809,11 +802,59 @@ export function createPaintModeling(report, project = {}) {
   },{signal:project.signal});
 
   function validStep(step) {
-    if (!Array.isArray(step?.matrix) || step.matrix.length !== 16 || !step.matrix.every(Number.isFinite) ||
-        !Array.isArray(step.targets) || !step.targets.length) return false;
+    if (!Array.isArray(step?.targets) || !step.targets.length) return false;
+    if (step.type==='vertexPositions')
+      return step.targets.every(target=>validVertices(target)&&Array.isArray(target.positions)&&
+        target.positions.length===target.vertices.length*3&&target.positions.every(Number.isFinite));
+    if (!Array.isArray(step.matrix) || step.matrix.length !== 16 || !step.matrix.every(Number.isFinite)) return false;
     return step.targets.every(target=>objects.has(target?.id) ||
-      (meshes[target?.mesh] && Array.isArray(target.vertices) && target.vertices.length &&
-      target.vertices.every(i=>Number.isInteger(i)&&i>=0&&i<meshes[target.mesh].geometry.attributes.position.count)));
+      validVertices(target));
+  }
+
+  function validVertices(target) {
+    return meshes[target?.mesh] && Array.isArray(target.vertices) && target.vertices.length &&
+      target.vertices.every(i=>Number.isInteger(i)&&i>=0&&i<meshes[target.mesh].geometry.attributes.position.count);
+  }
+
+  function applyVertexPositions(targets) {
+    for (const target of targets) {
+      const {geometry}=meshes[target.mesh];
+      writeVertexPositions(geometry.attributes.position,target);
+      geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
+    }
+  }
+
+  function canSmooth() {
+    return active&&mode==='edit'&&topologyState==='ready'&&selected.size>0&&
+      project.read?.()?.source.format==='glb'&&!gesture&&!saving&&!pendingOperation;
+  }
+
+  async function smooth(options) {
+    if (!canSmooth()) throw Error('请选择原生 GLB 工程中的网格元素');
+    const primitives=meshes.filter(mesh=>ownerOf(mesh)===object).map(mesh=>({mesh,geometry:mesh.geometry,topology:meshTopology(mesh)}));
+    const ids=new Set();
+    for (const {mesh,indices} of selected.values())
+      for (const index of indices) ids.add(meshTopology(mesh).vertices[index]);
+    const result=smoothSelectedVertices(primitives,ids,{...options,axes:[options.axes[0],options.axes[2],options.axes[1]]});
+    if (!result.size) throw Error('选中的顶点没有可平滑的位置');
+    const targets=[];
+    for (const {mesh,topology} of primitives) {
+      const vertices=[],positions=[];
+      topology.vertices.forEach((id,index)=>{
+        const next=result.get(id);
+        if(next){vertices.push(index);positions.push(next.x,next.y,next.z);}
+      });
+      if(vertices.length)targets.push({mesh:mesh.userData.modelingMesh,vertices,positions});
+    }
+    const step={type:'vertexPositions',targets};
+    if (JSON.stringify(step).length>2*1024*1024) throw Error('平滑选区过大，请分批修改');
+    applyVertexPositions(targets);
+    const task=saveDraft([...undo,step],[],false);
+    trackOperation(task);
+    context.updateModelBounds();updateSelection();
+    if (!await task) throw Error(error||'平滑修改未保存');
   }
 
   function startTransform() {
@@ -1134,7 +1175,7 @@ export function createPaintModeling(report, project = {}) {
   return {
     syncDocument(){if(active&&!gesture&&!saving&&readDraft()){error='已同步工程建模修改';replay();}},
     setObjectSelection(ids,activeId){if(!active||gesture||saving)return;selected.clear();selectedObjects.clear();for(const id of ids){const node=objects.get(id);if(node&&isVisible(node)&&inLocalView(node))selectedObjects.add(node);}const target=objects.get(activeId);object=selectedObjects.has(target)?target:[...selectedObjects].at(-1)||null;updateSelection();},
-    open,close,pick,boxSelect,selectAll,selectLinked,invertSelection,selectObject,frameSelection,frameObjects,setObjectVisibility,toggleVisibility,hideSelection,showAll,toggleLocalView,applyNumeric,inspectObject,transformObject,travel,exportDraft,cancelTransform,transformKey,isDragging:()=>!!gesture||saving||!!pendingOperation,
+    open,close,pick,boxSelect,selectAll,selectLinked,invertSelection,selectObject,frameSelection,frameObjects,setObjectVisibility,toggleVisibility,hideSelection,showAll,toggleLocalView,applyNumeric,inspectObject,transformObject,canSmooth,smooth,travel,exportDraft,cancelTransform,transformKey,isDragging:()=>!!gesture||saving||!!pendingOperation,
     setDisplayHelpers({overlays,transform}){
       showOverlays=overlays;showGizmo=transform;
       if(!active)return;

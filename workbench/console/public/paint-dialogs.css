@@ -260,3 +260,12 @@
 #render-batch-dialog .paint-form-footer{min-height:44px;flex:none;justify-content:flex-end;padding:7px 10px;border-top-color:var(--chrome-line)}
 #render-batch-error{flex:1;overflow-wrap:anywhere;font-size:12px}
 #submit-render-batch{white-space:nowrap}
+.mesh-smoothing-dialog{width:min(350px,94vw)}
+.mesh-smoothing-dialog .paint-form-content{gap:7px}
+.mesh-smoothing-dialog .paint-form-content>label:not(.mesh-smoothing-boundary){grid-template-columns:minmax(0,1fr) minmax(100px,1.3fr);align-items:center}
+.mesh-smoothing-dialog .paint-form-content input[type=number]{width:100%;min-width:0}
+.mesh-smoothing-dialog .paint-form-content fieldset{display:flex;align-items:center;gap:14px;margin:2px 0 0;padding:4px 7px;border:0}
+.mesh-smoothing-dialog .paint-form-content :is(fieldset label,.mesh-smoothing-boundary){display:flex;align-items:center;gap:5px}
+.mesh-smoothing-dialog .paint-form-footer{height:auto;min-height:42px;background:transparent}
+.mesh-smoothing-dialog .paint-form-footer button{flex:none}
+.mesh-smoothing-dialog .paint-form-footer [role=alert]{flex:1;font-size:12px;overflow-wrap:anywhere}

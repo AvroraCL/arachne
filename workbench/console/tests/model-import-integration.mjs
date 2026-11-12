@@ -409,6 +409,42 @@ try{
   assert.equal(cubeEdited.source.uvSha256,cube.source.uvSha256);
   console.log('PASS connected and inverse face selection, hover shortcuts and seam-safe movement across split vertices');
 
+  await cubeCanvas.focus();
+  await reopened.keyboard.press('a');
+  await selectionStatus.filter({hasText:'已选 6 面'}).waitFor();
+  const smoothDialog=reopened.getByRole('dialog',{name:'平滑顶点',exact:true});
+  async function openSmooth(){
+    await cubeEditor.getByRole('button',{name:'网格',exact:true}).click();
+    await reopened.getByRole('menuitem',{name:'平滑顶点…',exact:true}).click();
+    await smoothDialog.waitFor();
+  }
+  await openSmooth();
+  await reopened.keyboard.press('Escape');
+  await smoothDialog.waitFor({state:'hidden'});
+  assert.deepEqual((await api(cubeRoute)).modeling,cubeEdited.modeling);
+  await openSmooth();
+  await smoothDialog.getByRole('spinbutton',{name:'平滑系数'}).fill('0.2');
+  await smoothDialog.getByRole('spinbutton',{name:'重复次数'}).fill('2');
+  await smoothDialog.getByRole('checkbox',{name:'Y',exact:true}).uncheck();
+  await smoothDialog.getByRole('checkbox',{name:'Z',exact:true}).uncheck();
+  await reopened.screenshot({path:path.join(data,'model-smoothing.png')});
+  await smoothDialog.getByRole('button',{name:'应用平滑',exact:true}).click();
+  await smoothDialog.waitFor({state:'hidden'});
+  const smoothed=await api(cubeRoute),deformation=smoothed.modeling.steps.at(-1);
+  assert.equal(smoothed.modeling.version,2);
+  assert.equal(deformation.type,'vertexPositions');
+  assert.equal(deformation.targets[0].vertices.length,24);
+  assert.equal(smoothed.modeling.nativeSteps.at(-1).targets[0].vertices.length,8);
+  assert.equal(smoothed.source.uvSha256,cube.source.uvSha256);
+  await reopened.keyboard.press('Control+z');
+  await until(async()=> (await api(cubeRoute)).modeling.steps.length===1);
+  await reopened.keyboard.press('Control+Shift+z');
+  await until(async()=> (await api(cubeRoute)).modeling.steps.length===2);
+  await reopened.reload();
+  await cubeViewport.waitFor({timeout:30000});
+  assert.deepEqual((await api(cubeRoute)).modeling,smoothed.modeling);
+  console.log('PASS mesh smoothing dialog, seam-safe positions, cancellation, undo, redo and project reopen');
+
   await reopened.locator('[data-area-mode=drawing]').click();
   const drawing=reopened.locator('.editor-area[data-editor=image]').first();
   await drawing.getByRole('button',{name:'新建贴图',exact:true}).click();
@@ -546,6 +582,7 @@ try{
   });
   assert.equal(cubeBake.paintReport.uv_unchanged,true);
   assert.equal(Object.keys(cubeBake.paintReport.files).length,8);
+  assert.equal(cubeBake.paintReport.modelFingerprint,(await api(cubeRoute+'/paint/model-state')).fingerprint);
   const cubePaint=cubeRoute+'/paint';
   const shots=[
     {id:'top',name:'顶视验收',camera:{projection:'orthographic',eye:[0,5,0],target:[0,0,0],up:[0,0,-1],fov:38,orthoHeight:3.2}},

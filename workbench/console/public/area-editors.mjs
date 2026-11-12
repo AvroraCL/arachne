@@ -9,6 +9,7 @@ import {projectionIsCurrent} from './paint-surface-state.mjs';
 import {createViewport} from './viewport3d.mjs';
 import {modelPivotLabels} from './paint-model-transform.mjs';
 import {createPaintModeling} from './paint-modeling.mjs';
+import {createMeshSmoothingDialog} from './mesh-smoothing-dialog.mjs';
 import {createViewportMarquee} from './paint-model-marquee.mjs';
 import {createViewportDisplayControls} from './viewport-display-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
@@ -99,6 +100,17 @@ export function registerAreaEditors(registry,bridge){
     });
     const cursorMenu=createContextActions('三维游标',ctx.error);
     const selectionMenu=createContextActions('建模选择',ctx.error);
+    const meshMenu=createContextActions('网格',ctx.error);
+    const smoothing=createMeshSmoothingDialog({smooth:options=>modeler.smooth(options),
+      focus:()=>view.querySelector('canvas')?.focus({preventScroll:true})});
+    const meshButton=button('网格',()=>{
+      const anchor=meshButton.getBoundingClientRect();
+      meshMenu.open({clientX:anchor.left,clientY:anchor.bottom},'网格',[
+        {label:'平滑顶点…',enabled:modeler.canSmooth(),run:()=>smoothing.open()}
+      ]);
+    });
+    meshButton.setAttribute('aria-haspopup','menu');
+    meshButton.hidden=mode!=='edit';
     const selectButton=button('选择',openSelectionMenu,'建模选择');
     selectButton.setAttribute('aria-label','建模选择');
     selectButton.setAttribute('aria-haspopup','menu');
@@ -127,7 +139,7 @@ export function registerAreaEditors(registry,bridge){
     chromeButton(boxSelect,'marquee','框选');boxSelect.setAttribute('aria-keyshortcuts','B');boxSelect.setAttribute('aria-pressed','false');
     const frameButton=button('相机取景框',()=>toggleCameraFrame(),'相机取景框 · 小键盘 0');
     chromeButton(frameButton,'renderSettings');frameButton.setAttribute('aria-pressed','false');
-    toolbar.append(modes,component,selectButton,tool,orientation,transformPivot,cursorButton,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
+    toolbar.append(modes,component,selectButton,meshButton,tool,orientation,transformPivot,cursorButton,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
       button('适应',()=>{markCameraFree();viewport.fit();}),
       button('正交',()=>{markCameraFree();viewport.projection(!viewport.getState().orthographic);onChange();}),frameButton);
     transformPivot.dataset.searchable='false';
@@ -229,6 +241,7 @@ export function registerAreaEditors(registry,bridge){
       for(const control of [tool,modes,component]){control.disabled=next.dragging;syncSelectMenu(control);}
       for(const field of axes)field.disabled=next.dragging;
       apply.disabled=!next.hasTransformTarget||next.dragging;selectButton.disabled=boxSelect.disabled=!canBoxSelect();
+      meshButton.disabled=next.dragging||next.topologyState==='loading';
       view.toggleAttribute('data-local-view',next.localActive);
       showModelStatus();
       syncRenderPreview();
@@ -413,13 +426,14 @@ export function registerAreaEditors(registry,bridge){
     },{signal});
     function setMode(next){
       if(modeler.isDragging()||painter.isEditing()){modes.value=mode;return;}
-      marquee.cancel();cursorMenu.close();selectionMenu.close();
+      marquee.cancel();cursorMenu.close();selectionMenu.close();meshMenu.close();
       modeGeneration++;mode=next;modes.value=next;picking=false;pickerMessage='';syncSelectMenu(modes);painter.setMode(['paint','mask','fill','place'].includes(mode)?mode:'orbit');
       if(view.dataset.state==='ready'){
         if(['object','edit'].includes(mode)){modeler.open(viewport.modelingContext(),project.document.id);modeler.setMode(mode);modeler.setElement(component.value);modeler.setTool(tool.value);modeler.setOrientation(orientation.value);modeler.setPivot(transformPivot.value);}
         else modeler.close();
       }
       foreground.hidden=mode!=='paint';visible(maskInk,['mask','fill'].includes(mode));numeric.hidden=!inModeling();controls.bar.hidden=!['paint','mask'].includes(mode);visible(component,mode==='edit');visible(tool,inModeling());visible(orientation,inModeling());visible(transformPivot,inModeling());cursorButton.hidden=selectButton.hidden=boxSelect.hidden=!inModeling();selectButton.disabled=boxSelect.disabled=!canBoxSelect();syncPicker();onChange();
+      meshButton.hidden=mode!=='edit';
       syncSceneCursor();syncRenderPreview();
     }
     function releaseFrame(){
@@ -570,14 +584,14 @@ export function registerAreaEditors(registry,bridge){
     return {kind:'viewport',viewport,showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
       getState:()=>({mode,element:component.value,tool:tool.value,orientation:orientation.value,pivot:transformPivot.value,...display.getState(),
         camera:view.dataset.state==='ready'?viewport.readCamera():state.camera,cameraFrame,returnCamera,projectCameraView,cyclesPaused}),
-      isEditing:()=>modeler.isDragging()||painter.isEditing()||marquee.isDragging()||regionGesture.editing()||focusGesture.editing(),
+      isEditing:()=>smoothing.isOpen()||modeler.isDragging()||painter.isEditing()||marquee.isDragging()||regionGesture.editing()||focusGesture.editing(),
       setVisible(visible){
         if(shown===visible)return;
         shown=visible;viewport.setActive(visible);
         if(visible)void sync().catch(ctx.error);
         else{display.close();navigating=false;marquee.cancel();regionGesture.cancel();focusGesture.cancel();setPicking(false);releaseFrame();syncRenderPreview();}
       },
-      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();selectionMenu.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
+      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();selectionMenu.dispose();meshMenu.dispose();smoothing.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
   });
 
   registry.register('shader',ctx=>{

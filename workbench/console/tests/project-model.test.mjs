@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {Group,Mesh,BufferGeometry,Float32BufferAttribute,Matrix4,Vector3} from 'three';
 import {applyModelState} from '../public/paint-model-state.mjs';
 import {nativeModelSteps,validateModelState,modelFingerprint} from '../project-model.mjs';
+import {primitiveTopology} from '../public/paint-model-topology.mjs';
+import {smoothSelectedVertices} from '../public/mesh-smoothing.mjs';
 
 const matrix=new Matrix4().makeTranslation(2,3,4).toArray();
 test('material geometry replays object then vertex commands without accumulating on polling',()=>{
@@ -62,4 +64,47 @@ test('object transforms preserve authored shading normals and undo restores them
   assert.notDeepEqual(Array.from(geometry.attributes.normal.array),authored);
   applyModelState(root,null);
   assert.deepEqual(Array.from(geometry.attributes.normal.array),authored);
+});
+
+test('smoothing follows authored polygon boundaries and preserves open edges and locked axes',()=>{
+  const geometry=new BufferGeometry();
+  geometry.setAttribute('position',new Float32BufferAttribute([0,0,0,2,0,0,2,2,0,0,2,0],3));
+  geometry.setIndex([0,1,2,0,2,3]);
+  const topology=primitiveTopology(geometry,{vertices:[0,1,2,3],polygons:[0,0]});
+  const options={factor:.5,iterations:1,axes:[true,false,false]};
+  const primitives=[{geometry,topology}],selected=new Set([0]);
+  assert.equal(smoothSelectedVertices(primitives,selected,{...options,keepBoundary:true}).size,0);
+  assert.deepEqual(smoothSelectedVertices(primitives,selected,options).get(0).toArray(),[.5,0,0]);
+  assert.deepEqual(smoothSelectedVertices(primitives,selected,{...options,iterations:2}).get(0).toArray(),[.75,0,0]);
+  assert.throws(()=>smoothSelectedVertices(primitives,new Set([0,1,2,3]),{...options,factor:1,axes:[true,true,true]}),/折叠/);
+});
+
+test('native smoothing positions cannot separate UV seam aliases and replay from the saved baseline',()=>{
+  const glb={nodes:[{name:'wing',mesh:0}],scenes:[{nodes:[0]}],meshes:[{primitives:[
+    {attributes:{POSITION:0}},{attributes:{POSITION:1}}]}],accessors:[{count:3},{count:3}]};
+  const topology={primitives:{'0:0':{vertices:[0,4,5]},'0:1':{vertices:[4,6,7]}}};
+  const step={type:'vertexPositions',targets:[{mesh:0,vertices:[1],positions:[.5,1,2]},
+    {mesh:1,vertices:[0],positions:[.5,1,2]}]};
+  const state={version:2,binding:'a'.repeat(32),modelSha256:'b'.repeat(64),steps:[step],
+    nativeSteps:nativeModelSteps(glb,[step],topology)};
+  assert.deepEqual(state.nativeSteps[0].targets,[{object:'wing',vertices:[4],positions:[.5,1,2]}]);
+  assert.equal(validateModelState(state),state);
+  assert.throws(()=>validateModelState({...state,version:1}),/绑定/);
+  const missing=structuredClone(step);missing.targets.pop();
+  assert.throws(()=>nativeModelSteps(glb,[missing],topology),/绑定/);
+  const mismatched=structuredClone(step);mismatched.targets[1].positions[0]=.25;
+  assert.throws(()=>nativeModelSteps(glb,[mismatched],topology),/接缝/);
+  const root=new Group();
+  for(let i=0;i<2;i++){
+    const geometry=new BufferGeometry();
+    geometry.setAttribute('position',new Float32BufferAttribute([0,0,0,1,0,0,0,1,0],3));
+    root.add(new Mesh(geometry));
+  }
+  for(let i=0;i<2;i++){
+    applyModelState(root,state);
+    assert.deepEqual(new Vector3().fromBufferAttribute(root.children[0].geometry.attributes.position,1).toArray(),[.5,1,2]);
+    assert.deepEqual(new Vector3().fromBufferAttribute(root.children[1].geometry.attributes.position,0).toArray(),[.5,1,2]);
+  }
+  applyModelState(root,null);
+  assert.deepEqual(new Vector3().fromBufferAttribute(root.children[0].geometry.attributes.position,1).toArray(),[1,0,0]);
 });

@@ -229,6 +229,13 @@ class Model:
 
     def edit(self, steps):
         for step in steps:
+            if step.get('type') == 'vertexPositions':
+                for target in step['targets']:
+                    primitive = self.primitives[target['mesh']]
+                    primitive['positions'][target['vertices']] = np.asarray(
+                        target['positions'],dtype=np.float32).reshape(-1,3)
+                    primitive['normals'] = None
+                continue
             delta = np.asarray(step['matrix'],dtype=float).reshape(4,4).T
             worlds = self.worlds()
             for target in step['targets']:
