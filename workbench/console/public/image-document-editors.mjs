@@ -1,3 +1,4 @@
+import {copyImagePixels,copiedImage,onImageClipboardChange,imageClipboardPlacement,clipboardPngSize} from './image-clipboard.mjs';
 import {headerControls,chromeButton,createContextActions} from './area-chrome.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
@@ -51,7 +52,12 @@ export function createDocumentEditor(ctx,bridge){
     if(destinationOptionsKey!==key){destinationOptionsKey=key;destination.replaceChildren(new Option('新建材质填充层',''),...layers.map(l=>new Option(l.name,l.id)));}
     destination.value=previous||linked?.id||'';syncSelectMenu(destination);
   }
-  header.append(picker,create,channel,destination,bind);headerControls(ctx,header);
+  const copy=button('复制图像选区',copySelection),paste=button('粘贴为图像层',pasteSelection);
+  chromeButton(copy,'copy');chromeButton(paste,'paste');
+  copy.title='复制图像选区 · ⌘ / Ctrl + C';paste.title='粘贴为图像层 · ⌘ / Ctrl + V';
+  copy.disabled=paste.disabled=true;
+  let copying=false;
+  header.append(picker,create,channel,destination,bind,copy,paste);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const parameters=el('div','document-tool-parameters'),viewOptions=el('div','document-view-options');
   const rail=el('aside','document-tools'),stage=el('div','editor-image-stage document-image-stage'),canvas=el('canvas'),empty=el('div','document-empty'),status=el('output','editor-message');
@@ -176,11 +182,58 @@ export function createDocumentEditor(ctx,bridge){
   stage.addEventListener('pointermove',event=>{if(nav?.pointer!==event.pointerId)return;pan=[nav.pan[0]+event.clientX-nav.x,nav.pan[1]+event.clientY-nav.y];layout();},{signal});
   const end=event=>{if(nav?.pointer!==event.pointerId)return;nav=null;painter.refreshUVCursor();if(stage.hasPointerCapture(event.pointerId))stage.releasePointerCapture(event.pointerId);};for(const name of ['pointerup','pointercancel','lostpointercapture'])stage.addEventListener(name,end,{signal});
   stage.addEventListener('wheel',event=>{event.preventDefault();const before=zoom;zoom=Math.max(.03,Math.min(40,zoom*Math.exp(-event.deltaY*.001)));const r=stage.getBoundingClientRect(),x=event.clientX-r.x-r.width/2,y=event.clientY-r.y-r.height/2;pan=[x-(x-pan[0])*zoom/before,y-(y-pan[1])*zoom/before];layout();},{passive:false,signal});
-  function importFile(file,position){
-    const origin=imageSelectionOrigin(project),layerId=crypto.randomUUID();
-    void run(async()=>{if(!origin.documentId)throw Error('请先新建贴图');await bridge.importDocumentAsset(file,origin,layerId,position);if(!disposed)selectAddedLayer(project,origin,layerId);});
+  function canPaste(){
+    return !!currentDocument(project)&&!bridge.busy()&&!painter.isEditing()&&!selection.isDragging()&&!selection.isTransforming()&&!nav;
   }
-  host.addEventListener('paste',event=>{const file=[...event.clipboardData?.items||[]].find(i=>i.type==='image/png')?.getAsFile();if(file){event.preventDefault();event.stopPropagation();importFile(file);}},{signal});
+  function canCopy(){
+    const layer=currentLayer(project);
+    return canPaste()&&!copying&&project.imageContext?.target!=='mask'&&!!layer?.visible&&layer.opacity>0;
+  }
+  function syncClipboard(){
+    copy.disabled=!canCopy();paste.disabled=!canPaste()||!copiedImage();
+    copy.setAttribute('aria-busy',String(copying));
+  }
+  function copySelection(){
+    if(!canCopy())return false;
+    const origin=imageSelectionOrigin(project),region=selection.clip()||{clip:[0,0,1,1]};
+    copying=true;syncClipboard();
+    status.textContent='正在复制 4K 像素…';
+    void copyImagePixels(origin,region).then(({width,height})=>{
+      if(!disposed)status.textContent=`已复制 ${width} × ${height} px`;
+    }).catch(error=>{
+      if(!disposed&&error.name!=='AbortError'){status.textContent=error.message;ctx.error(error);}
+    }).finally(()=>{if(!disposed){copying=false;syncClipboard();}});
+    return true;
+  }
+  function importFile(file,position,pixelSize=false){
+    const origin=imageSelectionOrigin(project),layerId=crypto.randomUUID();
+    void run(async()=>{
+      if(!origin.documentId)throw Error('请先新建贴图');
+      const placement=pixelSize?imageClipboardPlacement(...await clipboardPngSize(file)):position;
+      await bridge.importDocumentAsset(file,origin,layerId,placement);
+      if(!disposed)selectAddedLayer(project,origin,layerId);
+    });
+  }
+  function pasteSelection(){
+    const entry=copiedImage();
+    if(!entry||!canPaste())return false;
+    const c=project.imageContext;
+    const center=entry.projectId===project.document.id&&entry.documentId===c?.documentId?entry.center:undefined;
+    importFile(entry.file,imageClipboardPlacement(entry.width,entry.height,center));
+    return true;
+  }
+  const stopClipboard=onImageClipboardChange(syncClipboard);
+  host.addEventListener('copy',event=>{
+    if(!event.target.closest('input,textarea,[contenteditable]')&&copySelection()){
+      event.preventDefault();event.stopPropagation();
+    }
+  },{signal});
+  host.addEventListener('paste',event=>{
+    if(event.target.closest('input,textarea,[contenteditable]')||!canPaste())return;
+    const file=[...event.clipboardData?.items||[]].find(item=>item.type==='image/png')?.getAsFile();
+    if(file){event.preventDefault();event.stopPropagation();importFile(file,undefined,true);}
+    else if(!event.clipboardData?.types.length&&pasteSelection()){event.preventDefault();event.stopPropagation();}
+  },{signal});
   function dropPosition(event){const r=canvas.getBoundingClientRect(),x=(event.clientX-r.left)/r.width,y=(event.clientY-r.top)/r.height;return r.width&&r.height&&x>=0&&x<=1&&y>=0&&y<=1?{x,y}:null;}
   canvas.addEventListener('click',event=>{
     if(mode!=='text'||event.button!==0||space||nav||bridge.busy())return;
@@ -209,7 +262,8 @@ export function createDocumentEditor(ctx,bridge){
     }
     let handled=true;
     if(mod&&!event.altKey){
-      if(key==='z')void project.travel(event.shiftKey?'redo':'undo').catch(ctx.error);
+      if(key==='c'&&!event.shiftKey)handled=copySelection();
+      else if(key==='z')void project.travel(event.shiftKey?'redo':'undo').catch(ctx.error);
       else if(key==='a')selection.selectAll();
       else if(key==='d')selection.clear();
       else if(key==='t')selection.start();
@@ -259,7 +313,7 @@ export function createDocumentEditor(ctx,bridge){
     }
     const documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}
     const next=JSON.stringify([doc.id,doc.revision]);if(sourceKey!==next){sourceKey=next;syncDestination();}else if(destinationDocument!==c?.documentId)syncDestination();
-    picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||bridge.busy();empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();live.refresh();
+    picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||bridge.busy();empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
   return {kind:'image',sync,handleKey,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>painter.isEditing()||selection.isDragging()||selection.isTransforming(),
@@ -268,7 +322,7 @@ export function createDocumentEditor(ctx,bridge){
       shown=visible;live.setVisible(visible);
       if(visible)sync();
     },
-    dispose(){disposed=true;unsub();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.clear();resize.disconnect();},setPaintMode(next){setMode(next);}};
+    dispose(){disposed=true;unsub();stopClipboard();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.clear();resize.disconnect();},setPaintMode(next){setMode(next);}};
 }
 
 export function createImagePanel(type,ctx){
@@ -682,7 +736,7 @@ export function createImagePanel(type,ctx){
       if(layer){addControl(body,'图层名称','text',layer.name,name=>command(project,{action:'updateLayer',layerId:layer.id,patch:{name}}));addControl(body,'锁定图层','checkbox',layer.locked,locked=>command(project,{action:'updateLayer',layerId:layer.id,patch:{locked}}));
         if(layer.text&&c.target!=='mask'){const edit=button('编辑文字…',()=>editText(layer));edit.disabled=layer.locked;body.append(edit);}
         if(c.target==='mask'){addControl(body,'启用蒙版','checkbox',layer.maskEnabled,maskEnabled=>command(project,{action:'updateLayer',layerId:layer.id,patch:{maskEnabled}}));addControl(body,'蒙版底色','number',layer.maskBase,maskBase=>command(project,{action:'updateLayer',layerId:layer.id,patch:{maskBase}}),{min:0,max:1,step:'any'});}
-        if(layer.kind==='image'){for(const [name,key,min,max] of [['位置 X','x',0,1],['位置 Y','y',0,1],['缩放','scale',.01,4],['旋转','rotation',-360,360]])addControl(body,name,'number',layer[key],value=>command(project,{action:'updateLayer',layerId:layer.id,patch:{[key]:value}}),{min,max,step:'any'});}
+        if(layer.kind==='image'){for(const [name,key,min,max] of [['位置 X','x',0,1],['位置 Y','y',0,1],['缩放','scale',1/4096,4],['旋转','rotation',-360,360]])addControl(body,name,'number',layer[key],value=>command(project,{action:'updateLayer',layerId:layer.id,patch:{[key]:value}}),{min,max,step:'any'});}
       }
       const refs=doc.paint.layers.flatMap(layer=>Object.entries(layer.documentMaps??{}).filter(([,id])=>id===c.documentId).map(([channel])=>({layer,channel})));
       body.append(el('strong','document-properties-heading','材质引用'));for(const {layer,channel} of refs){

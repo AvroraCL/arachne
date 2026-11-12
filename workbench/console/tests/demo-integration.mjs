@@ -508,6 +508,69 @@ try{
   await monitor.waitFor({state:'hidden'});
   assert.deepEqual(errors,[]);
   console.log('PASS background task filters, bounded inline logs, cancellation and retry selection');
+  const clipboardDocument='clipboard-source',clipboardLayer='clipboard-pixels',clipboardTarget='clipboard-target';
+  const currentProject=await api(project(libraryTarget.id));
+  const clipRect=[.125,.125,.625,.625],color='#248acf';
+  const imageProject=await api(paint(libraryTarget.id)+'/commands',{revision:currentProject.revision,operations:[
+    {op:'image',action:'create',documentId:clipboardDocument,patch:{name:'剪贴板来源'}},
+    {op:'image',action:'addLayer',documentId:clipboardDocument,layerId:clipboardLayer,kind:'pixel'},
+    {op:'image',action:'stroke',documentId:clipboardDocument,layerId:clipboardLayer,target:'pixels',
+      stroke:{uv:true,rect:clipRect,opacity:1,color,erase:false}},
+    {op:'image',action:'stroke',documentId:clipboardDocument,layerId:clipboardLayer,target:'mask',
+      stroke:{uv:true,rect:[.25,.125,.3,.625],opacity:1,value:0}},
+    {op:'image',action:'create',documentId:clipboardTarget,patch:{name:'剪贴板目标'}}
+  ]});
+  const clipResponse=await fetch(base+paint(libraryTarget.id)+'/image-clipboard',{method:'POST',
+    headers:{Origin:base,'Content-Type':'application/json'},
+    body:JSON.stringify({revision:imageProject.revision,documentId:clipboardDocument,layerId:clipboardLayer,rect:clipRect,
+      polygon:[[.125,.125],[.625,.125],[.125,.625]]})});
+  assert.equal(clipResponse.status,200,clipResponse.ok?'':await clipResponse.text());
+  const cropped=Buffer.from(await clipResponse.arrayBuffer());
+  assert.deepEqual([cropped.readUInt32BE(16),cropped.readUInt32BE(20)],[2048,2048]);
+  const cropFile=path.join(data,'clipboard-lasso.png');
+  await fs.writeFile(cropFile,cropped);
+  execFileSync(python,['-c',[
+    'from PIL import Image',
+    'import sys',
+    'with Image.open(sys.argv[1]) as im:',
+    ' assert im.getpixel((100, 100)) == (36, 138, 207, 255)',
+    ' assert im.getpixel((600, 100))[3] == 0',
+    ' assert im.getpixel((1900, 1900))[3] == 0',
+  ].join('\n'),cropFile],{stdio:'inherit'});
+  await page.locator('[data-area-mode=drawing]').click();
+  const imageEditor=page.locator('.editor-area[data-editor=image]').first();
+  const imageCanvas=imageEditor.getByLabel('图像文档画布');
+  await imageCanvas.waitFor();
+  await imageEditor.getByRole('button',{name:'矩形选区',exact:true}).click();
+  const imageBounds=await imageCanvas.boundingBox();
+  await page.mouse.move(imageBounds.x+imageBounds.width*.1,imageBounds.y+imageBounds.height*.1);
+  await page.mouse.down();
+  await page.mouse.move(imageBounds.x+imageBounds.width*.66,imageBounds.y+imageBounds.height*.67,{steps:5});
+  await page.mouse.up();
+  await page.keyboard.press('Control+c');
+  const pastePixels=imageEditor.getByRole('button',{name:'粘贴为图像层',exact:true});
+  await pastePixels.click();
+  const inPlace=await waitFor(async()=>{
+    const state=await api(project(libraryTarget.id));
+    return state.paint.imageDocuments[clipboardDocument].layers.length===2&&state;
+  },'选区原位粘贴');
+  const imageLayer=inPlace.paint.imageDocuments[clipboardDocument].layers.at(-1);
+  const imageAsset=inPlace.paint.assets[imageLayer.asset];
+  assert.equal(imageLayer.scale,Math.max(imageAsset.width,imageAsset.height)/4096);
+  assert.ok(Math.abs(imageLayer.x-.38)<.015);
+  assert.ok(Math.abs(imageLayer.y-.385)<.015);
+  await imageEditor.getByRole('button',{name:'图像文档',exact:true}).click();
+  await page.getByRole('option',{name:'剪贴板目标',exact:true}).click();
+  await pastePixels.click();
+  const crossDocument=await waitFor(async()=>{
+    const state=await api(project(libraryTarget.id));
+    return state.paint.imageDocuments[clipboardTarget].layers.length===1&&state;
+  },'跨文档粘贴');
+  const pasted=crossDocument.paint.imageDocuments[clipboardTarget].layers[0];
+  assert.deepEqual([pasted.x,pasted.y,pasted.scale,pasted.asset],[.5,.5,imageLayer.scale,imageLayer.asset]);
+  assert.deepEqual(crossDocument.paint.imageDocuments[clipboardDocument].layers,inPlace.paint.imageDocuments[clipboardDocument].layers);
+  assert.deepEqual(errors,[]);
+  console.log('PASS 4K selection copy, lasso transparency, original scale, same-document placement and cross-document paste');
   await page.addInitScript(()=>{
     window.arachneDesktop=Object.freeze({notifyProject(){}});
   });

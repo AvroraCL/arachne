@@ -13,7 +13,7 @@ from PIL import Image
 
 from paint_surface import Surface, registered_surface
 from material_graph import MaterialGraph
-from image_documents import document_pixels,composite_document
+from image_documents import document_pixels,composite_document,clipboard_png
 
 
 def decode(srgb):
@@ -481,7 +481,8 @@ def live_pixels(cfg):
     if cfg.get('imageDocumentId'):
         doc=cfg['paint']['imageDocuments'][cfg['imageDocumentId']]
         if cfg.get('isolatedImageLayer'):doc={**doc,'layers':[l for l in doc['layers'] if l['id']==cfg['isolatedImageLayer']]}
-        return composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask')).tobytes()
+        pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
+        return clipboard_png(pixels,cfg['clipboardRegion']) if cfg.get('clipboardRegion') else pixels.tobytes()
     step = 4096//cfg.get('liveResolution',256)
     pixels,(protected,conflict,written,eligible) = composite(cfg,step)
     codes = diagnostic_codes(protected,conflict,written)
@@ -514,7 +515,12 @@ def interactive():
 
 if __name__=='__main__':
     if sys.argv[1]=='--live-detail':
-        sys.stdout.buffer.write(live_pixels(json.loads(sys.stdin.buffer.read())))
+        config = json.loads(sys.stdin.buffer.read())
+        try:
+            sys.stdout.buffer.write(live_pixels(config))
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            sys.exit(1)
     elif sys.argv[1]=='--interactive':
         interactive()
     else:

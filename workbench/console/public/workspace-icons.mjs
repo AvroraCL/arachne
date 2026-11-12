@@ -3,6 +3,7 @@ const svg = content => `<svg class="chrome-icon" viewBox="0 0 20 20" fill="none"
 export const workspaceIcons = {
   meshObject: svg('<path class="mesh-face" d="m10 3 7 13H3Z"/><path d="M9 2h2v2H9ZM2 15h2v2H2Zm14 0h2v2h-2Z" fill="currentColor" stroke="none"/>'),
   copy: svg('<rect x="6.5" y="6.5" width="10.5" height="10.5" rx="1.2"/><path d="M4 13V4h9"/>'),
+  paste: svg('<path d="M7 5H4v12h12V5h-3"/><rect x="7" y="3" width="6" height="4" rx="1"/><path d="M7 11h6m-6 3h4"/>'),
   folder: svg('<path d="M3 15V5h5l2 2h7v8Z"/>'),
   chevron: svg('<path d="m8 5 5 5-5 5"/>'),
   moveUp: svg('<path d="M10 16V4m-5 5 5-5 5 5"/>'),

@@ -508,6 +508,15 @@ export function imageDocumentInput(doc,{revision,documentId,operation,inspectMas
     liveFormat:'rgba'
   };
 }
+export function imageClipboardInput(doc,request){
+  const {revision,documentId,layerId,rect,polygon}=fields(request,['revision','documentId','layerId','rect','polygon']);
+  if(!validUVRect(rect)||!validUVPolygon(polygon,rect))throw Error('图像复制选区无效');
+  const documents=doc.paint.imageDocuments??{};
+  const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId);
+  if(!layer||!layer.visible||!layer.opacity)throw Error('请选择可见的图像图层');
+  const input=imageDocumentInput(doc,{revision,documentId,isolatedImageLayer:layerId,resolution:4096});
+  return {...input,clipboardRegion:{rect,polygon}};
+}
 function completePng(bytes){
   if(bytes.length<45||!bytes.subarray(0,8).equals(pngSignature)||
      bytes.readUInt32BE(8)!==13||bytes.toString('ascii',12,16)!=='IHDR'||
@@ -538,6 +547,7 @@ function ensurePaintAsset(doc,{entry,existing,bytes}){
     try{if(hash(destination)===entry.id)return;}
     catch(error){if(error.code!=='ENOENT')throw error;}
   }
+  fs.mkdirSync(path.dirname(destination),{recursive:true});
   const temporary=destination+'.'+crypto.randomUUID()+'.tmp';
   try{
     fs.writeFileSync(temporary,bytes,{flag:'wx'});
@@ -558,8 +568,9 @@ function writePaintAsset(doc,revision,png,summary,update){
 }
 export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId,materialId,imageLayer}){
   if(doc.revision!==revision)throw revisionError(doc);
-  const image=imageLayer===undefined?null:fields(imageLayer,['documentId','layerId','x','y']);
+  const image=imageLayer===undefined?null:fields(imageLayer,['documentId','layerId','x','y','scale']);
   if(image&&(image.x!==undefined||image.y!==undefined)&&(!unit(image.x)||!unit(image.y)))throw Error('图像图层放置参数无效');
+  if(image?.scale!==undefined&&!ranged(image.scale,1/4096,4))throw Error('图像图层缩放无效');
   if(image&&(maskLayerId!==undefined||placement!==undefined||nodeId!==undefined||materialId!==undefined))throw Error('请选择单个图像导入目标');
   if(materialId!==undefined&&(typeof materialId!=='string'||!Object.hasOwn(doc.paint.materials??{},materialId)||nodeId===undefined))throw Error('节点材质不存在');
   const targetGraph=materialId===undefined?doc.paint.materialGraph:doc.paint.materials[materialId].graph;
@@ -579,7 +590,7 @@ export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId
   return writePaintAsset(doc,revision,png,image?'导入图像图层':place?'导入并放置画布图片':target?'保存图层蒙版':imageNode?'导入节点图像':'导入涂装素材',p=>{
     if(imageNode){(materialId===undefined?p.paint.materialGraph:p.paint.materials[materialId].graph).nodes.find(node=>node.id===nodeId).params.asset=entry.id;validate(p);}
     if(target)p.paint.layers.find(layer=>layer.id===target.id).mask=entry.id;
-    if(image)applyOperations(p,[{op:'image',action:'addLayer',documentId:image.documentId,layerId:image.layerId,kind:'image',patch:{asset:entry.id,name:label,...(image.x===undefined?{}:{x:image.x,y:image.y})}}]);
+    if(image)applyOperations(p,[{op:'image',action:'addLayer',documentId:image.documentId,layerId:image.layerId,kind:'image',patch:{asset:entry.id,name:label,...(image.x===undefined?{}:{x:image.x,y:image.y}),...(image.scale===undefined?{}:{scale:image.scale})}}]);
     if(place)applyOperations(p,[{op:'add',kind:'decal',parentId:place.parentId,patch:{
       image:entry.id,name:label,space:'uv',x:place.x,y:place.y,scale:.25
     }}]);
@@ -597,7 +608,9 @@ export async function savePaintText(doc,{revision,text,placement,layerId,documen
   requireUnlocked(layers,target);
   const place=placement===undefined?null:fields(placement,inImage?['x','y']:['x','y','parentId']);
   if((target&&place)||(!target&&(!place||!unit(place.x)||!unit(place.y))))throw Error('文字放置位置无效');
-  const scratch=fs.mkdtempSync(path.join(projectDir(doc.id),'assets','.text-'));
+  const assetFolder=path.join(projectDir(doc.id),'assets');
+  fs.mkdirSync(assetFolder,{recursive:true});
+  const scratch=fs.mkdtempSync(path.join(assetFolder,'.text-'));
   let bytes;
   try{
     const input=path.join(scratch,'text.json'),output=path.join(scratch,'text.png');

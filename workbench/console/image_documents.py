@@ -2,6 +2,7 @@
 
 No geometry, protection atlas or PBR layer state is used to edit a document.
 """
+from io import BytesIO
 import hashlib
 import json
 from collections import OrderedDict
@@ -101,6 +102,21 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
         out[start:start+len(part),:3]=np.rint(np.clip(rgb,0,1)*255)
         out[start:start+len(part),3]=np.rint(np.clip(part[:,3],0,1)*255)
     return out.reshape(size,size,4)[::-1]
+
+
+def clipboard_png(pixels, region):
+    height, width = pixels.shape[:2]
+    surface = ImageSurface(width)
+    rect, polygon = region['rect'], region.get('polygon')
+    row0, row1, col0, col1 = surface._uv_pixel_rect(rect)
+    cropped = pixels[height-row1:height-row0, col0:col1].copy()
+    if polygon:
+        cropped[~surface._polygon_tile(rect, polygon)[::-1]] = 0
+    if not cropped.size or not cropped[:, :, 3].any():
+        raise ValueError('选区内没有可复制的像素')
+    out = BytesIO()
+    Image.fromarray(cropped).save(out, format='PNG', compress_level=3)
+    return out.getvalue()
 
 
 _cache=OrderedDict()

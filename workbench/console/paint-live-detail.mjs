@@ -14,13 +14,16 @@ function pump(){
   const child=task.child=spawn(process.env.ARACHNE_PYTHON||'python',
     ['-X','utf8',path.join(ROOT,'paint_worker.py'),'--live-detail'],
     {cwd:ROOT,stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...process.env,OPENBLAS_NUM_THREADS:'1'}});
-  const size=4096*4096*(task.config.liveFormat==='rgba'?4:task.config.liveFormat==='pbr8'?15:6);
-  let pixels=Buffer.allocUnsafe(size),offset=0,log='';
+  const clipboard=!!task.config.clipboardRegion;
+  const size=clipboard?24*1024*1024:4096*4096*(task.config.liveFormat==='rgba'?4:task.config.liveFormat==='pbr8'?15:6);
+  let pixels=clipboard?[]:Buffer.allocUnsafe(size),offset=0,log='';
   const timer=setTimeout(()=>task.cancel(Error('4K 实时合成超时，请重试')),120000);
   task.cancel=error=>{task.error=error;child.kill();};
   child.stdout.on('data',chunk=>{
-    if(offset+chunk.length>size){task.cancel(Error('4K 实时贴图尺寸无效'));return;}
-    chunk.copy(pixels,offset);offset+=chunk.length;
+    if(offset+chunk.length>size){task.cancel(Error(clipboard?'选区 PNG 超过 24 MiB，请缩小选区':'4K 实时贴图尺寸无效'));return;}
+    if(clipboard)pixels.push(chunk);
+    else chunk.copy(pixels,offset);
+    offset+=chunk.length;
   });
   child.stderr.on('data',chunk=>{log=(log+chunk).slice(-3000);});
   child.on('error',error=>{task.error=error;});
@@ -28,8 +31,9 @@ function pump(){
   child.on('close',code=>{
     clearTimeout(timer);task.signal?.removeEventListener('abort',task.abort);
     active=null;
-    if(task.error||code!==0||offset!==size)task.reject(task.error||Error(log.trim()||'4K 实时合成失败'));
-    else task.resolve(pixels);
+    if(task.error||code!==0||(clipboard?offset<45:offset!==size))
+      task.reject(task.error||Error(log.trim()||'4K 实时合成失败'));
+    else task.resolve(clipboard?Buffer.concat(pixels,offset):pixels);
     pixels=null;pump();
   });
   child.stdin.end(JSON.stringify(task.config));
