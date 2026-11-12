@@ -508,5 +508,29 @@ try{
   await monitor.waitFor({state:'hidden'});
   assert.deepEqual(errors,[]);
   console.log('PASS background task filters, bounded inline logs, cancellation and retry selection');
+  await page.addInitScript(()=>{
+    window.arachneDesktop=Object.freeze({notifyProject(){}});
+  });
+  await page.reload();
+  await page.getByRole('button',{name:'设置',exact:true}).click();
+  const settings=page.locator('#settings-dialog');
+  await settings.waitFor();
+  await settings.getByRole('button',{name:'界面密度'}).click();
+  await page.getByRole('option',{name:'舒适',exact:true}).click();
+  await settings.getByRole('button',{name:'保存设置',exact:true}).click();
+  await settings.waitFor({state:'hidden'});
+  assert.equal(await page.locator('html').getAttribute('data-ui-density'),'comfortable');
+  const saved=await api('/api/desktop-settings');
+  assert.equal(saved.revision,1);
+  assert.equal(saved.settings.preferences.density,'comfortable');
+  assert.equal((await api('/api/desktop-settings',{revision:0,settings:saved.settings},409)).currentRevision,1);
+  const originalOrigin=base;
+  await stop();
+  await start(noBlender);
+  assert.notEqual(base,originalOrigin);
+  await page.goto(base+'/?project='+libraryTarget.id);
+  await page.locator('html[data-ui-density=comfortable]').waitFor();
+  assert.deepEqual(await api('/api/desktop-settings'),saved);
+  console.log('PASS native preferences survive a new local service port and reject stale writes');
 }catch(error){console.error(log);throw error;}
 finally{if(browser)await browser.close();await stop();console.log('Demo verification data:',data);}

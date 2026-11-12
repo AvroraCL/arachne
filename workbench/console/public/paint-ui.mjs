@@ -1,3 +1,4 @@
+import {connectDesktopSettings} from './paint-desktop-settings.mjs';
 import {setupProjectFiles} from './paint-project-files.mjs';
 import {setupTaskMonitor} from './paint-task-monitor.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
@@ -52,7 +53,8 @@ import {createMaskThumbnails} from './paint-mask-thumbnails.mjs';
 import {startAssetDrag,currentAssetDrag,endAssetDrag,hasAssetDrag,readAssetDrag} from './paint-asset-drag.mjs';
 
 const $=id=>document.getElementById(id);
-let preferences=loadPreferences(localStorage);
+const desktopSettings=await connectDesktopSettings(window,localStorage);
+let preferences=desktopSettings?.initial?.preferences||loadPreferences(localStorage);
 applyAppearance(preferences);
 const names={...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),x:'横向中心',y:'纵向中心',scale:'缩放',rotation:'旋转角度'};
 const geometryStatusNodes={status:$('model-geometry-status'),retry:$('model-geometry-retry'),log:$('model-geometry-log')};
@@ -2627,14 +2629,21 @@ uvPane.onpointerup=uvPane.onpointercancel=uvPane.onlostpointercapture=()=>{
 };
 const paintLayout=setupPaintLayout({surfaceIsEditing:()=>surfaceTools.isEditing()||uvSelection.isDragging()});
 const paintDisplay=setupPaintDisplay(viewport,surfaceTools.isEditing);
+const settingsSnapshot=()=>({version:1,preferences:{...preferences},brush:surfaceTools.getSettings(),display:paintDisplay.getSettings()});
+function applySettings(bundle){
+  preferences=bundle.preferences;applyAppearance(preferences);workspaceMotion.setMotion(preferences.motion);
+  surfaceTools.setSettings(bundle.brush);paintDisplay.setSettings(bundle.display);
+  liveView.preferencesChanged();areaSystem?.preferencesChanged();
+}
+if(desktopSettings?.initial)applySettings(desktopSettings.initial);
+if(desktopSettings?.migrate)void desktopSettings.save(settingsSnapshot()).catch(()=>{});
 setupPaintSettings({
-  snapshot:()=>({version:1,preferences:{...preferences},brush:surfaceTools.getSettings(),display:paintDisplay.getSettings()}),
+  snapshot:settingsSnapshot,
   canOpen:()=>!busy&&!drag&&!modelMarquee&&!modeler.isDragging()&&!surfaceTools.isEditing()&&!uvSelection.isDragging()&&!uvSelection.isTransforming()&&!propertyDraft,
-  apply:bundle=>{
-    preferences=bundle.preferences;applyAppearance(preferences);workspaceMotion.setMotion(preferences.motion);
-    surfaceTools.setSettings(bundle.brush);paintDisplay.setSettings(bundle.display);
-    liveView.preferencesChanged();areaSystem?.preferencesChanged();
-  }
+  apply:applySettings,
+  save:desktopSettings?.save,
+  refresh:desktopSettings?.refresh,
+  storageLabel:desktopSettings?'设置保存在本机':'设置保存在此浏览器'
 });
 decorateWorkspaceButtons(document,{
   '#model-frame-selection':'focus','#model-box-select':'marquee','#uv-select-tool':'marquee','#uv-lasso-tool':'lasso',

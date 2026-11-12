@@ -4,14 +4,14 @@ import {sceneOptions} from './scene-options.mjs';
 import {setSelectValue,enhanceSelectMenu} from './paint-select.mjs';
 
 const $=id=>document.getElementById(id);
-export function setupPaintSettings({snapshot,apply,canOpen}){
+export function setupPaintSettings({snapshot,apply,canOpen,save=raw=>saveSettingsBundle(localStorage,raw),refresh,storageLabel='设置保存在此浏览器'}){
   document.querySelector('#settings-title+small').textContent='阿拉克涅 · '+APP_VERSION;
   const dialog=$('settings-dialog'),form=$('settings-form'),error=$('settings-error');
   const controls=[...form.querySelectorAll('[data-setting]')];
   const tabs=[...dialog.querySelectorAll('[data-settings-tab]')];
   const sections=[...dialog.querySelectorAll('[data-settings-section]')];
   const status=$('settings-save-state');
-  let draft=null,focusBefore=null,baseline=null;
+  let draft=null,focusBefore=null,baseline=null,saving=false,opening=false;
   const message=text=>{error.textContent=text;};
   function showTab(id){
     for(const tab of tabs){const active=tab.dataset.settingsTab===id;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
@@ -51,30 +51,44 @@ export function setupPaintSettings({snapshot,apply,canOpen}){
   }
   function changed(){
     updateReadouts();
-    status.textContent=JSON.stringify(collect())===JSON.stringify(baseline)?'设置保存在此浏览器':'有未保存的更改';message('');
+    status.textContent=JSON.stringify(collect())===JSON.stringify(baseline)?storageLabel:'有未保存的更改';message('');
   }
   for(const control of controls)for(const type of ['input','change'])control.addEventListener(type,changed);
-  function open(){
-    if(dialog.open)return;
+  async function open(){
+    if(opening||!canOpen()||document.querySelector('dialog[open]'))return;
+    opening=true;
+    let issue='';
+    try{
+      if(refresh){
+        const latest=await refresh();
+        if(latest)apply(latest);
+      }
+    }catch(error){issue=error.message;}
+    finally{opening=false;}
     if(!canOpen()||document.querySelector('dialog[open]'))return;
     focusBefore=document.activeElement;
     document.querySelectorAll('.paint-menu[open]').forEach(menu=>menu.open=false);
-    baseline=snapshot();populate(baseline);status.textContent='设置保存在此浏览器';message('');showTab('interface');
+    baseline=snapshot();populate(baseline);status.textContent=storageLabel;message(issue);showTab('interface');
     dialog.showModal();tabs[0].focus();
   }
-  const close=()=>dialog.close();
+  const close=()=>{if(!saving)dialog.close();};
   $('open-settings').onclick=open;$('close-settings').onclick=close;$('cancel-settings').onclick=close;
   dialog.addEventListener('close',()=>{message('');if(focusBefore?.isConnected)focusBefore.focus({preventScroll:true});});
-  dialog.addEventListener('cancel',()=>message(''));
+  dialog.addEventListener('cancel',event=>{if(saving)event.preventDefault();else message('');});
   document.addEventListener('keydown',event=>{
     if((event.metaKey||event.ctrlKey)&&event.key===','){
-      event.preventDefault();event.stopImmediatePropagation();open();
+      event.preventDefault();event.stopImmediatePropagation();void open();
     }
   },true);
-  form.onsubmit=event=>{
+  form.onsubmit=async event=>{
     event.preventDefault();
-    try{const bundle=saveSettingsBundle(localStorage,collect());apply(bundle);close();}
-    catch(e){message(e.message);}
+    if(saving)return;
+    const commit=$('save-settings'),cancel=$('cancel-settings'),closeButton=$('close-settings'),reset=$('reset-settings');
+    const draftControls=dialog.querySelector('.settings-body');
+    saving=commit.disabled=cancel.disabled=closeButton.disabled=reset.disabled=draftControls.inert=true;
+    try{const bundle=await save(collect());apply(bundle);dialog.close();}
+    catch(error){message(error.message);}
+    finally{saving=commit.disabled=cancel.disabled=closeButton.disabled=reset.disabled=draftControls.inert=false;}
   };
   $('reset-settings').onclick=()=>{
     populate({version:1,preferences:{...preferenceDefaults},brush:{...brushDefaults},display:sceneOptions()});

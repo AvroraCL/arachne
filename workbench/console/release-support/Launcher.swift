@@ -109,14 +109,37 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
             let line=String(buffer[..<end]);buffer=String(buffer[buffer.index(after:end)...])
             guard line.hasPrefix("ARACHNE_READY "),let bytes=String(line.dropFirst(14)).data(using:.utf8),let value=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any],let address=value["url"] as? String,let parsed=URL(string:address),validLocal(parsed) else{continue}
             var target=parsed
-            if let remembered=UserDefaults.standard.string(forKey:"lastProjectId"),remembered.range(of:"^[A-Za-z0-9_-]{1,100}$",options:.regularExpression) != nil,
+            let folder=(value["data"] as? String).flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath:$0,isDirectory:true) : nil }
+            if let folder=folder, let remembered=lastProject(in:folder),
                var components=URLComponents(url:parsed,resolvingAgainstBaseURL:false) {
                 var items=(components.queryItems ?? []).filter{$0.name != "project"};items.append(URLQueryItem(name:"project",value:remembered));components.queryItems=items
                 target=components.url ?? parsed
             }
             ownsService=value["owned"] as? Bool ?? false
-            ready(target,data:URL(fileURLWithPath:value["data"] as? String ?? ""))
+            ready(target,data:folder)
         }
+    }
+
+    private func desktopState(_ folder:URL) -> URL {
+        folder.deletingLastPathComponent().appendingPathComponent("desktop.json")
+    }
+
+    private func lastProject(in folder:URL) -> String? {
+        let file=desktopState(folder)
+        let saved=(try? Data(contentsOf:file)).flatMap { try? JSONSerialization.jsonObject(with:$0) as? [String:Any] }
+        let previous=ProcessInfo.processInfo.environment["ARACHNE_USER_DATA_DIR"]==nil ? UserDefaults.standard.string(forKey:"lastProjectId") : nil
+        return [saved?["project"] as? String,previous].compactMap{$0}.first { id in
+            id.range(of:"^[A-Za-z0-9_-]{1,100}$",options:.regularExpression) != nil &&
+            FileManager.default.fileExists(atPath:folder.appendingPathComponent("projects").appendingPathComponent(id).appendingPathComponent("project.json").path)
+        }
+    }
+
+    private func rememberProject(_ id:String) {
+        guard let folder=data else{return}
+        do {
+            let state=try JSONSerialization.data(withJSONObject:["project":id])
+            try state.write(to:desktopState(folder),options:.atomic)
+        } catch { NSLog("无法保存最近打开的工程：%@",error.localizedDescription) }
     }
 
     func ready(_ address:URL,data:URL?) {
@@ -135,7 +158,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         guard let url=url else{return}
         if workbench==nil {
             let view=NativeWorkbench(url:url)
-            view.onProject={id,_ in UserDefaults.standard.set(id,forKey:"lastProjectId")}
+            view.onProject={ [weak self] id,_ in self?.rememberProject(id) }
             workbench=view
         }
         workbench?.show()

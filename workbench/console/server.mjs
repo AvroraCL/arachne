@@ -1,3 +1,4 @@
+import {readDesktopSettings,writeDesktopSettings} from './desktop-settings.mjs';
 import {importGlbProject} from './model-registration.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
@@ -47,12 +48,12 @@ function sendPaintSnapshot(req,res,doc,url){
   if(unchanged&&req.headers['if-none-match']===tag){res.writeHead(304,headers);res.end();return;}
   send(res,200,{document:unchanged?null:doc,jobs},headers);
 }
-async function body(req){
+async function body(req,limit=50*1024*1024){
   const decoder=new StringDecoder('utf8');
   let text='',bytes=0;
   for await(const part of req){
     bytes+=part.length;
-    if(bytes>50*1024*1024)throw Object.assign(Error('请求过大'),{status:413});
+    if(bytes>limit)throw Object.assign(Error('请求过大'),{status:413});
     text+=decoder.write(part);
   }
   text+=decoder.end();
@@ -169,6 +170,16 @@ const server=http.createServer(async(req,res)=>{
       const name=url.pathname==='/'?'index.html':url.pathname.slice(1);
       if(!/^[\w.-]+$/.test(name)){send(res,404,{error:'页面不存在'});return;}
       file(res,path.join(ROOT,'public',name));return;
+    }
+    if(parts[1]==='desktop-settings'&&parts.length===2){
+      if(req.method==='GET'){send(res,200,readDesktopSettings());return;}
+      if(req.method==='POST'){
+        if(![local,`http://localhost:${PORT}`].includes(req.headers.origin)){
+          send(res,403,{error:'请在本机工作台保存设置'});return;
+        }
+        send(res,200,writeDesktopSettings(await body(req,32768)));return;
+      }
+      send(res,405,{error:'方法不支持'});return;
     }
     if(parts[1]==='personal-library'){
       if(req.method==='GET'&&parts.length===2){send(res,200,personalLibrary.read());return;}

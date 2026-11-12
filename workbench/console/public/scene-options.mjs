@@ -1,7 +1,7 @@
 export const SCENE_DEFAULTS=Object.freeze({background:'gradient',backgroundColor:'#292929',backgroundTop:'#484848',environment:'studio',environmentStrength:.35,lightStrength:1,rotation:0,exposure:0,ground:false,groundColor:'#4a4a4a',groundHeight:0,groundRoughness:.7,grid:true,samples:32,resolution:.65,denoise:true,bounces:6});
 export function sceneOptions(raw={}){
  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('空间设置无效');
- for(const key of Object.keys(raw))if(!(key in SCENE_DEFAULTS))throw Error('未知空间设置：'+key);
+ for(const key of Object.keys(raw))if(!Object.hasOwn(SCENE_DEFAULTS,key))throw Error('未知空间设置：'+key);
  const value={...SCENE_DEFAULTS,...raw};
  for(const [key,choices] of [['background',['solid','gradient','transparent']],['environment',['studio','soft','daylight']]])if(!choices.includes(value[key]))throw Error('空间选项无效：'+key);
  for(const key of ['backgroundColor','backgroundTop','groundColor'])if(typeof value[key]!=='string'||!/^#[0-9a-f]{6}$/i.test(value[key]))throw Error('颜色格式无效');
