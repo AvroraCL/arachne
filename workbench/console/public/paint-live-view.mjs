@@ -126,7 +126,8 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     const isCurrent=()=>!request.controller.signal.aborted&&context()?.key===key&&intent?.group===request.group;
     try{
       if(context()?.modeling&&frame?.request.revision!==revision)onStatus('正在更新建模后的材质与表面…');
-      const body=JSON.stringify(rgba?{revision,operation,documentId:request.documentId,inspectMask:request.inspectMask,resolution:size}:{revision,operation,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
+      const draft=Array.isArray(operation)?{operations:operation}:{operation};
+      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:size}:{revision,...draft,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
       const response=await transport(()=>fetch('/api/projects/'+id+'/paint/'+(rgba?'image-live':'live'),{
         method:'POST',headers:{'Content-Type':'application/json'},signal:request.controller.signal,
         body

@@ -676,8 +676,49 @@ try{
   await canvas.waitFor();
   assert.equal(cloneStrokes(await api(projectRoute)).length,5);
   assert.equal(await editor.getByRole('checkbox',{name:'对齐仿制源'}).isChecked(),false);
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS Clone Stamp source cursor, aligned and unaligned strokes, original RGBA pixels and reopen');
+
+  const rapidDoc='rapid-strokes',rapidLayer='rapid-pixels';
+  const rapidSeed=await api(paintRoute+'/commands',{revision:unalignedClone.revision,operations:[
+    {op:'image',action:'create',documentId:rapidDoc,patch:{name:'连续画笔验收'}},
+    {op:'image',action:'addLayer',documentId:rapidDoc,layerId:rapidLayer,kind:'pixel',patch:{name:'连续笔触'}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(rapidDoc,{force:true});
+  await page.getByRole('button',{name:'连续笔触',exact:true}).click();
+  await brushTool.click();
+  await setBrushOption('流量',100);
+  await setBrushOption('不透明度',100);
+  const delayedWrite=async route=>{await delay(300);await route.continue();};
+  await page.route('**/paint/commands',delayedWrite);
+  const pendingPreview=page.waitForResponse(response=>{
+    const request=response.request().postDataJSON();
+    return response.url().endsWith('/paint/image-live')&&request?.operations?.length>=3;
+  });
+  const rapidPositions=[[.2,.35],[.34,.35],[.48,.35],[.62,.35],[.76,.35]];
+  for(const position of rapidPositions)await page.mouse.click(...await point(position));
+  assert.ok(Number(await editor.locator('.document-image-stage').getAttribute('data-pending-strokes'))>=3);
+  assert.equal((await pendingPreview).status(),200);
+  await canvas.focus();
+  await page.keyboard.press('Control+z');
+  const rapidStrokes=current=>current.paint.imageDocuments[rapidDoc].layers[0].strokes;
+  const rapidlyUndone=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision===rapidSeed.revision+6&&rapidStrokes(current)?.length===4&&current;
+  },'排队保存五笔后只撤销最后一笔');
+  await page.unroute('**/paint/commands',delayedWrite);
+  assert.deepEqual(rgba(await imagePng('rapid-undo.png',rapidlyUndone.revision,rapidDoc),
+    rapidPositions.map(([x,y])=>xy(x,y)))[1].map(pixel=>pixel[3]),[255,255,255,255,0]);
+  await canvas.focus();
+  await page.keyboard.press('Control+Shift+z');
+  const rapidlyRedone=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision===rapidlyUndone.revision+1&&rapidStrokes(current)?.length===5&&current;
+  },'重做独立恢复第五笔');
+  await editor.locator('.document-image-stage[data-preview-size="4096"][data-preview-revision="'+rapidlyRedone.revision+'"]').waitFor();
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS rapid consecutive strokes under delayed writes, merged live draft, independent undo/redo and automatic 4K');
 }catch(error){
   console.error(logs);
   throw error;

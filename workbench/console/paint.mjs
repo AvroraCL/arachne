@@ -1,4 +1,5 @@
 import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers} from './public/image-documents.mjs';
+import {imageStrokeQueueLimit} from './public/image-stroke-queue.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels} from './public/paint-channels.mjs';
 import {validateLibraries,libraryOperation,compileLibraryMaterial} from './public/paint-library.mjs';
@@ -553,35 +554,51 @@ function liveOperationAllowed(doc,operation){
   }
   return keys.every(key=>allowed.includes(key));
 }
-export function livePaintInput(doc,{revision,operation,inspectMask,isolatedLayer,pickUv,uvGuide,rawLayer=false,resolution=256,format='legacy'}){
+function liveDraftOperations(doc,operation,operations,imageDocumentId){
+  if(operations!==undefined){
+    if(operation||!Array.isArray(operations)||!operations.length||operations.length>imageStrokeQueueLimit)
+      throw Error('实时笔触批次无效');
+    const first=operations[0];
+    if(operations.some(edit=>edit?.op!=='image'||edit.action!=='stroke'||
+       edit.documentId!==first.documentId||edit.layerId!==first.layerId||edit.target!==first.target||
+       imageDocumentId!==undefined&&edit.documentId!==imageDocumentId))
+      throw Error('实时笔触必须位于同一图像层');
+    return operations;
+  }
+  if(!operation)return [];
+  if(!liveOperationAllowed(doc,operation)||
+     imageDocumentId!==undefined&&(operation.op!=='image'||operation.documentId!==imageDocumentId))
+    throw Error('实时预览仅接受当前目标的笔触、变换或材质参数');
+  return [operation];
+}
+export function livePaintInput(doc,{revision,operation,operations,inspectMask,isolatedLayer,pickUv,uvGuide,rawLayer=false,resolution=256,format='legacy'}){
   if(doc.revision!==revision)throw revisionError(doc);
   if(!['legacy','pbr8'].includes(format))throw Error('实时贴图格式无效');
-  if(typeof rawLayer!=='boolean'||rawLayer&&(operation||inspectMask||isolatedLayer===undefined||resolution!==256||pickUv!==undefined))throw Error('图层缩略图仅支持已保存的单层 256px 预览');
+  if(typeof rawLayer!=='boolean'||rawLayer&&(operation||operations||inspectMask||isolatedLayer===undefined||resolution!==256||pickUv!==undefined))throw Error('图层缩略图仅支持已保存的单层 256px 预览');
   if(pickUv!==undefined){
     if(!Array.isArray(pickUv)||pickUv.length!==2||!pickUv.every(unit))throw Error('表面 UV 坐标无效');
     return {...paintInput(doc),pickUv};
   }
-  if(operation&&!liveOperationAllowed(doc,operation))
-    throw Error('实时预览仅接受笔触、变换或材质参数');
   if(![256,512,4096].includes(resolution))throw Error('实时预览分辨率无效');
-  if(resolution===4096&&operation)throw Error('4K 实时预览仅接受已保存的工程修订');
-  const next=operation?applyOperations(structuredClone(doc),[operation]):doc;
+  const edits=liveDraftOperations(doc,operation,operations);
+  if(resolution===4096&&edits.length)throw Error('4K 实时预览仅接受已保存的工程修订');
+  const next=edits.length?applyOperations(structuredClone(doc),edits):doc;
   if(inspectMask&&!next.paint.layers.some(l=>l.id===inspectMask&&l.kind!=='group'))throw Error('蒙版图层不存在');
   if(isolatedLayer!==undefined&&(inspectMask||!next.paint.layers.some(l=>l.id===isolatedLayer)))throw Error('独显图层无效');
   const input=paintInput(next);
   if(rawLayer){input.paint={...input.paint,base:{color:'#383838',metallic:0,roughness:.5}};delete input.paint.baseChannels;delete input.paint.materialGraph;input.materialPlan=null;delete input.materialFingerprint;}
   return {...input,inspectMask,isolatedLayer,uvGuide:uvGuide===true,liveResolution:resolution,liveFormat:format};
 }
-export function imageDocumentInput(doc,{revision,documentId,operation,inspectMask,isolatedImageLayer,beforeImageLayer,resolution=256}){
+export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,resolution=256}){
   if(doc.revision!==revision)throw revisionError(doc);
-  if(![64,128,256,512,4096].includes(resolution)||resolution===4096&&operation)throw Error('图像预览尺寸无效');
-  if(operation&&(operation.op!=='image'||operation.documentId!==documentId||!liveOperationAllowed(doc,operation)))throw Error('图像预览目标无效');
-  const next=operation?applyOperations(structuredClone(doc),[operation]):doc;
+  const edits=liveDraftOperations(doc,operation,operations,documentId);
+  if(![64,128,256,512,4096].includes(resolution)||resolution===4096&&edits.length)throw Error('图像预览尺寸无效');
+  const next=edits.length?applyOperations(structuredClone(doc),edits):doc;
   if(!Object.hasOwn(next.paint.imageDocuments??{},documentId))throw Error('图像文档不存在');
   const image=next.paint.imageDocuments[documentId];
   if(isolatedImageLayer&&!image.layers.some(layer=>layer.id===isolatedImageLayer))throw Error('图像图层不存在');
   if(inspectMask&&!image.layers.some(layer=>layer.id===inspectMask))throw Error('图像蒙版不存在');
-  if(beforeImageLayer!==undefined&&(operation||inspectMask||isolatedImageLayer||resolution>512))
+  if(beforeImageLayer!==undefined&&(edits.length||inspectMask||isolatedImageLayer||resolution>512))
     throw Error('图像调整采样参数无效');
   const before=beforeImageLayer===undefined?null:imageLayersBeforeAdjustment(image.layers,beforeImageLayer);
   if(beforeImageLayer!==undefined&&!before)throw Error('图像调整图层不存在');
