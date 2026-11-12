@@ -58,6 +58,14 @@
 .document-shape-guide{position:absolute;inset:0;z-index:3;width:100%;height:100%;pointer-events:none}
 .document-shape-guide[hidden]{display:none}
 .document-shape-guide :is(rect,ellipse){fill:none;stroke:#eee;stroke-dasharray:4 3;filter:drop-shadow(0 0 1px #111)}
+.document-image-stage .area-selection-overlay[data-tracing] .uv-lasso-border{stroke:#d4e6f4;stroke-dasharray:none;fill:none}
+.document-image-stage .uv-polygon-anchor{fill:#242424;stroke:#eee;stroke-width:1.2;pointer-events:none}
+.document-image-stage .uv-polygon-anchor[data-close]{fill:#b7dcf7;stroke:#b7dcf7}
+@media(prefers-reduced-motion:no-preference){
+  .document-image-stage .area-selection-overlay:not([data-tracing],[data-transforming],[hidden])>
+  :is(.uv-selection-border,.uv-lasso-border){animation:document-marching-selection 1s linear infinite}
+}
+@keyframes document-marching-selection{to{stroke-dashoffset:-14}}
 .document-clone-source{
   position:absolute;z-index:4;width:13px;height:13px;transform:translate(-50%,-50%);
   pointer-events:none;filter:drop-shadow(0 0 1px #111);

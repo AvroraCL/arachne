@@ -881,9 +881,59 @@ try{
   assert.equal(inputPixels[1][3],143);
   await page.reload();
   await canvas.waitFor();
-  assert.equal(importedLayers(await api(projectRoute)).length,2);
-  assert.deepEqual(pageErrors,[]);
+  const reopenedImport=await api(projectRoute);
+  assert.equal(importedLayers(reopenedImport).length,2);
   console.log('PASS JPEG chooser and EXIF orientation, WebP drag and drop, original pixel size and preserved alpha');
+
+  const polyDoc='polygon-selection',polyLayer='polygon-pixels';
+  const polySeed=await api(paintRoute+'/commands',{revision:reopenedImport.revision,operations:[
+    {op:'image',action:'create',documentId:polyDoc,patch:{name:'多边形套索验收'}},
+    {op:'image',action:'addLayer',documentId:polyDoc,layerId:polyLayer,kind:'pixel',patch:{name:'多边形底稿'}},
+    {op:'image',action:'stroke',documentId:polyDoc,layerId:polyLayer,target:'pixels',
+      stroke:{uv:true,rect:[0,0,1,1],opacity:1,color:'#558ab8',erase:false}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(polyDoc,{force:true});
+  await page.getByRole('button',{name:'多边形底稿',exact:true}).click();
+  await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+  await editor.getByRole('button',{name:'套索',exact:true}).click();
+  await canvas.focus();
+  await page.keyboard.press('Shift+l');
+  const polyTool=editor.getByRole('button',{name:'多边形套索',exact:true});
+  assert.equal(await polyTool.getAttribute('aria-pressed'),'true');
+  await setBrushOption('选区羽化',0);
+  await editor.getByRole('button',{name:'新建选区',exact:true}).click();
+  await page.mouse.click(...await point([.2,.2]));
+  await page.keyboard.down('Shift');
+  await page.mouse.click(...await point([.7,.21]));
+  await page.keyboard.up('Shift');
+  await page.mouse.click(...await point([.25,.7]));
+  await page.mouse.click(...await point([.75,.78]));
+  await page.keyboard.press('Backspace');
+  assert.equal(await overlay.getAttribute('data-tracing'),'');
+  assert.match(await editor.locator('.document-tool-parameters output').first().textContent(),/3 个顶点/);
+  await page.screenshot({path:path.join(data,'polygon-tracing.png')});
+  await page.keyboard.press('Enter');
+  assert.equal(await overlay.getAttribute('data-tracing'),null);
+  const originalPolygon=await shape.getAttribute('d');
+  assert.ok(originalPolygon.endsWith('Z'));
+  await page.mouse.click(...await point([.6,.6]));
+  await page.mouse.click(...await point([.75,.62]));
+  await page.keyboard.press('Escape');
+  assert.equal(await shape.getAttribute('d'),originalPolygon);
+  await page.keyboard.press('Delete');
+  const polygonClear=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>polySeed.revision&&current;
+  },'清除逐点勾选的三角形');
+  const polygonStroke=polygonClear.paint.imageDocuments[polyDoc].layers[0].strokes.at(-1);
+  assert.equal(polygonStroke.polygon.length,3);
+  assert.ok(Math.abs(polygonStroke.polygon[1][1]-polygonStroke.polygon[0][1])<.00001);
+  assert.deepEqual(rgba(await imagePng('polygon-lasso.png',polygonClear.revision,polyDoc),
+    [xy(.31,.31),xy(.6,.6),xy(.1,.1)])[1].map(pixel=>pixel[3]),[0,255,255]);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS Polygonal Lasso, Shift snapping, vertex deletion, Enter closure, Esc restore and exact 4K triangle');
 }catch(error){
   console.error(logs);
   throw error;

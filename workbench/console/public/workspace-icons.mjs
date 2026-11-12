@@ -49,6 +49,7 @@ export const workspaceIcons = {
   alphaLock: svg('<rect x="3.5" y="3.5" width="13" height="13" rx="1"/><path d="M4 4h4v4H4Zm4 4h4v4H8Zm4-4h4v4h-4ZM4 12h4v4H4Zm8 0h4v4h-4Z" fill="currentColor" stroke="none"/>'),
   ellipseMarquee: svg('<circle cx="10" cy="10" r="7" stroke-dasharray="2 2"/>'),
   lasso: svg('<path d="M5.5 13.5C2 12.3 2 8.3 4.4 6.3c2.9-2.5 9.5-2.7 12.2.2 2.1 2.3.4 5.5-3.4 6.7-2.8.9-6.8.3-7.5 1.9-.9 1.8 1.8 2.4 2.6 1 .5-.9-.2-2.2-1.4-2.7"/>'),
+  polygonLasso: svg('<path d="m4 12 3-8 10 3-3 6-7 1m0 0c-2 0-3 2-1 3 2 1 3-2 1-3Z"/><circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none"/>'),
   transform: svg('<path d="M3 7V3h4m6 0h4v4m0 6v4h-4m-6 0H3v-4m7-6v6M7 10h6"/>'),
   hand: svg('<path d="M6 10V6a1 1 0 0 1 2 0v3-5a1 1 0 0 1 2 0v5-6a1 1 0 0 1 2 0v6-4a1 1 0 0 1 2 0v6l1.5-1.5a1.3 1.3 0 0 1 2 1.6l-3 4.4A4 4 0 0 1 11 17H9a4 4 0 0 1-3.3-1.8L3 11a1.3 1.3 0 0 1 2-1.6L6 10Z"/>'),
   brush: svg('<path d="m7.5 11.5 6.7-7.8a1.5 1.5 0 0 1 2.1 2.1l-7.8 6.7M7 12a2.5 2.5 0 0 0-2.5 2.5c0 1-.5 2-1.5 2.5h3a3 3 0 0 0 3-3 2 2 0 0 0-2-2Z"/>'),
