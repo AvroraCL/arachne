@@ -484,8 +484,93 @@ try{
   await page.reload();
   await canvas.waitFor();
   assert.equal(await option('选区羽化').inputValue(),'64');
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS feathered keyboard fill, exact soft coverage and clipboard bounds, linear transform and persisted tool setting');
+
+  const curvesDoc='curves-document',curvesPixels='curves-pixels';
+  const curvesSeed=await api(paintRoute+'/commands',{revision:transformed.revision,operations:[
+    {op:'image',action:'create',documentId:curvesDoc,patch:{name:'曲线验收'}},
+    {op:'image',action:'addLayer',documentId:curvesDoc,layerId:curvesPixels,kind:'pixel',patch:{name:'曲线底稿'}},
+    {op:'image',action:'stroke',documentId:curvesDoc,layerId:curvesPixels,target:'pixels',
+      stroke:{uv:true,rect:[.1,.1,.4,.9],opacity:.5,color:'#4060a0',erase:false}},
+    {op:'image',action:'stroke',documentId:curvesDoc,layerId:curvesPixels,target:'pixels',
+      stroke:{uv:true,rect:[.6,.1,.9,.9],opacity:1,color:'#c05028',erase:false}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(curvesDoc,{force:true});
+  await page.getByRole('button',{name:'曲线底稿',exact:true}).click();
+  await page.getByRole('button',{name:'新建调整图层',exact:true}).click();
+  const hist=page.waitForResponse(response=>response.url().endsWith('/paint/image-live')&&!!response.request().postDataJSON()?.beforeImageLayer);
+  await page.getByRole('menuitem',{name:'曲线',exact:true}).click();
+  const graph=page.getByRole('group',{name:'曲线控制点'});
+  await graph.locator('path.document-curves-histogram').waitFor();
+  assert.equal((await hist).status(),200);
+  await page.locator('.document-curves-graph[data-histogram-ready]').waitFor();
+  await graph.scrollIntoViewIfNeeded();
+  const curvesLayer=current=>current.paint.imageDocuments[curvesDoc].layers.find(layer=>layer.kind==='adjustment');
+  const curveCreated=await api(projectRoute);
+  assert.ok(curveCreated.revision>curvesSeed.revision);
+  async function graphPoint(x,y){
+    return graph.evaluate((node,[x,y])=>{
+      const point=new DOMPoint(x,255-y).matrixTransform(node.getScreenCTM());
+      return [point.x,point.y];
+    },[x,y]);
+  }
+  const graphDraft=page.waitForResponse(response=>{
+    const params=response.request().postDataJSON()?.operation?.patch?.adjustment;
+    return response.url().endsWith('/paint/image-live')&&params?.type==='curves'&&params.points.rgb.some(point=>Math.abs(point[1]-128)<=1);
+  });
+  await page.mouse.move(...await graphPoint(64,96));
+  await page.mouse.down();
+  await page.mouse.move(...await graphPoint(64,128),{steps:4});
+  assert.equal((await graphDraft).status(),200);
+  assert.equal((await api(projectRoute)).revision,curveCreated.revision);
+  await page.mouse.up();
+  const rgbCurve=await until(async()=>{
+    const current=await api(projectRoute);
+    return curvesLayer(current).adjustment.points.rgb.some(point=>Math.abs(point[0]-64)<=1&&Math.abs(point[1]-128)<=1)&&current;
+  },'保存 RGB 曲线控制点');
+  await page.locator('select[aria-label="曲线通道"]').selectOption('red',{force:true});
+  await page.locator('.document-curves-graph[data-channel=red]:not([data-disabled])').waitFor();
+  await page.mouse.click(...await graphPoint(128,148));
+  const redCurve=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>rgbCurve.revision&&curvesLayer(current).adjustment.points.red.length===3&&current;
+  },'保存独立红色曲线');
+  const curveOutput=page.locator('input.workspace-number-input[aria-label="曲线输出"]');
+  await until(()=>curveOutput.isEnabled(),'重绘后仍选中红色控制点');
+  const curveOutputField=curveOutput.locator('..');
+  await curveOutputField.dblclick();
+  const curveEntry=curveOutputField.getByRole('spinbutton',{name:'输入数值'});
+  await curveEntry.fill('152');
+  await curveEntry.press('Enter');
+  const preciseCurve=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>redCurve.revision&&curvesLayer(current).adjustment.points.red[1][1]===152&&current;
+  },'双击输入曲线输出值');
+  const [,curvePixels]=rgba(await imagePng('channel-curves.png',preciseCurve.revision,curvesDoc),
+    [xy(.25,.5),xy(.5,.5)]);
+  assert.ok(Math.abs(curvePixels[0][0]-152)<=3&&curvePixels[0][1]>96&&curvePixels[0][2]>160);
+  assert.equal(curvePixels[0][3],128);
+  assert.deepEqual(curvePixels[1],[0,0,0,0]);
+  await page.screenshot({path:path.join(data,'curve-editor.png')});
+  await graph.focus();
+  await page.keyboard.press('Delete');
+  const removedCurve=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>preciseCurve.revision&&curvesLayer(current).adjustment.points.red.length===2&&current;
+  },'Delete 删除曲线控制点');
+  await canvas.focus();
+  await page.keyboard.press('Control+z');
+  await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>removedCurve.revision&&curvesLayer(current).adjustment.points.red[1][1]===152;
+  },'撤销恢复曲线控制点');
+  await page.reload();
+  await graph.waitFor();
+  assert.equal(curvesLayer(await api(projectRoute)).adjustment.points.red[1][1],152);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS curve histogram, live point drag, independent RGB and red controls, exact numeric input, 4K alpha and undo');
 }catch(error){
   console.error(logs);
   throw error;

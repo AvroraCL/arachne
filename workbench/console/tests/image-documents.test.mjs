@@ -47,6 +47,11 @@ test('image adjustments have independent masks and validate exact parameters wit
  assert.throws(()=>checkImageAdjustment({...levels,inputWhite:16}),/黑场/);
  assert.throws(()=>checkImageAdjustment({...levels,invalid:4}),/参数无效/);
  assert.throws(()=>checkImageAdjustment({...levels,gamma:0}),/中间调/);
+ const curves=newImageAdjustment('curves');
+ curves.points.red.splice(1,0,[128,180]);
+ checkImageAdjustment(curves);
+ assert.equal(newImageAdjustment('curves').points.red.length,2);
+ assert.throws(()=>checkImageAdjustment({...curves,points:{...curves.points,red:[[0,0],[0,1],[255,255]]}}),/控制点/);
  assert.throws(()=>edit(paint,'stroke',{layerId:'levels',target:'pixels',stroke:{}}),/像素层/);
  assert.equal(new Set(imageBlendModes).size,16);
 });

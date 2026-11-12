@@ -1,4 +1,4 @@
-import {validateImageDocuments,imageDocumentOperation} from './public/image-documents.mjs';
+import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers} from './public/image-documents.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels} from './public/paint-channels.mjs';
 import {validateLibraries,libraryOperation,compileLibraryMaterial} from './public/paint-library.mjs';
@@ -571,7 +571,7 @@ export function livePaintInput(doc,{revision,operation,inspectMask,isolatedLayer
   if(rawLayer){input.paint={...input.paint,base:{color:'#383838',metallic:0,roughness:.5}};delete input.paint.baseChannels;delete input.paint.materialGraph;input.materialPlan=null;delete input.materialFingerprint;}
   return {...input,inspectMask,isolatedLayer,uvGuide:uvGuide===true,liveResolution:resolution,liveFormat:format};
 }
-export function imageDocumentInput(doc,{revision,documentId,operation,inspectMask,isolatedImageLayer,resolution=256}){
+export function imageDocumentInput(doc,{revision,documentId,operation,inspectMask,isolatedImageLayer,beforeImageLayer,resolution=256}){
   if(doc.revision!==revision)throw revisionError(doc);
   if(![64,128,256,512,4096].includes(resolution)||resolution===4096&&operation)throw Error('图像预览尺寸无效');
   if(operation&&(operation.op!=='image'||operation.documentId!==documentId||!liveOperationAllowed(doc,operation)))throw Error('图像预览目标无效');
@@ -580,18 +580,17 @@ export function imageDocumentInput(doc,{revision,documentId,operation,inspectMas
   const image=next.paint.imageDocuments[documentId];
   if(isolatedImageLayer&&!image.layers.some(layer=>layer.id===isolatedImageLayer))throw Error('图像图层不存在');
   if(inspectMask&&!image.layers.some(layer=>layer.id===inspectMask))throw Error('图像蒙版不存在');
+  if(beforeImageLayer!==undefined&&(operation||inspectMask||isolatedImageLayer||resolution>512))
+    throw Error('图像调整采样参数无效');
+  const before=beforeImageLayer===undefined?null:imageLayersBeforeAdjustment(image.layers,beforeImageLayer);
+  if(beforeImageLayer!==undefined&&!before)throw Error('图像调整图层不存在');
 
   const selected=isolatedImageLayer
     ?image.layers.filter(layer=>layer.id===isolatedImageLayer).map(layer=>layer.clipped?{...layer,clipped:false}:layer)
-    :image.layers;
-  let baseVisible=false;
+    :before??image.layers;
   const layers=inspectMask
     ?selected.filter(layer=>layer.id===inspectMask).map(({id,maskBase,maskStrokes,maskGradient})=>({id,maskBase,maskStrokes,...(maskGradient?{maskGradient}:{})}))
-    :selected.filter(layer=>{
-      const visible=layer.visible&&layer.opacity>0;
-      if(!layer.clipped)baseVisible=visible&&layer.kind!=='adjustment';
-      return visible&&(!layer.clipped||baseVisible);
-    });
+    :visibleImageLayers(selected);
   const assetIds=new Set(inspectMask?[]:layers.filter(layer=>layer.kind==='image').map(layer=>layer.asset));
   return {
     paint:{imageDocuments:{[documentId]:{colorSpace:image.colorSpace,layers}}},

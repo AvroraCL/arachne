@@ -16,6 +16,7 @@ import {pauseImageThumbnail,updateImageThumbnail} from './image-layer-thumbnails
 import {createImageGradientTool} from './image-gradient-tool.mjs';
 import {uvShapePayload,maxUVFeather} from './uv-selection-region.mjs';
 import {imageAdjustments,newImageAdjustment,imageBlendGroups} from './image-adjustments.mjs';
+import {createCurveEditor} from './image-curve-editor.mjs';
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 function button(text,action,label=text){const b=el('button','',text);b.type='button';b.onclick=action;b.setAttribute('aria-label',label);b.title=label;return b;}
 function choice(label,items,value,change){const s=el('select');s.setAttribute('aria-label',label);for(const [id,name] of items)s.append(new Option(name,id));s.value=value;s.onchange=()=>change(s.value);return s;}
@@ -519,7 +520,7 @@ export function createImagePanel(type,ctx){
   ctx.root.dataset.layerDomain='image';
   const {host,project}=ctx,tools=el('div','editor-toolbar'),body=el('div','document-panel editor-scroll'),error=el('output','editor-message');host.append(body,error);headerControls(ctx,tools);
   const run=fn=>Promise.resolve().then(fn).catch(e=>{error.textContent=e.message;ctx.error(e);});
-  let adjustmentEditing=null;
+  let adjustmentEditing=null,curveEditor=null,curveChannel=ctx.state?.curveChannel,curveSelection=null;
   function clearAdjustment(owner){
     if(adjustmentEditing?.owner!==owner)return;
     const {origin}=adjustmentEditing;adjustmentEditing=null;
@@ -990,6 +991,23 @@ export function createImagePanel(type,ctx){
     reset.disabled=disabled;
     heading.append(el('strong','',spec.label),reset);section.append(heading);
     const update=(key,value)=>command(project,{action:'updateLayer',layerId:layer.id,patch:{adjustment:{...adjustment,[key]:value}}});
+    if(adjustment.type==='curves'){
+      const origin=imageSelectionOrigin(project),owner={};
+      const operation=points=>({op:'image',action:'updateLayer',documentId:origin.documentId,layerId:layer.id,
+        patch:{adjustment:{type:'curves',points}}});
+      curveEditor=createCurveEditor(section,{layer,image:currentDocument(project),origin,channel:curveChannel,
+        point:curveSelection?.layerId===layer.id?curveSelection.point:null,disabled,
+        onChannel:value=>{curveChannel=value;ctx.onChange?.();},
+        onPoint:point=>{curveSelection={layerId:layer.id,point};},
+        onPreview:points=>{
+          if(!points){clearAdjustment(owner);return;}
+          adjustmentEditing={owner,origin};ctx.imageAdjustment?.(owner,origin,operation(points));
+        },
+        onCommit:points=>run(()=>project.commands([operation(points)],origin)).finally(()=>{key='';sync();})
+      });
+      body.append(section);
+      return;
+    }
     for(const [key,field] of Object.entries(spec.fields)){
       if(field.choices){
         const select=choice(field.label,field.choices,adjustment[key],value=>void run(()=>update(key,value)));
@@ -1037,6 +1055,7 @@ export function createImagePanel(type,ctx){
       }
       clearRows();
       bar=null;
+      curveEditor?.dispose();curveEditor=null;
       body.replaceChildren(el('p','document-muted','没有打开图像文档'));
       return;
     }
@@ -1075,6 +1094,7 @@ export function createImagePanel(type,ctx){
       footerStack=stackActions(layer,index,image.layers.length-1,imageSelectionOrigin(project),canEdit);
       stackButtons.forEach((control,i)=>{control.disabled=!footerStack[i].enabled;});
     }else{
+      curveEditor?.dispose();curveEditor=null;
       body.replaceChildren();
       const layerType={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层'};
       body.append(el('strong','document-properties-heading',c?.target==='mask'?'图层蒙版':layer?layer.text?'文字层':layerType[layer.kind]:'图像文档'));
@@ -1142,11 +1162,12 @@ export function createImagePanel(type,ctx){
   sync();
   return {
     sync,kind:type==='layers'?'imageLayers':'imageProperties',domain:'image',
-    getState:()=>toggle?{layerFilterOpen:filterOpen,layerQuery:search.value,layerKind:kind.value}:{},
+    getState:()=>toggle?{layerFilterOpen:filterOpen,layerQuery:search.value,layerKind:kind.value}:{curveChannel},
     isEditing:()=>!!renaming||!!reorder||!!adjustmentEditing,
     activate(){project.setEditorDomain('image');},
     dispose(){
       disposed=true;
+      curveEditor?.dispose();curveEditor=null;
       if(adjustmentEditing)clearAdjustment(adjustmentEditing.owner);
       unsub();
       thumbnailObserver?.disconnect();

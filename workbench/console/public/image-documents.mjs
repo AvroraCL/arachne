@@ -29,6 +29,20 @@ export function imageClippingBase(layers,index){
   }
   return null;
 }
+export function imageLayersBeforeAdjustment(layers,id){
+  const index=layers.findIndex(layer=>layer.id===id&&layer.kind==='adjustment');
+  if(index<0)return null;
+  const layer=layers[index],base=layer.clipped?imageClippingBase(layers,index):null;
+  return layers.slice(base?layers.indexOf(base):0,index);
+}
+export function visibleImageLayers(layers){
+  let baseVisible=false;
+  return layers.filter(layer=>{
+    const visible=layer.visible&&layer.opacity>0;
+    if(!layer.clipped)baseVisible=visible&&layer.kind!=='adjustment';
+    return visible&&(!layer.clipped||baseVisible);
+  });
+}
 function releaseClipping(layers,index){
   for(let i=index;layers[i]?.clipped;i++)delete layers[i].clipped;
 }

@@ -1,4 +1,5 @@
 """Color transforms and compositing math for editable image layers."""
+from functools import lru_cache
 import numpy as np
 
 
@@ -46,6 +47,8 @@ def neutral_adjustment(params):
     if kind == 'levels':
         return (params['inputBlack'], params['inputWhite'], params['gamma'],
                 params['outputBlack'], params['outputWhite']) == (0, 255, 1, 0, 255)
+    if kind == 'curves':
+        return all(all(x == y for x, y in points) for points in params['points'].values())
     if kind == 'hueSaturation':
         return params['hue'] == params['saturation'] == params['lightness'] == 0
     if kind == 'exposure':
@@ -73,6 +76,37 @@ def _hue_saturation(rgb, params):
     return lightness[:, None] - amplitude[:, None] * np.clip(np.minimum(position - 3, 9 - position), -1, 1)
 
 
+@lru_cache(maxsize=128)
+def curve_lut(points):
+    x, y = np.asarray(points, dtype=np.float64).T
+    dx = np.diff(x)
+    slope = np.diff(y) / dx
+    tangent = np.zeros(len(x))
+    tangent[0], tangent[-1] = slope[0], slope[-1]
+    for i in range(1, len(x)-1):
+        if slope[i-1]*slope[i] > 0:
+            a, b = 2*dx[i]+dx[i-1], dx[i]+2*dx[i-1]
+            tangent[i] = (a+b)/(a/slope[i-1]+b/slope[i])
+    input_values = np.linspace(0, 255, 4096)
+    index = np.clip(np.searchsorted(x, input_values, side='right')-1, 0, len(dx)-1)
+    h = dx[index]
+    t = (input_values-x[index])/h
+    t2, t3 = t*t, t*t*t
+    output = ((2*t3-3*t2+1)*y[index]+(t3-2*t2+t)*h*tangent[index]+
+              (-2*t3+3*t2)*y[index+1]+(t3-t2)*h*tangent[index+1])
+    return np.clip(output/255, 0, 1).astype(np.float32)
+
+
+def apply_curve(values, points):
+    if all(x == y for x, y in points):
+        return values
+    lut = curve_lut(tuple(map(tuple, points)))
+    scaled = np.clip(values, 0, 1)*(len(lut)-1)
+    left = scaled.astype(np.int32)
+    fraction = scaled-left
+    return (lut[left] + fraction*(lut[np.minimum(left+1, len(lut)-1)]-lut[left])).astype(np.float32)
+
+
 def adjust_rgb(rgb, params):
     kind = params['type']
     if kind == 'brightnessContrast':
@@ -88,6 +122,11 @@ def adjust_rgb(rgb, params):
         result = rgb.copy()
         part = result if channel == 'rgb' else result[:, ('red', 'green', 'blue').index(channel)]
         part[:] = out_low + adjusted * (out_high - out_low)
+    elif kind == 'curves':
+        curves = params['points']
+        master = apply_curve(rgb, curves['rgb'])
+        result = np.column_stack([apply_curve(master[:, i], curves[channel])
+                                  for i, channel in enumerate(('red', 'green', 'blue'))])
     elif kind == 'hueSaturation':
         result = _hue_saturation(rgb, params)
     elif kind == 'exposure':
