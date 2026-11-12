@@ -5,6 +5,7 @@ import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startRelease,userRoot} from '../workspace/workbench/console/scripts/release-runtime.mjs';
 import {restoreWindowState} from './window-state.mjs';
+import {downloadTarget} from './download-target.mjs';
 
 const appName='阿拉克涅',projectId=/^[\w-]{1,100}$/;
 const {ClipboardItem}=createRequire(import.meta.url)('electron');
@@ -111,9 +112,37 @@ function configureSession(){
     callback(permission==='clipboard-sanitized-write'&&sameOrigin(details.requestingUrl)));
   desktop.on('will-download',(event,item,contents,frame)=>{
     if(!sameOrigin(frame?.url??contents.getURL())||!sameOrigin(item.getURL())){event.preventDefault();return;}
+    const filename=path.basename(item.getFilename())||'阿拉克涅导出';
+    let preferred=app.getPath('downloads');
+    try{
+      if(typeof state.downloadFolder==='string'&&path.isAbsolute(state.downloadFolder)&&
+         fs.statSync(state.downloadFolder,{throwIfNoEntry:false})?.isDirectory())preferred=state.downloadFolder;
+    }catch{}
+    const options={title:'保存文件',defaultPath:path.join(preferred,filename)};
+    const parent=BrowserWindow.fromWebContents(contents);
+    let target;
+    try{
+      const selected=parent?dialog.showSaveDialogSync(parent,options):dialog.showSaveDialogSync(options);
+      if(!selected){event.preventDefault();return;}
+      target=downloadTarget(selected);
+      item.setSavePath(target.temporary);
+      state.downloadFolder=path.dirname(selected);saveState();
+    }catch(error){event.preventDefault();dialog.showErrorBox('无法准备下载',error.message);return;}
     downloads.add(item);
-    item.setSaveDialogOptions({title:'保存文件'});
-    item.once('done',()=>downloads.delete(item));
+    item.once('done',(_done,result)=>{
+      downloads.delete(item);
+      if(result==='cancelled'){
+        try{fs.rmSync(target.temporary,{force:true});}catch{}
+        return;
+      }
+      try{
+        if(result!=='completed')throw Error('下载未完成');
+        target.finish();
+      }catch(error){
+        const partial=fs.existsSync(target.temporary)?'\n下载内容保存在：\n'+target.temporary:'';
+        dialog.showErrorBox('无法保存导出文件',error.message+partial);
+      }
+    });
   });
 }
 

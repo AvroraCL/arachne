@@ -1,15 +1,69 @@
 import AppKit
+import Darwin
 import Foundation
 import WebKit
+
+struct NativeDownloadTarget {
+    private struct Revision: Equatable {
+        let device: dev_t
+        let inode: ino_t
+        let size: off_t
+        let modifiedSeconds: Int
+        let modifiedNanoseconds: Int
+        let changedSeconds: Int
+        let changedNanoseconds: Int
+    }
+
+    enum TargetError: LocalizedError {
+        case notRegular, changed
+        var errorDescription: String? {
+            switch self {
+            case .notRegular: return "请选择普通文件作为下载目标。"
+            case .changed: return "目标文件在下载期间发生变化。"
+            }
+        }
+    }
+
+    let temporary: URL
+    let destination: URL
+    private let original: Revision?
+
+    init(destination: URL) throws {
+        self.destination = destination
+        original = try Self.revision(destination)
+        temporary = destination.deletingLastPathComponent()
+            .appendingPathComponent(".arachne-\(UUID().uuidString).download")
+    }
+
+    private static func revision(_ file: URL) throws -> Revision? {
+        var info = stat()
+        let result = file.withUnsafeFileSystemRepresentation { name in
+            name.map { lstat($0, &info) } ?? -1
+        }
+        if result != 0 {
+            let code = errno
+            if code == ENOENT { return nil }
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+        guard info.st_mode & S_IFMT == S_IFREG else { throw TargetError.notRegular }
+        return Revision(device: info.st_dev, inode: info.st_ino, size: info.st_size,
+                        modifiedSeconds: info.st_mtimespec.tv_sec, modifiedNanoseconds: info.st_mtimespec.tv_nsec,
+                        changedSeconds: info.st_ctimespec.tv_sec, changedNanoseconds: info.st_ctimespec.tv_nsec)
+    }
+
+    func finish() throws {
+        guard try Self.revision(destination) == original else { throw TargetError.changed }
+        if original != nil {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+        } else {
+            try FileManager.default.moveItem(at: temporary, to: destination)
+        }
+    }
+}
 
 // The workbench continues to use the local project service. WebKit never gets
 // a general-purpose native file or shell bridge.
 final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler {
-    private struct DownloadTarget {
-        let temporary: URL
-        let destination: URL
-        let existed: Bool
-    }
     let window: NSWindow
     private let webView: WKWebView
     private let origin: URL
@@ -18,7 +72,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
     private var recoveryPromptOpen = false
     private var childWindows: [NSWindow] = []
     private var downloads: Set<ObjectIdentifier> = []
-    private var downloadTargets: [ObjectIdentifier: DownloadTarget] = [:]
+    private var downloadTargets: [ObjectIdentifier: NativeDownloadTarget] = [:]
     var onProject: ((String, String) -> Void)?
 
     init(url: URL, autosaveName: String? = "ArachneWorkbench", dataStore: WKWebsiteDataStore = .default()) {
@@ -267,10 +321,15 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
             guard result == .OK, let destination = panel.url else {
                 self.downloads.remove(key); completionHandler(nil); return
             }
-            let temporary = destination.deletingLastPathComponent().appendingPathComponent(".arachne-\(UUID().uuidString).download")
-            self.downloadTargets[key] = DownloadTarget(temporary: temporary, destination: destination,
-                                                       existed: FileManager.default.fileExists(atPath: destination.path))
-            completionHandler(temporary)
+            do {
+                let target = try NativeDownloadTarget(destination: destination)
+                self.downloadTargets[key] = target
+                completionHandler(target.temporary)
+            } catch {
+                self.downloads.remove(key)
+                completionHandler(nil)
+                self.alert("无法准备下载", error.localizedDescription)
+            }
         }
     }
 
@@ -278,16 +337,9 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         let key = ObjectIdentifier(download); downloads.remove(key)
         guard let target = downloadTargets.removeValue(forKey: key) else { return }
         do {
-            let files = FileManager.default
-            if target.existed {
-                guard files.fileExists(atPath: target.destination.path) else { throw CocoaError(.fileNoSuchFile) }
-                _ = try files.replaceItemAt(target.destination, withItemAt: target.temporary)
-            } else {
-                // moveItem refuses to overwrite a file that appeared while downloading.
-                try files.moveItem(at: target.temporary, to: target.destination)
-            }
+            try target.finish()
         } catch {
-            alert("无法保存导出文件", "原文件未被主动删除。下载内容保留在：\n\(target.temporary.path)\n\n\(error.localizedDescription)")
+            alert("无法保存导出文件", "\(error.localizedDescription)\n\n下载内容保留在：\n\(target.temporary.path)")
         }
     }
 

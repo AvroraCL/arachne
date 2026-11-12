@@ -156,21 +156,45 @@ try{
   const archive=await page.request.get(origin+exported.packageUrl);
   assert.equal(archive.status(),200);
   const archiveDigest=createHash('sha256').update(await archive.body()).digest('hex');
-  const saved=path.join(profile,'saved textures.zip');
-  await desktop.evaluate(({session},file)=>{
-    session.defaultSession.once('will-download',(event,item)=>{
-      if(!event.defaultPrevented)item.setSavePath(file);
-    });
+  const saved=path.join(profile,'已导出 贴图.zip');
+  await desktop.evaluate(({dialog},file)=>{
+    globalThis.arachneSaveDialog=dialog.showSaveDialogSync;
+    globalThis.arachneSaveError=dialog.showErrorBox;
+    dialog.showSaveDialogSync=(_window,options)=>{
+      globalThis.arachneDownloadOptions=options;
+      return file;
+    };
   },saved);
-  await page.evaluate(url=>{
+  const download=()=>page.evaluate(url=>{
     const link=document.createElement('a');
     link.href=url;link.download='textures.zip';link.click();
   },exported.packageUrl);
+  await download();
   await waitFor(async()=>{
     const bytes=await fs.readFile(saved).catch(error=>{if(error.code!=='ENOENT')throw error;});
     return bytes&&createHash('sha256').update(bytes).digest('hex')===archiveDigest;
   },'native ZIP download');
-  console.log('PASS native ZIP save dialog and archive hash');
+  assert.equal((await desktop.evaluate(()=>globalThis.arachneDownloadOptions)).title,'保存文件');
+  await desktop.evaluate(({dialog,session})=>{
+    dialog.showErrorBox=(title,detail)=>{globalThis.arachneDownloadError={title,detail};};
+    session.defaultSession.once('will-download',()=>{
+      const fs=process.getBuiltinModule('fs');
+      fs.writeFileSync(globalThis.arachneDownloadDestination,'其他程序刚保存的新内容');
+    });
+  });
+  await desktop.evaluate(file=>{globalThis.arachneDownloadDestination=file;},saved);
+  await download();
+  const conflict=await waitFor(()=>desktop.evaluate(()=>globalThis.arachneDownloadError),'download destination change alert');
+  assert.match(conflict.detail,/目标文件在下载期间发生变化/);
+  assert.equal(await fs.readFile(saved,'utf8'),'其他程序刚保存的新内容');
+  const recovered=(await fs.readdir(profile)).filter(file=>/^\.arachne-.*\.download$/.test(file));
+  assert.equal(recovered.length,1);
+  assert.equal(createHash('sha256').update(await fs.readFile(path.join(profile,recovered[0]))).digest('hex'),archiveDigest);
+  await desktop.evaluate(({dialog})=>{
+    dialog.showSaveDialogSync=globalThis.arachneSaveDialog;
+    dialog.showErrorBox=globalThis.arachneSaveError;
+  });
+  console.log('PASS native ZIP archive hash, Unicode download destination and external edit recovery');
   // A job submitted from a different project is invisible to the open
   // workbench. The native close guard must still check the shared service.
   const other=await read('/api/projects/'+seedId);
