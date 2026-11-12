@@ -221,7 +221,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     if(uvEnabled&&erasing)for(const id of ['surface-paint','surface-mask'])$(id).setAttribute('aria-pressed','false');
     $('surface-sample').hidden=(!sampleAnyLayer&&layer?.kind!=='paint')||state.maskTarget;
     $('surface-sample').disabled=!canSample;
-    if(state.brushColor||layer?.values.color)$('brush-ink-color').value=state.brushColor||layer.values.color;
+    if(state.brushColor||layer?.values?.color)$('brush-ink-color').value=state.brushColor||layer.values.color;
     $('surface-mask').disabled=$('surface-fill').disabled=!writable;
     $('surface-brush').hidden=!brushMode();
     $('surface-material').hidden=mode!=='paint';

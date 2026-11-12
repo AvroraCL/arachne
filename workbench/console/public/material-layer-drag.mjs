@@ -1,7 +1,8 @@
-import {layerChildren,layerLockOwner,layerParent} from './paint-layer-tree.mjs';
+import {hasMaterialMask,layerChildren,layerLockOwner,layerParent} from './paint-layer-tree.mjs';
 import {draggedSmartMaterial,smartMaterialDragType,smartMaterialPlacement} from './smart-material-placement.mjs';
 
 const mime='application/x-arachne-material-layer';
+const maskMime='application/x-arachne-material-mask';
 
 export function materialLayerDrop(layers,ids,targetId,zone){
   const byId=new Map(layers.map(layer=>[layer.id,layer]));
@@ -60,7 +61,16 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,importSma
     const doc=read(),target=doc?.paint.layers.find(layer=>layer.id===id);
     return target&&smartMaterialPlacement(doc.paint.layers,id,dropZone(event,row,target));
   }
-  function bind(handle,row,id,openFolder){
+  function findMaskDrop(event,id){
+    const doc=read(),sourceId=session?.mask;
+    if(!doc||!sourceId||sourceId===id||!canDrag()||!session.source.isConnected||
+       doc.id!==session.origin.id||doc.revision!==session.origin.revision)return null;
+    const layers=doc.paint.layers,target=layers.find(layer=>layer.id===id),source=layers.find(layer=>layer.id===sourceId);
+    const copy=event.altKey;
+    if(!target||!hasMaterialMask(source)||layerLockOwner(layers,target)||!copy&&layerLockOwner(layers,source))return null;
+    return {zone:'mask',operation:{op:'transferMask',id,sourceId,copy}};
+  }
+  function bind(handle,row,id,openFolder,mask){
     handle.ondragstart=event=>{
       const doc=read();
       if(!doc||!handle.draggable||!canDrag()){event.preventDefault();return;}
@@ -77,14 +87,26 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,importSma
       event.dataTransfer.effectAllowed='move';
     };
     handle.ondragend=cancel;
+    if(mask){
+      mask.ondragstart=event=>{
+        const doc=read(),layer=doc?.paint.layers.find(item=>item.id===id);
+        if(!doc||!hasMaterialMask(layer)||!canDrag()){event.preventDefault();return;}
+        cancel();
+        session={origin:{id:doc.id,revision:doc.revision},mask:id,source:row};
+        row.dataset.dragging='';
+        event.dataTransfer.setData(maskMime,id);
+        event.dataTransfer.effectAllowed=layerLockOwner(doc.paint.layers,layer)?'copy':'copyMove';
+      };
+      mask.ondragend=cancel;
+    }
     row.ondragenter=row.ondragover=event=>{
       const smart=event.dataTransfer.types.includes(smartMaterialDragType);
-      const drop=smart?findSmartDrop(event,row,id):findDrop(event,row,id);
+      const drop=smart?findSmartDrop(event,row,id):event.dataTransfer.types.includes(maskMime)?findMaskDrop(event,id):findDrop(event,row,id);
       const valid=smart?!!drop:!!drop?.operation;
       if(marker&&(!valid||marker!==row))clearMarker();
       if(!valid)return;
       event.preventDefault();
-      event.dataTransfer.dropEffect=smart?'copy':'move';
+      event.dataTransfer.dropEffect=smart||drop.operation?.copy?'copy':'move';
       if(row.dataset.layerDrop!==drop.zone)row.dataset.layerDrop=drop.zone;
       marker=row;
     };
@@ -103,7 +125,7 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,importSma
         });
         return;
       }
-      const drop=findDrop(event,row,id);
+      const drop=event.dataTransfer.types.includes(maskMime)?findMaskDrop(event,id):findDrop(event,row,id);
       if(!drop?.operation)return;
       event.preventDefault();
       const {origin}=session;

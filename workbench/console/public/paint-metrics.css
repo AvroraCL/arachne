@@ -65,6 +65,7 @@ body :is(input[type=number],output,.workspace-range-value){font-variant-numeric:
 #workspace:has(#paint-inspector:not([hidden])){--right-track:clamp(var(--side-min),var(--inspector-width,min(27vw,340px)),var(--side-max))}
 #layers{display:grid;gap:4px;margin-block:10px 6px}
 #layers .layer-row{min-height:var(--paint-layer-height);align-items:center;grid-template-columns:30px minmax(0,1fr) 26px 38px;gap:4px}
+#layers .layer-row[data-folder]{grid-template-columns:30px 18px minmax(0,1fr) 26px 38px;column-gap:2px}
 #layers button,#base{font-size:var(--paint-font-ui);min-height:var(--paint-control-height);padding:5px 8px}
 #layers .layer-select{gap:8px;min-height:var(--paint-layer-height);line-height:1.5}
 #layers .layer-thumb{width:28px;height:28px}

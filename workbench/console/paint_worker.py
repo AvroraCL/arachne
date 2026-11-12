@@ -139,7 +139,16 @@ def texture_coords(u, v, tiling):
     x, y = u-.5, v-.5
     repeat = tiling['repeat']
     return ((x*math.cos(angle)+y*math.sin(angle))*repeat+.5+tiling['offsetX'],
-            (-x*math.sin(angle)+y*math.cos(angle))*repeat+.5+tiling['offsetY'])
+            (-x*math.sin(angle)+y*math.cos(angle))*tiling.get('repeatY', repeat)+.5+tiling['offsetY'])
+
+
+def rotated_normal(value, angle):
+    angle = math.radians(angle)
+    x, y = (value[:, :2] - .5).T
+    result = value.copy()
+    result[:, 0] = x*math.cos(angle)+y*math.sin(angle)+.5
+    result[:, 1] = -x*math.sin(angle)+y*math.cos(angle)+.5
+    return result
 
 
 @lru_cache(maxsize=2)
@@ -276,6 +285,23 @@ def mask_effects(coverage, effects, generated, surface, ids):
     return coverage
 
 
+def mask_coverage(prepared, surface, ids, u, v):
+    image, strokes, base, effects, generated = prepared
+    coverage = mask_values(image, strokes, ids, u, v, base)
+    return mask_effects(coverage, effects, generated, surface, ids) if effects else coverage
+
+
+def finish_layer_groups(stack, keep, result, written, surface, ids, u, v):
+    while len(stack) > keep:
+        (_, opacity, mask), backdrop, child_writes = stack.pop()
+        amount = opacity * mask_coverage(mask, surface, ids, u, v)
+        if mask[-1]:
+            child_writes |= np.any(result != backdrop, axis=1)
+        result[:] = backdrop + (result - backdrop) * amount[:, None]
+        parent_writes = stack[-1][2] if stack else written
+        parent_writes |= child_writes & (amount > 0)
+
+
 def composite(cfg, step):
     with MaterialImages(cfg['assets']) as material_images:
         return composite_layers(cfg, step, material_images)
@@ -310,17 +336,39 @@ def composite_layers(cfg, step, material_images):
     layers = []
     fill_graphs = {}
     has_generator = False
-    folder_visibility = {}
+    folder_visibility, folder_scopes = {}, {}
+    inspected_folder = None
     def art(asset, kind):
         return read_art(cfg['assets'][asset],kind,step>=8)
 
+    def prepare_mask(layer, inspection):
+        if not (layer.get('maskEnabled', True) or inspection):
+            return None, None, 1, [], False
+        image = art(layer['mask'], 'mask') if layer.get('mask') else None
+        strokes = surface.mask(layer.get('maskStrokes', []), stroke_sample)
+        effects = [e for e in layer.get('maskEffects', []) if e['enabled'] and e['opacity']]
+        generated = any(e['kind'] in ('height', 'facing', 'edgeWear', 'surfaceNoise') for e in effects)
+        return image, strokes, layer.get('maskBase', 1), effects, generated
+
     for layer in paint['layers']:
-        parent_visible = folder_visibility.get(layer.get('parentId'),not isolated)
+        parent = layer.get('parentId')
+        parent_visible = folder_visibility.get(parent, not isolated)
         visible = layer['id']==isolated or (parent_visible and layer['visible'])
-        if layer['kind']=='group':
-            folder_visibility[layer['id']] = visible
-            continue
         inspection = inspect==layer['id']
+        scopes = folder_scopes.get(parent, ()) if parent_visible else ()
+        if layer['kind']=='group':
+            opacity = layer.get('opacity', 1)
+            folder_visibility[layer['id']] = visible and opacity > 0
+            if inspection or (not inspect and visible and opacity > 0):
+                prepared = prepare_mask(layer, inspection)
+                image, strokes, base, effects, generated = prepared
+                has_generator |= generated
+                if inspection:
+                    inspected_folder = prepared
+                elif opacity != 1 or image is not None or strokes is not None or base != 1 or effects:
+                    scopes += ((layer['id'], opacity, prepared),)
+            folder_scopes[layer['id']] = scopes
+            continue
         if not inspection and (inspect or not visible or not layer['opacity']):
             continue
         opacity = {name: layer.get('channelOpacity', {}).get(name, 1)
@@ -329,18 +377,13 @@ def composite_layers(cfg, step, material_images):
         if not opacity and not inspection:
             continue
         image = art(layer['image'],'decal') if layer['kind']=='decal' else None
-        masking = layer.get('maskEnabled',True) or inspection
-        mask = art(layer['mask'],'mask') if masking and layer['mask'] else None
         material_id = layer.get('materialId')
         maps = {} if material_id else {name: art(asset_id,name) for name,asset_id in layer.get('maps',{}).items() if name in opacity}
         for name,document_id in layer.get('documentMaps',{}).items():
             if name not in opacity:continue
             maps[name]={'document':document_pixels(paint['imageDocuments'][document_id],cfg['assets'],shape[0]),'colorSpace':paint['imageDocuments'][document_id]['colorSpace']}
-        surface_mask = surface.mask(layer.get('maskStrokes',[]),stroke_sample) if masking else None
-        effects = [e for e in layer.get('maskEffects',[]) if e['enabled'] and e['opacity']] if masking else []
-        mask_base = layer.get('maskBase',1) if masking else 1
-        generated = any(e['kind'] in ('height','facing','edgeWear','surfaceNoise') for e in effects)
-        has_generator |= generated
+        mask = prepare_mask(layer, inspection)
+        has_generator |= mask[-1]
         projector = layer.get('projector')
         projection_surface, reference_valid, reference_uv = reference_geometry(layer) if image is not None else (surface,valid,uv)
         projection = projection_surface.project(projector,image.shape) if projector else None
@@ -352,7 +395,7 @@ def composite_layers(cfg, step, material_images):
         strokes = surface.paint(layer.get('strokes',[]),opacity,color,stroke_sample) if layer['kind']=='paint' and not inspection else None
         if material_id and material_id not in fill_graphs and not inspection:
             fill_graphs[material_id] = MaterialGraph(cfg['fillMaterialPlans'][material_id],cfg['assets'],material_images)
-        layers.append((layer,image,mask,maps,opacity,surface_mask,mask_base,effects,generated,projection,canvas_bounds,strokes,reference_valid,reference_uv))
+        layers.append((layer,image,mask,maps,opacity,projection,canvas_bounds,strokes,reference_valid,reference_uv,scopes))
     base = enabled_base(paint)
     graph = MaterialGraph(cfg.get('materialPlan') if not inspect else None,cfg['assets'],material_images)
     combined = np.empty((len(valid),14),dtype=np.uint8)
@@ -364,7 +407,28 @@ def composite_layers(cfg, step, material_images):
         end = min(start+chunk,len(valid))
         base_values = base_material_values(dict(color='#000000',metallic=0,roughness=.5) if inspect else base,color)
         result = np.tile(base_values,(end-start,1))
-        for layer,image,mask,maps,opacity,surface_mask,mask_base,effects,generated,projection,canvas_bounds,strokes,reference_valid,reference_uv in layers:
+        chunk_written = written[start:end]
+        stack = []
+        scope_args = None
+        if inspected_folder is not None:
+            ids = np.arange(start, end)
+            u = (ids%shape[1])/(shape[1]-1)
+            v = 1-(ids//shape[1])/(shape[0]-1)
+            result[:, :3] = decode(mask_coverage(inspected_folder, surface, ids, u, v)[:, None])
+        for layer,image,mask,maps,opacity,projection,canvas_bounds,strokes,reference_valid,reference_uv,scopes in layers:
+            if stack or scopes:
+                if scope_args is None:
+                    ids = np.arange(start, end)
+                    scope_args = (surface, ids, (ids%shape[1])/(shape[1]-1), 1-(ids//shape[1])/(shape[0]-1))
+                common = 0
+                for opened, required in zip(stack, scopes):
+                    if opened[0] is not required:
+                        break
+                    common += 1
+                finish_layer_groups(stack, common, result, chunk_written, *scope_args)
+                for scope in scopes[common:]:
+                    stack.append((scope, result.copy(), np.zeros(end-start, dtype=bool)))
+            layer_writes = stack[-1][2] if stack else chunk_written
             if projection is not None:
                 projected_ids, projected_uv = projection
                 span = at_range(projected_ids,start,end)
@@ -393,9 +457,7 @@ def composite_layers(cfg, step, material_images):
             uu = (ids%shape[1])/(shape[1]-1)
             vv = 1-(ids//shape[1])/(shape[0]-1)
             mask_u,mask_v = (uu,vv) if projection is not None else (u,v)
-            coverage = mask_values(mask,surface_mask,ids,mask_u,mask_v,mask_base)
-            if effects:
-                coverage = mask_effects(coverage,effects,generated,surface,ids)
+            coverage = mask_coverage(mask, surface, ids, mask_u, mask_v)
             if inspect:
                 result[selected,:3] = decode(coverage[:,None])
                 continue
@@ -408,11 +470,15 @@ def composite_layers(cfg, step, material_images):
             else:
                 rgb = color(layer['values']['color'])
             weight *= coverage
-            if image is not None or generated and layer['kind']=='fill':
-                written[ids[weight>0]] = True
+            if image is not None or mask[-1] and layer['kind']=='fill':
+                layer_writes[selected[weight>0]] = True
             material = fill_graphs.get(layer.get('materialId'))
-            material_values = material.evaluate(result[selected],ids,shape[1],shape[0]) if material else None
             tiling=layer.get('tiling')
+            graph_uv = None
+            if material and tiling is not None:
+                gu, gv = texture_coords((ids%shape[1]+.5)/shape[1], 1-(ids//shape[1]+.5)/shape[0], tiling)
+                graph_uv = np.column_stack((gu, 1-gv))
+            material_values = material.evaluate(result[selected],ids,shape[1],shape[0],graph_uv) if material else None
             map_u,map_v=texture_coords(u,v,tiling) if maps else (u,v)
             for name,col in CHANNELS.items():
                 value = rgb if name=='color' else channel_value(name,layer['values'].get(name,DEFAULTS[name]),color)
@@ -428,9 +494,11 @@ def composite_layers(cfg, step, material_images):
                     if name not in RGB:
                         value = value[:,0]
                     channel_weight *= stroke_alpha
-                    written[ids[channel_weight>0]] = True
+                    layer_writes[selected[channel_weight>0]] = True
                 elif material_values is not None:
                     value = material_values[:,col]
+                    if name=='normal' and tiling and tiling['rotation']:
+                        value = rotated_normal(value, tiling['rotation'])
                     overlay=maps.get(name)
                     if isinstance(overlay,dict):
                         drawing,alpha=sample_document(overlay['document'],u,v,name,linear=overlay['colorSpace']=='linear')
@@ -442,11 +510,15 @@ def composite_layers(cfg, step, material_images):
                         value,document_alpha=sample_document(texture['document'],map_u,map_v,name,repeat=tiling is not None,linear=texture['colorSpace']=='linear')
                         channel_weight*=document_alpha
                     else:value = sample(texture,map_u,map_v,repeat=tiling is not None)
+                    if name=='normal' and tiling and tiling['rotation']:
+                        value = rotated_normal(value, tiling['rotation'])
                 blend = layer.get('blend','normal') if name=='color' else layer.get('channelBlend',{}).get(name,'normal')
                 if blend!='normal':
                     value = blend_channel(backdrop,value,blend)
                 alpha = channel_weight[:,None] if name in RGB else channel_weight
                 result[selected,col] = backdrop*(1-alpha)+value*alpha
+        if stack:
+            finish_layer_groups(stack, 0, result, chunk_written, *scope_args)
         if graph.plan:
             if '_graphPaint' in cfg:
                 original = result.copy()

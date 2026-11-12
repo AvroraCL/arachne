@@ -61,10 +61,11 @@ class MaterialGraph:
                 asset = node['params']['asset']
                 self.images[asset] = cache.load(asset)
 
-    def evaluate(self, paint, indices, width, height):
+    def evaluate(self, paint, indices, width, height, uv=None):
         if not self.plan:
             return paint
-        uv = np.stack(((indices % width + .5) / width, (indices // width + .5) / height), axis=-1)
+        if uv is None:
+            uv = np.stack(((indices % width + .5) / width, (indices // width + .5) / height), axis=-1)
         values = {}
         def rgb(text):
             return decode(np.array(list(bytes.fromhex(text[1:])), dtype=np.float32) / 255)

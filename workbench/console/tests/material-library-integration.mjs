@@ -9,6 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from 'playwright-core';
 import {pythonExecutable} from '../python-runtime.mjs';
 import {newMaskEffect} from '../public/paint-mask-effects.mjs';
+import {mappedLibraryMaterial} from '../public/paint-library-maps.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const data=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-material-library-'));
@@ -67,6 +68,8 @@ try{
     'print(json.dumps(files))'
   ].join('\n')],{encoding:'utf8',maxBuffer:2*1024*1024}));
   const packedPage=await browser.newPage({viewport:{width:1100,height:700}});
+  const pageErrors=[];
+  packedPage.on('pageerror',error=>pageErrors.push(error.message));
   await packedPage.goto(origin+'/?project='+packProject.id);
   await packedPage.locator('[data-area-mode=material]').click();
   await packedPage.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});
@@ -324,6 +327,182 @@ try{
     returnedView.camera[key].forEach((value,index)=>assert.ok(Math.abs(value-zoomed.camera[key][index])<1e-7));
   console.log('PASS independent camera framing and camera restoration across projects');
 
+  const maskingProject=await api('/api/projects',{workflowType:'pbr_paint',modelTemplate:'plane',name:'材质文件夹蒙版'});
+  const maskingRoute='/api/projects/'+maskingProject.id,maskingPaint=maskingRoute+'/paint';
+  const outer=await api(maskingPaint+'/commands',{revision:maskingProject.revision,operations:[
+    {op:'base',patch:{color:'#000000',roughness:.2}},
+    {op:'add',kind:'group',patch:{name:'外壳涂层'}}
+  ]});
+  const folder=outer.paint.layers[0];
+  const inside=await api(maskingPaint+'/commands',{revision:outer.revision,operations:[
+    {op:'add',kind:'fill',parentId:folder.id,patch:{name:'粗糙度底层',channels:{color:false,roughness:true,metallic:false},
+      values:{color:'#000000',roughness:.6,metallic:0}}},
+    {op:'add',kind:'group',parentId:folder.id,patch:{name:'局部反光',opacity:.5}}
+  ]});
+  const inner=inside.paint.layers.find(layer=>layer.name==='局部反光');
+  const maskSeed=await api(maskingPaint+'/commands',{revision:inside.revision,operations:[
+    {op:'add',kind:'fill',parentId:inner.id,patch:{name:'白色面漆',channels:{color:true,roughness:true,metallic:false},
+      values:{color:'#ffffff',roughness:1,metallic:0}}}
+  ]});
+  const maskPng=execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import base64,io','from PIL import Image',
+    'im=Image.new("L",(32,32),0);im.paste(255,(0,0,32,16))',
+    'out=io.BytesIO();im.save(out,format="PNG");print(base64.b64encode(out.getvalue()).decode())'
+  ].join('\n')],{encoding:'utf8'}).trim();
+  const bitmap=await api(maskingPaint+'/assets',{revision:maskSeed.revision,maskLayerId:inner.id,name:'顶部范围.png',data:maskPng});
+  await packedPage.goto(origin+'/?project='+maskingProject.id);
+  await packedPage.locator('[data-area-mode=material]').click();
+  const outerRow=packedPage.locator('[data-layer-id="'+folder.id+'"]');
+  const outerMask=outerRow.getByRole('button',{name:'绘制蒙版 · 外壳涂层',exact:true});
+  assert.equal(await outerMask.count(),0);
+  await outerRow.locator('.layer-select').click({button:'right'});
+  await packedPage.getByRole('menuitem',{name:'添加黑色蒙版',exact:true}).click();
+  await outerMask.waitFor();
+  const addedMask=await until(async()=>{
+    const doc=await api(maskingRoute);
+    return doc.paint.layers[0].maskEnabled&&doc;
+  },'create a folder mask from its context menu');
+  assert.equal(addedMask.revision,bitmap.document.revision+1);
+  assert.equal(addedMask.paint.layers[0].maskBase,0);
+  const groupMask=await api(maskingPaint+'/commands',{revision:addedMask.revision,operations:[
+    {op:'stroke',id:folder.id,target:'mask',stroke:{uv:true,rect:[0,0,.5,1],value:1,opacity:1}},
+    {op:'update',id:folder.id,patch:{opacity:.5}}
+  ]});
+  await packedPage.reload();
+  await sourceView.waitFor();
+  await outerMask.click({modifiers:['Alt']});
+  await packedPage.locator('.editor-viewport[data-material-inspection=mask]').first().waitFor();
+  const titleBox=await outerRow.locator('.layer-select').boundingBox();
+  const maskBox=await outerMask.boundingBox();
+  assert.ok(titleBox.width>65&&maskBox.x>titleBox.x&&Math.abs(maskBox.y-titleBox.y)<5);
+  await packedPage.screenshot({path:path.join(data,'material-folder-mask.png')});
+  const inspected=await fetch(origin+maskingPaint+'/live',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({revision:groupMask.revision,inspectMask:folder.id,resolution:256,format:'pbr8'})});
+  assert.equal(inspected.status,200);
+  const maskBytes=Buffer.from(await inspected.arrayBuffer());
+  assert.equal(maskBytes[(128*256+64)*15],255);
+  assert.equal(maskBytes[(128*256+192)*15],0);
+  await outerMask.click({modifiers:['Alt']});
+  const folderPreview=await job(maskingRoute,'preview',{revision:groupMask.revision,requestId:'folder-mask-4k'});
+  const folderMaps=await Promise.all([folderPreview.colorUrl,folderPreview.materialUrls.roughness].map(async(url,i)=>{
+    const target=path.join(data,'folder-mask-'+i+'.png');
+    await fs.writeFile(target,Buffer.from(await (await fetch(origin+url)).arrayBuffer()));
+    return target;
+  }));
+  const folderPixels=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import json,sys','from PIL import Image','points=((1024,1024),(1024,3072),(3072,1024))',
+    'print(json.dumps([[[*im.size],[im.getpixel(p) for p in points]] for im in map(Image.open,sys.argv[1:])]))'
+  ].join('\n'),...folderMaps],{encoding:'utf8'}));
+  assert.deepEqual(folderPixels,[[[4096,4096],[[137,137,137],[0,0,0],[0,0,0]]],[[4096,4096],[128,102,51]]]);
+  await outerMask.click({modifiers:['Shift']});
+  const disabled=await until(async()=>{
+    const doc=await api(maskingRoute);return doc.paint.layers[0].maskEnabled===false&&doc;
+  },'temporarily disable a folder mask');
+  assert.equal(disabled.paint.layers[0].maskStrokes.length,1);
+  const undoMask=await api(maskingPaint+'/undo',{revision:disabled.revision});
+  assert.deepEqual(undoMask.paint,groupMask.paint);
+  const maskBackup=await job(maskingRoute,'backup',{revision:undoMask.revision,requestId:'folder-mask-backup'});
+  const restoredMask=await fetch(clean+'/api/projects/paint-import',{method:'POST',headers:{'Content-Type':'application/zip'},
+    body:await (await fetch(origin+maskBackup.archiveUrl)).arrayBuffer()});
+  const restoredFolder=await restoredMask.json();
+  assert.equal(restoredMask.status,201,JSON.stringify(restoredFolder));
+  assert.deepEqual(restoredFolder.paint.layers,groupMask.paint.layers);
+  console.log('PASS nested material folder masks, color and roughness at 4K, mask inspection, disable, undo and clean restore');
+
+  await packedPage.setViewportSize({width:1100,height:940});
+  await packedPage.reload();
+  const maskTarget=packedPage.locator('[data-layer-id="'+inside.paint.layers.find(layer=>layer.name==='粗糙度底层').id+'"]');
+  const targetMask=maskTarget.getByRole('button',{name:'绘制蒙版 · 粗糙度底层',exact:true});
+  await outerMask.waitFor();
+  await packedPage.keyboard.down('Alt');
+  await outerMask.dragTo(maskTarget.locator('.layer-select'));
+  await packedPage.keyboard.up('Alt');
+  await targetMask.waitFor();
+  const copiedMask=await api(maskingRoute);
+  const targetId=await maskTarget.getAttribute('data-layer-id');
+  const maskedTarget=copiedMask.paint.layers.find(layer=>layer.id===targetId);
+  assert.deepEqual(maskedTarget.maskStrokes,groupMask.paint.layers[0].maskStrokes);
+  assert.equal(maskedTarget.opacity,1);
+  assert.deepEqual(copiedMask.paint.layers[0],groupMask.paint.layers[0]);
+  const innerRow=packedPage.locator('[data-layer-id="'+inner.id+'"]');
+  await targetMask.dragTo(innerRow.locator('.layer-select'));
+  const movedMask=await until(async()=>{
+    const doc=await api(maskingRoute);
+    return doc.paint.layers.find(layer=>layer.id===inner.id).maskStrokes?.length===1&&doc;
+  },'moving a material mask over the previous bitmap');
+  assert.equal(movedMask.paint.layers.find(layer=>layer.id===targetId).maskEnabled,undefined);
+  await innerRow.locator('.layer-mask').click({button:'right'});
+  await packedPage.getByRole('menuitem',{name:'删除蒙版',exact:true}).click();
+  const deletedMask=await until(async()=>{
+    const doc=await api(maskingRoute);
+    return doc.paint.layers.find(layer=>layer.id===inner.id).maskEnabled===undefined&&doc;
+  },'removing the selected material mask');
+  const undeleted=await api(maskingPaint+'/undo',{revision:deletedMask.revision,steps:2});
+  assert.deepEqual(undeleted.paint.layers,copiedMask.paint.layers);
+  console.log('PASS material mask drag copy and move across folders, replacement, deletion and multi-step undo');
+
+  const tiled=await api('/api/projects',{workflowType:'pbr_paint',modelTemplate:'plane',name:'库材质 UV 平铺'});
+  const tiledRoute='/api/projects/'+tiled.id,tiledPaint=tiledRoute+'/paint';
+  const pattern=execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import base64,io','from PIL import Image','im=Image.new("RGB",(32,32))',
+    'for x,y,color in ((0,0,"red"),(16,0,"lime"),(0,16,"blue"),(16,16,"yellow")): im.paste(color,(x,y,x+16,y+16))',
+    'out=io.BytesIO();im.save(out,format="PNG");print(base64.b64encode(out.getvalue()).decode())'
+  ].join('\n')],{encoding:'utf8'}).trim();
+  const patternUpload=await api(tiledPaint+'/assets',{revision:tiled.revision,name:'四色标记.png',data:pattern});
+  const normalUpload=await api(tiledPaint+'/assets',{revision:patternUpload.document.revision,name:'切线法线.png',data:packedFiles['蓝钢_Normal.png']});
+  const tiledGraph=mappedLibraryMaterial({color:patternUpload.asset.id,normal:normalUpload.asset.id},normalUpload.document.paint.assets,{normalFormat:'directx'});
+  const tilingSeed=await api(tiledPaint+'/commands',{revision:normalUpload.document.revision,operations:[
+    {op:'library',library:'materials',id:'pattern',action:'create',patch:{name:'四色材质',graph:tiledGraph}},
+    {op:'add',kind:'fill',patch:{name:'四色填充',materialId:'pattern',channels:{color:true,normal:true,roughness:true,metallic:true}}},
+    {op:'image',action:'create',documentId:'center',patch:{name:'固定在 UV 中心的标记'}},
+    {op:'image',action:'addLayer',documentId:'center',layerId:'center-pixels',kind:'pixel'},
+    {op:'image',action:'stroke',documentId:'center',layerId:'center-pixels',target:'pixels',
+      stroke:{uv:true,rect:[.42,.42,.58,.58],color:'#aa55ff',opacity:1,erase:false}}
+  ]});
+  const targetFill=tilingSeed.paint.layers[0];
+  await api(tiledPaint+'/commands',{revision:tilingSeed.revision,operations:[
+    {op:'image',action:'bind',documentId:'center',materialLayerId:targetFill.id,channel:'color'}
+  ]});
+  await packedPage.goto(origin+'/?project='+tiled.id);
+  await packedPage.locator('[data-area-mode=material]').click();
+  await packedPage.getByRole('button',{name:'四色填充',exact:true}).click();
+  const tilingPanel=packedPage.locator('details[data-property-section=uv]').filter({visible:true}).first();
+  if(await tilingPanel.getAttribute('open')===null)await tilingPanel.locator('summary').click();
+  await tilingPanel.getByRole('checkbox',{name:'重复平铺',exact:true}).check();
+  await tilingPanel.getByRole('checkbox',{name:'独立控制 X / Y',exact:true}).check();
+  for(const [label,value,key] of [['横向重复','2','repeat'],['旋转角度','90','rotation']]){
+    await tilingPanel.locator('xpath=ancestor::form[@aria-busy="false"]').waitFor();
+    const input=tilingPanel.getByRole('spinbutton',{name:label,exact:true});
+    await input.fill(value);
+    await input.press('Tab');
+    await until(async()=>(await api(tiledRoute)).paint.layers[0].tiling?.[key]===Number(value),label+'已保存');
+  }
+  const turned=await api(tiledRoute);
+  assert.deepEqual(turned.paint.layers[0].tiling,{repeat:2,repeatY:1,rotation:90,offsetX:0,offsetY:0});
+  assert.deepEqual(turned.paint.materials,tilingSeed.paint.materials);
+  await packedPage.reload();
+  await packedPage.getByRole('button',{name:'四色填充',exact:true}).click();
+  assert.equal(await tilingPanel.getByRole('spinbutton',{name:'旋转角度',exact:true}).inputValue(),'90');
+  await sourceView.waitFor();
+  await packedPage.locator('.editor-viewport[data-rendered-paint-revision="'+turned.revision+'"]').first().waitFor();
+  await packedPage.screenshot({path:path.join(data,'material-instance-tiling.png')});
+  const turnedBake=await job(tiledRoute,'preview',{revision:turned.revision,requestId:'tiled-material-4k'});
+  const turnedMaps=await Promise.all([turnedBake.colorUrl,turnedBake.materialUrls.normal].map(async(url,index)=>{
+    const file=path.join(data,'turned-'+index+'.png');
+    await fs.writeFile(file,Buffer.from(await (await fetch(origin+url)).arrayBuffer()));
+    return file;
+  }));
+  const turnedPixels=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import json,sys','from PIL import Image','points=((1024,409),(3072,409),(1024,1433),(3072,1433),(2048,2048))',
+    'print(json.dumps([[im.getpixel(p) for p in points] for im in map(Image.open,sys.argv[1:])]))'
+  ].join('\n'),...turnedMaps],{encoding:'utf8'}));
+  assert.deepEqual(turnedPixels[0],[[255,255,0],[0,255,0],[0,0,255],[255,0,0],[170,85,255]]);
+  assert.ok(turnedPixels[1].every(([x,y,z])=>x===204&&Math.abs(y-128)<=1&&z===230));
+  const untilted=await api(tiledPaint+'/undo',{revision:turned.revision});
+  assert.equal(untilted.paint.layers[0].tiling.rotation,0);
+  console.log('PASS independent UV tiling on a library material, rotated normal, fixed drawing overlay and undo');
+
+  assert.deepEqual(pageErrors,[]);
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
 }finally{
   await browser?.close();

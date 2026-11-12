@@ -50,7 +50,7 @@ import {setupPaintSettings} from './paint-settings.mjs';
 import {enhanceSelectMenu,setSelectValue,syncSelectMenu} from './paint-select.mjs';
 import {scrubNumber} from './studio-fields.mjs';
 import {decorateWorkspaceButtons,workspaceIcons} from './workspace-icons.mjs';
-import {layerParent,layerChildren,layerIsVisible,layerLockOwner,materialLayerRows} from './paint-layer-tree.mjs';
+import {layerParent,layerChildren,layerIsVisible,layerLockOwner,materialLayerRows,hasMaterialMask as hasLayerMask} from './paint-layer-tree.mjs';
 import {createMaterialLayerDrag} from './material-layer-drag.mjs';
 import {navigationCommand,projectionCamera} from './viewport-navigation.mjs';
 import {canvasZoomPercent,canvasScale,zoomCanvas,resizeCanvas} from './paint-canvas-navigation.mjs';
@@ -107,18 +107,24 @@ const materialLayerDrag=createMaterialLayerDrag({
 });
 function syncBusyControls(){
   libraryUI?.sync();shaderEditor?.sync();historyPanel?.sync();areaSystem?.busyChanged();taskMonitor?.sync();
+  for(const form of document.querySelectorAll('form[data-material-properties]'))syncPropertySaving(form);
   $('open-settings').disabled=busy;
   for(const control of $('empty').querySelectorAll('button'))control.disabled=busy;
   for(const control of [...areaButtons,$('upload')])control.disabled=busy||!doc;
   for(const control of addLayerControls)control.disabled=busy||!canAddLayer();
   renderDrawingLayerSettings();
 }
+function syncPropertySaving(form){
+  form.inert=busy;
+  form.setAttribute('aria-busy',String(busy));
+}
 function renderDrawingLayerSettings(){
   const item=doc&&selection.size===1?layer():null;
   const channel=$('layer-channel').value,blendChannel=channel||'color';
-  const available=!!item&&item.kind!=='group'&&!lockOwner(item)&&!busy&&!uvSelection.isTransforming()&&!surfaceTools.isEditing();
+  const available=!!item&&!lockOwner(item)&&!busy&&!uvSelection.isTransforming()&&!surfaceTools.isEditing();
   const blend=$('drawing-layer-blend'),opacity=$('drawing-layer-opacity');
-  blend.disabled=opacity.disabled=!available||!!channel&&!item?.channels?.[channel];
+  opacity.disabled=!available||!!channel&&!item?.channels?.[channel];
+  blend.disabled=opacity.disabled||item?.kind==='group';
   const blendMode=layerChannelBlend(item,blendChannel);
   if(blend.dataset.channel!==blendChannel){
     blend.dataset.channel=blendChannel;
@@ -284,8 +290,7 @@ function selectMaterialLayerById(id,event){
   render(true);
   areaSystem?.materialSelectionChanged();
 }
-function inspectedMask(){return inspectMask&&layer()?.kind!=='group'?layer():null;}
-const hasLayerMask=l=>Boolean(l.mask||l.maskBase===0||l.maskStrokes?.length||l.maskEffects?.length||typeof l.maskEnabled==='boolean');
+function inspectedMask(){return inspectMask?layer():null;}
 function renderPaintColors(){
   const target=paintTarget==='mask'?'mask':'paint',pair=paintColors.pair(target);
   for(const slot of ['foreground','background']){
@@ -350,6 +355,11 @@ function field(text,type,value,change,options={}){
   else {input.type=type;if(type==='number')Object.assign(input,{step:'any',...attributes});}
   if(type==='checkbox')input.checked=value;else input.value=value??'';
   const currentValue=()=>type==='checkbox'?input.checked:type==='number'?input.valueAsNumber:input.value;
+  const restoreValue=()=>{
+    if(type==='checkbox')input.checked=value;
+    else input.value=value??'';
+    if(type==='select')syncSelectMenu(input);
+  };
   const snapshot=previewOperation?{projectId:doc.id,revision:doc.revision}:null;
   const isCurrent=()=>doc?.id===snapshot.projectId&&doc.revision===snapshot.revision&&input.isConnected;
   function draft(){
@@ -365,7 +375,7 @@ function field(text,type,value,change,options={}){
   }
   input.onchange=()=>{
     if(snapshot&&(!isCurrent()||uvSelection.isTransforming())){
-      input.value=value;
+      restoreValue();
       if(propertyDraft===input)clearPropertyDraft();
       return;
     }
@@ -377,11 +387,14 @@ function field(text,type,value,change,options={}){
           await api('/api/projects/'+projectId+'/paint/commands',{revision,operations:[previewOperation(next)]});
         }else await change(next);
       }catch(error){
-        if(snapshot||type==='number')input.value=value;
+        restoreValue();
         if(propertyDraft===input)clearPropertyDraft();
         throw error;
       }
-    }).then(ok=>{if(!ok&&propertyDraft===input)clearPropertyDraft();});
+    }).then(ok=>{
+      if(!ok&&input.isConnected)restoreValue();
+      if(!ok&&propertyDraft===input)clearPropertyDraft();
+    });
   };
   if(snapshot){
     input.oninput=draft;
@@ -478,7 +491,7 @@ const surfaceTools=createSurfaceTools({viewport,host:$('viewport'),uvHost:$('uv-
   context:()=>{
     const selected=doc&&selection.size===1?layer():null;
     const enabled=!!liveContext()&&!busy&&!maskEditor.isOpen()&&!$('delivery-dialog').open;
-    return {layer:selected&&selected.kind!=='group'?{...selected,visible:layerIsVisible(doc.paint.layers,selected),
+    return {layer:selected?{...selected,visible:layerIsVisible(doc.paint.layers,selected),
       locked:!!lockOwner(selected),projectionCurrent:projectionIsCurrent(doc,selected)}:null,
       id:doc?.id,revision:doc?.revision,
       brushColor:workArea==='drawing'?paintColors.pair('paint').foreground:undefined,
@@ -530,7 +543,7 @@ const uvSelection=createUVSelection({
     return {active,interactive,id:selectedLayer?.id,projectId:doc?.id,revision:doc?.revision,image,
       maskInspection:inspectMask,canTransform:editable&&!inspectMask&&(painted||!!image),
       canClear:editable&&!inspectMask&&painted,
-      canFillMaterial:editable&&!inspectMask&&selectedLayer.kind==='paint',canFillMask:editable&&selectedLayer.kind!=='group'};
+      canFillMaterial:editable&&!inspectMask&&selectedLayer.kind==='paint',canFillMask:editable};
   },
   activate:()=>{
     if(!doc||workArea!=='drawing'||busy||surfaceTools.isEditing()||maskEditor.isOpen())return false;
@@ -587,7 +600,7 @@ function editTextLayer(layer){
 function activateSurface(mode){
   if(selection.size>1&&['paint','mask','fill','sample'].includes(mode))return;
   if(surfaceTools.isEditing()||mode==='sample'&&(layer()?.kind!=='paint'||paintTarget==='mask'))return;
-  if(layer()?.kind==='group'&&['paint','mask','fill'].includes(mode))return;
+  if(layer()?.kind==='group'&&mode==='paint')return;
   if(workArea==='modeling'||(workArea==='drawing'&&['place','fill'].includes(mode)))return;
   if(['mask','fill'].includes(mode)&&layer()&&!hasLayerMask(layer())){void selectMaskTarget(layer(),{mode});return;}
   if(['mask','fill'].includes(mode))paintTarget='mask';
@@ -609,7 +622,7 @@ for(const tool of ['orbit','paint','mask','fill','sample'])$('surface-'+tool).on
 $('surface-paint').onclick=()=>chooseBrush(false);
 $('uv-eraser-tool').onclick=()=>chooseBrush(true);
 function chooseBrush(erase){
-  if(!doc||busy||!(layer()?.kind==='paint'||paintTarget==='mask'&&layer()?.kind!=='group')||surfaceTools.isEditing()||uvSelection.isDragging())return;
+  if(!doc||busy||!(layer()?.kind==='paint'||paintTarget==='mask'&&layer())||surfaceTools.isEditing()||uvSelection.isDragging())return;
   $('brush-erase').checked=erase;
   activateSurface(paintTarget==='mask'?'mask':'paint');
 }
@@ -685,6 +698,7 @@ function propertyImage(assetId){
   control.append(thumbnail,text);return control;
 }
 function renderProperties(form=$('properties'),scope=null){
+  form.dataset.materialProperties='';syncPropertySaving(form);
   if(!scope||form.contains(propertyDraft))clearPropertyDraft();
   const scoped=scope!==null,l=scoped?doc.paint.layers.find(item=>item.id===scope.layerId):layer();
   if(scoped&&(scope.projectId!==doc.id||scope.layerId!=null&&!l)){
@@ -720,11 +734,28 @@ function renderProperties(form=$('properties'),scope=null){
     type:maskTarget?'蒙版':({fill:'填充',paint:'绘制',decal:'投影',group:'文件夹'}[l?.kind]||'填充'),
     icon:maskTarget?'mask':({paint:'brush',decal:'image',group:'fillLayer'}[l?.kind]||'fillLayer'),
     scope:undefined});
+  function addMaskProperties(){
+    const mask=propertySection(form,maskTarget?'mask-edit':'mask','蒙版',{open:maskTarget,hint:hasLayerMask(l)?'已添加':undefined});
+    mask.append(field('灰度蒙版','select',l.mask,mask=>editTarget({mask:mask||null}),{choices:[['','无'],...choices]}));
+    if(!l.mask)mask.append(field('蒙版底色','select',String(l.maskBase??1),value=>editTarget({maskBase:Number(value)}),
+      {choices:[['1','白色 · 显示'],['0','黑色 · 遮盖']]}));
+    if(hasLayerMask(l))mask.append(field('使用蒙版','checkbox',l.maskEnabled!==false,maskEnabled=>editTarget({maskEnabled})));
+    mask.append(button('编辑图片蒙版…',()=>maskEditor.open(maskOptions(l))));
+    mask.append(localButton(areaSystem?'在三维视口中绘制蒙版':workArea==='drawing'?'在画布上绘制蒙版':'在模型上绘制蒙版',()=>{
+      ensureSelected();
+      if(!busy&&!maskEditor.isOpen()){activateSurface('mask');areaSystem?.maskTarget();}
+    }));
+    mask.append(renderMaskEffects(l,editTarget));
+  }
   if(l?.kind==='group'){
-    const general=propertySection(form,'folder','文件夹设置');
-    const visibility=field('显示文件夹','checkbox',l.visible,visible=>editTarget({visible}));
-    visibility.dataset.lockAction='visibility';
-    general.append(field('名称','text',l.name,name=>editTarget({name})),visibility);
+    if(!maskTarget){
+      const general=propertySection(form,'folder','文件夹设置');
+      const visibility=field('显示文件夹','checkbox',l.visible,visible=>editTarget({visible}));
+      visibility.dataset.lockAction='visibility';
+      general.append(field('名称','text',l.name,name=>editTarget({name})),visibility,
+        liveField('文件夹不透明度','number',l.opacity??1,opacity=>({opacity}),{min:0,max:1}));
+    }
+    addMaskProperties();
     propertySection(form,'actions','图层操作',{open:false}).append(actionBar());
     renderPropertyLock(form,l||null,scoped?1:selection.size);
     return;
@@ -840,26 +871,24 @@ function renderProperties(form=$('properties'),scope=null){
       projection.append(liveField(label,'number',l[key],value=>({[key]:value}),range));
     }
   }
-  if(!maskTarget&&l.kind==='fill'&&!l.materialId&&(Object.keys(l.maps||{}).length||Object.keys(l.documentMaps||{}).length)){
+  if(!maskTarget&&l.kind==='fill'&&(l.materialId||Object.keys(l.maps||{}).length||Object.keys(l.documentMaps||{}).length)){
     const tiling=l.tiling||{repeat:1,rotation:0,offsetX:0,offsetY:0};
-    const group=propertySection(form,'uv','UV 平铺');
+    const group=propertySection(form,'uv','UV 平铺',{open:!!l.tiling});
     group.append(field('重复平铺','checkbox',!!l.tiling,enabled=>editTarget({tiling:enabled?tiling:null})));
-    if(l.tiling)for(const [key,label,min,max] of [
-      ['repeat','重复次数',1,32],['rotation','旋转角度',-360,360],
-      ['offsetX','横向偏移',-1,1],['offsetY','纵向偏移',-1,1]
-    ])group.append(field(label,'number',tiling[key],value=>editTarget({tiling:{...tiling,[key]:value}}),{min,max}));
+    if(l.tiling){
+      const separate=tiling.repeatY!==undefined;
+      group.append(field('独立控制 X / Y','checkbox',separate,enabled=>{
+        const {repeatY,...common}=tiling;
+        return editTarget({tiling:enabled?{...common,repeatY:tiling.repeat}:common});
+      }));
+      for(const [key,label,min,max,speed] of [
+        ['repeat',separate?'横向重复':'重复次数',.05,32,.035],
+        ...(separate?[['repeatY','纵向重复',.05,32,.035]]:[]),
+        ['rotation','旋转角度',-360,360,.5],['offsetX','横向偏移',-1,1,.008],['offsetY','纵向偏移',-1,1,.008]
+      ])group.append(liveField(label,'number',tiling[key],value=>({tiling:{...tiling,[key]:value}}),{min,max,dragSpeed:speed}));
+    }
   }
-  const mask=propertySection(form,maskTarget?'mask-edit':'mask','蒙版',{open:maskTarget,hint:hasLayerMask(l)?'已添加':undefined});
-  mask.append(field('灰度蒙版','select',l.mask,mask=>editTarget({mask:mask||null}),{choices:[['','无'],...choices]}));
-  if(!l.mask)mask.append(field('蒙版底色','select',String(l.maskBase??1),value=>editTarget({maskBase:Number(value)}),
-    {choices:[['1','白色 · 显示'],['0','黑色 · 遮盖']]}));
-  if(hasLayerMask(l))mask.append(field('使用蒙版','checkbox',l.maskEnabled!==false,maskEnabled=>editTarget({maskEnabled})));
-  mask.append(button('编辑图片蒙版…',()=>maskEditor.open(maskOptions(l))));
-  mask.append(localButton(areaSystem?'在三维视口中绘制蒙版':workArea==='drawing'?'在画布上绘制蒙版':'在模型上绘制蒙版',()=>{
-    ensureSelected();
-    if(!busy&&!maskEditor.isOpen()){activateSurface('mask');areaSystem?.maskTarget();}
-  }));
-  mask.append(renderMaskEffects(l,editTarget));
+  addMaskProperties();
   propertySection(form,'actions','图层操作',{open:false}).append(actionBar());
   renderPropertyLock(form,l||null,scoped?1:selection.size);
 }
@@ -966,7 +995,7 @@ function syncLayerSelection(){
   maskThumbnails.sync();
 }
 async function selectMaskTarget(item,{altKey=false,mode='mask'}={}){
-  if(!item||item.kind==='group'||busy||workArea==='modeling'&&!areaSystem||maskEditor.isOpen()||surfaceTools.isEditing()||uvSelection.isTransforming())return;
+  if(!item||busy||workArea==='modeling'&&!areaSystem||maskEditor.isOpen()||surfaceTools.isEditing()||uvSelection.isTransforming())return;
   if(!hasLayerMask(item)){
     if(altKey||lockOwner(item))return;
     if(!await run(()=>command([{op:'update',id:item.id,patch:{maskEnabled:true,maskBase:item.maskBase??1}}])))return;
@@ -1087,7 +1116,7 @@ function renderLayer(l,depth,channel,filtering){
     const thumbnail=element(l.kind==='decal'?'img':'span');
     thumbnail.className='layer-thumb';
     if(l.kind==='decal'){thumbnail.src=route()+'/assets/'+l.image;thumbnail.alt='';}
-    else if(folder){thumbnail.classList.add('folder-thumb');thumbnail.textContent='▰';}
+    else if(folder){thumbnail.classList.add('folder-thumb');thumbnail.innerHTML=workspaceIcons.folder;}
     else if(l.kind==='paint'||l.materialId){const canvas=element('canvas');canvas.width=canvas.height=64;canvas.dataset.layerPreview='';canvas.setAttribute('aria-hidden','true');thumbnail.append(canvas);}
     else thumbnail.style.background=l.values.color;
     const title=element('span',l.name);title.className='layer-title';
@@ -1096,6 +1125,7 @@ function renderLayer(l,depth,channel,filtering){
       ?(l.channels?.[channel]?names[channel]+' · '+Number(((l.channelOpacity?.[channel]??1)*100).toFixed(2))+'%':names[channel]+' · 未启用')
       :'双击名称重命名 · ⌘ / Ctrl 多选 · Shift 连续选择';
     const row=element('div');row.className='layer-row';row.dataset.layerId=l.id;
+    row.toggleAttribute('data-folder',folder);
     row.style.setProperty('--layer-depth',depth);
     row.toggleAttribute('data-inherited-hidden',l.visible&&!layerIsVisible(doc.paint.layers,l));
     row.toggleAttribute('data-channel-inactive',!!channel&&!folder&&!l.channels?.[channel]);
@@ -1118,12 +1148,12 @@ function renderLayer(l,depth,channel,filtering){
     lock.disabled=inheritedLock;
     row.append(visibility,node,lock);
     node.draggable=!owner;
-    materialLayerDrag.bind(node,row,l.id,id=>{
+    const expand=id=>{
       if(collapsedFolders.delete(id)){saveCollapsedFolders();renderLayers();}
-    });
+    };
     if(folder){
       const collapsed=!filtering&&collapsedFolders.has(l.id);
-      const disclosure=localButton(collapsed?'▸':'▾',()=>{
+      const disclosure=localButton('',()=>{
         if(busy||maskEditor.isOpen()||surfaceTools.isEditing())return;
         if(collapsed)collapsedFolders.delete(l.id);
         else{
@@ -1134,13 +1164,14 @@ function renderLayer(l,depth,channel,filtering){
         render();
       });
       disclosure.className='layer-disclosure';
+      disclosure.innerHTML=workspaceIcons.chevron;
       disclosure.setAttribute('aria-label',(collapsed?'展开 ':'收起 ')+l.name);
       disclosure.setAttribute('aria-expanded',String(!collapsed));
       disclosure.disabled=filtering;
-      row.append(disclosure);
-      return row;
+      row.insertBefore(disclosure,node);
     }
     const hasMask=hasLayerMask(l);
+    if(folder&&!hasMask){materialLayerDrag.bind(node,row,l.id,expand);return row;}
     const maskButton=localButton(hasMask?'':'＋',event=>{
       if(busy||maskEditor.isOpen()||surfaceTools.isEditing())return;
       if(hasMask&&event.shiftKey){
@@ -1151,7 +1182,8 @@ function renderLayer(l,depth,channel,filtering){
       void selectMaskTarget(l,{altKey:event.altKey});
     });
     const maskLabel=(hasMask?'绘制蒙版 · ':'添加蒙版 · ')+l.name;
-    maskButton.className='layer-mask';maskButton.title=hasMask?maskLabel+' · Option 点击单独查看 · Shift 点击启用或停用':maskLabel;
+    maskButton.className='layer-mask';maskButton.title=hasMask?maskLabel+' · Option 单击查看 · Shift 单击启用或停用 · 拖动移动 · Option 拖动复制':maskLabel;
+    maskButton.draggable=hasMask;
     maskButton.disabled=!!owner&&!hasMask;
     maskButton.toggleAttribute('data-mask-disabled',l.maskEnabled===false);
     maskButton.toggleAttribute('data-mask-effects',!!l.maskEffects?.length);
@@ -1162,6 +1194,7 @@ function renderLayer(l,depth,channel,filtering){
     }
     if(hasMask)maskButton.setAttribute('aria-pressed',String(paintTarget==='mask'&&selected===l.id));
     row.append(maskButton);
+    materialLayerDrag.bind(node,row,l.id,expand,maskButton);
     return row;
 }
 function isLayerUnder(layer,folder){
@@ -1195,11 +1228,12 @@ function openMaterialLayerMenu(event,id,rename=startLayerRename){
     areaSystem?.areas.openEditor('library');
     return libraryUI.saveSmart(single.id);
   }));
-  if(single&&single.kind!=='group'){
+  if(single){
     actions.push(null);
     if(hasLayerMask(single))actions.push(name('编辑蒙版','mask',()=>selectMaskTarget(single)),
       name(inspectedMask()?.id===single.id?'退出蒙版查看':'查看蒙版','mask',()=>selectMaskTarget(single,{altKey:true}),true,'⌥ 点击缩略图'),
-      edit(single.maskEnabled===false?'启用蒙版':'停用蒙版','mask',()=>command([{op:'update',id:single.id,patch:{maskEnabled:single.maskEnabled===false}}]),editable));
+      edit(single.maskEnabled===false?'启用蒙版':'停用蒙版','mask',()=>command([{op:'update',id:single.id,patch:{maskEnabled:single.maskEnabled===false}}]),editable),
+      edit('删除蒙版','trash',()=>command([{op:'removeMask',id:single.id}]),editable));
     else for(const [label,value] of [['添加白色蒙版',1],['添加黑色蒙版',0]])actions.push(name(label,'mask',async()=>{
       if(await run(()=>command([{op:'update',id:single.id,patch:{maskEnabled:true,maskBase:value}}]))&&doc?.id===origin.id){const current=doc.paint.layers.find(layer=>layer.id===single.id);if(current)await selectMaskTarget(current);}
     },editable));
@@ -1250,8 +1284,8 @@ function render(keepLayerRows=false){
 function renderAssetRoles(){
   const l=selection.size===1?layer():null,select=$('asset-role'),previous=select.value;
   select.hidden=false;if(select.closest('.custom-select'))select.closest('.custom-select').hidden=false;$('apply-asset').hidden=false;
-  const roles=l&&l.kind!=='group'&&!lockOwner(l)?[['mask','灰度蒙版']]:[];
-  if(roles.length&&l.kind!=='paint'&&!l.materialId){
+  const roles=l&&!lockOwner(l)?[['mask','灰度蒙版']]:[];
+  if(roles.length&&!['paint','group'].includes(l.kind)&&!l.materialId){
     if(l.kind==='fill')roles.push(['color','颜色贴图']);
     else if(!l.text)roles.push(['image','替换贴花']);
     roles.push(...paintChannels.filter(k=>k!=='color').map(k=>[k,names[k]+'贴图']));
@@ -1779,7 +1813,7 @@ async function importAsset(blob,name,placement){
 
 $('apply-asset').onclick=()=>run(()=>{
   const l=layer(),role=$('asset-role').value;
-  if(selection.size!==1||!l||l.kind==='group'||!role||!doc.paint.assets[selectedAsset])return;
+  if(selection.size!==1||!l||!role||!doc.paint.assets[selectedAsset])return;
   if(role==='image'||role==='mask')return edit({[role]:selectedAsset});
   const documentMaps={...l.documentMaps};delete documentMaps[role];
   return edit({maps:{...l.maps,[role]:selectedAsset},...(l.kind==='fill'?{documentMaps}:{}),channels:{...l.channels,[role]:true}});
@@ -1923,13 +1957,13 @@ document.addEventListener('keydown',event=>{
     event.preventDefault();uvHandHeld=true;$('uv-view').classList.add('hand-held');return;
   }
   if(key==='h'){event.preventDefault();activateSurface('orbit');}
-  if(key==='b'&&(layer()?.kind==='paint'||paintTarget==='mask'&&layer()?.kind!=='group')){
+  if(key==='b'&&(layer()?.kind==='paint'||paintTarget==='mask'&&layer())){
     event.preventDefault();chooseBrush(false);
   }
-  if(key==='e'&&(layer()?.kind==='paint'||paintTarget==='mask'&&layer()?.kind!=='group')){
+  if(key==='e'&&(layer()?.kind==='paint'||paintTarget==='mask'&&layer())){
     event.preventDefault();chooseBrush(true);
   }
-  if(key==='4'&&workArea==='material'&&layer()&&layer().kind!=='group'){event.preventDefault();activateSurface('fill');}
+  if(key==='4'&&workArea==='material'&&layer()){event.preventDefault();activateSurface('fill');}
   if(key==='x')surfaceTools.invertInk();
   if(key==='l'&&workArea==='material'&&['paint','mask'].includes($('viewport').dataset.tool)){event.preventDefault();surfaceTools.toggleMirror();}
   if(['i','p'].includes(key)&&layer()?.kind==='paint'){event.preventDefault();activateSurface('sample');}
@@ -2611,7 +2645,7 @@ function renderCanvasChrome(){
   }
   $('canvas-document-name').textContent=doc.name;
   $('canvas-document-channel').textContent=paintTarget==='mask'?'蒙版 · 8 位':$('channel').value==='color'?'颜色 · RGB / 8':(names[$('channel').value]||'写入诊断')+' · 8 位';
-  $('add-layer-mask').disabled=!doc||busy||selection.size!==1||!layer()||layer().kind==='group'||!!lockOwner(layer())||uvSelection.isTransforming();
+  $('add-layer-mask').disabled=!doc||busy||selection.size!==1||!layer()||!!lockOwner(layer())||uvSelection.isTransforming();
   renderPaintColors();
   const kind=$('uv-view').dataset.selectionTool;
   const mode=$('viewport').dataset.tool;
@@ -2738,7 +2772,7 @@ $('drawing-layer-opacity').onchange=()=>{
   const field=$('drawing-layer-opacity'),channel=$('layer-channel').value,target=doc&&layer();
   const opacity=field.valueAsNumber/100;
   if(field.value&&field.validity.valid){
-    if(selection.size!==1||!target||target.kind==='group'||lockOwner(target)||channel&&!target.channels[channel])return;
+    if(selection.size!==1||!target||lockOwner(target)||channel&&!target.channels?.[channel])return;
     void run(()=>edit(channel?{channelOpacity:{...target.channelOpacity,[channel]:opacity}}:{opacity}));
   }
   else{field.blur();renderDrawingLayerSettings();}
