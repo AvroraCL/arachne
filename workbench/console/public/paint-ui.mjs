@@ -2769,7 +2769,7 @@ Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({w
 },status:()=>{
   if(busy||[...projectWrites.values()].some(count=>count>0))return {state:'saving'};
   if([...projectSaveErrors.values()].some(Boolean))return {state:'error'};
-  if(document.querySelector('dialog[open],.workspace-range-field[data-dragging],.workspace-range-field[data-editing],[data-document-dirty]')||
+  if(document.querySelector('dialog[open]:not(#task-monitor),.workspace-range-field[data-dragging],.workspace-range-field[data-editing],[data-document-dirty]')||
      propertyDraft||layerRename||modelMarquee||modeler.isDragging()||surfaceTools.isEditing()||uvSelection.isDragging()||uvSelection.isTransforming()||
      areaSystem?.areas.editors().some(editor=>editor.isEditing?.()))return {state:'editing'};
   if(jobs.some(job=>['queued','running'].includes(job.status)))return {state:'jobs'};

@@ -563,10 +563,12 @@ try{
   assert.equal(update.jobs[0].id,running.id);
   const taskRow=monitor.locator('[data-job-id='+JSON.stringify(running.id)+']');
   await taskRow.waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync()),{state:'jobs'});
   await monitor.getByRole('button',{name:'取消任务',exact:true}).click();
   await waitFor(async()=>(await api(taskPath+running.id)).status==='cancelled','取消后台出图');
   await monitor.getByRole('button',{name:'已中止',exact:true}).click();
   await taskRow.getByText('已取消').waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync()),{state:'ready'});
   const jobLog=path.join(data,'projects',libraryTarget.id,'jobs',running.id,'run.log');
   await fs.appendFile(jobLog,'TEST OLDEST\n'+'过程\n'.repeat(7000)+'TEST END\n');
   const tail=await api(taskPath+running.id+'/log');
