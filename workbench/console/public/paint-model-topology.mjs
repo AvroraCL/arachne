@@ -71,3 +71,24 @@ export function mergePrimitiveAliases(primitives){
   }
   return aliases;
 }
+
+export function connectedVertexGroups(visit){
+  const parent=new Map();
+  function root(key){
+    let result=parent.get(key);
+    if(result===undefined){parent.set(key,key);return key;}
+    while(result!==parent.get(result))result=parent.get(result);
+    while(key!==result){
+      const next=parent.get(key);
+      parent.set(key,result);
+      key=next;
+    }
+    return result;
+  }
+  visit((a,b,c)=>{
+    const group=root(a);
+    parent.set(root(b),group);
+    parent.set(root(c),group);
+  });
+  return root;
+}

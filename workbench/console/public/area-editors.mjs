@@ -72,6 +72,7 @@ export function registerAreaEditors(registry,bridge){
     stage.append(view,frameCaption);frameCaption.hidden=true;
     const controls=surfaceControls(view),elements=controls.elements;elements['brush-uv-radius'].closest('label').hidden=true;
     view.addEventListener('pointermove',event=>{if(event.target.tagName==='CANVAS')lastPointer={clientX:event.clientX,clientY:event.clientY};},{signal});
+    view.addEventListener('pointerleave',()=>{lastPointer=null;},{signal});
     view.addEventListener('dragover',event=>{if(hasAssetDrag(event.dataTransfer)){event.preventDefault();event.dataTransfer.dropEffect='copy';}},{signal});
     view.addEventListener('drop',event=>{
       if(!hasAssetDrag(event.dataTransfer))return;event.preventDefault();
@@ -97,6 +98,10 @@ export function registerAreaEditors(registry,bridge){
       resetNumeric();syncSceneCursor();onChange();
     });
     const cursorMenu=createContextActions('三维游标',ctx.error);
+    const selectionMenu=createContextActions('建模选择',ctx.error);
+    const selectButton=button('选择',openSelectionMenu,'建模选择');
+    selectButton.setAttribute('aria-label','建模选择');
+    selectButton.setAttribute('aria-haspopup','menu');
     const cursorButton=chromeButton(button('三维游标',openCursorMenu),'pivot');
     cursorButton.title='三维游标 · Shift + S · Shift + 右键放置';
     cursorButton.setAttribute('aria-haspopup','menu');
@@ -122,7 +127,7 @@ export function registerAreaEditors(registry,bridge){
     chromeButton(boxSelect,'marquee','框选');boxSelect.setAttribute('aria-keyshortcuts','B');boxSelect.setAttribute('aria-pressed','false');
     const frameButton=button('相机取景框',()=>toggleCameraFrame(),'相机取景框 · 小键盘 0');
     chromeButton(frameButton,'renderSettings');frameButton.setAttribute('aria-pressed','false');
-    toolbar.append(modes,component,tool,orientation,transformPivot,cursorButton,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
+    toolbar.append(modes,component,selectButton,tool,orientation,transformPivot,cursorButton,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
       button('适应',()=>{markCameraFree();viewport.fit();}),
       button('正交',()=>{markCameraFree();viewport.projection(!viewport.getState().orthographic);onChange();}),frameButton);
     transformPivot.dataset.searchable='false';
@@ -223,7 +228,7 @@ export function registerAreaEditors(registry,bridge){
       if(tool.value!==next.tool){tool.value=next.tool;resetNumeric();}
       for(const control of [tool,modes,component]){control.disabled=next.dragging;syncSelectMenu(control);}
       for(const field of axes)field.disabled=next.dragging;
-      apply.disabled=!next.hasTransformTarget||next.dragging;boxSelect.disabled=!canBoxSelect();
+      apply.disabled=!next.hasTransformTarget||next.dragging;selectButton.disabled=boxSelect.disabled=!canBoxSelect();
       view.toggleAttribute('data-local-view',next.localActive);
       showModelStatus();
       syncRenderPreview();
@@ -373,6 +378,18 @@ export function registerAreaEditors(registry,bridge){
       ]);
       return true;
     }
+    function openSelectionMenu(){
+      if(!canBoxSelect())return false;
+      const anchor=selectButton.getBoundingClientRect(),edit=mode==='edit';
+      const apply=action=>()=>{action();view.querySelector('canvas')?.focus({preventScroll:true});};
+      selectionMenu.open({clientX:anchor.left,clientY:anchor.bottom},'选择',[
+        {label:'全选',icon:'marquee',shortcut:'A',run:apply(()=>modeler.selectAll())},
+        {label:'取消选择',icon:'close',shortcut:'Alt A',run:apply(()=>modeler.selectAll(false))},
+        {label:'反选',icon:'invert',shortcut:'Ctrl I',run:apply(()=>modeler.invertSelection())},
+        ...(edit?[null,{label:'选择关联',icon:'shader',shortcut:'Ctrl L',enabled:!!modelState.elementCount,run:apply(()=>modeler.selectLinked())}]:[])
+      ]);
+      return true;
+    }
     view.addEventListener('pointerdown',event=>{
       if(event.button!==2||!event.shiftKey||!event.target.matches('canvas')||!canPlaceCursor())return;
       event.preventDefault();event.stopImmediatePropagation();
@@ -389,13 +406,13 @@ export function registerAreaEditors(registry,bridge){
     },{signal});
     function setMode(next){
       if(modeler.isDragging()||painter.isEditing()){modes.value=mode;return;}
-      marquee.cancel();cursorMenu.close();
+      marquee.cancel();cursorMenu.close();selectionMenu.close();
       modeGeneration++;mode=next;modes.value=next;picking=false;pickerMessage='';syncSelectMenu(modes);painter.setMode(['paint','mask','fill','place'].includes(mode)?mode:'orbit');
       if(view.dataset.state==='ready'){
         if(['object','edit'].includes(mode)){modeler.open(viewport.modelingContext(),project.document.id);modeler.setMode(mode);modeler.setElement(component.value);modeler.setTool(tool.value);modeler.setOrientation(orientation.value);modeler.setPivot(transformPivot.value);}
         else modeler.close();
       }
-      foreground.hidden=mode!=='paint';visible(maskInk,['mask','fill'].includes(mode));numeric.hidden=!inModeling();controls.bar.hidden=!['paint','mask'].includes(mode);visible(component,mode==='edit');visible(tool,inModeling());visible(orientation,inModeling());visible(transformPivot,inModeling());cursorButton.hidden=!inModeling();boxSelect.hidden=!inModeling();boxSelect.disabled=!canBoxSelect();syncPicker();onChange();
+      foreground.hidden=mode!=='paint';visible(maskInk,['mask','fill'].includes(mode));numeric.hidden=!inModeling();controls.bar.hidden=!['paint','mask'].includes(mode);visible(component,mode==='edit');visible(tool,inModeling());visible(orientation,inModeling());visible(transformPivot,inModeling());cursorButton.hidden=selectButton.hidden=boxSelect.hidden=!inModeling();selectButton.disabled=boxSelect.disabled=!canBoxSelect();syncPicker();onChange();
       syncSceneCursor();syncRenderPreview();
     }
     function releaseFrame(){
@@ -498,6 +515,10 @@ export function registerAreaEditors(registry,bridge){
       else if(['x','d'].includes(key)&&['paint','mask','fill'].includes(mode)){sampledBrush=null;bridge.colorKey(key,['mask','fill'].includes(mode)?'mask':'paint');maskInk.value=String(Math.round(bridge.maskInk()));syncPicker();}
       else if(!mod&&!event.altKey&&['g','r','s'].includes(key)&&['object','edit'].includes(mode)){tool.value={g:'translate',r:'rotate',s:'scale'}[key];syncSelectMenu(tool);modeler.setTool(tool.value);resetNumeric();onChange();event.preventDefault();}
       else if(inModeling()&&!mod&&!event.shiftKey&&event.code==='KeyA'){if(modeler.selectAll(!event.altKey))event.preventDefault();}
+      else if(inModeling()&&mod&&!event.altKey&&!event.shiftKey&&key==='i'){if(modeler.invertSelection())event.preventDefault();}
+      else if(mode==='edit'&&!event.altKey&&key==='l'){
+        if(!event.repeat&&(mod&&!event.shiftKey?modeler.selectLinked():!mod&&lastPointer&&modeler.selectLinked(lastPointer,event.shiftKey)))event.preventDefault();
+      }
       else if(inModeling()&&!mod&&!event.altKey&&!event.shiftKey&&key==='b'){if(!event.repeat&&marquee.toggle())event.preventDefault();}
       else if(mode==='object'&&!mod&&!event.shiftKey&&event.code==='KeyH'){if(event.altKey?modeler.showAll():modeler.hideSelection())event.preventDefault();}
       else if(!mod&&!event.altKey&&!event.shiftKey&&event.code.startsWith('Digit')&&['1','2','3'].includes(key)&&mode==='edit'){component.value={1:'vertex',2:'edge',3:'face'}[key];syncSelectMenu(component);modeler.setElement(component.value);event.preventDefault();}
@@ -549,7 +570,7 @@ export function registerAreaEditors(registry,bridge){
         if(visible)void sync().catch(ctx.error);
         else{display.close();navigating=false;marquee.cancel();regionGesture.cancel();focusGesture.cancel();setPicking(false);releaseFrame();syncRenderPreview();}
       },
-      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
+      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();selectionMenu.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
   });
 
   registry.register('shader',ctx=>{

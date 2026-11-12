@@ -128,13 +128,13 @@ def paint_material(scene, binary, material, maps, active):
 
 def apply_modeling(config, scene, binary):
     import numpy as np
-    from model_glb import Model, normalize
+    from model_glb import Model, authored_groups, normalize
 
     model = Model(config['model']['file'])
     steps = config['modeling']['steps']
     model.edit(steps)
 
-    def vector_accessor(values, bounds=False):
+    def vector_accessor(values, bounds=False, extras=None):
         data = np.asarray(values,dtype='<f4')
         if not np.isfinite(data).all():
             raise ValueError('建模结果包含无效顶点或法线')
@@ -146,6 +146,8 @@ def apply_modeling(config, scene, binary):
         entry = dict(bufferView=len(views)-1,componentType=5126,count=len(data),type='VEC3')
         if bounds:
             entry.update(min=data.min(axis=0).tolist(),max=data.max(axis=0).tolist())
+        if extras:
+            entry['extras'] = extras
         accessors = scene['accessors']
         accessors.append(entry)
         return len(accessors)-1
@@ -176,7 +178,12 @@ def apply_modeling(config, scene, binary):
             np.add.at(normals,indices[:,corner],face)
         unreferenced = np.linalg.norm(normals,axis=1)<1e-20
         normals[unreferenced] = [0,0,1]
-        attributes['POSITION'] = vector_accessor(vertices,bounds=True)
+        source_position = scene['accessors'][attributes['POSITION']]
+        groups = authored_groups(source_position,'arachneVertexGroups',len(vertices))
+        if groups is not None and np.array_equal(vertices,vertices[groups]):
+            attributes['POSITION'] = vector_accessor(vertices,bounds=True,extras={'arachneVertexGroups':groups})
+        else:
+            attributes['POSITION'] = vector_accessor(vertices,bounds=True)
         attributes['NORMAL'] = vector_accessor(normalize(normals))
         attributes.pop('TANGENT',None)
     return model.uv_digest()

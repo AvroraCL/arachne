@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {BufferGeometry,Float32BufferAttribute,Matrix4,Vector3,Quaternion,Euler,Object3D} from 'three';
 import {numericModelDelta,modelOrientation} from '../public/paint-modeling.mjs';
-import {primitiveTopology,mergePrimitiveAliases} from '../public/paint-model-topology.mjs';
+import {primitiveTopology,mergePrimitiveAliases,connectedVertexGroups} from '../public/paint-model-topology.mjs';
 import {edgeInMarquee,faceCenterInMarquee,meshInMarquee,projectMarqueeVertices,vertexInMarquee}
   from '../public/paint-model-marquee.mjs';
 
@@ -79,6 +79,19 @@ test('native vertex aliases span material primitives but keep distinct coinciden
   ]);
   assert.deepEqual(aliases.get(5),[{mesh:meshA,indices:[0]},{mesh:meshB,indices:[0,2]}]);
   assert.deepEqual(aliases.get(9),[{mesh:meshA,indices:[2]}]);
+});
+
+test('linked selection follows transitive native vertex IDs and keeps disconnected pieces distinct',()=>{
+  const root=connectedVertexGroups(link=>{
+    link('left-1','left-2','left-3');
+    link('right-1','right-2','right-3');
+    link('left-3','other-primitive-1','other-primitive-2');
+    link('other-primitive-2','left-2','other-primitive-2');
+  });
+  assert.equal(root('left-1'),root('other-primitive-1'));
+  assert.equal(root('right-1'),root('right-3'));
+  assert.notEqual(root('left-1'),root('right-1'));
+  assert.notEqual(root('loose-point'),root('left-1'));
 });
 
 test('model marquee intersects projected edges and filled triangles without selecting clipped vertices',()=>{

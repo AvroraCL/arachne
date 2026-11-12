@@ -5,7 +5,7 @@ export {modelOrientation,numericModelDelta} from './paint-model-transform.mjs';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {axisColors} from './viewport-colors.mjs';
 import {createObjectOrigins,objectOriginCenter} from './viewport-origins.mjs';
-import {loadModelTopology,primitiveTopology,mergePrimitiveAliases} from './paint-model-topology.mjs';
+import {loadModelTopology,primitiveTopology,mergePrimitiveAliases,connectedVertexGroups} from './paint-model-topology.mjs';
 import {projectMarqueeVertices,vertexInMarquee,edgeInMarquee,faceCenterInMarquee,meshInMarquee,visitTriangles}
   from './paint-model-marquee.mjs';
 
@@ -33,6 +33,7 @@ export function createPaintModeling(report, project = {}) {
   let topologyState = 'idle', topologyMeta = null, topologyRequest = null, selectionVersion=0;
   let localObjects = null, localCamera = null;
   let primitiveCache = new WeakMap(), objectAliases = new WeakMap();
+  let connectedObject=null,connectedGroup=null;
 
   function notify() {
     const objectLabel = selectedObjects.size>1 ? '已选 '+selectedObjects.size+' 个物体' : object?.name;
@@ -42,7 +43,7 @@ export function createPaintModeling(report, project = {}) {
     const materialScope = materialNames.size&&!materialNames.has('f_16xl')?'所选物体使用原生材质 · 当前编辑示例材质':`示例材质 · ${uses} 个网格共用${objectLabel?' · '+objectLabel:''}`;
     const modal=gesture?.keyboard?.describe();
     report({materialScope,mode,element,tool,orientation,pivotMode,modal,dragging:!!gesture||saving||!!pendingOperation,hasDraft:!!undo.length,sceneItems,binding:context?.binding,projectId:currentProject,selectionVersion,
-      activeId:object?.userData.modelingId,selectedIds:[...selectedObjects].map(node=>node.userData.modelingId),
+      activeId:object?.userData.modelingId,selectedIds:[...selectedObjects].map(node=>node.userData.modelingId),elementCount:selected.size,
       hasTransformTarget:!!object&&(mode==='object'||selected.size>0),topologyState,localActive:!!localObjects,
       selectionKey:mode==='edit'?[...selected.keys()].join(','):[...selectedObjects].map(node=>node.id).join(',')+'|active:'+object?.id,
       visibility:new Map([...objects].map(([id,node])=>[id,!inLocalView(node)?'outside':
@@ -128,6 +129,7 @@ export function createPaintModeling(report, project = {}) {
       const result = await loadModelTopology(projectId,request.signal);
       if (request.signal.aborted) return;
       topologyMeta = result.primitives;
+      connectedObject=null;connectedGroup=null;
       topologyState = result.matchedPrimitives===result.expectedPrimitives?'ready':'partial';
     } catch {
       if (request.signal.aborted) return;
@@ -300,9 +302,9 @@ export function createPaintModeling(report, project = {}) {
     notify();
   }
 
-  function pick(event) {
-    if (!active || gesture || saving || gizmo.dragging || (mode==='edit'&&topologyState==='loading')) return;
+  function hitAt(event,near=false){
     const {left,top,width,height} = context.canvas.getBoundingClientRect();
+    if(!width||!height||event.clientX<left||event.clientX>=left+width||event.clientY<top||event.clientY>=top+height)return {};
     const camera = context.getCamera();
     const cursor = new THREE.Vector2(event.clientX-left,event.clientY-top);
     const ndc = new THREE.Vector2();
@@ -311,12 +313,17 @@ export function createPaintModeling(report, project = {}) {
       return raycaster.intersectObject(root,true).find(hit=>isVisible(hit.object)&&inLocalView(hit.object));
     };
     let hit = pickAt(cursor.x,cursor.y);
-    if (!hit && mode === 'edit' && element !== 'face') {
+    if (!hit && near) {
       for (const [dx,dy] of [[5,0],[-5,0],[0,5],[0,-5]]) {
         hit = pickAt(cursor.x+dx,cursor.y+dy);
         if (hit) break;
       }
     }
+    return {hit,cursor,camera,width,height};
+  }
+  function pick(event) {
+    if (!active || gesture || saving || gizmo.dragging || (mode==='edit'&&topologyState==='loading')) return;
+    const {hit,cursor,camera,width,height}=hitAt(event,mode==='edit'&&element!=='face');
     error = '';
     if (!hit?.face) {
       if (mode === 'object' && !event.shiftKey) {
@@ -368,12 +375,8 @@ export function createPaintModeling(report, project = {}) {
     updateSelection();
   }
 
-  function selectElements(mesh,points,rect,subtract){
+  function visitElements(mesh,points,rect,choose){
     const {geometry}=mesh,topology=meshTopology(mesh);
-    const choose=(key,indices)=>{
-      if(subtract)selected.delete(key);
-      else selected.set(key,{mesh,indices});
-    };
     if(element==='vertex'){
       for(let i=0;i<geometry.attributes.position.count;i++)if(!rect||vertexInMarquee(points,i,rect))choose(vertexKey(mesh,i),[i]);
       return;
@@ -393,6 +396,67 @@ export function createPaintModeling(report, project = {}) {
     if(topology?.faces){
       for(const [id,polygon] of topology.faces)face(id,polygon.vertices,polygon.triangles);
     }else visitTriangles(geometry,(a,b,c,id)=>{const indices=[a,b,c];face(id,indices,indices);});
+  }
+
+  function selectElements(mesh,points,rect,subtract){
+    visitElements(mesh,points,rect,(key,indices)=>{
+      if(subtract)selected.delete(key);
+      else selected.set(key,{mesh,indices});
+    });
+  }
+
+  function canEditSelection(){
+    return !!(active&&mode==='edit'&&object&&topologyState!=='loading'&&!gesture&&!saving&&!pendingOperation&&!gizmo.dragging);
+  }
+  function editMeshes(){
+    return meshes.filter(mesh=>ownerOf(mesh)===object&&isVisible(mesh)&&inLocalView(mesh));
+  }
+  function selectLinked(event,subtract=false){
+    if(!canEditSelection())return false;
+    let seeds=selected.values();
+    if(event){
+      const {hit}=hitAt(event,true);
+      if(!hit?.face||ownerOf(hit.object)!==object)return false;
+      seeds=[{mesh:hit.object,indices:[hit.face.a,hit.face.b,hit.face.c]}];
+    }else if(!selected.size)return false;
+    const edit=editMeshes();
+    if(connectedObject!==object){
+      connectedGroup=connectedVertexGroups(connect=>{
+        for(const mesh of edit){
+          const keys=new Map();
+          const vertex=i=>{if(!keys.has(i))keys.set(i,vertexKey(mesh,i));return keys.get(i);};
+          visitTriangles(mesh.geometry,(a,b,c)=>connect(vertex(a),vertex(b),vertex(c)));
+        }
+      });
+      connectedObject=object;
+    }
+    const groups=new Set();
+    for(const {mesh,indices} of seeds)for(const i of indices)groups.add(connectedGroup(vertexKey(mesh,i)));
+    for(const mesh of edit)visitElements(mesh,null,null,(key,indices)=>{
+      if(!groups.has(connectedGroup(vertexKey(mesh,indices[0]))))return;
+      if(subtract)selected.delete(key);
+      else if(!selected.has(key))selected.set(key,{mesh,indices});
+    });
+    error='';selectionVersion++;updateSelection();return true;
+  }
+
+  function invertSelection(){
+    if(!active||gesture||saving||pendingOperation||gizmo.dragging)return false;
+    if(mode==='edit'){
+      if(!canEditSelection())return false;
+      const previous=new Set(selected.keys());
+      selected.clear();
+      for(const mesh of editMeshes())visitElements(mesh,null,null,(key,indices)=>{
+        if(!previous.has(key)&&!selected.has(key))selected.set(key,{mesh,indices});
+      });
+    }else{
+      for(const node of objects.values()){
+        if(selectedObjects.has(node))selectedObjects.delete(node);
+        else if(isVisible(node)&&inLocalView(node))selectedObjects.add(node);
+      }
+      object=[...selectedObjects].at(-1)||null;
+    }
+    error='';selectionVersion++;updateSelection();return true;
   }
 
   function boxSelect(rect,action){
@@ -991,6 +1055,7 @@ export function createPaintModeling(report, project = {}) {
     topologyRequest = null;
     topologyState = 'idle';
     topologyMeta = null;
+    connectedObject = connectedGroup = null;
     primitiveCache = new WeakMap();
     objectAliases = new WeakMap();
     clearHelpers();
@@ -1069,7 +1134,7 @@ export function createPaintModeling(report, project = {}) {
   return {
     syncDocument(){if(active&&!gesture&&!saving&&readDraft()){error='已同步工程建模修改';replay();}},
     setObjectSelection(ids,activeId){if(!active||gesture||saving)return;selected.clear();selectedObjects.clear();for(const id of ids){const node=objects.get(id);if(node&&isVisible(node)&&inLocalView(node))selectedObjects.add(node);}const target=objects.get(activeId);object=selectedObjects.has(target)?target:[...selectedObjects].at(-1)||null;updateSelection();},
-    open,close,pick,boxSelect,selectAll,selectObject,frameSelection,frameObjects,setObjectVisibility,toggleVisibility,hideSelection,showAll,toggleLocalView,applyNumeric,inspectObject,transformObject,travel,exportDraft,cancelTransform,transformKey,isDragging:()=>!!gesture||saving||!!pendingOperation,
+    open,close,pick,boxSelect,selectAll,selectLinked,invertSelection,selectObject,frameSelection,frameObjects,setObjectVisibility,toggleVisibility,hideSelection,showAll,toggleLocalView,applyNumeric,inspectObject,transformObject,travel,exportDraft,cancelTransform,transformKey,isDragging:()=>!!gesture||saving||!!pendingOperation,
     setDisplayHelpers({overlays,transform}){
       showOverlays=overlays;showGizmo=transform;
       if(!active)return;

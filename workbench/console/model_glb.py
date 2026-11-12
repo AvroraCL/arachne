@@ -85,6 +85,15 @@ def index(items, key):
     return items[key]
 
 
+def authored_groups(entry, key, count):
+    extras = entry.get('extras')
+    groups = extras.get(key) if isinstance(extras,dict) else None
+    if groups is not None and (not isinstance(groups,list) or len(groups)!=count or
+            any(type(value) is not int or not 0<=value<count for value in groups)):
+        raise ValueError('GLB 建模拓扑标记无效')
+    return groups
+
+
 class Model:
     def __init__(self, file, registration=False):
         self.scene,self.binary = read_glb(Path(file).read_bytes())
@@ -194,14 +203,21 @@ class Model:
             key = primitive['key']
             if key in entries:
                 continue
-            mesh = key.split(':')[0]
+            mesh, primitive_id = map(int,key.split(':'))
             accessor = (mesh,primitive['position_accessor'])
             count,faces = len(primitive['positions']),len(primitive['indices'])
             if accessor not in starts:
                 starts[accessor] = vertex
                 vertex += count
             start = starts[accessor]
-            entries[key] = dict(vertices=list(range(start,start+count)),polygons=list(range(polygon,polygon+faces)))
+            shared = authored_groups(self.scene['accessors'][accessor[1]],'arachneVertexGroups',count)
+            positions = primitive['positions']
+            if shared is not None and not np.array_equal(positions,positions[shared]):
+                raise ValueError('GLB 建模顶点组包含不同位置的顶点')
+            mesh_primitive = self.scene['meshes'][mesh]['primitives'][primitive_id]
+            groups = authored_groups(mesh_primitive,'arachneFaceGroups',faces)
+            entries[key] = dict(vertices=[start+i for i in shared] if shared is not None else list(range(start,start+count)),
+                                polygons=[polygon+i for i in groups] if groups is not None else list(range(polygon,polygon+faces)))
             polygon += faces
         return entries
 

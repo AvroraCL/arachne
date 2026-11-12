@@ -10,12 +10,25 @@ const padding=.02;
 const full=[[0,0,1,1]];
 const cubeCharts=Array.from({length:6},(_,i)=>[i%3/3,Math.floor(i/3)/2,1/3,1/2]);
 const cylinderCharts=[[0,0,1,.56],[0,.56,.5,.44],[.5,.56,.5,.44]];
+const segments=48;
 const geometryTemplates={
   plane:()=>[new PlaneGeometry(2,2).rotateX(-Math.PI/2),full],
   cube:()=>[new BoxGeometry(2,2,2),cubeCharts],
-  sphere:()=>[new SphereGeometry(1,48,24),full],
-  cylinder:()=>[new CylinderGeometry(.8,.8,2,48),cylinderCharts]
+  sphere:()=>[new SphereGeometry(1,segments,24),full],
+  cylinder:()=>[new CylinderGeometry(.8,.8,2,segments),cylinderCharts]
 };
+
+function faceGroups(kind,count){
+  return Array.from({length:count},(_,index)=>{
+    if(kind==='plane')return 0;
+    if(kind==='cube')return Math.floor(index/2);
+    if(kind==='cylinder')return index<segments*2?Math.floor(index/2):Math.floor(index/segments)+segments-2;
+    // Pole rings are triangles. The bands between them are quads.
+    if(index<segments)return index;
+    if(index>=count-segments)return (count-segments*2)/2+index-(count-segments)+segments;
+    return segments+Math.floor((index-segments)/2);
+  });
+}
 
 export function primitiveGlb(kind){
   if(!Object.hasOwn(geometryTemplates,kind))throw Error('不支持的模型模板');
@@ -29,6 +42,16 @@ export function primitiveGlb(kind){
     for(const i of vertices)uv.setXY(i,
       x+padding+uv.getX(i)*(width-2*padding),
       y+padding+(1-uv.getY(i))*(height-2*padding));
+  });
+  // glTF duplicates draw vertices at UV or hard-normal seams. Keep their
+  // authored mesh identity for the modeling editor without altering the UVs.
+  const representatives=new Map();
+  const vertexGroups=Array.from({length:position.count},(_,i)=>{
+    const point=[position.getX(i),position.getY(i),position.getZ(i)].map(n=>Math.abs(n)<1e-12?0:n);
+    position.setXYZ(i,...point);
+    const key=point.join(',');
+    if(!representatives.has(key))representatives.set(key,i);
+    return representatives.get(key);
   });
   geometry.computeBoundingBox();
   const {min,max}=geometry.boundingBox;
@@ -47,7 +70,7 @@ export function primitiveGlb(kind){
     return accessors.length-1;
   }
   const attributes={
-    POSITION:append(position,'VEC3',5126,34962,{min:min.toArray(),max:max.toArray()}),
+    POSITION:append(position,'VEC3',5126,34962,{min:min.toArray(),max:max.toArray(),extras:{arachneVertexGroups:vertexGroups}}),
     NORMAL:append(normal,'VEC3',5126,34962),
     TEXCOORD_0:append(uv,'VEC2',5126,34962)
   };
@@ -55,7 +78,7 @@ export function primitiveGlb(kind){
   const name=modelTemplates[kind],binary=Buffer.concat(parts);
   const description=Buffer.from(JSON.stringify({
     asset:{version:'2.0',generator:'Arachne'},scene:0,scenes:[{nodes:[0]}],nodes:[{name,mesh:0}],
-    meshes:[{name,primitives:[{attributes,indices,material:0}]}],
+    meshes:[{name,primitives:[{attributes,indices,material:0,extras:{arachneFaceGroups:faceGroups(kind,index.count/3)}}]}],
     materials:[{name:'表面材质',doubleSided:kind==='plane',
       pbrMetallicRoughness:{baseColorFactor:[.22,.24,.27,1],metallicFactor:0,roughnessFactor:.48}}],
     bufferViews:views,accessors,buffers:[{byteLength:binary.length}]
