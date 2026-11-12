@@ -215,14 +215,15 @@ try{
   console.log('PASS desktop GPU path tracing, formal PNG, project and window reopen, Chinese path, 4K bake, native ZIP save, '+
     (withoutBlender?'GLB export without Blender':'Cycles render')+' and service shutdown');
 }catch(error){
+  console.error(error);
   console.error('Desktop verification data:',profile);
   for(const name of await fs.readdir(path.join(profile,'logs')).catch(()=>[])){
     const log=await fs.readFile(path.join(profile,'logs',name),'utf8').catch(()=>null);
     if(log)console.error(log.slice(-8000));
   }
   if(desktop){
-    desktop.process().kill();
-    await desktop.close().catch(()=>{});
+    await Promise.race([desktop.evaluate(({app})=>app.exit(1)).catch(()=>{}),delay(2000)]);
+    if(desktop.process().exitCode===null)desktop.process().kill();
   }
   throw error;
 }finally{clearTimeout(limit);}
