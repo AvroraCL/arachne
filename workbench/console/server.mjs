@@ -26,6 +26,7 @@ import {workspaceRoot} from './workspace-paths.mjs';
 import {demoProjectId,nativeDemoProjectId} from './demo-source.mjs';
 import {migrateBlendProject,hasBlendMigrations,stopBlendMigrations} from './blend-migration.mjs';
 import {viewportManifest,startViewport,viewportFile,viewportTopology,viewportTopologyFile,stopViewport} from './viewport.mjs';
+import {acquireServiceProfile} from './service-owner.mjs';
 
 const personalLibrary=createPersonalLibrary({root:path.join(DATA,'personal-library'),readProject:read,projectFolder:projectDir,commitProject:commit});
 const localWorkbenchMark=path.join(DATA,'workbench-mark.svg');
@@ -33,13 +34,11 @@ const localWorkbenchMark=path.join(DATA,'workbench-mark.svg');
 const portArg=process.argv.indexOf('--port');const PORT=portArg<0?8766:Number(process.argv[portArg+1]);
 if(!Number.isInteger(PORT)||PORT<1024||PORT>65535)throw Error('端口无效');
 const local=`http://127.0.0.1:${PORT}`;setBaseUrl(local);
-const lock=path.join(DATA,'server-lock.json');
-if(fs.existsSync(lock)){
-  const owner=JSON.parse(fs.readFileSync(lock,'utf8'));let alive=false;try{process.kill(owner.pid,0);alive=true;}catch{}
-  if(alive)throw Error('已有控制台使用该数据目录：'+owner.url+'；请复用该服务');
-}
-fs.writeFileSync(lock,JSON.stringify({pid:process.pid,url:local}));
-process.on('exit',()=>{try{if(JSON.parse(fs.readFileSync(lock,'utf8')).pid===process.pid)fs.unlinkSync(lock);}catch{}});
+const releaseProfile=await acquireServiceProfile(DATA,local,()=>{
+  console.error('数据目录锁意外退出，停止工作台');
+  void shutdown(1);
+});
+process.once('exit',releaseProfile);
 const send=(res,status,data,headers={})=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(data));};
 // Cache response metadata only. Active jobs and atomic project writes invalidate it.
 const paintSnapshots=new Map();
@@ -451,20 +450,24 @@ const server=http.createServer(async(req,res)=>{
 });
 
 recover();
-server.on('error',e=>{console.error(e.code==='EADDRINUSE'?'端口被占用，请使用 --port 更换；未终止其他服务':e);process.exitCode=1;});
+server.on('error',e=>{
+  console.error(e.code==='EADDRINUSE'?'端口被占用，请使用 --port 更换；未终止其他服务':e);
+  void shutdown(1);
+});
 server.listen(PORT,'127.0.0.1',()=>console.log(`阿拉克涅 Web 控制台 ${local}\n仅本机 · 数据保存在 ${DATA}`));
 let stopping=false;
-async function shutdown(){
+async function shutdown(code=0){
   if(stopping)return;
   stopping=true;
   server.close();stopCyclesDeviceProbe();
   const previewStop=stopPaintCyclesView(),interactiveStop=stopCyclesSessions();
   stopLivePaint();stopViewport();stopModelGeometry();stopBlendMigrations();
-  await Promise.all([stop(),previewStop,interactiveStop]);
-  process.exit(0);
+  try{await Promise.all([stop(),previewStop,interactiveStop]);}
+  catch(error){console.error('无法清理工作台后台任务',error);code=1;}
+  finally{process.exit(code);}
 }
-for(const sig of ['SIGINT','SIGTERM'])process.on(sig,shutdown);
+for(const sig of ['SIGINT','SIGTERM'])process.on(sig,()=>void shutdown());
 if(process.send){
-  process.once('disconnect',shutdown);
+  process.once('disconnect',()=>void shutdown());
   if(!process.connected)void shutdown();
 }

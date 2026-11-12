@@ -9,6 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 import {demoProjectId,nativeDemoProjectId} from '../demo-source.mjs';
 import {APP_VERSION} from '../public/app-version.mjs';
+import {ownerIsRunning,readServiceOwner} from '../service-owner.mjs';
 
 const consoleRoot=path.resolve(import.meta.dirname,'..'),workspace=path.resolve(consoleRoot,'../..');
 const resources=path.resolve(workspace,'..');
@@ -21,7 +22,6 @@ const data=path.join(userRoot,'data'),record=path.join(userRoot,'current-server.
 async function json(file){return JSON.parse(await fs.readFile(file,'utf8'));}
 async function write(file,value){await fs.mkdir(path.dirname(file),{recursive:true});const tmp=file+'.'+process.pid+'.tmp';await fs.writeFile(tmp,JSON.stringify(value,null,2)+'\n');await fs.rename(tmp,file);}
 async function exists(file){return fs.access(file).then(()=>true,()=>false);}
-function alive(pid){try{process.kill(pid,0);return true;}catch{return false;}}
 async function health(url){try{const r=await fetch(url+'/api/health',{signal:AbortSignal.timeout(1000)});return r.ok&&await r.json();}catch{return null;}}
 async function portAvailable(port){const socket=net.createServer();try{socket.listen(port,'127.0.0.1');await once(socket,'listening');return true;}catch{return false;}finally{socket.close();}}
 
@@ -63,14 +63,11 @@ export async function startRelease({signal}={}){
   const build=await json(path.join(resources,'build-info.json'));
   if(build.version!==APP_VERSION||typeof build.buildId!=='string'||!/^[a-f0-9-]{36}$/i.test(build.buildId))throw Error('应用构建标识无效，请重新解压完整发布包');
   await fs.mkdir(data,{recursive:true});
-  const ownerFile=path.join(data,'server-lock.json');
-  if(await exists(ownerFile)){
-    const owner=await json(ownerFile);
-    if(alive(owner.pid)){
-      const current=await health(owner.url);
-      if(!current||current.version!==APP_VERSION||current.buildId!==build.buildId)throw Error('另一个构建正在使用工程目录，请先退出该版本');
-      const result={url:owner.url+'/paint.html',version:APP_VERSION,data,owned:false};await write(record,result);return result;
-    }
+  const owner=readServiceOwner(path.join(data,'server-lock.json'));
+  if(ownerIsRunning(owner)){
+    const current=await health(owner.url);
+    if(!current||current.version!==APP_VERSION||current.buildId!==build.buildId)throw Error('另一个构建正在使用工程目录，请先退出该版本');
+    const result={url:owner.url+'/paint.html',version:APP_VERSION,data,owned:false};await write(record,result);return result;
   }
   const aliasesFile=path.join(userRoot,'install-roots.json');let previous=[];
   if(await exists(aliasesFile)){const value=await json(aliasesFile);if(!Array.isArray(value.roots)||value.roots.length>32)throw Error('安装路径记录无效');previous=value.roots;}

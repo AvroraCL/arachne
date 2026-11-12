@@ -1,8 +1,9 @@
-"""Process-owned locks for disposable geometry caches; never unlink lock files."""
+"""Process-owned locks for geometry caches and the service data directory."""
 from contextlib import contextmanager
 import errno
 import os
 from pathlib import Path
+import sys
 import threading
 import time
 
@@ -71,3 +72,19 @@ def watch_parent(owner_pid):
             time.sleep(.2)
             check()
     threading.Thread(target=monitor, name='geometry-owner', daemon=True).start()
+
+
+def hold_service_lock(folder):
+    def unavailable():
+        print('busy', flush=True)
+        sys.exit(2)
+
+    with cache_lock(folder, unavailable):
+        print('ready', flush=True)
+        # The service exclusively owns the writing end of this pipe. EOF
+        # releases the lock on graceful shutdown and on forced termination.
+        sys.stdin.buffer.read(1)
+
+
+if __name__ == '__main__':
+    hold_service_lock(sys.argv[1])
