@@ -24,7 +24,10 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
     save:async(patch,origin)=>{
       const id=crypto.randomUUID(),selection=selectionGeneration;
       await saveMap([{op:'library',library:'materials',id,action:'create',patch}],origin);
-      if(read()?.id===origin.id&&selection===selectionGeneration)select('materials',id);
+      if(read()?.id===origin.id&&selection===selectionGeneration){
+        search.value='';
+        select('materials',id);
+      }
     }
   });
   const fromMaps=chromeButton(button('从贴图创建材质',()=>mapDialog.open()),'image');

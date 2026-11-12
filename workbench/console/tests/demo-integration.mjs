@@ -773,6 +773,10 @@ try{
   await page.reload();
   await page.locator('[data-area-mode=material]').click();
   const mapShelf=page.locator('.editor-area[data-editor=library]').first();
+  const mapScope=mapShelf.getByRole('button',{name:'资源库范围',exact:true});
+  await mapScope.click();
+  await page.getByRole('option',{name:'当前项目',exact:true}).click();
+  await mapShelf.getByRole('tab',{name:'材质',exact:true}).click();
   await mapShelf.getByRole('button',{name:'从贴图创建材质',exact:true}).click();
   const mapDialog=page.getByRole('dialog',{name:'从贴图创建材质',exact:true});
   const inputFiles=Object.entries(pngMaps).map(([channel,data])=>({
