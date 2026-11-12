@@ -6,11 +6,13 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {clone,validate} from './public/model.mjs';
 import {resolveSource,portableSource} from './workspace-paths.mjs';
+import {recoverProjectTransaction,saveProjectTransaction} from './project-transaction.mjs';
 
 export const ROOT=path.dirname(fileURLToPath(import.meta.url));
 export const DATA=dataDirectory(ROOT);
 fs.mkdirSync(path.join(DATA,'projects'),{recursive:true});
-const writeProject=(file,doc)=>atomic(file,{...doc,source:portableSource(doc.source)});
+const portableDocument=doc=>({...doc,source:portableSource(doc.source)});
+const writeProject=(file,doc)=>atomic(file,portableDocument(doc));
 export const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 export function atomic(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.'+crypto.randomUUID()+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value,null,2)+'\n');fs.renameSync(tmp,file);}
 const projectIdPattern=/^[\w-]{1,100}$/;
@@ -20,10 +22,12 @@ export function projectDir(id){
 }
 const projectFile=id=>path.join(projectDir(id),'project.json');
 export function projectFileVersion(id){
+  recoverProjectTransaction(projectDir(id));
   const stat=fs.statSync(projectFile(id),{bigint:true,throwIfNoEntry:false});
   return stat?.isFile()?`${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`:null;
 }
 function readProjectFile(id){
+  recoverProjectTransaction(projectDir(id));
   const file=projectFile(id);
   let doc;
   try{doc=JSON.parse(fs.readFileSync(file,'utf8'));}
@@ -57,20 +61,24 @@ export function list(){
 }
 function history(id){const file=path.join(projectDir(id),'history.json');return fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{undo:[],redo:[]};}
 function content(p){const q=clone(p);delete q.revision;delete q.updated;return q;}
+function saveRevision(id,doc,h,operation){
+  const folder=projectDir(id);
+  saveProjectTransaction(folder,portableDocument(doc),h);
+  try{fs.appendFileSync(path.join(folder,'operations.jsonl'),JSON.stringify({revision:doc.revision,time:doc.updated,...operation})+'\n');}
+  catch(error){console.warn('工程已保存，无法写入操作日志',error.code);}
+}
 export function commit(id,expected,mutator,summary){
   const before=read(id);if(expected!==before.revision){const e=Error('项目已被修改，请读取最新版本再操作');e.status=409;throw e;}
   const next=mutator(clone(before));validate(next);const h=history(id);h.undo.push(content(before));h.undo=h.undo.slice(-50);h.redo=[];
   next.revision=before.revision+1;next.updated=new Date().toISOString();
-  atomic(path.join(projectDir(id),'history.json'),h);writeProject(path.join(projectDir(id),'project.json'),next);
-  fs.appendFileSync(path.join(projectDir(id),'operations.jsonl'),JSON.stringify({revision:next.revision,time:next.updated,summary})+'\n');return next;
+  saveRevision(id,next,h,{summary});return next;
 }
 export function projectHistory(id){const current=read(id);return paintHistoryEntries(current,history(id));}
 export function travel(id,expected,direction,steps=1){
   const p=read(id);if(expected!==p.revision){const e=Error('版本已改变');e.status=409;throw e;}
   const result=travelPaintHistory(p,history(id),direction,steps);if(!result.changed)return p;
   const restored=result.restored;restored.revision=p.revision+1;restored.updated=new Date().toISOString();validate(restored);
-  atomic(path.join(projectDir(id),'history.json'),result.history);writeProject(path.join(projectDir(id),'project.json'),restored);
-  fs.appendFileSync(path.join(projectDir(id),'operations.jsonl'),JSON.stringify({revision:restored.revision,time:restored.updated,summary:direction,...(steps>1?{steps}:{})})+'\n');return restored;
+  saveRevision(id,restored,result.history,{summary:direction,...(steps>1?{steps}:{})});return restored;
 }
 export async function forkProject(sourceId,snapshot,name,prepareAssets){
   const sourceDir=projectDir(sourceId);const id=crypto.randomUUID(),dir=projectDir(id),doc=clone(snapshot);
