@@ -3,12 +3,15 @@ import {paintChannels} from './paint-channels.mjs';
 import {uvShapeFields,uvShapePayload} from './uv-selection-region.mjs';
 import {checkImageAdjustment,imageBlendModes} from './image-adjustments.mjs';
 import {validImageShape} from './image-shapes.mjs';
+import {layerChildren,layerLockOwner,layerParent} from './paint-layer-tree.mjs';
+import {arrangeImageLayer,duplicateImageLayer,followingClips,groupImageLayers,imageGroupBlend,imageGroupTarget,imageLayersBefore,
+  imageStackBase,removeImageLayer,repairImageClips,ungroupImageLayer,validateImageLayerTree} from './image-layer-tree.mjs';
 const record=o=>o&&typeof o==='object'&&!Array.isArray(o),id=s=>typeof s==='string'&&/^[\w-]{1,100}$/.test(s),unit=n=>Number.isFinite(n)&&n>=0&&n<=1;
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
 const ink=s=>typeof s==='string'&&/^#[a-f\d]{6}$/i.test(s);
 const layerFields=['name','visible','locked','alphaLocked','opacity','blend','maskEnabled','maskBase','maskGradient','asset','x','y','scale','rotation','stretch','gradient','adjustment','clipped','shape'];
-const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层',shape:'形状层'};
+const layerNames={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层',shape:'形状层',group:'图层组'};
 const pair=(values,check)=>Array.isArray(values)&&values.length===2&&values.every(check);
 function checkGradient(gradient,checkStroke,mask=false){
   if(!exact(gradient,['kind','start','end','colors','alpha','clip',...uvShapeFields])||
@@ -23,34 +26,28 @@ function checkGradient(gradient,checkStroke,mask=false){
 export const imageLayerDefaults={visible:true,locked:false,opacity:1,blend:'normal',maskEnabled:false,maskBase:1};
 export const imageDocumentLimit=16;
 export const hasImageLayerMask=layer=>!!layer&&(layer.maskEnabled||Array.isArray(layer.maskStrokes)||!!layer.maskGradient);
-export function imageClippingBase(layers,index){
-  for(let i=index-1;i>=0;i--){
-    const layer=layers[i];
-    if(!layer.clipped)return layer.kind==='adjustment'?null:layer;
-  }
-  return null;
-}
+export const imageClippingBase=imageStackBase;
 export function imageLayersBeforeAdjustment(layers,id){
   const index=layers.findIndex(layer=>layer.id===id&&layer.kind==='adjustment');
   if(index<0)return null;
   const layer=layers[index],base=layer.clipped?imageClippingBase(layers,index):null;
-  return layers.slice(base?layers.indexOf(base):0,index);
+  return imageLayersBefore(layers,layer,base);
 }
 export function visibleImageLayers(layers){
-  let baseVisible=false;
-  return layers.filter(layer=>{
-    const visible=layer.visible&&layer.opacity>0;
-    if(!layer.clipped)baseVisible=visible&&layer.kind!=='adjustment';
-    return visible&&(!layer.clipped||baseVisible);
-  });
-}
-function releaseClipping(layers,index){
-  for(let i=index;layers[i]?.clipped;i++)delete layers[i].clipped;
-}
-function repairClipping(layers){
-  for(let i=0;i<layers.length;i++){
-    if(layers[i].clipped&&!imageClippingBase(layers,i))releaseClipping(layers,i);
+  const visible=new Set();
+  function visit(parent){
+    let baseVisible=false;
+    for(const layer of layerChildren(layers,parent)){
+      const active=layer.visible&&layer.opacity>0;
+      if(!layer.clipped)baseVisible=active&&!['adjustment','group'].includes(layer.kind);
+      if(active&&(!layer.clipped||baseVisible)){
+        visible.add(layer.id);
+        if(layer.kind==='group')visit(layer.id);
+      }
+    }
   }
+  visit(null);
+  return layers.filter(layer=>visible.has(layer.id));
 }
 function resetMask(layer){
   layer.maskEnabled=false;
@@ -80,11 +77,13 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
     if(!id(key)||!exact(doc,['name','width','height','colorSpace','layers'])||!label(doc.name)||doc.width!==4096||doc.height!==4096||!['srgb','linear'].includes(doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>64)throw Error('图像文档无效');
     const ids=new Set();
     for(const [index,layer] of doc.layers.entries()){
-      if(!exact(layer,['id','kind',...layerFields,'strokes','maskStrokes','text'])||!id(layer.id)||ids.has(layer.id)||typeof layer.kind!=='string'||!Object.hasOwn(layerNames,layer.kind)||!label(layer.name)||typeof layer.visible!=='boolean'||typeof layer.locked!=='boolean'||!unit(layer.opacity)||!imageBlendModes.includes(layer.blend)||typeof layer.maskEnabled!=='boolean'||!unit(layer.maskBase))throw Error('图像图层无效');
+      if(!exact(layer,['id','kind','parentId',...layerFields,'strokes','maskStrokes','text'])||!id(layer.id)||ids.has(layer.id)||typeof layer.kind!=='string'||!Object.hasOwn(layerNames,layer.kind)||!label(layer.name)||typeof layer.visible!=='boolean'||typeof layer.locked!=='boolean'||!unit(layer.opacity)||!(imageBlendModes.includes(layer.blend)||layer.kind==='group'&&layer.blend===imageGroupBlend)||typeof layer.maskEnabled!=='boolean'||!unit(layer.maskBase))throw Error('图像图层无效');
       if(layer.clipped!==undefined&&(typeof layer.clipped!=='boolean'||layer.clipped&&!imageClippingBase(doc.layers,index)))
         throw Error('剪贴蒙版需要下方的底层');
       if(layer.alphaLocked!==undefined&&(layer.kind!=='pixel'||typeof layer.alphaLocked!=='boolean'))
         throw Error('只有像素图层可以锁定透明度');
+      if(layer.kind==='group'&&['asset','x','y','scale','rotation','stretch'].some(key=>Object.hasOwn(layer,key)))
+        throw Error('图层组只能保存组属性与蒙版');
       ids.add(layer.id);
       if(layer.kind==='gradient')checkGradient(layer.gradient,checkStroke);
       else if(layer.gradient!==undefined)throw Error('请选择渐变填充层');
@@ -125,6 +124,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
         }
       }
     }
+    validateImageLayerTree(doc.layers);
   }
   if(stamps>30000)throw Error('图像文档笔触超出上限');
   for(const layer of paint.layers){
@@ -141,8 +141,14 @@ function duplicateImageName(documents,source){
   while(names.has(name))name=candidate(' 副本 '+(++number));
   return name;
 }
+function imageGroupName(layers){
+  const names=new Set(layers.map(layer=>layer.name));
+  let name=layerNames.group,count=1;
+  while(names.has(name))name=layerNames.group+' '+(++count);
+  return name;
+}
 export function imageDocumentOperation(paint,o,{requireUnlocked}){
-  if(!exact(o,['op','action','documentId','newDocumentId','layerId','sourceLayerId','reveal','copy','clipped','patch','kind','target','stroke','transform','rect',...uvShapeFields,'index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
+  if(!exact(o,['op','action','documentId','newDocumentId','layerId','layerIds','parentId','anchorId','placement','sourceLayerId','reveal','copy','clipped','patch','kind','target','stroke','transform','rect',...uvShapeFields,'index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
   const documents=paint.imageDocuments??={},doc=Object.hasOwn(documents,o.documentId)?documents[o.documentId]:null;
   if(o.action==='create'){
     if(doc||!exact(o.patch??{},['name','colorSpace']))throw Error('图像文档已存在或参数无效');
@@ -168,17 +174,30 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     layer.documentMaps={...layer.documentMaps,[o.channel]:o.documentId};layer.channels[o.channel]=true;if(layer.maps)delete layer.maps[o.channel];return;
   }
   if(o.action==='addLayer'){
-    const index=o.index??doc.layers.length;
+    let index=o.index??doc.layers.length;
     if(!id(o.layerId)||doc.layers.some(l=>l.id===o.layerId)||typeof o.kind!=='string'||!Object.hasOwn(layerNames,o.kind)||!exact(o.patch??{},layerFields)||
        !Number.isInteger(index)||index<0||index>doc.layers.length)throw Error('图像图层参数无效');
-    const defaults=['image','shape'].includes(o.kind)?{x:.5,y:.5,scale:1,rotation:0,stretch:[1,1]}:o.kind==='adjustment'?{maskEnabled:true}:{};
-    const clipped=doc.layers[index]?.clipped&&imageClippingBase(doc.layers,index);
-    doc.layers.splice(index,0,{id:o.layerId,kind:o.kind,name:layerNames[o.kind],...imageLayerDefaults,...defaults,
-      ...(clipped?{clipped:true}:{}),...o.patch});
+    const parent=imageGroupTarget(doc.layers,o.parentId)?.id??null;
+    const defaults=['image','shape'].includes(o.kind)?{x:.5,y:.5,scale:1,rotation:0,stretch:[1,1]}:
+      o.kind==='adjustment'?{maskEnabled:true}:o.kind==='group'?{blend:imageGroupBlend}:{};
+    const next=doc.layers.slice(index).find(layer=>layerParent(layer)===parent);
+    if(o.kind==='group'&&next?.clipped)
+      index=doc.layers.indexOf(followingClips(doc.layers,next).at(-1)??next)+1;
+    const clipped=o.kind!=='group'&&next?.clipped&&imageClippingBase(doc.layers,doc.layers.indexOf(next));
+    const name=o.kind==='group'?imageGroupName(doc.layers):layerNames[o.kind];
+    doc.layers.splice(index,0,{id:o.layerId,kind:o.kind,name,...imageLayerDefaults,...defaults,
+      ...(parent?{parentId:parent}:{}),...(clipped?{clipped:true}:{}),...o.patch});
+    return;
+  }
+  if(o.action==='groupLayers'){
+    if(!id(o.layerId)||doc.layers.some(l=>l.id===o.layerId)||!exact(o.patch??{},['name']))throw Error('新图层组参数无效');
+    groupImageLayers(doc,o.layerIds,{id:o.layerId,kind:'group',name:imageGroupName(doc.layers),...imageLayerDefaults,blend:imageGroupBlend,...o.patch});
     return;
   }
   const index=doc.layers.findIndex(l=>l.id===o.layerId),layer=doc.layers[index];if(!layer)throw Error('图像图层不存在');
-  if(layer.locked&&!(o.action==='updateLayer'&&Object.keys(o.patch??{}).every(k=>['locked','visible'].includes(k))))throw Object.assign(Error('图像图层已锁定'),{status:423});
+  const owner=layerLockOwner(doc.layers,layer);
+  if(owner&&!(owner===layer&&o.action==='updateLayer'&&Object.keys(o.patch??{}).every(k=>['locked','visible'].includes(k))))
+    throw Object.assign(Error('图像图层或上级组已锁定'),{status:423});
   if(o.action==='updateLayer'){
     if(!exact(o.patch,layerFields)||Object.hasOwn(o.patch,'clipped'))throw Error('图像图层参数无效');
     if(Object.hasOwn(o.patch,'asset')&&o.patch.asset!==layer.asset)delete layer.text;
@@ -192,7 +211,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     if(o.clipped){
       if(!imageClippingBase(doc.layers,index))throw Error('剪贴蒙版需要下方的底层');
       layer.clipped=true;
-    }else releaseClipping(doc.layers,index);
+    }else if(layer.clipped)for(const item of [layer,...followingClips(doc.layers,layer)])delete item.clipped;
   }
   else if(o.action==='createMask'){
     if(hasImageLayerMask(layer))throw Error('图像图层已有蒙版');
@@ -205,7 +224,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
   else if(o.action==='transferMask'){
     const source=doc.layers.find(item=>item.id===o.sourceLayerId);
     if(typeof o.copy!=='boolean'||source===layer||!hasImageLayerMask(source))throw Error('请选择另一个图层的蒙版');
-    if(source.locked&&!o.copy)throw Object.assign(Error('源图层已锁定'),{status:423});
+    if(layerLockOwner(doc.layers,source)&&!o.copy)throw Object.assign(Error('源图层或上级组已锁定'),{status:423});
     resetMask(layer);
     layer.maskEnabled=source.maskEnabled;
     layer.maskBase=source.maskBase;
@@ -222,26 +241,21 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
       for(const stroke of layer.maskStrokes??[])stroke.value=1-stroke.value;
     }else resetMask(layer);
   }
-  else if(o.action==='removeLayer'){
-    doc.layers.splice(index,1);
-    if(!layer.clipped)releaseClipping(doc.layers,index);
-    repairClipping(doc.layers);
-  }
+  else if(o.action==='removeLayer')removeImageLayer(doc,layer);
+  else if(o.action==='ungroupLayer')ungroupImageLayer(doc,layer);
   else if(o.action==='duplicateLayer'){
     if(!id(o.patch?.id)||doc.layers.some(l=>l.id===o.patch.id))throw Error('图像副本编号无效');
-    const duplicate={...structuredClone(layer),id:o.patch.id,name:layer.name.slice(0,90)+' 副本'};
-    // Place a base-layer copy above its group so the existing clips stay attached.
-    let destination=index+1;
-    if(!layer.clipped)while(doc.layers[destination]?.clipped)destination++;
-    doc.layers.splice(destination,0,duplicate);
+    duplicateImageLayer(doc,layer,o.patch.id);
   }
   else if(o.action==='moveLayer'){
+    if(o.anchorId!==undefined||o.placement!==undefined){arrangeImageLayer(doc,layer,o);return;}
     if(!Number.isInteger(o.index)||o.index<0||o.index>=doc.layers.length)throw Error('图像层序无效');
+    if(doc.layers.some(item=>item.kind==='group'))throw Error('图层组内请指定相邻图层');
     if(o.index===index)return;
     doc.layers.splice(index,1);
     if(doc.layers[o.index]?.clipped&&imageClippingBase(doc.layers,o.index))layer.clipped=true;
     doc.layers.splice(o.index,0,layer);
-    repairClipping(doc.layers);
+    repairImageClips(doc.layers);
   }
   else if(o.action==='stroke'){
     if(!['pixels','mask'].includes(o.target)||o.target==='pixels'&&layer.kind!=='pixel')throw Error('请在像素层或蒙版上绘制');

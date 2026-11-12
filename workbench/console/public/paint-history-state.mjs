@@ -17,13 +17,14 @@ function imageStrokeLabel(stroke){
 function imageLayerLabel(previous,layer){
   if(!previous){
     if(layer.adjustment)return '新建'+(imageAdjustments[layer.adjustment.type]?.label||'图层')+'调整';
-    return {pixel:'新建像素层',image:layer.text?'新建文字层':'置入图片',gradient:'新建渐变层',shape:'绘制形状'}[layer.kind]||'新建图像层';
+    return {pixel:'新建像素层',image:layer.text?'新建文字层':'置入图片',gradient:'新建渐变层',shape:'绘制形状',group:'新建图层组'}[layer.kind]||'新建图像层';
   }
-  if(!layer)return '删除图像层';
+  if(!layer)return previous.kind==='group'?'删除图层组':'删除图像层';
   if((layer.strokes?.length||0)>(previous.strokes?.length||0))return imageStrokeLabel(layer.strokes.at(-1));
   if(previous.name!==layer.name)return '重命名图层';
   if(previous.visible!==layer.visible)return layer.visible?'显示图层':'隐藏图层';
   if(previous.locked!==layer.locked)return layer.locked?'锁定图层':'解锁图层';
+  if(previous.parentId!==layer.parentId)return '移动图层组归属';
   if(previous.alphaLocked!==layer.alphaLocked)return layer.alphaLocked?'锁定透明像素':'解锁透明像素';
   if(previous.clipped!==layer.clipped)return layer.clipped?'创建剪贴蒙版':'释放剪贴蒙版';
   if(hasImageLayerMask(previous)!==hasImageLayerMask(layer))return hasImageLayerMask(layer)?'添加图层蒙版':'删除图层蒙版';

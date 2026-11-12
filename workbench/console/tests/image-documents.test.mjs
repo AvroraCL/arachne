@@ -203,6 +203,33 @@ test('RGBA live input includes only the layers and assets required for the reque
  assert.throws(()=>input({isolatedImageLayer:'missing'}),/图像图层不存在/);
  assert.throws(()=>input({inspectMask:'missing'}),/图像蒙版不存在/);
 });
+test('image folders preserve sibling order, clipping ownership, nested masks and inherited locks',()=>{
+ const paint=defaults();edit(paint,'create');
+ for(const layerId of ['base','clip','other'])edit(paint,'addLayer',{layerId,kind:'pixel'});
+ edit(paint,'setClipping',{layerId:'clip',clipped:true});
+ assert.throws(()=>edit(paint,'groupLayers',{layerId:'folder',layerIds:['clip']}),/对应底层一起成组/);
+ edit(paint,'groupLayers',{layerId:'folder',layerIds:['base','clip']});
+ edit(paint,'createMask',{layerId:'folder',reveal:false});
+ edit(paint,'addLayer',{layerId:'nested',kind:'group',parentId:'folder'});
+ edit(paint,'moveLayer',{layerId:'other',anchorId:'nested',placement:'inside'});
+ assert.throws(()=>edit(paint,'moveLayer',{layerId:'folder',anchorId:'nested',placement:'inside'}),/移入自身/);
+ edit(paint,'updateLayer',{layerId:'folder',patch:{locked:true,visible:false}});
+ assert.throws(()=>edit(paint,'updateLayer',{layerId:'other',patch:{opacity:.5}}),/上级组已锁定/);
+ const doc={id:'image-folders',revision:1,paint};
+ assert.deepEqual(imageDocumentInput(doc,{documentId:'doc',revision:1}).paint.imageDocuments.doc.layers,[]);
+ edit(paint,'updateLayer',{layerId:'folder',patch:{locked:false,visible:true}});
+ edit(paint,'duplicateLayer',{layerId:'folder',patch:{id:'duplicate'}});
+ validateImageDocuments(paint,checks);
+ const layers=paint.imageDocuments.doc.layers,copy=layers.find(layer=>layer.id==='duplicate');
+ assert.equal(copy.maskBase,0);
+ const nested=layers.find(layer=>layer.parentId==='duplicate'&&layer.kind==='group');
+ assert.ok(nested&&nested.id!=='nested'&&layers.some(layer=>layer.parentId===nested.id&&layer.id!=='other'));
+ const isolated=imageDocumentInput(doc,{documentId:'doc',revision:1,isolatedImageLayer:'other'});
+ assert.equal(isolated.paint.imageDocuments.doc.layers[0].parentId,undefined);
+ edit(paint,'ungroupLayer',{layerId:'folder'});
+ assert.equal(paint.imageDocuments.doc.layers.find(layer=>layer.id==='nested').parentId,undefined);
+ validateImageDocuments(paint,checks);
+});
 test('independent compositor preserves transparency, mask edits, layer order, linear blending and transform',()=>{
  const script=`import numpy as np
 from image_documents import composite_document,png_bytes
@@ -232,6 +259,16 @@ layer['maskStrokes']=[dict(uv=True,rect=[.4,.4,.6,.6],value=0,opacity=1)]
 q=composite_document(doc,{},64,inspect_mask='gradient')
 assert list(q[32,8])==[0,0,0,255] and list(q[32,55])==[255,255,255,255]
 assert q[32,32,0]==0 and abs(int(q[8,32,0])-131)<=1
+bottom={**base,'strokes':[dict(uv=True,rect=[0,0,1,1],color='#ff0000',opacity=1,erase=False)]}
+folder=dict(id='folder',kind='group',visible=True,opacity=1,blend='passThrough',maskEnabled=False,maskBase=1)
+invert=dict(id='invert',kind='adjustment',parentId='folder',visible=True,opacity=1,blend='normal',maskEnabled=False,adjustment={'type':'invert'})
+doc['layers']=[bottom,invert,folder]
+assert list(composite_document(doc,{},64)[32,32])==[0,255,255,255]
+folder['blend']='normal'
+assert list(composite_document(doc,{},64)[32,32])==[255,0,0,255]
+folder.update(blend='passThrough',opacity=.5,maskEnabled=True,maskStrokes=[dict(uv=True,rect=[0,0,.5,1],value=0,opacity=1)])
+grouped=composite_document(doc,{},64)
+assert list(grouped[32,16])==[255,0,0,255] and list(grouped[32,48])==[188,188,188,255]
 from PIL import Image
 from io import BytesIO
 for color_space,key,value in [('linear','gamma',1),('srgb','srgb',0)]:

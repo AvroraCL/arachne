@@ -59,10 +59,10 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
       alpha:[1,transparent?0:1]};
     return flip?reversed(stops):stops;
   }
-  function operation(origin,layerId,gradient,index){
+  function operation(origin,layerId,gradient,insertion){
     const patch=origin.target==='mask'?{maskGradient:{...gradient},maskEnabled:true}:{gradient:{...gradient}};
-    return {op:'image',action:index===undefined?'updateLayer':'addLayer',documentId:origin.documentId,layerId,
-      ...(index===undefined?{}:{kind:'gradient',index}),patch};
+    return {op:'image',action:insertion?'addLayer':'updateLayer',documentId:origin.documentId,layerId,
+      ...(insertion?{kind:'gradient',...insertion}:{}),patch};
   }
   function updateSelected(change){
     const state=context(),gradient=currentGradient(state);
@@ -127,7 +127,7 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
       frame=0;
       if(gesture===current&&usable(current.gradient)){
         current.previewed=true;
-        preview(operation(current.origin,current.layerId,current.gradient,current.index));
+        preview(operation(current.origin,current.layerId,current.gradient,current.insertion));
       }
     });
   }
@@ -152,7 +152,7 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
     }else{
       gradient.start=pointIn;gradient.end=pointIn;
     }
-    gesture={origin:state.origin,layerId:layer?.id||crypto.randomUUID(),index:layer?undefined:state.index,
+    gesture={origin:state.origin,layerId:layer?.id||crypto.randomUUID(),insertion:layer?null:state.insertion,
       before:previous,gradient,handle,anchor,pointer:event.pointerId,previewed:false};
     stage.setAttribute('data-gradient-dragging','');
     stage.focus({preventScroll:true});stage.setPointerCapture(event.pointerId);
@@ -166,7 +166,7 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
     cancelAnimationFrame(frame);frame=0;
     if(stage.hasPointerCapture(current.pointer))stage.releasePointerCapture(current.pointer);
     if(write&&usable(current.gradient)&&JSON.stringify(current.before)!==JSON.stringify(current.gradient))
-      void commit(operation(current.origin,current.layerId,current.gradient,current.index),current.origin,current.index!==undefined);
+      void commit(operation(current.origin,current.layerId,current.gradient,current.insertion),current.origin,!!current.insertion);
     else if(current.previewed)preview(null);
     sync();return true;
   }

@@ -1,4 +1,5 @@
 import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers} from './public/image-documents.mjs';
+import {isolateImageLayer} from './public/image-layer-tree.mjs';
 import {imageStrokeQueueLimit} from './public/image-stroke-queue.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels,channelBlendChoices} from './public/paint-channels.mjs';
@@ -28,7 +29,7 @@ import {checkRenderPreset,renderBookmarkLimit} from './public/paint-delivery-opt
 import {checkRenderVisibility,updateRenderVisibility} from './public/render-visibility.mjs';
 import {checkRenderOptics} from './public/render-optics.mjs';
 import {checkRenderRegion,renderRegionPixels} from './public/render-region.mjs';
-import {layerParent,layerChildren,layerTreeOrder,layerLockOwner} from './public/paint-layer-tree.mjs';
+import {layerParent,layerChildren,layerTreeOrder,layerIsVisible,layerLockOwner} from './public/paint-layer-tree.mjs';
 import {uvShapeFields,uvShapePayload,uvRegionLimits,maxUVFeather} from './public/uv-selection-region.mjs';
 
 export const PAINT='pbr_paint';
@@ -606,7 +607,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
   if(beforeImageLayer!==undefined&&!before)throw Error('图像调整图层不存在');
 
   const selected=isolatedImageLayer
-    ?image.layers.filter(layer=>layer.id===isolatedImageLayer).map(layer=>layer.clipped?{...layer,clipped:false}:layer)
+    ?isolateImageLayer(image.layers,isolatedImageLayer)
     :before??image.layers;
   const layers=inspectMask
     ?selected.filter(layer=>layer.id===inspectMask).map(({id,maskBase,maskStrokes,maskGradient})=>({id,maskBase,maskStrokes,...(maskGradient?{maskGradient}:{})}))
@@ -629,7 +630,8 @@ export function imageClipboardInput(doc,request){
   if(!merged){
     const documents=doc.paint.imageDocuments??{};
     const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId);
-    if(!layer||!layer.visible||!layer.opacity||layer.kind==='adjustment')throw Error('请选择包含像素的可见图像图层');
+    if(!layer||!layerIsVisible(documents[documentId].layers,layer)||!layer.opacity||layer.kind==='adjustment')
+      throw Error('请选择包含像素的可见图像图层');
   }
   const input=imageDocumentInput(doc,{revision,documentId,isolatedImageLayer:merged?undefined:layerId,resolution:4096});
   return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
@@ -689,7 +691,7 @@ function writePaintAsset(doc,revision,png,summary,update){
 }
 export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId,materialId,imageLayer}){
   if(doc.revision!==revision)throw revisionError(doc);
-  const image=imageLayer===undefined?null:fields(imageLayer,['documentId','layerId','x','y','scale']);
+  const image=imageLayer===undefined?null:fields(imageLayer,['documentId','layerId','x','y','scale','index','parentId']);
   if(image&&(image.x!==undefined||image.y!==undefined)&&(!unit(image.x)||!unit(image.y)))throw Error('图像图层放置参数无效');
   if(image?.scale!==undefined&&!ranged(image.scale,1/4096,4))throw Error('图像图层缩放无效');
   if(image&&(maskLayerId!==undefined||placement!==undefined||nodeId!==undefined||materialId!==undefined))throw Error('请选择单个图像导入目标');
@@ -711,7 +713,9 @@ export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId
   return writePaintAsset(doc,revision,png,image?'导入图像图层':place?'导入并放置画布图片':target?'保存图层蒙版':imageNode?'导入节点图像':'导入涂装素材',p=>{
     if(imageNode){(materialId===undefined?p.paint.materialGraph:p.paint.materials[materialId].graph).nodes.find(node=>node.id===nodeId).params.asset=entry.id;validate(p);}
     if(target)p.paint.layers.find(layer=>layer.id===target.id).mask=entry.id;
-    if(image)applyOperations(p,[{op:'image',action:'addLayer',documentId:image.documentId,layerId:image.layerId,kind:'image',patch:{asset:entry.id,name:label,...(image.x===undefined?{}:{x:image.x,y:image.y}),...(image.scale===undefined?{}:{scale:image.scale})}}]);
+    if(image)applyOperations(p,[{op:'image',action:'addLayer',documentId:image.documentId,layerId:image.layerId,kind:'image',
+      index:image.index,parentId:image.parentId,patch:{asset:entry.id,name:label,...(image.x===undefined?{}:{x:image.x,y:image.y}),
+        ...(image.scale===undefined?{}:{scale:image.scale})}}]);
     if(place)applyOperations(p,[{op:'add',kind:'decal',parentId:place.parentId,patch:{
       image:entry.id,name:label,space:'uv',x:place.x,y:place.y,scale:.25
     }}]);
@@ -727,7 +731,7 @@ export async function savePaintText(doc,{revision,text,placement,layerId,documen
   const target=layerId===undefined?null:layers.find(item=>item.id===layerId&&item.text);
   if(layerId!==undefined&&!target)throw Error('请选择可编辑的文字层');
   requireUnlocked(layers,target);
-  const place=placement===undefined?null:fields(placement,inImage?['x','y']:['x','y','parentId']);
+  const place=placement===undefined?null:fields(placement,inImage?['x','y','index','parentId']:['x','y','parentId']);
   if((target&&place)||(!target&&(!place||!unit(place.x)||!unit(place.y))))throw Error('文字放置位置无效');
   const assetFolder=path.join(projectDir(doc.id),'assets');
   fs.mkdirSync(assetFolder,{recursive:true});
@@ -765,10 +769,9 @@ export async function savePaintText(doc,{revision,text,placement,layerId,documen
       existingLayer.text=style;
     }else if(inImage){
       selected=crypto.randomUUID();
-      applyOperations(p,[{op:'image',action:'addLayer',documentId,layerId:selected,kind:'image',patch:{
-        asset:entry.id,name,x:place.x,y:place.y,scale:Math.max(.01,edge/4096)
-      }}]);
-      currentLayers.at(-1).text=style;
+      applyOperations(p,[{op:'image',action:'addLayer',documentId,layerId:selected,kind:'image',index:place.index,parentId:place.parentId,
+        patch:{asset:entry.id,name,x:place.x,y:place.y,scale:Math.max(.01,edge/4096)}}]);
+      currentLayers.find(item=>item.id===selected).text=style;
     }else{
       const known=new Set(p.paint.layers.map(item=>item.id));
       applyOperations(p,[{op:'add',kind:'decal',parentId:place.parentId,patch:{

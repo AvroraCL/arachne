@@ -82,7 +82,7 @@ export function createImageShapeTool({stage,canvas,parameters,signal,context,pre
     if(width<1||height<1)return null;
     const {kind,fill,stroke,strokeWidth,cornerRadius}=g.style;
     const shape={kind,width,height,fill:fill?g.colors.foreground:null,stroke:stroke?g.colors.background:null,strokeWidth,cornerRadius};
-    return {op:'image',action:'addLayer',documentId:g.origin.documentId,layerId:g.layerId,kind:'shape',index:g.index,
+    return {op:'image',action:'addLayer',documentId:g.origin.documentId,layerId:g.layerId,kind:'shape',...g.insertion,
       patch:{name:imageShapeKinds.find(([value])=>value===kind)[1],shape,
         x:(left+right)/2,y:(top+bottom)/2,scale:Math.max(width,height)/resolution}};
   }
@@ -117,7 +117,7 @@ export function createImageShapeTool({stage,canvas,parameters,signal,context,pre
     if(!state.enabled||!usable(style)||![style.strokeWidth,style.cornerRadius].every(Number.isInteger))return;
     const box=canvas.getBoundingClientRect(),start=[(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height];
     if(!start.every(n=>n>=0&&n<=1))return;
-    gesture={pointer:event.pointerId,start,rect:bounds(start,start,event),origin:state.origin,index:state.index,
+    gesture={pointer:event.pointerId,start,rect:bounds(start,start,event),origin:state.origin,insertion:state.insertion,
       colors:state.colors,style,layerId:crypto.randomUUID(),previewed:false};
     stage.focus({preventScroll:true});stage.setPointerCapture(event.pointerId);
     event.preventDefault();event.stopImmediatePropagation();sync();

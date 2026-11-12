@@ -1010,6 +1010,64 @@ try{
   assert.deepEqual(pageErrors,[]);
   console.log('PASS drawing history, native-menu undo, compact tool rail, brush tip HUD and Escape rollback');
   console.log('PASS Chinese layer rename after IME confirmation and native save/quit guard during composition');
+
+  await page.setViewportSize({width:1400,height:900});
+  const groupDoc='drawing-groups',leftLayer='group-left',rightLayer='group-right';
+  await api(paintRoute+'/commands',{revision:polygonClear.revision+1,operations:[
+    {op:'image',action:'create',documentId:groupDoc,patch:{name:'图层组验收'}},
+    ...[[leftLayer,'左侧填色','#225ebb',[0,0,.5,1]],[rightLayer,'右侧填色','#c0692b',[.5,0,1,1]]].flatMap(([layerId,name,color,rect])=>[
+      {op:'image',action:'addLayer',documentId:groupDoc,layerId,kind:'pixel',patch:{name}},
+      {op:'image',action:'stroke',documentId:groupDoc,layerId,target:'pixels',stroke:{uv:true,rect,color,opacity:1,erase:false}}
+    ])
+  ]});
+  await editor.locator('select[aria-label="图像文档"]').selectOption(groupDoc,{force:true});
+  const groupLayers=async()=>Object.fromEntries((await api(projectRoute)).paint.imageDocuments[groupDoc].layers.map(layer=>[layer.id,layer]));
+  const leftButton=layersPanel.getByRole('button',{name:'左侧填色',exact:true}),rightButton=layersPanel.getByRole('button',{name:'右侧填色',exact:true});
+  await leftButton.click();await rightButton.click({modifiers:['Shift']});
+  assert.equal(await layersPanel.locator('.document-layer-row[data-selected]').count(),2);
+  await rightButton.press('Control+g');
+  const parent=await until(async()=>Object.values(await groupLayers()).find(layer=>layer.kind==='group'),'创建图层组');
+  assert.equal(parent.blend,'passThrough');
+  const row=id=>layersPanel.locator('[data-image-layer-id="'+id+'"]');
+  await row(parent.id).getByRole('button',{name:'图层组',exact:true}).waitFor();
+  assert.deepEqual(Object.values(await groupLayers()).filter(layer=>layer.parentId===parent.id).map(layer=>layer.id),[leftLayer,rightLayer]);
+  await row(parent.id).getByRole('button',{name:'收起 图层组',exact:true}).click();
+  await leftButton.waitFor({state:'hidden'});
+  await row(parent.id).getByRole('button',{name:'展开 图层组',exact:true}).click();
+  await leftButton.waitFor();
+  await row(parent.id).getByRole('button',{name:'图层组',exact:true}).click();
+  await layersPanel.getByRole('button',{name:'新建图层组',exact:true}).click();
+  const nested=await until(async()=>Object.values(await groupLayers()).find(layer=>layer.kind==='group'&&layer.parentId===parent.id),'创建子组');
+  await rightButton.dragTo(row(nested.id));
+  await until(async()=>(await groupLayers())[rightLayer].parentId===nested.id,'拖入子组');
+  await row(parent.id).getByRole('button',{name:'图层组',exact:true}).click();
+  const groupOpacity=layersPanel.locator('input.workspace-number-input[aria-label="不透明度"]');
+  await groupOpacity.fill('50');await groupOpacity.press('Tab');
+  await until(async()=>(await groupLayers())[parent.id].opacity===.5,'图层组不透明度');
+  await editor.getByRole('button',{name:'矩形选区',exact:true}).click();
+  await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+  await drag([.06,.08],[.48,.92]);
+  await layersPanel.getByRole('button',{name:'添加蒙版',exact:true}).click();
+  await row(parent.id).getByRole('button',{name:'选择蒙版 图层组',exact:true}).waitFor();
+  const masked=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.paint.imageDocuments[groupDoc].layers.find(layer=>layer.id===parent.id).maskEnabled&&current;
+  },'组蒙版保存');
+  assert.deepEqual(rgba(await imagePng('drawing-groups.png',masked.revision,groupDoc),[xy(.25,.5),xy(.75,.5)]),[
+    [4096,4096],[[34,94,187,128],[0,0,0,0]]
+  ]);
+  await editor.locator('.document-image-stage[data-preview-size="4096"]').waitFor({timeout:45000});
+  await page.screenshot({path:path.join(data,'drawing-groups-workbench.png')});
+  await page.reload();await canvas.waitFor();
+  await row(parent.id).waitFor();
+  const reopenedGroup=(await groupLayers())[parent.id];
+  assert.equal(reopenedGroup.opacity,.5);assert.equal(reopenedGroup.maskEnabled,true);
+  const undoneGroup=await api(paintRoute+'/undo',{revision:masked.revision});
+  assert.equal(undoneGroup.paint.imageDocuments[groupDoc].layers.find(layer=>layer.id===parent.id).maskEnabled,false);
+  const redoneGroup=await api(paintRoute+'/redo',{revision:undoneGroup.revision});
+  assert.deepEqual(redoneGroup.paint.imageDocuments[groupDoc].layers,masked.paint.imageDocuments[groupDoc].layers);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS drawing group multiselect, nested drag, collapse, 4K alpha mask, reopen and undo/redo');
 }catch(error){
   console.error(logs);
   throw error;

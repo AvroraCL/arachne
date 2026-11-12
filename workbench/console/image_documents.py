@@ -3,6 +3,8 @@
 No geometry, protection atlas or PBR layer state is used to edit a document.
 """
 from io import BytesIO
+from contextlib import contextmanager
+from tempfile import TemporaryFile
 import hashlib
 import json
 import struct
@@ -245,6 +247,65 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
         composite_tile(result, ids, pixels, opacity, 'normal' if group_base else layer['blend'], clipped)
 
 
+@contextmanager
+def composite_buffer(result, depth):
+    # A single temporary 4K buffer stays in memory. Nested groups and clipping
+    # stacks use OS-paged scratch files so deep edits don't multiply peak RAM.
+    if depth and result.nbytes >= 128 * 1024 * 1024:
+        with TemporaryFile() as file:
+            buffer = np.memmap(file, dtype=result.dtype, mode='w+', shape=result.shape)
+            try:
+                yield buffer
+            finally:
+                buffer._mmap.close()
+    else:
+        yield np.zeros_like(result)
+
+
+def composite_stack(result, children, surface, assets, linear, color, parent=None, depth=0):
+    layers = children.get(parent, [])
+    index = 0
+    while index < len(layers):
+        base = layers[index]
+        end = index + 1
+        while end < len(layers) and layers[end].get('clipped', False):
+            end += 1
+        clips = [layer for layer in layers[index+1:end] if layer['visible'] and layer['opacity']]
+        index = end
+        if base.get('clipped', False) or not base['visible'] or not base['opacity']:
+            continue
+        if base['kind'] == 'group':
+            opacity = base['opacity']
+            mask = surface.mask(base.get('maskStrokes', [])) if base['maskEnabled'] else None
+            pass_through = base['blend'] == 'passThrough'
+            if pass_through and opacity == 1 and mask is None:
+                composite_stack(result, children, surface, assets, linear, color, base['id'], depth)
+                continue
+            with composite_buffer(result, depth) as buffer:
+                if pass_through:
+                    buffer[:] = result
+                composite_stack(buffer, children, surface, assets, linear, color, base['id'], depth + 1)
+                if pass_through:
+                    for start in range(0, len(result), 131072):
+                        ids = np.arange(start, min(start + 131072, len(result)))
+                        amount = opacity if mask is None else opacity * mask_values(base, mask, ids, surface)[:, None]
+                        result[ids] += (buffer[ids] - result[ids]) * amount
+                else:
+                    for ids, pixels in image_tiles(buffer):
+                        amount = opacity if mask is None else opacity * mask_values(base, mask, ids, surface)[:, None]
+                        composite_tile(result, ids, pixels, amount, base['blend'])
+            continue
+        if not clips or base['kind'] == 'adjustment':
+            composite_layer(result, base, surface, assets, linear, color)
+            continue
+        with composite_buffer(result, depth) as buffer:
+            composite_layer(buffer, base, surface, assets, linear, color, group_base=True)
+            for layer in clips:
+                composite_layer(buffer, layer, surface, assets, linear, color, clipped=True)
+            for ids, pixels in image_tiles(buffer):
+                composite_tile(result, ids, pixels, base['opacity'], base['blend'])
+
+
 def composite_document(document,assets,size=4096,inspect_mask=None):
     surface=ImageSurface(size);result=np.zeros((size*size,4),dtype=np.float32)
     linear=document['colorSpace']=='linear'
@@ -263,26 +324,10 @@ def composite_document(document,assets,size=4096,inspect_mask=None):
                     result[ids, 3] = 1
                 break
     else:
-        index = 0
-        while index < len(layers):
-            base = layers[index]
-            end = index+1
-            while end < len(layers) and layers[end].get('clipped', False):
-                end += 1
-            clips = [layer for layer in layers[index+1:end] if layer['visible'] and layer['opacity']]
-            index = end
-            if base.get('clipped', False) or not base['visible'] or not base['opacity']:
-                continue
-            if not clips or base['kind'] == 'adjustment':
-                composite_layer(result, base, surface, assets, linear, color)
-                continue
-            group = np.zeros_like(result)
-            composite_layer(group, base, surface, assets, linear, color, group_base=True)
-            for layer in clips:
-                composite_layer(group, layer, surface, assets, linear, color, clipped=True)
-            for ids, pixels in image_tiles(group):
-                composite_tile(result, ids, pixels, base['opacity'], base['blend'])
-            del group
+        children = {}
+        for layer in layers:
+            children.setdefault(layer.get('parentId'), []).append(layer)
+        composite_stack(result, children, surface, assets, linear, color)
     # Encode in tiles to keep the 4K working set bounded.
     out=np.empty((len(result),4),dtype=np.uint8)
     for start in range(0,len(result),131072):

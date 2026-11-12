@@ -8,7 +8,8 @@ import {createLiveView} from './paint-live-view.mjs';
 import {hasImageLayerMask,imageDocumentLimit,imageClippingBase,surfaceToImageCommand} from './image-documents.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
-import {layerLockOwner} from './paint-layer-tree.mjs';
+import {layerChildren,layerIsVisible,layerLockOwner,layerParent,layerTreeOrder,layerTreeRows} from './paint-layer-tree.mjs';
+import {followingClips,imageGroupBlend,imageLayerInsertion} from './image-layer-tree.mjs';
 import {channelSpecs,paintChannels} from './paint-channels.mjs';
 import {maskGray} from './paint-colors.mjs';
 import {createBrushBinding} from './paint-brush-binding.mjs';
@@ -31,6 +32,22 @@ const selectionNames={rect:'矩形选区',ellipse:'椭圆选区',lasso:'套索',
 const imageDragTypes={layer:'application/x-arachne-image-layer',mask:'application/x-arachne-image-mask'};
 const currentDocument=project=>{const documents=project.document?.paint.imageDocuments??{},id=project.imageContext?.documentId;return Object.hasOwn(documents,id)?documents[id]:null;};
 const currentLayer=project=>currentDocument(project)?.layers.find(l=>l.id===project.imageContext?.layerId);
+function editableImageLayer(project){
+  const layer=currentLayer(project);
+  if(!layer)return null;
+  const {layers}=currentDocument(project);
+  return {...layer,locked:!!layerLockOwner(layers,layer),visible:layerIsVisible(layers,layer)};
+}
+function imageInsertion(project){
+  const image=currentDocument(project);
+  return imageLayerInsertion(image?.layers??[],project.imageContext?.layerId);
+}
+function canInsertImage(project){
+  const image=currentDocument(project);
+  if(!image||image.layers.length>=64)return false;
+  const {parentId}=imageInsertion(project),parent=image.layers.find(item=>item.id===parentId);
+  return !parent||!layerLockOwner(image.layers,parent);
+}
 function selectImage(project,patch){
   const selection={...project.imageContext,...patch};
   if(selection.target!=='mask'||patch.target&&!patch.inspectMask)delete selection.inspectMask;
@@ -43,11 +60,14 @@ export function imageSelectionOrigin(project){const c=project.imageContext;retur
 function selectAddedLayer(project,origin,layerId){const c=project.imageContext;if(project.document?.id===origin.id&&c?.documentId===origin.documentId&&c?.layerId===origin.layerId&&c?.target===origin.target)selectImage(project,{layerId,target:'pixels'});}
 async function addPixel(project,origin){
   const layerId=crypto.randomUUID(),layers=project.document.paint.imageDocuments[origin.documentId].layers;
-  const index=layers.findIndex(layer=>layer.id===origin.layerId)+1||layers.length;
-  await commandAt(project,origin,{action:'addLayer',layerId,kind:'pixel',index});
+  await commandAt(project,origin,{action:'addLayer',layerId,kind:'pixel',...imageLayerInsertion(layers,origin.layerId)});
   selectAddedLayer(project,origin,layerId);
 }
-export async function addImageAsset(project,origin,asset,name,position){const layerId=crypto.randomUUID();await project.commands([{op:'image',documentId:origin.documentId,action:'addLayer',layerId,kind:'image',patch:{asset,name,...position}}],origin);selectAddedLayer(project,origin,layerId);}
+export async function addImageAsset(project,origin,asset,name,position){
+  const layerId=crypto.randomUUID(),layers=project.document.paint.imageDocuments[origin.documentId].layers;
+  await commandAt(project,origin,{action:'addLayer',layerId,kind:'image',...imageLayerInsertion(layers,origin.layerId),patch:{asset,name,...position}});
+  selectAddedLayer(project,origin,layerId);
+}
 function remember(project){try{localStorage.setItem('arachne-image-selection:'+project.document.id,JSON.stringify(project.imageContext));}catch{}}
 export function createDocumentEditor(ctx,bridge){
   bridge={...bridge,...bridge.imageColors};
@@ -218,7 +238,7 @@ export function createDocumentEditor(ctx,bridge){
   }
   status.onclick=()=>{if(stage.dataset.previewPhase==='error')live.retryDetail();};status.onkeydown=event=>{if(stage.dataset.previewPhase==='error'&&['Enter',' '].includes(event.key)){event.preventDefault();event.stopPropagation();live.retryDetail();}};
   function brushContext(){
-    const layer=currentLayer(project),origin=imageOrigin(),maskTarget=project.imageContext?.target==='mask';
+    const layer=editableImageLayer(project),origin=imageOrigin(),maskTarget=project.imageContext?.target==='mask';
     const busy=!!pendingImageEdit||importing||bridge.busy()&&!strokeQueue.saving||!strokeQueue.accepts(imageSelectionOrigin(project));
     return {...origin,busy,enabled:false,uvEnabled:!!layer&&!busy,brushColor:bridge.foreground(),
       maskValue:maskTarget&&elements['brush-erase'].checked?maskGray(bridge.colorPair('mask').background):bridge.maskInk(),maskTarget,
@@ -278,7 +298,7 @@ export function createDocumentEditor(ctx,bridge){
   parameters.append(transformOptions,elements['uv-selection-options'],sampleNotice);
   selection=bridge.createSelection({pane:stage,canvas,elements,isHandHeld:()=>space||!!nav,
     context:()=>{
-      const layer=currentLayer(project),origin=imageOrigin(),editable=!!layer&&!layer.locked&&!writing();
+      const layer=editableImageLayer(project),origin=imageOrigin(),editable=!!layer&&layer.visible&&!layer.locked&&!writing();
       const pixels=project.imageContext?.target!=='mask';
       const asset=layer?.kind==='image'?project.document.paint.assets[layer.asset]:layer?.shape;
       const image=asset?{x:layer.x,y:layer.y,scale:layer.scale,rotation:layer.rotation,
@@ -382,17 +402,17 @@ export function createDocumentEditor(ctx,bridge){
   stage.addEventListener('wheel',event=>{event.preventDefault();if(drawingGesture())return;const before=zoom;zoom=Math.max(.03,Math.min(40,zoom*Math.exp(-event.deltaY*.001)));const r=stage.getBoundingClientRect(),x=event.clientX-r.x-r.width/2,y=event.clientY-r.y-r.height/2;pan=[x-(x-pan[0])*zoom/before,y-(y-pan[1])*zoom/before];layout();},{passive:false,signal});
   gradientTool=createImageGradientTool({stage,canvas,parameters,signal,settings:state.gradient,onChange:ctx.onChange,
     context:()=>{
-      const origin=imageSelectionOrigin(project),image=currentDocument(project),layer=currentLayer(project);
-      const index=layer?image.layers.indexOf(layer)+1:image?.layers.length??0;
-      const editable=origin.target==='pixels'||origin.target==='mask'&&hasImageLayerMask(layer)&&!layer.locked;
-      return {origin,layer,index,colors:bridge.colorPair(colorTarget()),selection:selection.clip(),
-        enabled:!!image&&editable&&!writing()&&!painter.isEditing()&&!selection.isTransforming()&&!nav&&!space};
+      const origin=imageSelectionOrigin(project),layer=editableImageLayer(project);
+      const editable=origin.target==='mask'?hasImageLayerMask(layer)&&!layer.locked:
+        layer?.kind==='gradient'?!layer.locked:canInsertImage(project);
+      return {origin,layer,insertion:imageInsertion(project),colors:bridge.colorPair(colorTarget()),selection:selection.clip(),
+        enabled:!!currentDocument(project)&&editable&&!writing()&&!painter.isEditing()&&!selection.isTransforming()&&!nav&&!space};
     },
     preview:operation=>{live.update(operation);project.draft(operation);},
     commit:(operation,origin,added)=>submitEdit(operation,origin,added?()=>selectAddedLayer(project,origin,operation.layerId):undefined)
   });
   function canPaintPixels(){
-    const layer=currentLayer(project);
+    const layer=editableImageLayer(project);
     return layer?.kind==='pixel'&&layer.visible&&!layer.locked&&project.imageContext?.target!=='mask'&&!writing();
   }
   bucketTool=createImageFillTool({stage,canvas,parameters,signal,settings:state.bucket,onChange:ctx.onChange,
@@ -401,14 +421,12 @@ export function createDocumentEditor(ctx,bridge){
     commit:submitEdit,sample:([u,v])=>sampleImage({u,v},imageOrigin())});
   cloneTool=createImageCloneTool({stage,canvas,parameters,settings:state.clone,context:brushContext,onChange:ctx.onChange});
   function canCreateShape(){
-    const image=currentDocument(project);
-    return !!image&&image.layers.length<64&&project.imageContext?.target!=='mask'&&!writing();
+    return canInsertImage(project)&&project.imageContext?.target!=='mask'&&!writing();
   }
   shapeTool=createImageShapeTool({stage,canvas,parameters,signal,settings:state.shape,onChange:ctx.onChange,
     context:()=>{
-      const origin=imageSelectionOrigin(project),image=currentDocument(project);
-      const index=image?.layers.findIndex(layer=>layer.id===origin.layerId)+1||image?.layers.length||0;
-      return {origin,index,colors:bridge.colorPair('paint'),enabled:canCreateShape()&&!selection.isTransforming()&&!nav&&!space};
+      return {origin:imageSelectionOrigin(project),insertion:imageInsertion(project),colors:bridge.colorPair('paint'),
+        enabled:canCreateShape()&&!selection.isTransforming()&&!nav&&!space};
     },
     preview:operation=>{live.update(operation);project.draft(operation);},
     commit:(operation,origin)=>submitEdit(operation,origin,()=>selectAddedLayer(project,origin,operation.layerId))
@@ -418,14 +436,17 @@ export function createDocumentEditor(ctx,bridge){
   }
   function canCopy(merged=false){
     if(!canPaste()||copying)return false;
-    if(merged)return currentDocument(project).layers.some(layer=>layer.visible&&layer.opacity>0&&layer.kind!=='adjustment');
-    const layer=currentLayer(project);
+    if(merged){
+      const {layers}=currentDocument(project);
+      return layers.some(layer=>layerIsVisible(layers,layer)&&layer.opacity>0&&!['adjustment','group'].includes(layer.kind));
+    }
+    const layer=editableImageLayer(project);
     return project.imageContext?.target!=='mask'&&!!layer?.visible&&layer.kind!=='adjustment'&&layer.opacity>0;
   }
   function syncClipboard(){
-    copy.disabled=!canCopy();paste.disabled=!canPaste()||!copiedImage();
+    copy.disabled=!canCopy();paste.disabled=!canPaste()||!canInsertImage(project)||!copiedImage();
     copy.setAttribute('aria-busy',String(copying));
-    importButton.disabled=!canPaste();
+    importButton.disabled=!canPaste()||!canInsertImage(project);
     importButton.setAttribute('aria-busy',String(importing));
     download.disabled=!canPaste()||!!exportRequest;
     download.setAttribute('aria-busy',String(!!exportRequest));
@@ -471,8 +492,8 @@ export function createDocumentEditor(ctx,bridge){
     return true;
   }
   function importFile(file,position,pixelSize=false){
-    if(!canPaste())return;
-    const origin=imageSelectionOrigin(project),layerId=crypto.randomUUID();
+    if(!canPaste()||!canInsertImage(project))return;
+    const origin=imageSelectionOrigin(project),layerId=crypto.randomUUID(),insertion=imageInsertion(project);
     importing=true;
     syncClipboard();
     void run(async()=>{
@@ -482,13 +503,13 @@ export function createDocumentEditor(ctx,bridge){
       const [width,height]=prepared.size;
       const placement=position?.scale!==undefined?position:imageClipboardPlacement(width,height,position&&[position.x,position.y]);
       if(!pixelSize&&position?.scale===undefined)placement.scale=Math.min(1,placement.scale);
-      await bridge.importDocumentAsset(prepared.file,origin,layerId,placement);
+      await bridge.importDocumentAsset(prepared.file,origin,layerId,{...placement,...insertion});
       if(!disposed)selectAddedLayer(project,origin,layerId);
     }).finally(()=>{importing=false;if(!disposed)sync();});
   }
   function pasteSelection(){
     const entry=copiedImage();
-    if(!entry||!canPaste())return false;
+    if(!entry||!canPaste()||!canInsertImage(project))return false;
     const c=project.imageContext;
     const center=entry.projectId===project.document.id&&entry.documentId===c?.documentId?entry.center:undefined;
     importFile(entry.file,imageClipboardPlacement(entry.width,entry.height,center));
@@ -501,7 +522,7 @@ export function createDocumentEditor(ctx,bridge){
     }
   },{signal});
   host.addEventListener('paste',event=>{
-    if(event.target.closest('input,textarea,[contenteditable]')||!canPaste())return;
+    if(event.target.closest('input,textarea,[contenteditable]')||!canPaste()||!canInsertImage(project))return;
     const file=[...event.clipboardData?.items||[]].filter(item=>item.kind==='file')
       .map(item=>item.getAsFile()).find(acceptsDrawingImage);
     if(file){event.preventDefault();event.stopPropagation();importFile(file,undefined,true);}
@@ -509,10 +530,10 @@ export function createDocumentEditor(ctx,bridge){
   },{signal});
   function dropPosition(event){const r=canvas.getBoundingClientRect(),x=(event.clientX-r.left)/r.width,y=(event.clientY-r.top)/r.height;return r.width&&r.height&&x>=0&&x<=1&&y>=0&&y<=1?{x,y}:null;}
   canvas.addEventListener('click',event=>{
-    if(mode!=='text'||event.button!==0||space||nav||bridge.busy())return;
+    if(mode!=='text'||event.button!==0||space||nav||bridge.busy()||!canInsertImage(project))return;
     const placement=dropPosition(event),origin=imageSelectionOrigin(project);
     if(!placement||!origin.documentId)return;
-    bridge.openImageText(origin,null,placement,bridge.foreground(),layerId=>{
+    bridge.openImageText(origin,null,{...placement,...imageInsertion(project)},bridge.foreground(),layerId=>{
       if(!disposed)selectAddedLayer(project,origin,layerId);
     });
   },{signal});
@@ -569,7 +590,7 @@ export function createDocumentEditor(ctx,bridge){
       if(key==='c')handled=copySelection(event.shiftKey);
       else if(key==='i'&&event.shiftKey)handled=selection.invert();
       else if(key==='i'){
-        const layer=currentLayer(project);
+        const layer=editableImageLayer(project);
         handled=project.imageContext?.target==='mask'&&hasImageLayerMask(layer)&&!layer.locked&&
           (!!pendingImageEdit||strokeQueue.saving||!bridge.busy())&&!selection.isTransforming();
         if(handled){
@@ -596,7 +617,7 @@ export function createDocumentEditor(ctx,bridge){
       }else handled=false;
     }else if(mod&&event.altKey&&(event.code==='KeyG'||key==='g')&&!event.shiftKey){
       const image=currentDocument(project),layer=currentLayer(project),index=image?.layers.indexOf(layer);
-      handled=!!layer&&!layer.locked&&!writing()&&!selection.isTransforming()&&!!imageClippingBase(image.layers,index);
+      handled=!!layer&&!layerLockOwner(image.layers,layer)&&!writing()&&!selection.isTransforming()&&!!imageClippingBase(image.layers,index);
       if(handled){
         const origin=imageSelectionOrigin(project);
         void run(()=>commandAt(project,origin,{action:'setClipping',layerId:layer.id,clipped:!layer.clipped}));
@@ -656,7 +677,14 @@ export function createDocumentEditor(ctx,bridge){
     }
     const documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}
     const next=JSON.stringify([doc.id,doc.revision]);if(sourceKey!==next){sourceKey=next;syncDestination();}else if(destinationDocument!==c?.documentId)syncDestination();
-    picker.value=c?.documentId||'';syncSelectMenu(picker);textTool.disabled=bind.disabled=!image||writing();gradientButton.disabled=!image||writing()||c?.target==='mask'&&!!layer?.locked;bucketButton.disabled=cloneButton.disabled=!canPaintPixels();shapeButton.disabled=!canCreateShape();bucketTool.sync();cloneTool.layout();shapeTool.sync();empty.hidden=!!image;canvas.hidden=!image;if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();syncStrokePreview();live.refresh();
+    picker.value=c?.documentId||'';syncSelectMenu(picker);
+    bind.disabled=!image||writing();textTool.disabled=bind.disabled||!canInsertImage(project);
+    const locked=layer&&layerLockOwner(image.layers,layer);
+    gradientButton.disabled=bind.disabled||(c?.target==='mask'||layer?.kind==='gradient'?!!locked:!canInsertImage(project));
+    bucketButton.disabled=cloneButton.disabled=!canPaintPixels();shapeButton.disabled=!canCreateShape();
+    bucketTool.sync();cloneTool.layout();shapeTool.sync();empty.hidden=!!image;canvas.hidden=!image;
+    if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}
+    ctx.title.textContent=image?image.name+' · RGBA':'';painter.render();selection.sync();syncColors();syncClipboard();syncStrokePreview();live.refresh();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
   return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,tool:mode,selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||strokeQueue.saving||drawingGesture()||selection.isDragging()||selection.isTransforming(),
@@ -732,7 +760,7 @@ export function createImagePanel(type,ctx){
   }
   const picker=choice('图像图层文档',[],'',value=>selectImage(project,{documentId:value||null,layerId:null,target:'pixels'}));tools.append(picker);enhanceSelectMenu(picker);
   const filters=el('div','document-layer-filter'),search=el('input'),filterCount=el('output','document-filter-count');
-  const kinds=[['all','全部类型'],['pixel','像素层'],['image','图像层'],['gradient','渐变填充'],['adjustment','调整图层'],['shape','形状层'],['text','文字层'],['mask','带蒙版']];
+  const kinds=[['all','全部类型'],['group','图层组'],['pixel','像素层'],['image','图像层'],['gradient','渐变填充'],['adjustment','调整图层'],['shape','形状层'],['text','文字层'],['mask','带蒙版']];
   const kind=choice('筛选图层类型',kinds,kinds.some(([value])=>value===ctx.state?.layerKind)?ctx.state.layerKind:'all',filterChanged);
   let filterOpen=ctx.state?.layerFilterOpen===true;
   search.type='search';search.placeholder='搜索图层';search.setAttribute('aria-label','搜索图像图层');search.value=typeof ctx.state?.layerQuery==='string'?ctx.state.layerQuery:'';search.oninput=filterChanged;
@@ -756,13 +784,15 @@ export function createImagePanel(type,ctx){
     const origin=imageSelectionOrigin(project);
     resetFilter();filterChanged();void run(()=>addPixel(project,origin));
   }),'plus'):null;
+  const addGroup=type==='layers'?chromeButton(button('新建图层组',event=>createGroup(event.shiftKey)),'folder'):null;
+  if(addGroup)addGroup.title='新建图层组 · Shift 点击将所选图层成组';
   const adjustmentsMenu=type==='layers'?createContextActions('调整图层类型',failure=>ctx.error(failure)):null;
   const addAdjustment=type==='layers'?chromeButton(button('新建调整图层',openAdjustments),'adjustment'):null;
   addAdjustment?.setAttribute('aria-haspopup','menu');
   if(add){
     actions.setAttribute('role','group');
     actions.setAttribute('aria-label','图层操作');
-    primaryActions.append(addMask,addAdjustment,add,stackButtons[3]);
+    primaryActions.append(addMask,addAdjustment,addGroup,add,stackButtons[3]);
     actions.append(...stackButtons.slice(0,3),primaryActions);
     error.classList.add('document-layer-error');
     host.append(actions);
@@ -782,6 +812,97 @@ export function createImagePanel(type,ctx){
   },{root:body,rootMargin:'38px 0px'}):null;
   let menuTarget=null,reorder=null,dropRow=null;
   let stackDocument='',renaming=null,bar=null,disposed=false;
+  let selectedRows=new Set(),selectionAnchor=null,selectionContext='',renderedRows=[];
+  const collapsedGroups=new Set((Array.isArray(ctx.state?.collapsedImageGroups)?ctx.state.collapsedImageGroups:[])
+    .filter(value=>typeof value==='string').slice(-256));
+  const selectionKey=(origin,layerId=origin.layerId,target=origin.target)=>JSON.stringify([origin.id,origin.documentId,layerId,target]);
+  function setRowSelection(ids,active,anchor=active){
+    const origin=imageSelectionOrigin(project);
+    selectedRows=new Set(ids);selectionAnchor=anchor;
+    selectionContext=selectionKey(origin,active,'pixels');
+    selectImage(project,{layerId:active,target:'pixels'});
+    sync();
+  }
+  function selectRow(item,event){
+    if(event.shiftKey&&selectionAnchor){
+      const from=renderedRows.findIndex(row=>row.layer.id===selectionAnchor),to=renderedRows.findIndex(row=>row.layer===item);
+      if(from>=0&&to>=0){
+        setRowSelection(renderedRows.slice(Math.min(from,to),Math.max(from,to)+1).map(row=>row.layer.id),item.id,selectionAnchor);
+        return;
+      }
+    }
+    if(event.ctrlKey||event.metaKey){
+      const next=new Set(selectedRows),active=project.imageContext?.layerId;
+      if(next.has(item.id)&&next.size>1){
+        next.delete(item.id);
+        setRowSelection(next,active===item.id?[...next].at(-1):active);
+        return;
+      }
+      next.add(item.id);setRowSelection(next,item.id);return;
+    }
+    setRowSelection([item.id],item.id);
+  }
+  function changeGroup(id,open){
+    if(open)collapsedGroups.delete(id);
+    else{
+      collapsedGroups.add(id);
+      const layers=currentDocument(project)?.layers??[],children=new Set(layerTreeOrder(layers,id).map(item=>item.id));
+      if([...selectedRows].some(key=>children.has(key)))setRowSelection([id],id);
+    }
+    sync();ctx.onChange?.();
+  }
+  function createGroup(fromSelection){
+    const image=currentDocument(project);
+    if(!image||ctx.busy?.()||image.layers.length>=64)return;
+    const origin=imageSelectionOrigin(project),layerId=crypto.randomUUID();
+    const op=fromSelection?{action:'groupLayers',layerIds:[...selectedRows]}:
+      {action:'addLayer',kind:'group',...imageLayerInsertion(image.layers,origin.layerId)};
+    return run(async()=>{
+      resetFilter();
+      sync();
+      await commandAt(project,origin,{...op,layerId});
+      if(!disposed)selectAddedLayer(project,origin,layerId);
+    });
+  }
+  const groupDialog=type==='layers'?el('dialog','paint-form-dialog'):null;
+  let groupAction;
+  if(groupDialog){
+    groupDialog.setAttribute('aria-label','确认图层组操作');
+    const form=el('form'),header=el('header'),title=el('h2'),content=el('div','paint-form-content');
+    const message=el('p','project-copy-source'),footer=el('footer','paint-form-footer');
+    const cancel=button('取消',()=>groupDialog.close()),confirm=el('button','primary');
+    confirm.type='submit';
+    header.append(title);content.append(message);footer.append(cancel,confirm);
+    form.append(header,content,footer);groupDialog.append(form);host.append(groupDialog);
+    groupDialog.addEventListener('close',()=>{groupAction=null;});
+    form.onsubmit=event=>{
+      event.preventDefault();
+      const action=groupAction;
+      groupDialog.close();
+      if(action)void run(action);
+    };
+    groupDialog.setAction=(label,description,action)=>{
+      groupAction=action;
+      title.textContent=confirm.textContent=label;
+      message.textContent=description;
+      groupDialog.showModal();cancel.focus();
+    };
+  }
+  function ungroup(item,origin=imageSelectionOrigin(project)){
+    const action=()=>commandAt(project,origin,{action:'ungroupLayer',layerId:item.id});
+    if(hasImageLayerMask(item)||item.blend!==imageGroupBlend||item.opacity!==1||!item.visible)
+      groupDialog.setAction('解散图层组','子图层将保留，组蒙版和组级显示、混合设置会移除。',action);
+    else return run(action);
+  }
+  if(type==='layers')body.addEventListener('keydown',event=>{
+    if(compositionKey(event)||!(event.ctrlKey||event.metaKey)||event.altKey||event.key.toLowerCase()!=='g'||
+       event.target.closest('input,select,textarea,[contenteditable]'))return;
+    const item=currentLayer(project);
+    if(!item||event.shiftKey&&item.kind!=='group')return;
+    event.preventDefault();event.stopPropagation();
+    if(event.shiftKey)void ungroup(item);
+    else void createGroup(true);
+  });
   function openAdjustments(){
     const image=currentDocument(project);
     if(!image||ctx.busy?.())return;
@@ -789,9 +910,9 @@ export function createImagePanel(type,ctx){
     const rect=addAdjustment.getBoundingClientRect();
     adjustmentsMenu.open({clientX:rect.left,clientY:rect.bottom},'新建调整图层',
       Object.entries(imageAdjustments).map(([type,{label}])=>({label,icon:'adjustment',run:()=>{
-        const layerId=crypto.randomUUID(),index=image.layers.findIndex(layer=>layer.id===origin.layerId)+1;
+        const layerId=crypto.randomUUID();
         const operations=[{op:'image',action:'addLayer',documentId:origin.documentId,layerId,kind:'adjustment',
-          index:index||image.layers.length,patch:{name:label,adjustment:newImageAdjustment(type),maskEnabled:!selection}}];
+          ...imageLayerInsertion(image.layers,origin.layerId),patch:{name:label,adjustment:newImageAdjustment(type),maskEnabled:!selection}}];
         if(selection)operations.push({op:'image',action:'createMask',documentId:origin.documentId,layerId,reveal:true,
           rect:selection.clip,...uvShapePayload(selection)});
         return run(async()=>{
@@ -811,7 +932,7 @@ export function createImagePanel(type,ctx){
     if(!nearViewport||row.hidden||!previewContext)return;
     const {revision,colorSpace}=previewContext;
     if(view.previewItem===item&&view.previewRevision===revision&&view.previewColorSpace===colorSpace)return;
-    if(!item.text&&item.kind!=='adjustment')updateImageThumbnail(preview,previewContext,item);
+    if(!item.text&&!['adjustment','group'].includes(item.kind))updateImageThumbnail(preview,previewContext,item);
     if(hasImageLayerMask(item))updateImageThumbnail(maskPreview,previewContext,item,true);
     view.previewItem=item;
     view.previewRevision=revision;
@@ -831,7 +952,7 @@ export function createImagePanel(type,ctx){
   }
   function startRename(view){
     finishRename({commit:true});
-    if(!view.row.isConnected||view.row.hidden||view.item.locked||ctx.busy?.())return;
+    if(!view.row.isConnected||view.row.hidden||view.lockOwner||ctx.busy?.())return;
     const input=el('input','document-layer-rename'),original=view.item.name;
     renaming={input,view,original,origin:imageSelectionOrigin(project)};
     input.value=original;
@@ -862,21 +983,26 @@ export function createImagePanel(type,ctx){
        origin.documentId!==project.imageContext?.documentId||layerId===view.item.id||!image)return null;
     const from=image.layers.findIndex(item=>item.id===layerId),to=image.layers.findIndex(item=>item.id===view.item.id);
     if(from<0||to<0)return null;
-    const source=image.layers[from];
+    const source=image.layers[from],sourceLock=layerLockOwner(image.layers,source),targetLock=layerLockOwner(image.layers,view.item);
     if(kind==='mask'){
-      const copy=event.altKey||source.locked;
-      if(view.item.locked||!hasImageLayerMask(source))return null;
+      const copy=event.altKey||!!sourceLock;
+      if(targetLock||!hasImageLayerMask(source))return null;
       return {edge:'mask',copy};
     }
-    if(source.locked)return null;
-    const rect=view.row.getBoundingClientRect(),above=event.clientY<rect.top+rect.height/2;
-    const index=to+(above?1:0)-(from<to?1:0);
-    return index===from?null:{index,edge:above?'above':'below'};
+    if(sourceLock||source.kind==='group'&&layerTreeOrder(image.layers,source.id).includes(view.item))return null;
+    const rect=view.row.getBoundingClientRect(),fraction=(event.clientY-rect.top)/rect.height;
+    if(view.item.kind==='group'&&fraction>=.24&&fraction<=.76&&!targetLock)
+      return {edge:'inside'};
+    const parent=image.layers.find(item=>item.id===layerParent(view.item));
+    if(parent&&layerLockOwner(image.layers,parent))return null;
+    const edge=fraction<.5?'above':'below',siblings=layerChildren(image.layers,layerParent(view.item));
+    const sourceIndex=siblings.indexOf(source),targetIndex=siblings.indexOf(view.item);
+    return sourceIndex>=0&&targetIndex-sourceIndex===(edge==='above'?1:-1)?null:{edge};
   }
   function bindReorder(view){
     const {row,select,name,mask}=view;
     const startDrag=(event,kind)=>{
-      if((kind==='layer'&&view.item.locked)||(kind==='mask'&&!hasImageLayerMask(view.item))||ctx.busy?.()||renaming){
+      if((kind==='layer'&&view.lockOwner)||(kind==='mask'&&!hasImageLayerMask(view.item))||ctx.busy?.()||renaming){
         event.preventDefault();return;
       }
       clearDrag();
@@ -884,7 +1010,7 @@ export function createImagePanel(type,ctx){
       reorder={origin:imageSelectionOrigin(project),layerId:view.item.id,row,kind};
       row.dataset.dragging='';
       event.dataTransfer.setData(imageDragTypes[kind],view.item.id);
-      event.dataTransfer.effectAllowed=kind==='layer'?'move':view.item.locked?'copy':'copyMove';
+      event.dataTransfer.effectAllowed=kind==='layer'?'move':view.lockOwner?'copy':'copyMove';
     };
     for(const [source,kind] of [[select,'layer'],[name,'layer'],[mask,'mask']]){
       source.ondragstart=event=>startDrag(event,kind);
@@ -914,7 +1040,10 @@ export function createImagePanel(type,ctx){
       const {origin,layerId,kind}=reorder,targetLayerId=view.item.id;
       clearDrag();
       if(kind==='layer'){
-        void run(()=>commandAt(project,origin,{action:'moveLayer',layerId,index:target.index}));
+        void run(async()=>{
+          await commandAt(project,origin,{action:'moveLayer',layerId,anchorId:targetLayerId,placement:target.edge});
+          if(!disposed&&target.edge==='inside')changeGroup(targetLayerId,true);
+        });
         return;
       }
       void run(async()=>{
@@ -925,23 +1054,35 @@ export function createImagePanel(type,ctx){
       });
     };
   }
-  function stackActions(item,index,last,origin,editable){
+  function stackActions(item,layers,origin,editable){
+    if(!item)return [];
+    const siblings=layerChildren(layers,layerParent(item)),index=siblings.indexOf(item);
     const apply=operation=>()=>commandAt(project,origin,{layerId:item.id,...operation()});
-    const move=(label,icon,target)=>({label,icon,enabled:editable&&index!==target,run:apply(()=>({action:'moveLayer',index:target}))});
+    const move=(label,icon,target,placement)=>({label,icon,enabled:editable&&!!target,
+      run:apply(()=>({action:'moveLayer',anchorId:target.id,placement}))});
+    const remove=apply(()=>({action:'removeLayer'}));
     return [
-      move('上移','moveUp',Math.min(last,index+1)),
-      move('下移','moveDown',Math.max(0,index-1)),
-      {label:'复制',icon:'copy',enabled:editable,run:apply(()=>({action:'duplicateLayer',patch:{id:crypto.randomUUID()}}))},
-      {label:'删除',icon:'trash',enabled:editable,run:apply(()=>({action:'removeLayer'}))}
+      move('上移','moveUp',siblings[index+1],'above'),
+      move('下移','moveDown',siblings[index-1],'below'),
+      {label:'复制',icon:'copy',enabled:editable,run:async()=>{
+        const layerId=crypto.randomUUID();
+        await apply(()=>({action:'duplicateLayer',patch:{id:layerId}}))();
+        if(!disposed)selectAddedLayer(project,origin,layerId);
+      }},
+      {label:'删除',icon:'trash',enabled:editable,run:()=>{
+        if(item.kind==='group'&&layerChildren(layers,item.id).length)
+          groupDialog.setAction('删除图层组','将删除「'+item.name+'」和其中的图层。',remove);
+        else return remove();
+      }}
     ];
   }
   function editText(item,origin=imageSelectionOrigin(project)){
-    if(item?.text&&!item.locked&&!ctx.busy?.())ctx.openImageText?.(origin,item);
+    if(item?.text&&!layerLockOwner(currentDocument(project).layers,item)&&!ctx.busy?.())ctx.openImageText?.(origin,item);
   }
   function selectLayerMask(item,origin=imageSelectionOrigin(project),{inspect=false,reveal=true}={}){
     if(!item||ctx.busy?.())return;
     const hasMask=hasImageLayerMask(item);
-    if(item.locked&&!hasMask)return;
+    if(layerLockOwner(currentDocument(project).layers,item)&&!hasMask)return;
     const selection=hasMask?null:ctx.imageSelection?.(origin);
     void run(async()=>{
       if(!hasMask)await commandAt(project,origin,{action:'createMask',layerId:item.id,reveal,
@@ -961,27 +1102,29 @@ export function createImagePanel(type,ctx){
     event.preventDefault();
     event.stopPropagation();
     view.select.focus({preventScroll:true});
-    if(project.imageContext?.layerId!==item.id)selectImage(project,{layerId:item.id,target:'pixels'});
-    const origin=imageSelectionOrigin(project),editable=!item.locked,hasMask=hasImageLayerMask(item);
+    if(!selectedRows.has(item.id))setRowSelection([item.id],item.id);
+    const origin=imageSelectionOrigin(project),editable=!view.lockOwner,hasMask=hasImageLayerMask(item);
     const maskAction=action=>()=>commandAt(project,origin,{action,layerId:item.id});
     const update=patch=>()=>commandAt(project,origin,{action:'updateLayer',layerId:item.id,patch});
-    const [up,down,copy,remove]=stackActions(item,index,layers.length-1,origin,editable);
+    const [up,down,copy,remove]=stackActions(item,layers,origin,editable);
     menuTarget={id:item.id,revision:origin.revision};
     // A right-click can open the popover before the pointer is released.
     // Keep the pointer just inside the menu so the release does not dismiss it.
     const position=anchor??{clientX:event.clientX-2,clientY:event.clientY-2};
     menu.open(position,item.name,[
       {label:'重命名',icon:'pen',shortcut:'F2',enabled:editable,run:()=>startRename(view)},
+      {label:'将所选图层成组',icon:'folder',shortcut:'⌘ / Ctrl + G',enabled:editable,run:()=>createGroup(true)},
+      ...(item.kind==='group'?[{label:'解散图层组',icon:'folder',shortcut:'⌘ / Ctrl + Shift + G',enabled:editable,run:()=>ungroup(item,origin)}]:[]),
       ...(item.text?[{label:'编辑文字…',icon:'text',enabled:editable,run:()=>editText(item,origin)}]:[]),
       copy,
-      {label:item.visible?'隐藏':'显示',icon:item.visible?'hidden':'eye',run:update({visible:!item.visible})},
-      {label:item.locked?'解锁':'锁定',icon:item.locked?'unlock':'lock',run:update({locked:!item.locked})},
+      {label:item.visible?'隐藏':'显示',icon:item.visible?'hidden':'eye',enabled:!view.lockOwner||view.lockOwner===item,run:update({visible:!item.visible})},
+      {label:item.locked?'解锁':'锁定',icon:item.locked?'unlock':'lock',enabled:!view.lockOwner||view.lockOwner===item,run:update({locked:!item.locked})},
       ...(item.kind==='pixel'?[{label:item.alphaLocked?'解锁透明像素':'锁定透明像素',icon:'alphaLock',
         enabled:editable,run:update({alphaLocked:!item.alphaLocked})}]:[]),
       null,up,down,null,
-      {label:item.clipped?'释放剪贴蒙版':'创建剪贴蒙版',icon:'clippingMask',shortcut:'⌥⌘G',
+      ...(item.kind==='group'?[]:[{label:item.clipped?'释放剪贴蒙版':'创建剪贴蒙版',icon:'clippingMask',shortcut:'⌥⌘G',
         enabled:editable&&!!imageClippingBase(layers,index),
-        run:()=>commandAt(project,origin,{action:'setClipping',layerId:item.id,clipped:!item.clipped})},
+        run:()=>commandAt(project,origin,{action:'setClipping',layerId:item.id,clipped:!item.clipped})}]),
       {label:hasMask?'选择蒙版':'添加蒙版',icon:'mask',enabled:editable||hasMask,run:()=>selectLayerMask(item,origin)},
       ...(hasMask?[
         {label:'单独查看蒙版',icon:'eye',shortcut:'Alt',run:()=>selectLayerMask(item,origin,{inspect:true})},
@@ -999,29 +1142,31 @@ export function createImagePanel(type,ctx){
     textThumb.innerHTML=workspaceIcons.text;textThumb.setAttribute('aria-hidden','true');textThumb.title='双击编辑文字';
     const effectThumb=el('span','document-adjustment-thumbnail');
     effectThumb.innerHTML=workspaceIcons.adjustment;effectThumb.setAttribute('aria-hidden','true');
+    const folderThumb=el('span','document-group-thumbnail');
+    folderThumb.innerHTML=workspaceIcons.folder;folderThumb.setAttribute('aria-hidden','true');
     const clipMark=el('span','document-layer-clip-mark');
     clipMark.innerHTML=workspaceIcons.clippingMask;
-    const view={row,preview,textThumb,effectThumb,maskPreview,name,item,clipMark,nearViewport:!thumbnailObserver};
+    const view={row,preview,textThumb,effectThumb,folderThumb,maskPreview,name,item,clipMark,nearViewport:!thumbnailObserver};
     function setLayer(patch){
       const origin=imageSelectionOrigin(project);
       void run(()=>commandAt(project,origin,{action:'updateLayer',layerId:item.id,patch}));
     }
     const eye=button('',()=>setLayer({visible:!view.item.visible}));
     const lock=button('',()=>setLayer({locked:!view.item.locked}));
-    const select=button('',()=>selectImage(project,{layerId:item.id,target:'pixels'}));
+    const select=button('',event=>selectRow(view.item,event));
     select.className='document-layer-select';
-    select.append(preview,textThumb,effectThumb);
+    select.append(preview,textThumb,effectThumb,folderThumb);
     select.ondblclick=event=>event.target.closest('.document-text-thumbnail')?editText(view.item):startRename(view);
     name.setAttribute('aria-hidden','true');
-    name.onclick=()=>{
+    name.onclick=event=>{
       if(select.disabled)return;
       select.focus({preventScroll:true});
-      select.click();
+      selectRow(view.item,event);
     };
     name.ondblclick=()=>startRename(view);
     const mask=button('',event=>{
       const layer=view.item;
-      if(event.shiftKey){if(!layer.locked)setLayer({maskEnabled:!layer.maskEnabled});return;}
+      if(event.shiftKey){if(!view.lockOwner)setLayer({maskEnabled:!layer.maskEnabled});return;}
       selectLayerMask(layer,imageSelectionOrigin(project),{inspect:event.altKey});
     });
     mask.className='document-layer-mask';
@@ -1032,9 +1177,12 @@ export function createImagePanel(type,ctx){
     });
     clipEdge.className='document-layer-clip-edge';
     clipEdge.tabIndex=-1;
+    const disclosure=button('',()=>changeGroup(item.id,collapsedGroups.has(item.id)));
+    disclosure.className='document-group-disclosure';
+    disclosure.innerHTML=workspaceIcons.chevron;
     row.dataset.imageLayerId=item.id;
-    row.append(eye,select,mask,name,lock,clipMark,clipEdge);
-    Object.assign(view,{eye,select,lock,mask,clipEdge});
+    row.append(eye,select,mask,name,lock,clipMark,clipEdge,disclosure);
+    Object.assign(view,{eye,select,lock,mask,clipEdge,disclosure});
     bindReorder(view);
     row.oncontextmenu=event=>openLayerMenu(event,view);
     select.onkeydown=event=>{
@@ -1060,30 +1208,42 @@ export function createImagePanel(type,ctx){
       control.innerHTML=workspaceIcons[icon];
     }
   }
-  function updateRow(view,item,context,target,busy,base,hasClips){
-    const {row,eye,select,preview,textThumb,effectThumb,mask,maskPreview,lock,name,clipMark,clipEdge}=view;
-    const selected=item.id===target.layerId,hasMask=hasImageLayerMask(item);
+  function updateRow(view,rowState,context,target,busy,base,hasClips,filtering){
+    const {layer:item,depth,open,visible,lockOwner}=rowState;
+    const {row,eye,select,preview,textThumb,effectThumb,folderThumb,mask,maskPreview,lock,name,clipMark,clipEdge,disclosure}=view;
+    const selected=selectedRows.has(item.id),active=item.id===target.layerId,group=item.kind==='group',hasMask=hasImageLayerMask(item);
+    const inheritedLock=lockOwner&&lockOwner!==item;
     row.toggleAttribute('data-selected',selected);
+    row.toggleAttribute('data-active',active);
+    row.toggleAttribute('data-group',group);
+    row.toggleAttribute('data-inherited-hidden',item.visible&&!visible);
+    row.style.setProperty('--image-layer-depth',depth);
     row.toggleAttribute('data-has-mask',hasMask);
     row.toggleAttribute('data-clipped',!!item.clipped);
     row.toggleAttribute('data-clipping-base',hasClips);
     clipMark.hidden=!item.clipped;
     if(item.clipped)clipMark.title='剪贴到底层 '+base?.name;
-    clipEdge.hidden=!base||item.locked;
+    clipEdge.hidden=!base||!!lockOwner;
     clipEdge.disabled=busy;
     labelButton(clipEdge,'Alt / Option 单击'+(item.clipped?'释放':'创建')+'剪贴蒙版');
     mask.hidden=!hasMask;
-    select.setAttribute('aria-pressed',String(selected&&target.target!=='mask'));
-    mask.setAttribute('aria-pressed',String(selected&&target.target==='mask'));
+    select.setAttribute('aria-pressed',String(selected&&!(active&&target.target==='mask')));
+    mask.setAttribute('aria-pressed',String(active&&target.target==='mask'));
     mask.toggleAttribute('data-disabled',hasMask&&!item.maskEnabled);
-    preview.hidden=!!item.text||item.kind==='adjustment';textThumb.hidden=!item.text;effectThumb.hidden=item.kind!=='adjustment';
+    preview.hidden=!!item.text||group||item.kind==='adjustment';textThumb.hidden=!item.text;effectThumb.hidden=item.kind!=='adjustment';folderThumb.hidden=!group;
+    disclosure.hidden=!group;
+    disclosure.disabled=busy||filtering;
+    if(group){
+      disclosure.setAttribute('aria-expanded',String(open));
+      labelButton(disclosure,(open?'收起 ':'展开 ')+item.name);
+    }
     if(name.textContent!==item.name){
       name.textContent=item.name;
       name.title=item.name;
     }
     labelButton(select,item.name);
     labelButton(eye,(item.visible?'隐藏 ':'显示 ')+item.name,item.visible?'eye':'hidden');
-    labelButton(lock,(item.locked?'解锁 ':'锁定 ')+item.name,item.locked?'lock':'unlock');
+    labelButton(lock,inheritedLock?'由「'+lockOwner.name+'」锁定':(item.locked?'解锁 ':'锁定 ')+item.name,lockOwner?'lock':'unlock');
     labelButton(mask,'选择蒙版 '+item.name);
     mask.title='选择蒙版 · Alt 单独查看 · Shift 启用或停用 · 拖动移动 · Alt 拖动复制';
     if(hasMask&&!mask.contains(maskPreview))mask.replaceChildren(maskPreview);
@@ -1091,11 +1251,13 @@ export function createImagePanel(type,ctx){
       pauseImageThumbnail(maskPreview);
       maskPreview.remove();
     }
-    for(const control of [eye,select,lock])control.disabled=busy;
+    eye.disabled=lock.disabled=busy||!!inheritedLock;
+    select.disabled=busy;
     mask.disabled=busy;
     mask.draggable=hasMask&&!busy;
-    name.draggable=select.draggable=!busy&&!item.locked;
+    name.draggable=select.draggable=!busy&&!lockOwner;
     view.item=item;
+    view.lockOwner=lockOwner;
     view.previewContext=context;
     refreshPreviews(view);
   }
@@ -1111,7 +1273,7 @@ export function createImagePanel(type,ctx){
     rows.clear();
     rowsHost.replaceChildren();
   }
-  function renderRows(image,doc,context,visibleIds,busy){
+  function renderRows(image,doc,context,visibleIds,busy,filtering){
     const documentKey=JSON.stringify([doc.id,context.documentId]);
     if(stackDocument!==documentKey){clearRows();stackDocument=documentKey;}
     if(reorder&&(reorder.origin.revision!==doc.revision||busy||!visibleIds.has(reorder.layerId)))clearDrag();
@@ -1126,11 +1288,15 @@ export function createImagePanel(type,ctx){
       rows.delete(id);
     }
     const previewContext={projectId:doc.id,revision:doc.revision,documentId:context.documentId,colorSpace:image.colorSpace};
+    for(const [id,view] of rows){
+      if(visibleIds.has(id)||view.row.hidden)continue;
+      if(renaming?.view===view)finishRename({commit:true});
+      stopPreviews(view);view.row.hidden=true;
+    }
     let cursor=rowsHost.firstChild;
-    for(let index=image.layers.length-1;index>=0;index--){
-      const item=image.layers[index],shown=visibleIds.has(item.id);
+    for(const state of renderedRows){
+      const item=state.layer,index=image.layers.indexOf(item);
       let view=rows.get(item.id);
-      if(!view&&!shown)continue;
       if(!view){
         view=makeRow(item);
         rows.set(item.id,view);
@@ -1138,17 +1304,13 @@ export function createImagePanel(type,ctx){
       }
       if(view.row!==cursor)rowsHost.insertBefore(view.row,cursor);
       cursor=view.row.nextSibling;
-      if(!shown&&!view.row.hidden){
-        if(renaming?.view===view)finishRename({commit:true});
-        stopPreviews(view);
-      }
-      view.row.hidden=!shown;
-      if(shown)updateRow(view,item,previewContext,context,busy,
-        imageClippingBase(image.layers,index),!item.clipped&&!!image.layers[index+1]?.clipped);
+      view.row.hidden=false;
+      updateRow(view,state,previewContext,context,busy,imageClippingBase(image.layers,index),
+        !item.clipped&&followingClips(image.layers,item).length>0,filtering);
     }
   }
   function renderAdjustment(layer,busy){
-    const adjustment=layer.adjustment,spec=imageAdjustments[adjustment.type],disabled=layer.locked||busy;
+    const adjustment=layer.adjustment,spec=imageAdjustments[adjustment.type],disabled=!!layerLockOwner(currentDocument(project).layers,layer)||busy;
     const section=el('section','document-adjustment-properties'),heading=el('div','document-adjustment-heading');
     const reset=button('重置调整',()=>void run(()=>command(project,{
       action:'updateLayer',layerId:layer.id,patch:{adjustment:newImageAdjustment(adjustment.type)}
@@ -1241,10 +1403,21 @@ export function createImagePanel(type,ctx){
       if(origin.id!==doc.id||origin.revision!==doc.revision||origin.documentId!==c?.documentId||origin.layerId!==c?.layerId||origin.target!==c?.target)
         clearAdjustment(owner);
     }
-    const targetKey=JSON.stringify([doc.id,c]),next=JSON.stringify([doc.id,doc.revision,c,!!ctx.busy?.(),filterOpen,search.value,kind.value]);if(key===next)return;if(renderedTarget===targetKey&&body.contains(document.activeElement)&&document.activeElement.hasAttribute('data-document-dirty'))return;key=next;renderedTarget=targetKey;
+    const origin=imageSelectionOrigin(project),rowKey=selectionKey(origin);
+    if(selectionContext!==rowKey){
+      selectionContext=rowKey;selectionAnchor=layer?.id??null;selectedRows=new Set(layer?[layer.id]:[]);
+    }else if(image)selectedRows=new Set(image.layers.filter(item=>selectedRows.has(item.id)).map(item=>item.id));
+    const targetKey=JSON.stringify([doc.id,c]),next=JSON.stringify([doc.id,doc.revision,c,!!ctx.busy?.(),filterOpen,search.value,kind.value,[...selectedRows],[...collapsedGroups]]);
+    if(key===next)return;
+    if(renderedTarget===targetKey&&body.contains(document.activeElement)&&document.activeElement.hasAttribute('data-document-dirty'))return;
+    key=next;renderedTarget=targetKey;
     const selected=project.imageContext?.documentId||'',documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}picker.value=selected;syncSelectMenu(picker);
     const busy=!!ctx.busy?.();
-    if(add)add.disabled=addAdjustment.disabled=!image||busy||image.layers.length>=64;
+    const lockOwner=layer&&layerLockOwner(image.layers,layer);
+    if(add){
+      const parent=layer&&(layer.kind==='group'?layer:layerParent(layer)&&image.layers.find(item=>item.id===layerParent(layer)));
+      add.disabled=addAdjustment.disabled=addGroup.disabled=!image||busy||image.layers.length>=64||!!(parent&&layerLockOwner(image.layers,parent));
+    }
     if(toggle){
       toggle.disabled=!image;
       toggle.setAttribute('aria-pressed',String(filterOpen));
@@ -1264,17 +1437,20 @@ export function createImagePanel(type,ctx){
       return;
     }
     if(type==='layers'){
-      const query=filterOpen?search.value.trim().toLocaleLowerCase():'',mode=filterOpen?kind.value:'all';
-      const matches=image.layers.filter(item=>item.name.toLocaleLowerCase().includes(query)&&(mode==='all'||mode===(item.text?'text':item.kind)||mode==='mask'&&hasImageLayerMask(item)));
-      const visibleIds=new Set(matches.map(item=>item.id));
-      const selectedVisible=!!layer&&visibleIds.has(layer.id),canEdit=selectedVisible&&!layer.locked&&!busy;
-      filterCount.textContent=matches.length+' / '+image.layers.length+(layer&&!selectedVisible?' · 当前图层不在结果中':'');
+      const query=filterOpen?search.value.trim():'',mode=filterOpen?kind.value:'all',filtering=!!query||mode!=='all';
+      const filter=mode==='all'?null:item=>mode===(item.text?'text':item.kind)||mode==='mask'&&hasImageLayerMask(item);
+      renderedRows=layerTreeRows(image.layers,{query,filter,collapsed:collapsedGroups});
+      const visibleIds=new Set(renderedRows.map(row=>row.layer.id));
+      const selectedVisible=!!layer&&visibleIds.has(layer.id),canEdit=selectedVisible&&!lockOwner&&!busy;
+      filterCount.textContent=(filtering?renderedRows.length:image.layers.length)+' / '+image.layers.length+
+        (filtering&&layer&&!selectedVisible?' · 当前图层不在结果中':'');
 
       const controls=el('div','document-layer-controls');
       const blend=choice('图像图层混合模式',[],'',value=>{
         const origin=imageSelectionOrigin(project);
         void run(()=>commandAt(project,origin,{action:'updateLayer',layerId:layer.id,patch:{blend:value}}));
       });
+      if(layer?.kind==='group')blend.append(new Option('穿透',imageGroupBlend));
       for(const [label,modes] of imageBlendGroups){
         const target=label?el('optgroup'):blend;
         if(label)target.label=label;
@@ -1300,18 +1476,17 @@ export function createImagePanel(type,ctx){
       else body.replaceChildren(controls,message,rowsHost);
       bar=controls;
       enhanceSelectMenu(blend);
-      message.hidden=matches.length>0;
+      message.hidden=renderedRows.length>0;
       message.textContent=image.layers.length?'没有匹配的图层':'没有图层';
-      renderRows(image,doc,c,visibleIds,busy);
+      renderRows(image,doc,c,visibleIds,busy,filtering);
 
-      const index=image.layers.findIndex(item=>item.id===layer?.id);
       addMask.disabled=!canEdit||hasImageLayerMask(layer);
-      footerStack=stackActions(layer,index,image.layers.length-1,imageSelectionOrigin(project),canEdit);
-      stackButtons.forEach((control,i)=>{control.disabled=!footerStack[i].enabled;});
+      footerStack=stackActions(layer,image.layers,origin,canEdit);
+      stackButtons.forEach((control,i)=>{control.disabled=!footerStack[i]?.enabled;});
     }else{
       curveEditor?.dispose();curveEditor=null;
       body.replaceChildren();
-      const layerType={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层',shape:'形状层'};
+      const layerType={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层',shape:'形状层',group:'图层组'};
       body.append(el('strong','document-properties-heading',c?.target==='mask'?'图层蒙版':layer?layer.text?'文字层':layerType[layer.kind]:'图像文档'));
       addControl(body,'文档名称','text',image.name,name=>command(project,{action:'update',patch:{name}}));
       const colorSpace=choice('图像颜色空间',[['srgb','颜色（sRGB）'],['linear','数据（线性）']],image.colorSpace,value=>void run(()=>command(project,{action:'update',patch:{colorSpace:value}})));body.append(colorSpace);enhanceSelectMenu(colorSpace);
@@ -1333,12 +1508,12 @@ export function createImagePanel(type,ctx){
       remove.disabled=!!refs.length;remove.title=refs.length?'请先解除材质通道引用':'删除图像文档';
       documentActions.append(duplicate,remove);
       body.append(el('div','document-muted','4096 × 4096 · RGBA'),documentActions);
-      if(layer){addControl(body,'图层名称','text',layer.name,name=>command(project,{action:'updateLayer',layerId:layer.id,patch:{name}}));addControl(body,'锁定图层','checkbox',layer.locked,locked=>command(project,{action:'updateLayer',layerId:layer.id,patch:{locked}}));
+      if(layer){addControl(body,'图层名称','text',layer.name,name=>command(project,{action:'updateLayer',layerId:layer.id,patch:{name}}),{disabled:!!lockOwner});addControl(body,'锁定图层','checkbox',layer.locked,locked=>command(project,{action:'updateLayer',layerId:layer.id,patch:{locked}}),{disabled:!!lockOwner&&lockOwner!==layer});
         if(layer.adjustment&&c.target!=='mask')renderAdjustment(layer,busy);
         if(layer.shape&&c.target!=='mask')renderShape(layer,busy);
         if(layer.text&&c.target!=='mask'){const edit=button('编辑文字…',()=>editText(layer));edit.disabled=layer.locked;body.append(edit);}
         if(layer.gradient&&c.target!=='mask'){
-          const disabled=layer.locked||busy;
+          const disabled=!!lockOwner||busy;
           const update=(key,index,value)=>{
             const gradient={...layer.gradient,[key]:layer.gradient[key].map((previous,i)=>i===index?value:previous)};
             return command(project,{action:'updateLayer',layerId:layer.id,patch:{gradient}});
@@ -1349,7 +1524,7 @@ export function createImagePanel(type,ctx){
           }
         }
         if(c.target==='mask'){
-          const disabled=layer.locked||busy;
+          const disabled=!!lockOwner||busy;
           addControl(body,'启用蒙版','checkbox',layer.maskEnabled,maskEnabled=>command(project,{action:'updateLayer',layerId:layer.id,patch:{maskEnabled}}),{disabled});
           addControl(body,'蒙版底色','number',layer.maskBase,maskBase=>command(project,{action:'updateLayer',layerId:layer.id,patch:{maskBase}}),{min:0,max:1,step:'any',disabled});
           const maskActions=el('div','document-mask-actions');
@@ -1378,8 +1553,8 @@ export function createImagePanel(type,ctx){
   sync();
   return {
     sync,kind:type==='layers'?'imageLayers':'imageProperties',domain:'image',
-    getState:()=>toggle?{layerFilterOpen:filterOpen,layerQuery:search.value,layerKind:kind.value}:{curveChannel},
-    isEditing:()=>!!renaming||!!reorder||!!adjustmentEditing,
+    getState:()=>toggle?{layerFilterOpen:filterOpen,layerQuery:search.value,layerKind:kind.value,collapsedImageGroups:[...collapsedGroups].slice(-256)}:{curveChannel},
+    isEditing:()=>!!renaming||!!reorder||!!adjustmentEditing||!!groupDialog?.open,
     activate(){project.setEditorDomain('image');},
     dispose(){
       disposed=true;
@@ -1391,6 +1566,7 @@ export function createImagePanel(type,ctx){
       clearRows();
       menu?.dispose();
       adjustmentsMenu?.dispose();
+      groupDialog?.remove();
     }
   };
 }
