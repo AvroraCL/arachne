@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createPaintColors,maskGray,grayColor} from '../public/paint-colors.mjs';
+import {createPaintColors,maskGray,grayColor,normalizePaintHex,paintHsv,paintHex} from '../public/paint-colors.mjs';
 import {maskThumbnailKey,layerThumbnailKey} from '../public/paint-mask-thumbnails.mjs';
 
 test('foreground/background swap and reset stay independent between paint and mask',()=>{
@@ -30,6 +30,14 @@ test('mask colors use gray values; saved preferences normalize without sharing m
   assert.equal(colors.pair('mask').foreground,'#363636');
   const copy=colors.snapshot();copy.paint.foreground='#ffffff';assert.equal(colors.pair().foreground,'#000000');
   assert.throws(()=>colors.set('paint','foreground','red'));
+});
+test('color picker preserves exact RGB through HSV conversion and accepts shorthand HEX',()=>{
+  assert.equal(normalizePaintHex(' #AbC '),'#aabbcc');
+  assert.equal(normalizePaintHex('cc33a0'),'#cc33a0');
+  assert.equal(normalizePaintHex('orange'),null);
+  for(const hex of ['#000000','#ffffff','#ff0000','#00ff00','#0000ff','#53c7af','#c49100','#b017b0','#010101'])
+    assert.equal(paintHex(paintHsv(hex)),hex);
+  assert.equal(paintHex({h:360,s:1,v:1}),'#ff0000');
 });
 test('mask thumbnail caches ignore paint color/opacity but invalidate changed masks and geometry',async()=>{
   const layer={id:'layer',kind:'paint',mask:null,maskBase:1,maskStrokes:[],values:{color:'#ff0000'},opacity:1};

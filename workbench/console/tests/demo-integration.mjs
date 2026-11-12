@@ -485,7 +485,6 @@ try{
     personal=saved.state;
   }
   const libraryTarget=await api('/api/projects',{workflowType:'pbr_paint',name:'资源库导入工程'},201);
-  await browser.close();
   page=await browserPage();
   await page.goto(base+'/?project='+libraryTarget.id);
   await page.locator('.area-switch [data-area-mode=material]:enabled').click();

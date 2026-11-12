@@ -190,7 +190,12 @@ export function createDocumentEditor(ctx,bridge){
   elements['surface-orbit'].onclick=()=>{selection.stop();setMode('orbit');};elements['surface-paint'].onclick=()=>{selection.stop();elements['brush-erase'].checked=false;setMode(project.imageContext?.target==='mask'?'mask':'paint');};elements['uv-eraser-tool'].onclick=()=>{selection.stop();elements['brush-erase'].checked=true;setMode(project.imageContext?.target==='mask'?'mask':'paint');};elements['surface-sample'].onclick=()=>{if(project.imageContext?.target!=='mask'){selection.stop();setMode('sample');}};
   const colors=el('div','document-colors'),front=el('input'),back=el('input');front.type=back.type='color';front.setAttribute('aria-label','图像前景色');back.setAttribute('aria-label','图像背景色');colors.append(back,front,button('⇄',()=>colorKey('x'),'交换图像前景色和背景色'),button('◩',()=>colorKey('d'),'恢复图像黑白'));rail.append(colors);
   function colorTarget(){return project.imageContext?.target==='mask'?'mask':'paint';}
-  function syncColors(){const pair=bridge.colorPair(colorTarget());front.value=pair.foreground;back.value=pair.background;gradientTool?.sync();}
+  function syncColors(){
+    const target=colorTarget(),pair=bridge.colorPair(target);
+    front.value=pair.foreground;back.value=pair.background;
+    for(const input of [front,back])input.toggleAttribute('data-color-gray',target==='mask');
+    gradientTool?.sync();
+  }
   front.oninput=()=>{bridge.setColor(colorTarget(),'foreground',front.value);syncColors();};back.oninput=()=>{bridge.setColor(colorTarget(),'background',back.value);syncColors();};
   function colorKey(key){bridge.colorKey(key,colorTarget());syncColors();painter.render();}
   function syncToolName(transforming=selection?.isTransforming()){

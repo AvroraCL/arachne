@@ -16,7 +16,7 @@ export function setupRangeControls(root=document){
   const inputs=new WeakMap();
   const native=HTMLInputElement.prototype;
   const numeric=input=>input.type==='number'&&!input.classList.contains('workspace-range-editor')&&(input.hasAttribute('data-scrub-number')||input.matches('#properties input,#model-numeric input,.shader-params input,#drawing-layer-opacity'));
-  const supported=input=>input.type==='range'||numeric(input);
+  const supported=input=>input.type==='range'&&!input.hasAttribute('data-native-range')||numeric(input);
   function sync(input){
     if(!supported(input))return;
     const fill=numeric(input)&&(input.min===''||input.max==='')?0:rangePercent(input.value,input.min===''?0:input.min,input.max===''?100:input.max);

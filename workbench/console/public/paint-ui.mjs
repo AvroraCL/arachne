@@ -7,6 +7,7 @@ import {setupProjectWelcome} from './paint-project-welcome.mjs';
 import {setupWorkspaceLayouts} from './paint-workspace-layouts.mjs';
 import {setupCommandPicker} from './paint-command-picker.mjs';
 import {setupRenderCameraBatch} from './render-camera-batch.mjs';
+import {setupPaintColorPicker} from './paint-color-picker.mjs';
 import {setupProjectPicker} from './paint-project-picker.mjs';
 import {paintChannels,channelSpecs,effectiveValues,baseChannelEnabled} from './paint-channels.mjs';
 import {installPaintTooltips} from './paint-tooltips.mjs';
@@ -265,6 +266,7 @@ function renderPaintColors(){
   const target=paintTarget==='mask'?'mask':'paint',pair=paintColors.pair(target);
   for(const slot of ['foreground','background']){
     const input=$(slot+'-color');input.value=pair[slot];
+    input.toggleAttribute('data-color-gray',target==='mask');
     input.parentElement.title=(slot==='foreground'?'前景色':'背景色')+' · '+pair[slot].toUpperCase()+(target==='mask'?' · 蒙版灰度':'');
   }
   for(const input of document.querySelectorAll('[data-paint-foreground]')){
@@ -1532,6 +1534,7 @@ $('project-copy-form').onsubmit=async event=>{
 const projectPicker=setupProjectPicker({list:projects,current:()=>doc?.id,open:(id,error)=>run(()=>load(id),error),canOpen:canOpenProjectDialog});
 $('open-projects').onclick=projectPicker;
 setupCommandPicker({canOpen:canOpenProjectDialog});
+setupPaintColorPicker();
 document.addEventListener('keydown',event=>{
   if(event.defaultPrevented||event.repeat||event.isComposing)return;
   const picker=event.key==='Escape'&&document.querySelector('.workbench-picker[open]');
