@@ -33,6 +33,7 @@
       <button id="open-projects" type="button" aria-haspopup="dialog">打开工程…</button>
       <button id="open-paint-import" type="button" aria-haspopup="dialog">打开涂装 ZIP…</button>
       <button id="open-glb-migration" type="button" aria-haspopup="dialog" hidden>迁移为 GLB 工程…</button>
+      <button id="open-project-copy" type="button" aria-haspopup="dialog" disabled>另存为工程…</button>
       <button id="open-project-details" type="button" aria-haspopup="dialog">工程详情…</button>
       <hr>
       <button id="open-delivery" type="button" aria-haspopup="dialog" disabled><svg class="chrome-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13V3m-3 3 3-3 3 3M4 11v5h12v-5"/></svg><span>导出…</span></button>
@@ -575,6 +576,16 @@
   </div>
   <div class="mask-area"><canvas id="mask-canvas" aria-label="灰度蒙版画布"></canvas></div>
   <div class="mask-footer"><span id="mask-status" role="status"></span><button id="mask-save" class="primary" type="button">保存蒙版</button></div>
+</dialog>
+<dialog id="project-copy-dialog" class="paint-form-dialog" aria-labelledby="project-copy-title">
+  <form id="project-copy-form">
+    <header><strong id="project-copy-title">另存为工程</strong><button id="close-project-copy" type="button">关闭</button></header>
+    <div class="paint-form-content">
+      <label>工程名称 <input id="project-copy-name" type="text" required maxlength="100" autocomplete="off"></label>
+      <p id="project-copy-source" class="project-copy-source"></p>
+    </div>
+    <footer class="paint-form-footer"><p id="project-copy-error" role="alert"></p><button id="save-project-copy" class="primary" type="submit">另存并打开</button></footer>
+  </form>
 </dialog>
 <dialog id="new-paint-dialog" class="paint-form-dialog" aria-labelledby="new-paint-title">
   <form id="new-paint-form">

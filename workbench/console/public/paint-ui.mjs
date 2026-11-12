@@ -195,7 +195,7 @@ function renderProjectState(){
   const state=!doc?'empty':pending?'saving':failure?'error':'saved';
   status.dataset.state=state;status.textContent={empty:'',saving:'正在保存…',error:'保存失败',saved:'已保存'}[state];
   status.title=failure||'工程修改自动保存在本机';
-  $('open-project-details').disabled=!doc;
+  $('open-project-details').disabled=$('open-project-copy').disabled=!doc;
   $('project-detail-name').textContent=doc?.name||'未打开工程';
   $('project-detail-id').textContent=doc?.id||'—';
   $('project-detail-updated').textContent=doc?.updated?new Date(doc.updated).toLocaleString():'—';
@@ -1488,6 +1488,43 @@ $('open-project-details').onclick=()=>{
   renderProjectState();document.querySelectorAll('.paint-menu[open]').forEach(menu=>menu.open=false);projectDialog.showModal();
 };
 $('close-project-dialog').onclick=()=>projectDialog.close();
+const projectCopy=$('project-copy-dialog'),copyName=$('project-copy-name'),copySave=$('save-project-copy');
+const copyClose=$('close-project-copy'),copyError=$('project-copy-error');
+let copySource=null,copyId=null,copyPending=false;
+function openProjectCopy(){
+  if(!doc||!canOpenProjectDialog())return false;
+  copySource=doc.id;copyId=null;copyPending=false;
+  copyName.value=doc.name.slice(0,95)+' · 副本';
+  copyName.disabled=copySave.disabled=copyClose.disabled=false;
+  copySave.textContent='另存并打开';
+  copyError.textContent='';
+  $('project-copy-source').textContent='源工程　'+doc.name;
+  document.querySelectorAll('.paint-menu[open]').forEach(menu=>menu.open=false);
+  projectCopy.showModal();copyName.focus();copyName.select();
+  return true;
+}
+$('open-project-copy').onclick=openProjectCopy;
+copyClose.onclick=()=>projectCopy.close();
+projectCopy.addEventListener('cancel',event=>{if(copyPending)event.preventDefault();});
+$('project-copy-form').onsubmit=async event=>{
+  event.preventDefault();
+  if(copyPending||doc?.id!==copySource)return;
+  copyPending=copyName.disabled=copySave.disabled=copyClose.disabled=true;
+  copyError.textContent='';
+  copySave.textContent=copyId?'正在打开…':'正在复制…';
+  try{
+    const success=await run(async()=>{
+      if(!copyId)copyId=(await post('save-copy',{name:copyName.value})).id;
+      await load(copyId);
+    },copyError);
+    if(success)projectCopy.close();
+  }finally{
+    copyPending=copySave.disabled=copyClose.disabled=false;
+    copyName.disabled=!!copyId;
+    copySave.textContent=copyId?'打开副本':'另存并打开';
+    if(projectCopy.open)(copyId?copySave:copyName).focus();
+  }
+};
 const projectPicker=setupProjectPicker({list:projects,current:()=>doc?.id,open:(id,error)=>run(()=>load(id),error),canOpen:canOpenProjectDialog});
 $('open-projects').onclick=projectPicker;
 setupCommandPicker({canOpen:canOpenProjectDialog});
@@ -1500,8 +1537,10 @@ document.addEventListener('keydown',event=>{
     else if(picker.dispatchEvent(new Event('cancel',{cancelable:true})))picker.close();
     return;
   }
-  if(event.altKey||event.shiftKey||!(event.metaKey||event.ctrlKey)||event.key.toLowerCase()!=='o')return;
-  if(projectPicker()){event.preventDefault();event.stopPropagation();}
+  if(event.altKey||!(event.metaKey||event.ctrlKey))return;
+  const key=event.key.toLowerCase();
+  const opened=event.shiftKey&&key==='s'?openProjectCopy():!event.shiftKey&&key==='o'&&projectPicker();
+  if(opened){event.preventDefault();event.stopPropagation();}
 },true);
 const glbMigration=$('glb-migration-dialog'),migrationStart=$('start-glb-migration'),migrationClose=$('close-glb-migration');
 $('open-glb-migration').onclick=()=>{

@@ -72,7 +72,7 @@ export function travel(id,expected,direction,steps=1){
   atomic(path.join(projectDir(id),'history.json'),result.history);writeProject(path.join(projectDir(id),'project.json'),restored);
   fs.appendFileSync(path.join(projectDir(id),'operations.jsonl'),JSON.stringify({revision:restored.revision,time:restored.updated,summary:direction,...(steps>1?{steps}:{})})+'\n');return restored;
 }
-export function forkProject(sourceId,snapshot,name,prepareAssets){
+export async function forkProject(sourceId,snapshot,name,prepareAssets){
   const sourceDir=projectDir(sourceId);const id=crypto.randomUUID(),dir=projectDir(id),doc=clone(snapshot);
   doc.id=id;doc.name=name;doc.revision=0;doc.updated=new Date().toISOString();doc.source=resolveSource(doc.source);
   validate(doc);const assets=Object.values(doc.assets).map(a=>({a,file:path.join(sourceDir,'assets',path.basename(a.file))}));
@@ -82,7 +82,7 @@ export function forkProject(sourceId,snapshot,name,prepareAssets){
     const folder=path.join(dir,'assets');
     fs.mkdirSync(folder);
     for(const {a,file} of assets){fs.copyFileSync(file,path.join(folder,path.basename(a.file)));if(fs.existsSync(file+'.ttf'))fs.copyFileSync(file+'.ttf',path.join(folder,path.basename(a.file)+'.ttf'));}
-    prepareAssets?.(folder);
+    if(prepareAssets)await prepareAssets(folder);
     atomic(path.join(dir,'history.json'),{undo:[],redo:[]});
     writeProject(path.join(dir,'project.json'),doc);
     return doc;

@@ -5,6 +5,7 @@ const commands=[
   {target:'open-projects',name:'打开工程',group:'文件',keys:'切换项目 open project'},
   {target:'open-paint-import',name:'打开涂装 ZIP',group:'文件',keys:'导入 zip archive import'},
   {target:'open-glb-migration',name:'迁移为 GLB 工程',group:'文件',keys:'blend blender migrate'},
+  {target:'open-project-copy',name:'另存为工程',group:'文件',keys:'独立副本 save as copy'},
   {target:'open-project-details',name:'工程详情',group:'文件',keys:'修订号 details'},
   {target:'open-delivery',name:'导出',group:'文件',keys:'贴图模型交付 export glb zip'},
   {target:'create-paint-backup',name:'生成工程副本',group:'文件',keys:'备份 duplicate backup'},

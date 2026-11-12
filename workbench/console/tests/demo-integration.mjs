@@ -379,6 +379,11 @@ try{
     version:1,binding:manifest.key,modelSha256:manifest.modelSha256,steps,nativeSteps:nativeModelSteps(json,steps)
   }});
   assert.deepEqual((await api(project(doc.id))).modeling.steps,steps);
+  const modeledCopy=await api(paint(doc.id)+'/save-copy',{revision:doc.revision,name:'建模副本'},201);
+  assert.deepEqual(modeledCopy.modeling,doc.modeling);
+  assert.deepEqual(modeledCopy.paint,doc.paint);
+  assert.equal(modeledCopy.revision,0);
+
   const modeled=await preview(doc);
   assert.ok(modeled.paintReport.modelFingerprint);
   assert.equal(modeled.paintReport.uv_unchanged,true);
@@ -639,6 +644,37 @@ try{
   assert.deepEqual(await sourceLayer(),invertedMask);
   assert.deepEqual(errors,[]);
   console.log('PASS isolated mask view, inversion shortcut, removal and undo');
+  const copySource=await api(project(libraryTarget.id));
+  const staleCopy=await api(paint(copySource.id)+'/save-copy',{revision:copySource.revision-1,name:'旧修订副本'},409);
+  assert.equal(staleCopy.currentRevision,copySource.revision);
+  await page.keyboard.press('Control+Shift+s');
+  const copyDialog=page.getByRole('dialog',{name:'另存为工程'});
+  await copyDialog.waitFor();
+  assert.ok((await copyDialog.getByLabel('工程名称').inputValue()).endsWith('副本'));
+  await copyDialog.getByLabel('工程名称').fill('独立绘制副本');
+  await copyDialog.getByRole('button',{name:'另存并打开'}).click();
+  await copyDialog.waitFor({state:'hidden'});
+  const copyProjectId=new URL(page.url()).searchParams.get('project');
+  assert.notEqual(copyProjectId,copySource.id);
+  const copy=await api(project(copyProjectId));
+  assert.equal(copy.name,'独立绘制副本');
+  assert.equal(copy.revision,0);
+  assert.deepEqual(copy.paint,copySource.paint);
+  assert.deepEqual(copy.source,copySource.source);
+  assert.deepEqual(await api(project(copyProjectId)+'/jobs'),[]);
+  const copiedPng=await fetch(base+paint(copyProjectId)+'/assets/'+imageLayer.asset);
+  assert.equal(copiedPng.status,200);
+  assert.equal(hash(Buffer.from(await copiedPng.arrayBuffer())),imageLayer.asset);
+  await api(paint(copyProjectId)+'/commands',{revision:copy.revision,operations:[
+    {op:'image',action:'removeMask',documentId:clipboardDocument,layerId:clipboardLayer}
+  ]});
+  assert.deepEqual(await api(project(copySource.id)),copySource);
+  await page.reload();
+  await page.locator('#project-name').filter({hasText:'独立绘制副本'}).waitFor();
+  await page.goto(base+'/?project='+copySource.id);
+  assert.deepEqual(errors,[]);
+  console.log('PASS separate Save As copy with source revision guard, byte-identical assets and independent edits');
+
 
 
   await page.addInitScript(()=>{

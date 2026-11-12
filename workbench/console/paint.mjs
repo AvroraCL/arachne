@@ -156,6 +156,21 @@ export async function createPaint({sourceProjectId,name='示例模型 · PBR 涂
   paintTemplate(doc,{base:{...values},layers:[],assets:{}});
   return forkProject(doc.id,doc,(typeof name==='string'?name.trim().slice(0,100):'')||'示例模型 · PBR 涂装');
 }
+export async function savePaintCopy(doc,request){
+  const {revision,name}=fields(request,['revision','name']);
+  if(doc.revision!==revision)throw revisionError(doc);
+  const title=typeof name==='string'?name.trim():'';
+  if(!title||title.length>100||/[\u0000-\u001f\u007f]/.test(title))throw Error('请输入有效的工程名称');
+  return forkProject(doc.id,doc,title,async destination=>{
+    for(const [id,entry] of Object.entries(doc.paint.assets)){
+      if(!sha256(id)||entry.file!=='paint-'+id+'.png')throw Error('涂装素材登记无效');
+      const copied=path.join(destination,entry.file);
+      try{await fsp.copyFile(assetPath(doc,id),copied,fs.constants.COPYFILE_EXCL|fs.constants.COPYFILE_FICLONE);}
+      catch(error){if(error.code==='ENOENT')throw Error('缺少涂装素材：'+entry.name);throw error;}
+      if(await sha256File(copied)!==id)throw Error('复制时素材指纹变化：'+entry.name);
+    }
+  });
+}
 function checkedRenderCamera(value){
   fields(value,['projection','eye','target','up','fov','orthoHeight']);
   return cyclesOptions({camera:value}).camera;

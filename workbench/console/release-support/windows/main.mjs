@@ -41,7 +41,7 @@ function buildMenus(){
     {label:'文件',submenu:[
       command('新建工程…','newProject','CmdOrCtrl+N'),command('打开工程…','openProject','CmdOrCtrl+O'),
       command('打开涂装 ZIP…','importArchive'),command('迁移为 GLB 工程…','migrateModel'),separator,command('保存工程','save','CmdOrCtrl+S'),
-      command('生成工程副本','createBackup'),command('下载工程副本…','downloadBackup'),
+      command('另存为工程…','saveProjectCopy','CmdOrCtrl+Shift+S'),command('生成工程副本','createBackup'),command('下载工程副本…','downloadBackup'),
       command('工程详情…','projectDetails'),command('导出…','export','CmdOrCtrl+E'),separator,
       {label:'显示工程目录',click:()=>void shell.openPath(service.data)},{label:'退出',role:'quit'}
     ]},

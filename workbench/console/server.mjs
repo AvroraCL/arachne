@@ -3,7 +3,7 @@ import {importGlbProject} from './model-registration.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
-import {PAINT,createPaint,editPaint,importPaint,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,checkPaintPreview} from './paint.mjs';
+import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,checkPaintPreview} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
 import {resolvePaintRenderSettings} from './cycles-options.mjs';
@@ -319,6 +319,7 @@ const server=http.createServer(async(req,res)=>{
       else if(operation==='text')send(res,201,await savePaintText(doc,b));
       else if(['undo','redo'].includes(operation))send(res,200,travel(id,b.revision,operation,b.steps));
       else if(operation==='preview'||operation==='draft')send(res,202,submit(id,operation==='draft'?'paint-draft':'paint-preview',b.revision,b.requestId));
+      else if(operation==='save-copy')send(res,201,await savePaintCopy(doc,b));
       else if(operation==='backup')send(res,202,submit(id,'paint-backup',b.revision,b.requestId));
       else if(operation==='render'){
         const settings=resolvePaintRenderSettings(doc.paint,b);

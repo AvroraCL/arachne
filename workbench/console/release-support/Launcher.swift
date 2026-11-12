@@ -58,6 +58,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         command(file,"新建工程…","newProject","n");command(file,"打开工程…","openProject","o")
         command(file,"打开涂装 ZIP…","importArchive");command(file,"迁移为 GLB 工程…","migrateModel")
         file.addItem(.separator());command(file,"保存工程","save","s")
+        command(file,"另存为工程…","saveProjectCopy","s",[.command,.shift])
         command(file,"生成工程副本","createBackup");command(file,"下载工程副本…","downloadBackup")
         command(file,"工程详情…","projectDetails");file.addItem(.separator());command(file,"导出…","export","e")
         let edit=group("编辑")

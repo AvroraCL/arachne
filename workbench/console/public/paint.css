@@ -542,7 +542,7 @@ body:has(#mask-editor.surface-mask[open]) #viewport canvas{cursor:crosshair}
 .paint-form-footer{display:flex;align-items:center;gap:6px;justify-content:space-between;padding:8px 12px;border-top:1px solid #383838}
 .paint-form-footer [role=alert]{min-width:0;color:#ddd}
 
-#new-paint-name{width:100%;min-height:30px;padding:4px 8px}
+:is(#new-paint-name,#project-copy-name){width:100%;min-height:30px;padding:4px 8px}
 
 #model-geometry-status{font-size:var(--paint-font-caption,12px);color:#b8b8b8;white-space:nowrap;margin-left:auto;padding:0 6px}
 #model-geometry-status[data-state=running]::before,#model-geometry-status[data-state=queued]::before{content:'';display:inline-block;width:9px;height:9px;margin-right:5px;border:1px solid #555;border-top-color:#ccc;border-radius:50%;vertical-align:-1px;animation:geometry-progress 1s linear infinite}
