@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {createModelTransform,worldAxes,constraintSegment} from '../public/paint-model-transform.mjs';
+import {createModelTransform,worldAxes,constraintSegment,modelPivotPoint,numericModelDelta} from '../public/paint-model-transform.mjs';
 
 const pivot=new THREE.Vector3(),camera=new THREE.OrthographicCamera(-5,5,5,-5,.1,100);camera.position.set(0,0,10);camera.lookAt(0,0,0);camera.updateMatrixWorld(true);
 const rect={left:0,top:0,width:1000,height:1000};
@@ -64,4 +64,15 @@ test('constraint guides clip to both camera types before rendering, including se
     assert.ok(endpoints[0].distanceTo(endpoints[1])>0);
   }
   assert.equal(constraintSegment(camera,new THREE.Vector3(0,20,0),new THREE.Vector3(1,0,0)),null);
+});
+
+
+test('bounds and median pivots give distinct rotations for uneven selections',()=>{
+  const points=[[0,0,0],[1,1,0],[8,3,0]].map(coords=>new THREE.Vector3(...coords));
+  const median=modelPivotPoint(points,'median'),bounds=modelPivotPoint(points,'bounds');
+  near(median,[3,4/3,0]);near(bounds,[4,1.5,0]);
+  near(modelPivotPoint([],'bounds'),[0,0,0]);
+  const active=points.at(-1);
+  near(active.clone().applyMatrix4(numericModelDelta('rotate',[0,0,90],active)),active.toArray());
+  assert.ok(active.distanceTo(active.clone().applyMatrix4(numericModelDelta('rotate',[0,0,90],median)))>1);
 });

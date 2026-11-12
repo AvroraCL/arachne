@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {objectClickSelection} from './paint-object-selection.mjs';
-import {modelOrientation,numericModelDelta,createModelTransform,constraintSegment,worldAxes} from './paint-model-transform.mjs';
+import {modelOrientation,numericModelDelta,createModelTransform,constraintSegment,worldAxes,modelPivotPoint,modelPivotLabels} from './paint-model-transform.mjs';
 export {modelOrientation,numericModelDelta} from './paint-model-transform.mjs';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {axisColors} from './viewport-colors.mjs';
@@ -24,7 +24,7 @@ export function createPaintModeling(report, project = {}) {
   let showOverlays=true,showGizmo=true;
   let currentProject, storageKey, storageSnapshot, undo = [], redo = [], gesture = null, saving = false, error = '';
   let pendingOperation=null,queuedHistory=[];
-  let mode = 'object', element = 'vertex', tool = 'translate', orientation = 'global', object = null;
+  let mode = 'object', element = 'vertex', tool = 'translate', orientation = 'global', pivotMode = 'median', object = null;
   const selected = new Map(), selectedObjects = new Set(), objects = new Map(), meshes = [];
   const welds = new WeakMap();
   const point = new THREE.Vector3();
@@ -41,7 +41,7 @@ export function createPaintModeling(report, project = {}) {
     let uses=0;context?.model?.traverse(node=>{if(node.isMesh&&[node.material].flat().some(m=>(m.userData.sourceMaterial||m.name)==='f_16xl'))uses++;});
     const materialScope = materialNames.size&&!materialNames.has('f_16xl')?'所选物体使用原生材质 · 当前编辑示例材质':`示例材质 · ${uses} 个网格共用${objectLabel?' · '+objectLabel:''}`;
     const modal=gesture?.keyboard?.describe();
-    report({materialScope,mode,element,tool,orientation,modal,dragging:!!gesture||saving||!!pendingOperation,hasDraft:!!undo.length,sceneItems,binding:context?.binding,projectId:currentProject,selectionVersion,
+    report({materialScope,mode,element,tool,orientation,pivotMode,modal,dragging:!!gesture||saving||!!pendingOperation,hasDraft:!!undo.length,sceneItems,binding:context?.binding,projectId:currentProject,selectionVersion,
       activeId:object?.userData.modelingId,selectedIds:[...selectedObjects].map(node=>node.userData.modelingId),
       hasTransformTarget:!!object&&(mode==='object'||selected.size>0),topologyState,localActive:!!localObjects,
       selectionKey:mode==='edit'?[...selected.keys()].join(','):[...selectedObjects].map(node=>node.id).join(',')+'|active:'+object?.id,
@@ -264,18 +264,22 @@ export function createPaintModeling(report, project = {}) {
 
   function selectionCenter() {
     if (mode === 'object') {
+      if(pivotMode==='active'&&object)return object.getWorldPosition(new THREE.Vector3());
+      if(pivotMode==='bounds')return modelPivotPoint([...selectedObjects].map(node=>node.getWorldPosition(new THREE.Vector3())),pivotMode);
       return objectOriginCenter(selectedObjects);
     }
-    const center = new THREE.Vector3(), unique = new Set();
-    for (const {mesh,indices} of selected.values()) {
-      for (const index of indices) {
-        const key = vertexKey(mesh,index);
-        if (unique.has(key)) continue;
-        unique.add(key);
-        center.add(point.fromBufferAttribute(mesh.geometry.attributes.position,index).applyMatrix4(mesh.matrixWorld));
-      }
+    const entries=pivotMode==='active'?[...selected.values()].slice(-1):selected.values();
+    return modelPivotPoint(selectedPositions(entries),pivotMode);
+  }
+
+  function* selectedPositions(entries){
+    const unique=new Set();
+    for(const {mesh,indices} of entries)for(const index of indices){
+      const key=vertexKey(mesh,index);
+      if(unique.has(key))continue;
+      unique.add(key);
+      yield point.fromBufferAttribute(mesh.geometry.attributes.position,index).applyMatrix4(mesh.matrixWorld);
     }
-    return center.divideScalar(unique.size);
   }
 
   function updateSelection() {
@@ -1096,6 +1100,13 @@ export function createPaintModeling(report, project = {}) {
     setOrientation(next){
       if (!['global','local'].includes(next) || gesture || saving) return false;
       orientation=next;
+      if(active)updateSelection();
+      return true;
+    },
+    setPivot(next){
+      if(!Object.hasOwn(modelPivotLabels,next)||gesture||saving)return false;
+      if(next===pivotMode)return true;
+      pivotMode=next;
       if(active)updateSelection();
       return true;
     }

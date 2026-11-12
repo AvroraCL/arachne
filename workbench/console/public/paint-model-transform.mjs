@@ -9,6 +9,19 @@ export function modelOrientation(object,orientation='global'){
   return rotation.normalize().multiply(worldAxes);
 }
 
+export const modelPivotLabels={median:'中值点',bounds:'边界中心',active:'活动元素'};
+
+export function modelPivotPoint(points,mode){
+  const center=new THREE.Vector3(),bounds=mode==='bounds'?new THREE.Box3():null;
+  let count=0;
+  for(const point of points){
+    if(bounds)bounds.expandByPoint(point);
+    else center.add(point);
+    count++;
+  }
+  return bounds?bounds.getCenter(center):count?center.divideScalar(count):center;
+}
+
 export function numericModelDelta(tool,values,pivot,orientation=worldAxes){
   const limit={translate:1000,rotate:36000,scale:100}[tool];
   if(!Number.isFinite(limit)||!Array.isArray(values)||values.length!==3||
