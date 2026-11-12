@@ -225,7 +225,7 @@ try{
   await desktop.evaluate(({clipboard})=>clipboard.clear());
   await clipboardCanvas.focus();
   await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.copy());
-  const copiedSize=await waitFor(async()=>desktop.evaluate(async({clipboard,nativeImage,ClipboardItem})=>{
+  const clipboardImageSize=()=>desktop.evaluate(async({clipboard,nativeImage,ClipboardItem})=>{
     let image;
     if(ClipboardItem){
       const png=(await clipboard.read()).find(item=>item.types.includes('image/png'));
@@ -234,8 +234,15 @@ try{
       image=nativeImage.createFromBuffer(Buffer.from(await blob.arrayBuffer()));
     }else image=clipboard.readImage();
     return image.isEmpty()?null:image.getSize();
-  }),'copying the document to the Windows clipboard');
+  });
+  const copiedSize=await waitFor(clipboardImageSize,'copying the document to the Windows clipboard');
   assert.deepEqual(copiedSize,{width:4096,height:4096});
+  await desktop.evaluate(({clipboard,Menu,BrowserWindow})=>{
+    clipboard.clear();
+    const item=Menu.getApplicationMenu().items.find(group=>group.label==='编辑').submenu.items.find(item=>item.label==='合并复制');
+    item.click(item,BrowserWindow.getAllWindows()[0],{});
+  });
+  assert.deepEqual(await waitFor(clipboardImageSize,'copying merged pixels from the Windows Edit menu'),copiedSize);
   console.log('PASS 125% Windows desktop scale and native clipboard image paste and copy');
   const textProbe='中文剪切验收';
   await page.evaluate(text=>{

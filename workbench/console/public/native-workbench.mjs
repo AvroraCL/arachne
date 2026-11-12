@@ -23,13 +23,13 @@ export function createNativeWorkbench({window,document,status,flush,imageCommand
       if(!control||control.disabled)return false;
       control.click();return true;
     }
-    if(name==='cut'||name==='pasteInPlace'){
+    if(['cut','copyMerged','pasteInPlace'].includes(name)){
       if(focused?.matches?.('input,textarea,[contenteditable="true"]')){
         if(name!=='cut')return false;
         return nativeEdit?'native-text':document.execCommand('cut');
       }
       if(document.querySelector('dialog[open]'))return false;
-      return imageCommand?.(name==='cut'?'cutSelection':'pasteInPlace')===true;
+      return imageCommand?.(name==='cut'?'cutSelection':name)===true;
     }
     const id=commands[name];
     if(!id||document.querySelector('dialog[open]'))return false;

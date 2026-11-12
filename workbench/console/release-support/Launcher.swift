@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Darwin
+import CryptoKit
 
 let contents=URL(fileURLWithPath:CommandLine.arguments[0]).resolvingSymlinksInPath().deletingLastPathComponent().deletingLastPathComponent()
 let resources=contents.appendingPathComponent("Resources")
@@ -67,6 +68,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         for (title,selector,key) in [("拷贝","copy:","c"),("粘贴","paste:","v"),("全选","selectAll:","a")] {
             edit.addItem(withTitle:title,action:Selector(selector),keyEquivalent:key)
         }
+        command(edit,"合并复制","copyMerged","c",[.command,.shift])
         command(edit,"原位粘贴","pasteInPlace","v",[.command,.shift])
         edit.addItem(.separator());command(edit,"历史记录…","history");command(edit,"搜索命令…","searchCommands","k")
         let render=group("渲染");command(render,"渲染设置","renderSettings");command(render,"后台任务…","renderTasks")
@@ -160,7 +162,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
     @objc func openWorkspace() {
         guard let url=url else{return}
         if workbench==nil {
-            let view=NativeWorkbench(url:url)
+            let autosaveName:String
+            if let data=data,ProcessInfo.processInfo.environment["ARACHNE_USER_DATA_DIR"] != nil {
+                let digest=SHA256.hash(data:Data(data.standardizedFileURL.resolvingSymlinksInPath().path.utf8))
+                autosaveName="ArachneWorkbench-"+digest.prefix(12).map{String(format:"%02x",$0)}.joined()
+            } else { autosaveName=data==nil ? "ArachneWorkbenchDevelopment" : "ArachneWorkbench" }
+            let view=NativeWorkbench(url:url,autosaveName:autosaveName)
             view.onProject={ [weak self] id,_ in self?.rememberProject(id) }
             workbench=view
         }
@@ -169,6 +176,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
     @objc func showData() { if let data=data { NSWorkspace.shared.open(data) } }
     @objc func about() { let alert=NSAlert();alert.messageText="阿拉克涅 \(version)";alert.informativeText="建模 · 材质 · 绘制\nMac 窗口 · 本机工作台";alert.runModal() }
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool { openWorkspace();return false }
+    func applicationDidChangeScreenParameters(_ notification:Notification) { workbench?.fitWindowToScreen() }
 
     // The owned service can also be used by MCP or another project window.
     // Check all projects before stopping it, not just the currently open one.

@@ -61,6 +61,7 @@ function buildMenus(){
     {label:'编辑',submenu:[
       command('撤销','undo','CmdOrCtrl+Z'),command('重做','redo','CmdOrCtrl+Shift+Z'),separator,
       command('剪切','cut','CmdOrCtrl+X'),{label:'复制',role:'copy'},{label:'粘贴',role:'paste'},
+      command('合并复制','copyMerged','CmdOrCtrl+Shift+C'),
       command('原位粘贴','pasteInPlace','CmdOrCtrl+Shift+V'),{label:'全选',role:'selectAll'},
       separator,command('历史记录…','history'),command('搜索命令…','searchCommands','CmdOrCtrl+K'),command('设置…','settings')
     ]},

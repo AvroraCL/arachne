@@ -21,11 +21,11 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
     private var downloadTargets: [ObjectIdentifier: DownloadTarget] = [:]
     var onProject: ((String, String) -> Void)?
 
-    init(url: URL) {
+    init(url: URL, autosaveName: String? = "ArachneWorkbench", dataStore: WKWebsiteDataStore = .default()) {
         origin = url
         recoveryURL = url
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = dataStore
         webView = WKWebView(frame: .zero, configuration: configuration)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -46,9 +46,9 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = webView
         window.isReleasedWhenClosed = false
-        if !window.setFrameUsingName("ArachneWorkbench") { window.center() }
+        if autosaveName.map({ window.setFrameUsingName($0) }) != true { window.center() }
         fitWindowToScreen()
-        window.setFrameAutosaveName("ArachneWorkbench")
+        if let autosaveName = autosaveName { window.setFrameAutosaveName(autosaveName) }
         webView.load(URLRequest(url: url))
     }
 
@@ -74,7 +74,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
         return NSRect(x: x, y: y, width: width, height: height)
     }
 
-    private func fitWindowToScreen() {
+    func fitWindowToScreen() {
         guard !window.styleMask.contains(.fullScreen),
               let primary = NSScreen.screens.first?.visibleFrame else { return }
         let frame = Self.visibleWindowFrame(window.frame, displays: NSScreen.screens.map(\.visibleFrame), primary: primary)
@@ -167,7 +167,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
 
     func perform(_ command: String) {
         // The enum is fixed here, so no user string is interpolated into JS.
-        let allowed = ["newProject", "openProject", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo", "cut", "pasteInPlace"]
+        let allowed = ["newProject", "openProject", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo", "cut", "copyMerged", "pasteInPlace"]
         guard allowed.contains(command), sameOrigin(webView.url) else { NSSound.beep(); return }
         webView.evaluateJavaScript("window.arachneNativeHost?.command('\(command)', {nativeEdit:true}) ?? false") { value, error in
             if command == "cut", value as? String == "native-text",
@@ -178,18 +178,27 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
 
     func prepareToQuit(_ completion: @escaping (String) -> Void) {
         if !downloads.isEmpty { completion("downloads"); return }
-        guard sameOrigin(webView.url) else { completion("unavailable"); return }
+        guard !rendererStopped, sameOrigin(webView.url) else { completion("unavailable"); return }
+        var completed = false
+        func finish(_ state: String) {
+            guard !completed else { return }
+            completed = true
+            completion(state)
+        }
+        let timeout = DispatchWorkItem { finish("unavailable") }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: timeout)
         Task { @MainActor in
+            defer { timeout.cancel() }
             do {
                 let value = try await webView.callAsyncJavaScript(
                     "const host=window.arachneNativeHost; return host?.prepareToCloseAsync ? await host.prepareToCloseAsync() : host?.prepareToClose() ?? null",
                     arguments: [:], in: nil, contentWorld: .page)
                 guard let status = value as? [String: Any], let state = status["state"] as? String,
                       ["ready", "saving", "editing", "error", "jobs"].contains(state) else {
-                    completion("unavailable"); return
+                    finish("unavailable"); return
                 }
-                completion(state)
-            } catch { completion("unavailable") }
+                finish(state)
+            } catch { finish("unavailable") }
         }
     }
 
