@@ -1,0 +1,60 @@
+name: Windows desktop
+
+on:
+  push:
+    branches: [main]
+    paths: ['workbench/**', '.github/workflows/windows-desktop.yml']
+  pull_request:
+    paths: ['workbench/**', '.github/workflows/windows-desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    env:
+      ARACHNE_PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/arachne-windows
+      ARACHNE_DESKTOP_SCREENSHOTS: ${{ runner.temp }}/arachne-screenshots
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Install workbench dependencies
+        working-directory: workbench/console
+        run: |
+          npm ci
+          python -m pip install -r requirements.txt
+          npx --no-install playwright-core install --only-shell chromium
+      - name: Build the Windows desktop package
+        working-directory: workbench/console
+        run: npm run package:win
+      - name: Verify the extracted desktop package
+        working-directory: workbench/console
+        run: |
+          $archive = Get-ChildItem -Path $env:ARACHNE_PACKAGE_OUTPUT_DIR -Filter '*.zip' | Select-Object -First 1
+          if (!$archive) { throw 'Desktop ZIP is missing' }
+          $hash = (Get-Content ($archive.FullName + '.sha256')).Split(' ')[0]
+          if ((Get-FileHash $archive.FullName -Algorithm SHA256).Hash -ne $hash) { throw 'Desktop ZIP checksum mismatch' }
+          $extracted = Join-Path $env:RUNNER_TEMP '阿拉克涅 包验证'
+          Expand-Archive -Path $archive.FullName -DestinationPath $extracted
+          $executable = Join-Path (Join-Path $extracted $archive.BaseName) 'Arachne.exe'
+          node tests/windows-desktop-integration.mjs $executable
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: windows-workbench-screenshots
+          path: ${{ env.ARACHNE_DESKTOP_SCREENSHOTS }}
+          if-no-files-found: ignore
+          retention-days: 7
