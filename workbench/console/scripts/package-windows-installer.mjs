@@ -16,7 +16,8 @@ const option=process.platform==='win32'?'/':'-';
 try{
   execFileSync(process.env.ARACHNE_MAKENSIS||'makensis',[
     option+'V2',option+'DVERSION='+APP_VERSION,option+'DPRODUCT_VERSION='+APP_VERSION.replace(/[^\d.]/g,'').replace(/\.\.+/,'.'),
-    option+'DBUNDLE='+bundle,option+'DOUTPUT='+pending,path.join(root,'release-support/windows/installer.nsi')
+    option+'DBUNDLE_FILES='+path.join(bundle,'*'),option+'DAPP_ICON='+path.join(bundle,'resources','app','arachne.ico'),
+    option+'DOUTPUT='+pending,path.join(root,'release-support/windows/installer.nsi')
   ],{stdio:'inherit',windowsHide:true});
   const hash=createHash('sha256');
   for await(const part of createReadStream(pending))hash.update(part);

@@ -7,7 +7,7 @@ SetCompressor /SOLID zlib
 !include "WinVer.nsh"
 !include "x64.nsh"
 !define UNINSTALL "Software\Microsoft\Windows\CurrentVersion\Uninstall\Arachne"
-!define MUI_ICON "${BUNDLE}/resources/app/arachne.ico"
+!define MUI_ICON "${APP_ICON}"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\Arachne.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "打开阿拉克涅"
 
@@ -52,7 +52,7 @@ running:
   Abort
 copy_files:
   SetOutPath "$INSTDIR"
-  File /r "${BUNDLE}/*"
+  File /r "${BUNDLE_FILES}"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\阿拉克涅"
   CreateShortCut "$SMPROGRAMS\阿拉克涅\阿拉克涅.lnk" "$INSTDIR\Arachne.exe" "" "$INSTDIR\resources\app\arachne.ico"
