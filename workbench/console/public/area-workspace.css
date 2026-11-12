@@ -165,6 +165,13 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .render-settings-camera-actions{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .render-settings-camera-actions[hidden]{display:none}
 .render-settings-camera-actions button{min-height:24px;padding:2px 7px;font-size:12px}
+.render-bookmark-chooser{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;margin-top:0}
+.render-bookmark-chooser .custom-select{min-width:0}
+.render-bookmark-chooser .custom-select-button{width:100%;text-align:left}
+.render-bookmark-add .chrome-icon{width:14px;height:14px;vertical-align:middle}
+.render-bookmark-details{margin-top:4px}
+.render-bookmark-details input{width:100%;min-width:0}
+
 .render-appearance-fields[hidden]{display:none}
 .render-lighting-fields input[type=color]{width:100%;min-width:0;height:25px;padding:0;border:0;background:transparent}
 .render-settings-check input{justify-self:start;width:15px;height:15px;margin:0}

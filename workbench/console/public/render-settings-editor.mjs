@@ -1,3 +1,4 @@
+import {sameDeliveryCamera,renderBookmarkLimit} from './paint-delivery-options.mjs';
 import {syncSelectMenu} from './paint-select.mjs';
 import {createPropertyEditorFrame} from './property-editor.mjs';
 import {areaIcons} from './area-chrome.mjs';
@@ -252,6 +253,88 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     }
     syncSelectMenu(framing);
   }
+  const bookmarks=section('output','bookmarks','相机书签',false);
+  const bookmarkRow=el('div','render-bookmark-chooser render-settings-camera-actions'),bookmarkPicker=el('select');
+  bookmarkRow.dataset.search='选择相机书签 添加镜头 保存视口';
+  bookmarkPicker.setAttribute('aria-label','相机书签');
+  const addBookmark=el('button','render-bookmark-add');addBookmark.type='button';
+  addBookmark.innerHTML=workspaceIcons.plus;
+  addBookmark.setAttribute('aria-label','保存视口为新镜头');addBookmark.title='保存视口为新镜头';
+  bookmarkRow.append(bookmarkPicker,addBookmark);bookmarks.append(bookmarkRow);
+  const bookmarkDetails=el('div','render-bookmark-details');bookmarks.append(bookmarkDetails);
+  const bookmarkName=el('input');bookmarkName.type='text';bookmarkName.maxLength=80;bookmarkName.setAttribute('aria-label','镜头名称');
+  row(bookmarkDetails,'镜头名称',bookmarkName);
+  const bookmarkActions=el('div','render-settings-camera-actions');
+  bookmarkActions.dataset.search='用作出图相机 更新镜头 删除镜头';
+  bookmarkDetails.append(bookmarkActions);
+  function bookmarkButton(label,action){
+    const control=el('button','',label);control.type='button';control.onclick=()=>void editBookmark(action);
+    bookmarkActions.append(control);return control;
+  }
+  const activateBookmark=bookmarkButton('用作出图相机',async origin=>{
+    const {camera}=selectedBookmark();
+    if(!sameDeliveryCamera(camera,settings.projectCamera?.()))await project.commands([{op:'renderCamera',camera}],origin);
+    if(project.document?.id===origin.id)settings.set({framing:'saved'});
+  });
+  const replaceBookmark=bookmarkButton('用视口更新',origin=>{
+    const camera=settings.viewportCamera?.();
+    if(!camera)throw Error('请先打开三维视口');
+    return project.commands([{op:'renderBookmark',action:'update',id:bookmarkId,patch:{camera}}],origin);
+  });
+  const deleteBookmark=bookmarkButton('删除',origin=>project.commands([{op:'renderBookmark',action:'remove',id:bookmarkId}],origin));
+  deleteBookmark.setAttribute('aria-label','删除镜头');
+  let bookmarkId=state.cameraBookmark||'',bookmarkListKey='',nameKey='',bookmarkPending=false;
+  const listBookmarks=()=>project.document?.paint.renderBookmarks??[];
+  const selectedBookmark=()=>listBookmarks().find(entry=>entry.id===bookmarkId);
+  async function editBookmark(action){
+    const origin=project.origin();
+    if(bookmarkPending||!origin||!status('output').available)return;
+    bookmarkPending=true;syncBookmarks();
+    try{await action(origin);}catch(error){ctx.error(error);}
+    finally{bookmarkPending=false;refresh();}
+  }
+  addBookmark.onclick=()=>void editBookmark(async origin=>{
+    const camera=settings.viewportCamera?.();
+    if(!camera)throw Error('请先打开三维视口');
+    const taken=new Set(listBookmarks().map(entry=>entry.name));
+    let number=1;while(taken.has('镜头 '+number))number++;
+    const id=crypto.randomUUID();
+    await project.commands([{op:'renderBookmark',action:'add',id,patch:{name:'镜头 '+number,camera}}],origin);
+    if(project.document?.id===origin.id){bookmarkId=id;syncBookmarks();onChange();}
+  });
+  bookmarkPicker.onchange=()=>{bookmarkId=bookmarkPicker.value;syncBookmarks();onChange();};
+  bookmarkName.onchange=()=>{
+    const name=bookmarkName.value.trim(),entry=selectedBookmark();
+    if(!entry||entry.name===name){bookmarkName.value=entry?.name||'';return;}
+    void editBookmark(async origin=>{
+      await project.commands([{op:'renderBookmark',action:'update',id:entry.id,patch:{name}}],origin);
+    }).finally(()=>{bookmarkName.value=selectedBookmark()?.name||'';});
+  };
+  bookmarkName.onkeydown=event=>{
+    if(event.key==='Enter'){event.preventDefault();bookmarkName.blur();}
+    else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();bookmarkName.value=selectedBookmark()?.name||'';bookmarkName.blur();}
+  };
+  function syncBookmarks(){
+    const entries=listBookmarks(),key=JSON.stringify(entries.map(({id,name})=>[id,name]));
+    if(key!==bookmarkListKey){
+      bookmarkListKey=key;
+      bookmarkPicker.replaceChildren(...(entries.length?entries.map(({id,name})=>new Option(name,id)):[new Option('尚无相机书签','')]));
+    }
+    if(!selectedBookmark())bookmarkId=entries[0]?.id||'';
+    const entry=selectedBookmark(),nextNameKey=JSON.stringify([project.document?.id,entry?.id,entry?.name]);
+    bookmarkPicker.value=bookmarkId;
+    bookmarkPicker.disabled=bookmarkPending||!entries.length;
+    if(nameKey!==nextNameKey){nameKey=nextNameKey;bookmarkName.value=entry?.name||'';}
+    bookmarkDetails.hidden=!entry;
+    bookmarkName.disabled=deleteBookmark.disabled=bookmarkPending;
+    addBookmark.disabled=bookmarkPending||entries.length>=renderBookmarkLimit||!settings.canUseViewport();
+    replaceBookmark.disabled=bookmarkPending||!settings.canUseViewport();
+    const active=!!entry&&sameDeliveryCamera(entry.camera,settings.projectCamera?.())&&settings.read().framing==='saved';
+    activateBookmark.disabled=bookmarkPending||active;
+    activateBookmark.textContent=active?'当前出图相机':'用作出图相机';
+    syncSelectMenu(bookmarkPicker);
+  }
+
   const opticsPanel=section('output','optics','景深',false),opticsMode=el('select');
   opticsMode.setAttribute('aria-label','景深模式');
   opticsMode.append(new Option('跟随源相机','source'),new Option('启用','on'),new Option('关闭','off'));
@@ -399,7 +482,7 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     refresh();
   }
   function refresh(){
-    syncCamera();syncAppearance();syncLighting();syncOptics();syncRegion();
+    syncCamera();syncAppearance();syncLighting();syncOptics();syncRegion();syncBookmarks();
     for(const category of categories){
       const current=status(category),value=target(category),message=unavailable[category];
       message.hidden=current.available;message.textContent=current.reason||'';
@@ -430,6 +513,6 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   }
   const unsubscribe=settings.subscribe(sync),unsubscribeProject=project.subscribe(event=>event.kind==='project'?sync(event):observe(event));
   sync();
-  return {kind:'renderSettings',sync,getState:()=>({...frame.getState(),sections:{...openSections},pins:structuredClone(pins),object:objectEditor.getState(),material:materialEditor.getState()}),
+  return {kind:'renderSettings',sync,getState:()=>({...frame.getState(),sections:{...openSections},cameraBookmark:bookmarkId,pins:structuredClone(pins),object:objectEditor.getState(),material:materialEditor.getState()}),
     dispose(){unsubscribe();unsubscribeProject();materialEditor.dispose();drawingEditor.dispose();}};
 }

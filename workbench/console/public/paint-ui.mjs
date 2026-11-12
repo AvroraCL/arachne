@@ -2036,6 +2036,7 @@ const renderSettingsBridge={
   clearProjectPreset:()=>changeRenderPreset(false),
   restoreProjectPreset:()=>changeDeliveryPreferences(()=>renderPreferences.reset(doc)),
   projectCamera:()=>doc?.paint.renderCamera||null,
+  viewportCamera:()=>visibleDeliveryCamera()?deliveryViewport().readCamera():null,
   saveProjectCamera:()=>changeProjectCamera(true),
   clearProjectCamera:()=>changeProjectCamera(false),
   setCameraLens:editProjectCameraLens,

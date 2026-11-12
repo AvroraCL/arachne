@@ -122,6 +122,8 @@ export function createRenderPreferences(initial){
   };
 }
 
+export const renderBookmarkLimit=24;
+
 export function sameDeliveryCamera(a,b){
   if(!a||!b)return a===b;
   if(a.projection!==b.projection)return false;

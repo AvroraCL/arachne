@@ -234,6 +234,46 @@ try{
   assert.equal(await workspaceRoot.evaluate(node=>node.style.getPropertyValue('--area-ratio')),'0.67');
   assert.equal((await api(project(doc.id))).revision,doc.revision);
   console.log('PASS portable workspace layouts, validated import, explicit apply and persistence without changing the project');
+  await page.locator('[data-area-mode=modeling]').click();
+  await page.locator('.editor-viewport[data-state=ready]').first().waitFor();
+  await page.keyboard.press('F3');
+  await page.locator('#command-search').fill('渲染设置');
+  await page.keyboard.press('Enter');
+  const renderProperties=page.locator('.editor-area[data-editor=renderSettings]').first();
+  await renderProperties.getByRole('tab',{name:'输出属性'}).click();
+  const bookmarkPanel=renderProperties.locator('details').filter({has:page.locator('summary').getByText('相机书签',{exact:true})});
+  await bookmarkPanel.locator('summary').click();
+  const addShot=bookmarkPanel.getByRole('button',{name:'保存视口为新镜头'});
+  await addShot.click();
+  const firstShot=await waitFor(async()=>{
+    const state=await api(project(doc.id));
+    return state.paint.renderBookmarks?.[0];
+  },'保存当前镜头');
+  const shotName=bookmarkPanel.getByLabel('镜头名称');
+  await shotName.fill('透视构图');
+  await shotName.press('Enter');
+  await waitFor(async()=>(await api(project(doc.id))).paint.renderBookmarks?.[0].name==='透视构图','重命名镜头');
+  await page.locator('.editor-area[data-editor=viewport]').first().getByRole('button',{name:/顶视/}).click();
+  await addShot.click();
+  const secondShot=await waitFor(async()=>{
+    const state=await api(project(doc.id));
+    return state.paint.renderBookmarks?.[1];
+  },'保存第二个镜头');
+  assert.notDeepEqual(secondShot.camera,firstShot.camera);
+  await bookmarkPanel.getByRole('button',{name:'相机书签',exact:true}).click();
+  await page.getByRole('option',{name:'透视构图',exact:true}).click();
+  await bookmarkPanel.getByRole('button',{name:'用作出图相机',exact:true}).click();
+  doc=await waitFor(async()=>{
+    const state=await api(project(doc.id));
+    return JSON.stringify(state.paint.renderCamera)===JSON.stringify(firstShot.camera)&&state;
+  },'应用工程出图相机');
+  await bookmarkPanel.getByRole('button',{name:'当前出图相机',exact:true}).waitFor();
+  await page.reload();
+  const restoredProperties=page.locator('.editor-area[data-editor=renderSettings]').first();
+  await restoredProperties.getByRole('button',{name:'当前出图相机',exact:true}).waitFor();
+  assert.deepEqual((await api(project(doc.id))).paint.renderBookmarks,doc.paint.renderBookmarks);
+  console.log('PASS multiple camera bookmarks, rename, render-camera activation and project reload');
+
   const beforeBaseEdit=doc;
   const baseSnapshot=await snapshot(beforeBaseEdit);
   const baseTag=baseSnapshot.headers.get('etag');
