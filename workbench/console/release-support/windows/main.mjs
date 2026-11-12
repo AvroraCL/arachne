@@ -225,14 +225,14 @@ async function start(){
     if(state.project!==id){state.project=id;saveState();}
   });
   const trustedClipboard=event=>event.sender===win.webContents&&event.senderFrame===win.webContents.mainFrame&&sameOrigin(event.senderFrame?.url);
-  ipcMain.handle('arachne:clipboard-nodes',(event,text)=>{
+  ipcMain.handle('arachne:clipboard-nodes',async(event,text)=>{
     if(!trustedClipboard(event)||!win.isFocused()||!isNodeClipboard(text))return false;
-    clipboard.writeText(text);return true;
+    await clipboard.writeText(text);return true;
   });
-  ipcMain.handle('arachne:read-clipboard-nodes',event=>{
+  ipcMain.handle('arachne:read-clipboard-nodes',async event=>{
     if(!trustedClipboard(event)||!win.isFocused())return null;
-    const text=clipboard.readText();
-    return isNodeClipboard(text)?text:null;
+    const text=await clipboard.readText();
+    return !win.isDestroyed()&&trustedClipboard(event)&&win.isFocused()&&isNodeClipboard(text)?text:null;
   });
   ipcMain.handle('arachne:clipboard-image',async(event,bytes)=>{
     if(!trustedClipboard(event)||!(bytes instanceof ArrayBuffer)||bytes.byteLength<24||bytes.byteLength>clipboardImageLimit)return false;

@@ -356,8 +356,8 @@ try{
   await editMenu('全选');
   await page.waitForFunction(count=>document.querySelectorAll('.shader-node.selected').length===count,baselineGraph.nodes.length);
   await editMenu('复制');
-  const nodeText=await waitFor(async()=>await desktop.evaluate(({clipboard})=>{
-    const text=clipboard.readText();return text.startsWith('arachne-material-nodes/v1\n')?text:null;
+  const nodeText=await waitFor(async()=>await desktop.evaluate(async({clipboard})=>{
+    const text=await clipboard.readText();return text.startsWith('arachne-material-nodes/v1\n')?text:null;
   }),'native menu copied graph nodes');
   assert.equal(JSON.parse(nodeText.split('\n').slice(1).join('\n')).nodes.length,baselineGraph.nodes.length-1);
   await editMenu('粘贴');
