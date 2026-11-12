@@ -19,9 +19,6 @@ jobs:
   desktop:
     runs-on: windows-2025
     timeout-minutes: 25
-    env:
-      ARACHNE_PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/arachne-windows
-      ARACHNE_DESKTOP_SCREENSHOTS: ${{ runner.temp }}/arachne-screenshots
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -39,9 +36,14 @@ jobs:
           npx --no-install playwright-core install --only-shell chromium
       - name: Build the Windows desktop package
         working-directory: workbench/console
+        env:
+          ARACHNE_PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/arachne-windows
         run: npm run package:win
       - name: Verify the extracted desktop package
         working-directory: workbench/console
+        env:
+          ARACHNE_PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/arachne-windows
+          ARACHNE_DESKTOP_SCREENSHOTS: ${{ runner.temp }}/arachne-screenshots
         run: |
           $archive = Get-ChildItem -Path $env:ARACHNE_PACKAGE_OUTPUT_DIR -Filter '*.zip' | Select-Object -First 1
           if (!$archive) { throw 'Desktop ZIP is missing' }
@@ -55,6 +57,6 @@ jobs:
         if: always()
         with:
           name: windows-workbench-screenshots
-          path: ${{ env.ARACHNE_DESKTOP_SCREENSHOTS }}
+          path: ${{ runner.temp }}/arachne-screenshots
           if-no-files-found: ignore
           retention-days: 7
