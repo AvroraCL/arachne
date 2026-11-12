@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createImageStrokeQueue} from '../public/image-stroke-queue.mjs';
+import {createImageStrokeQueue,strokeTarget} from '../public/image-stroke-queue.mjs';
 
 const target={id:'project',documentId:'doc',layerId:'layer',target:'pixels'};
 const operation=ink=>({op:'image',action:'stroke',documentId:target.documentId,layerId:target.layerId,target:'pixels',stroke:{color:ink}});
@@ -82,4 +82,37 @@ test('an uncommitted stroke waits for explicit rebasing when another edit advanc
  assert.equal(await queue.retry({rebase:true}),true);
  assert.equal(doc.revision,4);
  assert.equal(queue.size,0);
+});
+
+test('material strokes survive a lost response but never rebase model-space points',async()=>{
+ const surface={id:target.id,layerId:'material-layer',target:'mask',revision:7};
+ const stroke=value=>({op:'stroke',id:surface.layerId,target:'mask',stroke:{stamps:[[0,0,0,0,0,1]],value}});
+ const [one,two]=[0,1].map(stroke);
+ assert.deepEqual(strokeTarget(one),['material','surface','material-layer','mask']);
+ assert.equal(strokeTarget({...one,target:'pixels'}),null);
+ let doc={id:surface.id,revision:7},server=doc,journal;
+ const attempts=[];
+ const options={domain:'material',read:()=>doc,readLatest:async()=>doc=server,
+   write:async(edit,origin)=>{
+     attempts.push(edit);
+     server=committed(server,origin);
+     if(attempts.length===1)throw new TypeError('response lost');
+     return doc=server;
+   },onPreview(){},onStateChange(){},onError(){},onDraftChange:(_id,draft)=>{journal=structuredClone(draft);}};
+ const original=createImageStrokeQueue(options);
+ original.submit(one,surface);original.submit(two,surface);
+ assert.deepEqual(original.operations({id:surface.id,revision:7}),[one,two]);
+ assert.equal(await original.flush(),false);
+ const reopened=createImageStrokeQueue(options);
+ assert.equal(reopened.restore(surface.id,journal),true);
+ assert.equal(await reopened.retry(),true);
+ assert.deepEqual(attempts,[one,two]);
+ assert.equal(doc.revision,9);
+ const conflicted=createImageStrokeQueue({...options,write:async()=>{throw Error('temporarily offline');}});
+ conflicted.submit(one,{...surface,revision:9});assert.equal(await conflicted.flush(),false);
+ server={...server,revision:10};
+ assert.equal(await conflicted.retry({rebase:true}),false);
+ assert.equal(conflicted.canRebase,false);
+ assert.match(conflicted.failure.message,/无法确认表面仍一致/);
+ assert.equal(conflicted.size,1);
 });

@@ -1,6 +1,6 @@
 import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers} from './public/image-documents.mjs';
 import {isolateImageLayer} from './public/image-layer-tree.mjs';
-import {imageStrokeQueueLimit,strokeReceiptLimit} from './public/image-stroke-queue.mjs';
+import {imageStrokeQueueLimit,strokeReceiptLimit,strokeTarget} from './public/image-stroke-queue.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels,channelBlendChoices} from './public/paint-channels.mjs';
 import {checkedTexturePreset,textureExportPresets} from './public/texture-export-presets.mjs';
@@ -548,7 +548,7 @@ export function editPaint(doc,{revision,operations,strokeRequestId},sourceVisibi
   let receipt;
   if(strokeRequestId!==undefined){
     if(typeof strokeRequestId!=='string'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(strokeRequestId)||
-       !Array.isArray(operations)||operations.length!==1||operations[0]?.op!=='image'||operations[0]?.action!=='stroke')
+       !Array.isArray(operations)||operations.length!==1||!strokeTarget(operations[0]))
       throw Error('笔触保存编号无效');
     const digest=crypto.createHash('sha256').update(JSON.stringify(operations)).digest('hex');
     const saved=doc.strokeSaveReceipts?.find(item=>item.id===strokeRequestId);
@@ -615,11 +615,10 @@ function liveDraftOperations(doc,operation,operations,imageDocumentId){
   if(operations!==undefined){
     if(operation||!Array.isArray(operations)||!operations.length||operations.length>imageStrokeQueueLimit)
       throw Error('实时笔触批次无效');
-    const first=operations[0];
-    if(operations.some(edit=>edit?.op!=='image'||edit.action!=='stroke'||
-       edit.documentId!==first.documentId||edit.layerId!==first.layerId||edit.target!==first.target||
-       imageDocumentId!==undefined&&edit.documentId!==imageDocumentId))
-      throw Error('实时笔触必须位于同一图像层');
+    const first=strokeTarget(operations[0]);
+    if(!first||imageDocumentId!==undefined&&(first[0]!=='image'||first[1]!==imageDocumentId)||
+       operations.some(edit=>{const key=strokeTarget(edit);return !key||key.some((value,index)=>value!==first[index]);}))
+      throw Error('实时笔触必须位于同一图层和编辑目标');
     return operations;
   }
   if(!operation)return [];

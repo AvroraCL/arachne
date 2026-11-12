@@ -57,3 +57,4 @@
 .area-header-tools:not(:focus-within)[data-more-left][data-more-right]{
   mask-image:linear-gradient(to right,transparent,#000 11px,#000 calc(100% - 13px),transparent)
 }
+.material-stroke-recovery{inset:auto 12px 12px;max-width:760px;z-index:30}

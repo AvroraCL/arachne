@@ -181,7 +181,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     hoverFrame=requestAnimationFrame(()=>{
       hoverFrame=null;brushCursor.hidden=mirrorCursor.hidden=true;
       const state=context();
-      if(!hover||!state.enabled||!state.layer?.visible||state.layer.locked||(mode==='paint'&&state.layer.kind!=='paint'))return;
+      if(!hover||!state.enabled||state.strokeEnabled===false||!state.layer?.visible||state.layer.locked||(mode==='paint'&&state.layer.kind!=='paint'))return;
       const hit=viewport.pickTargetUV(...hover);
       if(!hit)return;
       const radius=Number(radiusInput.value),source=viewport.screenPoint(hit.point);
@@ -334,7 +334,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   }
   function beginStroke(event,uv=false){
     const state=context();
-    if(!(uv?state.uvEnabled:state.enabled)||!state.layer||state.layer.locked||!brushMode()||(pixelBrush()&&state.layer.kind!=='paint')||state.layer.visible===false)return;
+    if(!(uv?state.uvEnabled:state.enabled)||state.strokeEnabled===false||!state.layer||state.layer.locked||!brushMode()||(pixelBrush()&&state.layer.kind!=='paint')||state.layer.visible===false)return;
     const target=pixelBrush()?'material':'mask',params=strokeInk(state.layer,target,state);
     if(!params)return;
     const isDrawing=uv&&drawingBrush;
@@ -446,7 +446,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     }
     if(mode==='fill'){
       const state=context();
-      if(!state.enabled||!state.layer?.visible||state.layer.locked)return;
+      if(!state.enabled||state.strokeEnabled===false||!state.layer?.visible||state.layer.locked)return;
       event.target.focus({preventScroll:true});
       const hit=viewport.pickTargetUV(event.clientX,event.clientY);
       if(hit){

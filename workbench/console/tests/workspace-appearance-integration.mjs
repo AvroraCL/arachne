@@ -81,8 +81,38 @@ try{
     assert.deepEqual([next.width,next.height],[Math.floor(first.cssWidth*ratio),Math.floor(first.cssHeight*ratio)]);
   }
   await cdp.detach();
+  const split=page.getByRole('separator',{name:'调整区域高度',exact:true}).first();
+  const ratio=()=>split.getAttribute('aria-valuenow');
+  const defaultRatio=await ratio();
+  await split.focus();await split.press('ArrowUp');
+  const customRatio=await ratio();assert.notEqual(customRatio,defaultRatio);
+  await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync());
+  await page.reload();await viewport.waitFor();
+  assert.equal(await ratio(),customRatio,'Reload retains the user-resized layout');
+  await page.evaluate(()=>{
+    const write=Storage.prototype.setItem;
+    window.restoreLayoutStorage=()=>{Storage.prototype.setItem=write;};
+    Storage.prototype.setItem=function(key,value){
+      if(key==='arachne-area-workspaces-v1')throw new DOMException('layout quota test','QuotaExceededError');
+      return write.call(this,key,value);
+    };
+  });
+  await split.focus();await split.press('ArrowUp');
+  const pendingRatio=await ratio();assert.notEqual(pendingRatio,customRatio);
+  const recovery=page.locator('.area-layout-save');
+  await recovery.getByRole('alert').filter({hasText:'浏览器存储空间不足'}).waitFor();
+  assert.equal(await page.locator('#project-save-state').textContent(),'保存失败');
+  assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'unsaved');
+  assert.equal(await ratio(),pendingRatio);
+  await page.evaluate(()=>window.restoreLayoutStorage());
+  await recovery.getByRole('button',{name:'重试保存布局',exact:true}).click();
+  await recovery.waitFor({state:'hidden'});
+  assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'ready');
+  await page.reload();await viewport.waitFor();
+  assert.equal(await ratio(),pendingRatio);
   assert.deepEqual(errors,[]);
   console.log('PASS all three workspaces at 1440 and 900 px; viewport reallocates its buffer at 125%, 200% and 100% without a CSS resize');
+  console.log('PASS custom layout reload, browser quota error, quit protection and retry without losing the layout');
 }catch(error){console.error(logs);throw error;}
 finally{
   await browser?.close();

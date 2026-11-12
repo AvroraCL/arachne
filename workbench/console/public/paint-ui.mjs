@@ -226,7 +226,7 @@ function renderProjectState(){
   name.textContent=doc?.name||'未打开工程';name.title=doc?.name||'';
   const strokes=areaSystem?.strokeSaveStatus()||[];
   const pending=projectWrites.get(doc?.id)||strokes.some(item=>item.saving)||desktopWorkspace?.saving;
-  const failure=strokes.find(item=>item.failure)?.failure.message||projectSaveErrors.get(doc?.id)||desktopWorkspace?.failure?.message;
+  const failure=strokes.find(item=>item.failure)?.failure.message||projectSaveErrors.get(doc?.id)||desktopWorkspace?.failure?.message||areaSystem?.areas.layoutSaveError?.message;
   const state=!doc?'empty':pending?'saving':failure?'error':'saved',label={empty:'',saving:'正在保存…',error:'保存失败',saved:'已保存'}[state];
   status.dataset.state=state;if(status.textContent!==label)status.textContent=label;
   status.title=failure||'工程修改自动保存在本机';
@@ -2260,6 +2260,10 @@ function syncDeliveryControls(){
 }
 $('open-delivery').onclick=()=>{
   if(maskEditor.isOpen())return;
+  if(areaSystem?.strokeSaveStatus().some(item=>item.pending)){
+    $('status').textContent='请先保存或放弃待保存的笔触，再导出工程';
+    return;
+  }
   syncDeliveryControls();$('delivery-dialog').showModal();
 };
 $('close-delivery').onclick=()=>$('delivery-dialog').close();
@@ -2937,17 +2941,19 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
 // access is exposed to it. Active edits and pending writes must finish first.
 async function saveWorkbench(){
   await areaSystem?.retryStrokeSaves();
-  if(desktopWorkspace){areaSystem?.areas.save();if(desktopWorkspace.failure)await desktopWorkspace.retry();}
+  areaSystem?.areas.save();
+  if(desktopWorkspace?.failure)await desktopWorkspace.retry();
 }
 Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({window,document,imageCommand:action=>areaSystem?.imageCommand(action),
   editorCommand:(action,focused)=>areaSystem?.editorCommand(action,focused),
   save:()=>void saveWorkbench(),flush:async()=>{
-  if(desktopWorkspace){areaSystem?.areas.save();return desktopWorkspace.flush();}
+  if(areaSystem?.areas.save()===false)return false;
+  if(desktopWorkspace)return desktopWorkspace.flush();
 },status:()=>{
   const strokes=areaSystem?.strokeSaveStatus()||[];
   if(busy||[...projectWrites.values()].some(count=>count>0))return {state:'saving'};
   if(strokes.some(item=>item.saving))return {state:'saving'};
-  if(strokes.some(item=>item.failure)||desktopWorkspace?.failure)return {state:'unsaved'};
+  if(strokes.some(item=>item.failure)||desktopWorkspace?.failure||areaSystem?.areas.layoutSaveError)return {state:'unsaved'};
   if([...projectSaveErrors.values()].some(Boolean))return {state:'error'};
   if(document.querySelector('dialog[open]:not(#task-monitor),.workspace-range-field[data-dragging],.workspace-range-field[data-editing],[data-document-dirty]')||
      propertyDraft||layerRename||modelMarquee||modeler.isDragging()||surfaceTools.isEditing()||uvSelection.isDragging()||uvSelection.isTransforming()||
@@ -2957,7 +2963,8 @@ Object.defineProperty(window,'arachneNativeHost',{value:createNativeWorkbench({w
 }})});
 $('save-workbench').onclick=()=>window.arachneNativeHost.command('save');
 window.addEventListener('beforeunload',event=>{
-  if(!areaSystem?.strokeSaveStatus().some(item=>item.pending)&&!desktopWorkspace?.failure&&!desktopWorkspace?.saving)return;
+  const layoutSaved=areaSystem?.areas.save();
+  if(layoutSaved!==false&&!areaSystem?.strokeSaveStatus().some(item=>item.pending)&&!desktopWorkspace?.failure&&!desktopWorkspace?.saving)return;
   event.preventDefault();event.returnValue='';
 });
 

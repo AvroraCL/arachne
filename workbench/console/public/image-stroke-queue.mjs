@@ -1,13 +1,29 @@
 export const imageStrokeQueueLimit=16;
 export const strokeReceiptLimit=64;
 
-const identity=origin=>[origin.id,origin.documentId,origin.layerId,origin.target];
 const same=(a,b)=>a?.length===b.length&&b.every((value,index)=>a[index]===value);
 const receipt=(doc,entry)=>entry&&doc?.strokeSaveReceipts?.find(item=>item.id===entry.requestId);
 const requestIdPattern=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const networkFailure=error=>error instanceof TypeError||['AbortError','TimeoutError'].includes(error?.name);
 
-export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateChange,onError,onDraftChange=()=>{}}){
+// A receipt can identify a single stroke from either editor. The same
+// identity also constrains which drafts may be composited in one live frame.
+export function strokeTarget(op){
+  if(!op?.stroke||typeof op.stroke!=='object'||Array.isArray(op.stroke))return null;
+  if(op.op==='image'&&op.action==='stroke'&&typeof op.documentId==='string'&&typeof op.layerId==='string'&&['pixels','mask'].includes(op.target))
+    return ['image',op.documentId,op.layerId,op.target];
+  if(op.op==='stroke'&&typeof op.id==='string'&&['material','mask'].includes(op.target))
+    return ['material','surface',op.id,op.target];
+  return null;
+}
+
+export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateChange,onError,onDraftChange=()=>{},
+    domain='image',allowRebase=domain==='image'}){
+  const identity=origin=>[origin.id,domain==='material'?'surface':origin.documentId,origin.layerId,origin.target];
+  const operationKey=(id,op)=>{
+    const key=strokeTarget(op);
+    return key?.[0]===domain?[id,...key.slice(1)]:null;
+  };
   let target=null,expected=null,active=null,task=null,failure=null,canRebase=false;
   const pending=[];
   function reset(){
@@ -17,15 +33,14 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
   function draftChanged(){onDraftChange(target?.[0],pending.length?{target,expected,pending}:null);}
   function restore(id,draft){
     if(task||active||pending.length||draft?.target?.length!==4||draft.target[0]!==id||
-       !draft.target.every(value=>typeof value==='string')||!['pixels','mask'].includes(draft.target[3])||
+       !draft.target.every(value=>typeof value==='string')||
        !Number.isSafeInteger(draft.expected)||draft.expected<0||!Array.isArray(draft.pending)||
        !draft.pending.length||draft.pending.length>imageStrokeQueueLimit)return false;
-    const [,documentId,layerId,kind]=draft.target,ids=new Set();
+    const ids=new Set();
     for(const entry of draft.pending){
       const op=entry?.operation;
       if(!requestIdPattern.test(entry?.requestId)||ids.has(entry.requestId)||typeof entry.attempted!=='boolean'||
-         op?.op!=='image'||op.action!=='stroke'||op.documentId!==documentId||op.layerId!==layerId||
-         op.target!==kind||!op.stroke||typeof op.stroke!=='object')return false;
+         !same(operationKey(id,op),draft.target))return false;
       ids.add(entry.requestId);
     }
     target=draft.target;expected=draft.expected;pending.push(...draft.pending);
@@ -36,13 +51,13 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
     return !failure&&pending.length<imageStrokeQueueLimit&&(!target||same(target,identity(origin)));
   }
   function prepare(operation,origin){
-    const key=[origin.id,operation.documentId,operation.layerId,operation.target];
-    if(read()?.id!==origin.id||target&&!same(target,key))return false;
+    const key=operationKey(origin.id,operation),doc=read();
+    if(!key||doc?.id!==origin.id||target&&!same(target,key))return false;
     if(!target){target=key;expected=origin.revision;}
     return true;
   }
   function operations(origin){
-    if(!target||!same(target,identity(origin)))return [];
+    if(!target||origin.id!==target[0]||(origin.layerId!==undefined&&!same(target,identity(origin))))return [];
     const saved=receipt(read(),pending[0]);
     const start=origin.revision===expected?0:saved?.revision===origin.revision&&saved.revision===expected+1?1:null;
     return start===null?[]:[...pending.slice(start).map(entry=>entry.operation),...(active?[active]:[])];
@@ -112,6 +127,9 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
       }
       if(!pending.length)return true;
       if(latest.revision!==expected){
+        // Model-space points cannot safely move to another revision's
+        // surface: the target object or its transform may have changed.
+        if(!allowRebase)throw Error(`当前工程为 r${latest.revision}，材质笔触基于 r${expected}，无法确认表面仍一致。`);
         // One revision can write at most one receipt. An older, attempted
         // request may have fallen out of the receipt window.
         canRebase=!pending[0].attempted||latest.revision-expected<=strokeReceiptLimit;
@@ -128,5 +146,6 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
     pending.length=0;active=null;draftChanged();reset();notify();return true;
   }
   return {accepts,operations,preview,submit,retry,discard,restore,flush:()=>task||Promise.resolve(!pending.length),
-    get size(){return pending.length;},get saving(){return !!task;},get failure(){return failure;},get canRebase(){return canRebase;}};
+    get size(){return pending.length;},get saving(){return !!task;},get failure(){return failure;},get canRebase(){return canRebase;},
+    get target(){return target?.slice()??null;}};
 }

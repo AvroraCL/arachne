@@ -337,10 +337,21 @@ export function registerAreaEditors(registry,bridge){
       return true;
     }
     const painter=createSurfaceTools({viewport,host:view,uvHost:controls.dummy,elements,settingsKey:'arachne-area-brush:'+ctx.areaId,preserveUnavailableMode:true,onIdle:()=>void sync().catch(ctx.error),
-      context:()=>{const doc=project.document,l=selectedLayer(project);return {id:doc?.id,revision:doc?.revision,enabled:!bridge.busy()&&!['object','edit'].includes(mode)&&view.dataset.state==='ready',uvEnabled:false,
+      context:()=>{
+        const doc=project.document,l=selectedLayer(project),origin={id:doc?.id,revision:doc?.revision,layerId:l?.id,target:mode==='paint'?'material':'mask'};
+        const ready=!['object','edit'].includes(mode)&&view.dataset.state==='ready',brush=['paint','mask','fill'].includes(mode);
+        const strokeEnabled=ready&&!!l&&(!bridge.busy()||bridge.materialStrokes.saving)&&bridge.materialStrokes.accepts(ctx.areaId,origin);
+        return {...origin,enabled:ready&&(!bridge.busy()||brush&&strokeEnabled),strokeEnabled,uvEnabled:false,
         brushColor:bridge.foreground(),sampledMaterial:currentSample(l),maskValue:bridge.maskInk(),maskTarget:['mask','fill'].includes(mode),layer:l?{...l,projectionCurrent:projectionIsCurrent(doc,l),visible:layerIsVisible(doc.paint.layers,l),locked:!!layerLockOwner(doc.paint.layers,l)}:null};},
-      preview:(op,origin)=>{if(project.document?.id===origin.id&&project.document.revision===origin.revision)project.draft(op);},
-      commit:(op,origin)=>void project.commands([op],origin).catch(error=>{project.draft(null);ctx.error(error);}),
+      preview:(op,origin)=>{
+        if(op?.op==='stroke'){bridge.materialStrokes.preview(ctx.areaId,op,origin);return;}
+        if(!op&&bridge.materialStrokes.release(ctx.areaId,origin))return;
+        if(!bridge.materialStrokes.size&&project.document?.id===origin.id&&project.document.revision===origin.revision)project.draft(op);
+      },
+      commit:(op,origin)=>{
+        if(op.op==='stroke'){bridge.materialStrokes.submit(ctx.areaId,op,origin);return;}
+        void project.commands([op],origin).catch(error=>{project.draft(null);ctx.error(error);});
+      },
       sample:pickMaterial,place:(projector,hit)=>{const origin=placement;if(!origin||origin.layerId!==project.layerId)return;void bridge.validateSurface(hit,origin).then(()=>project.commands([{op:'update',id:origin.layerId,patch:{projector}}],origin)).then(()=>{placement=null;setMode('view');}).catch(ctx.error);},isHandHeld:()=>false,uvClip:()=>null
     });
     const brushBinding=createBrushBinding({project,painter,onApplied:settings=>{elements['brush-mirror-enabled'].checked=settings.mirror;}});
@@ -385,7 +396,8 @@ export function registerAreaEditors(registry,bridge){
       const {inspection,status:preview}=bridge.materialPreview(),cycles=viewport.renderPreviewState();
       const rendered=display.mode==='cycles'&&cycles?.phase!=='off'&&cycles;
       const textured=!['solid','wire'].includes(display.mode);
-      resolution.textContent=rendered?cycles.text:textured?materialPreviewText(frame,inspection,preview,project.document?.revision):'';
+      const label=rendered?cycles.text:textured?materialPreviewText(frame,inspection,preview,project.document?.revision):'';
+      resolution.textContent=bridge.materialStrokes.size?`${label}${label?' · ':''}${bridge.materialStrokes.size} 笔待保存`:label;
       if(display.channel&&!inspection&&view.dataset.state==='ready')
         status.textContent=(displayedChannel?'通道 · ':'等待通道 · ')+channelSpecs[display.channel].name;
       else if(!inModeling()&&!placement&&view.dataset.state==='ready')
@@ -600,6 +612,7 @@ export function registerAreaEditors(registry,bridge){
     view.addEventListener('viewport-camera',()=>{modeler.syncCamera();syncRenderPreview();bridge.cameraChanged?.();onChange();},{signal});
     const subscription=project.subscribe(event=>{
       if(!shown&&(event.kind==='frame'||event.kind==='preview'))return;
+      if(event.kind==='view'&&event.source==='materialStrokeSave'){syncPreviewStatus();painter.render();return;}
       if(event.kind==='project'){syncProjectCamera();syncCameraFrame();}
       if(event.kind==='selection'){layerGeneration++;setPicking(false);}
       if(event.kind==='scene'&&project.scene?.owner&&project.scene.owner!==ctx.areaId&&['object','edit'].includes(mode)){
@@ -621,7 +634,7 @@ export function registerAreaEditors(registry,bridge){
         if(visible)void sync().catch(ctx.error);
         else{display.close();navigating=false;marquee.cancel();regionGesture.cancel();focusGesture.cancel();setPicking(false);releaseFrame();syncRenderPreview();}
       },
-      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();selectionMenu.dispose();meshMenu.dispose();smoothing.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
+      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();selectionMenu.dispose();meshMenu.dispose();smoothing.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();bridge.materialStrokes.release(ctx.areaId);modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
   });
 
   registry.register('shader',ctx=>{
