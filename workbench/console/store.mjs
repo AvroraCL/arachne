@@ -18,8 +18,13 @@ export function projectDir(id){
   if(!projectIdPattern.test(id))throw Error('工程 ID 无效');
   return path.join(DATA,'projects',id);
 }
+const projectFile=id=>path.join(projectDir(id),'project.json');
+export function projectFileVersion(id){
+  const stat=fs.statSync(projectFile(id),{bigint:true,throwIfNoEntry:false});
+  return stat?.isFile()?`${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`:null;
+}
 function readProjectFile(id){
-  const file=path.join(projectDir(id),'project.json');
+  const file=projectFile(id);
   let doc;
   try{doc=JSON.parse(fs.readFileSync(file,'utf8'));}
   catch(error){

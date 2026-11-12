@@ -234,10 +234,18 @@ try{
   assert.equal(await workspaceRoot.evaluate(node=>node.style.getPropertyValue('--area-ratio')),'0.67');
   assert.equal((await api(project(doc.id))).revision,doc.revision);
   console.log('PASS portable workspace layouts, validated import, explicit apply and persistence without changing the project');
+  const beforeBaseEdit=doc;
+  const baseSnapshot=await snapshot(beforeBaseEdit);
+  const baseTag=baseSnapshot.headers.get('etag');
+  await baseSnapshot.json();
+  assert.equal((await snapshot(beforeBaseEdit,baseTag)).status,304);
   doc=await api(paint(doc.id)+'/commands',{revision:doc.revision,operations:[
     {op:'base',patch:{color:'#386d87',metallic:.2,roughness:.6,alpha:.8,emission:'#000000'}},
     {op:'baseChannels',patch:{normal:true,ao:true}},{op:'add',kind:'fill',patch:{name:'示例填充',values:{color:'#386d87',metallic:.2,roughness:.6}}}
   ]});
+  const changedSnapshot=await snapshot(beforeBaseEdit,baseTag);
+  assert.equal(changedSnapshot.status,200);
+  assert.equal((await changedSnapshot.json()).document.revision,doc.revision);
   const baked=await preview(doc);
   assert.equal(Object.keys(baked.paintReport.files).length,8);
   assert.equal(baked.paintReport.protectedTexelsWritten,0);

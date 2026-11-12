@@ -11,9 +11,10 @@ import {cyclesResource} from './cycles-resource.mjs';
 
 const PYTHON=process.env.ARACHNE_PYTHON||'python';
 export const paintExportTypes=['paint-export','paint-texture-export','paint-glb-export'];
-let baseUrl='',running=false;
+let baseUrl='',running=false,generation=0;
 const queue=[],active=new Map();
 export const setBaseUrl=url=>{baseUrl=url;};
+export const jobUpdates=()=>generation;
 const safe=id=>{if(!/^[\w-]+$/.test(id))throw Error('任务ID无效');return id;};
 export const jobDir=(pid,jid)=>path.join(projectDir(pid),'jobs',safe(jid));
 export const getJob=(pid,jid)=>JSON.parse(fs.readFileSync(path.join(jobDir(pid,jid),'job.json'),'utf8'));
@@ -32,7 +33,11 @@ export function readJobLog(pid,jid){
     return {jobId:jid,text,truncated:offset>0};
   }finally{fs.closeSync(fd);}
 }
-function update(j,patch){Object.assign(j,patch,{updated:new Date().toISOString()});atomic(path.join(jobDir(j.projectId,j.id),'job.json'),j);}
+function update(j,patch){
+  Object.assign(j,patch,{updated:new Date().toISOString()});
+  atomic(path.join(jobDir(j.projectId,j.id),'job.json'),j);
+  generation++;
+}
 const fileUrl=(j,name)=>`/api/projects/${j.projectId}/jobs/${j.id}/files/${name}`;
 function cancelled(j){if(j.cancelRequested){const e=Error('任务已取消');e.cancelled=true;throw e;}}
 function log(j,text){fs.appendFileSync(path.join(jobDir(j.projectId,j.id),'run.log'),text);}

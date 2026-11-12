@@ -18,8 +18,8 @@ import {StringDecoder} from 'node:string_decoder';
 import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 const compressLive=promisify(gzip);
-import {ROOT,DATA,list,read,commit,travel,projectHistory,projectDir} from './store.mjs';
-import {setBaseUrl,getJob,listJobs,submit,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes,readJobLog} from './jobs.mjs';
+import {ROOT,DATA,list,read,commit,travel,projectHistory,projectDir,projectFileVersion} from './store.mjs';
+import {setBaseUrl,getJob,listJobs,jobUpdates,submit,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes,readJobLog} from './jobs.mjs';
 import {workspaceRoot} from './workspace-paths.mjs';
 import {demoProjectId,nativeDemoProjectId} from './demo-source.mjs';
 import {migrateBlendProject,stopBlendMigrations} from './blend-migration.mjs';
@@ -39,14 +39,31 @@ if(fs.existsSync(lock)){
 fs.writeFileSync(lock,JSON.stringify({pid:process.pid,url:local}));
 process.on('exit',()=>{try{if(JSON.parse(fs.readFileSync(lock,'utf8')).pid===process.pid)fs.unlinkSync(lock);}catch{}});
 const send=(res,status,data,headers={})=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(data));};
-function sendPaintSnapshot(req,res,doc,url){
-  const jobs=listJobs(doc.id),known=url.searchParams.get('knownRevision');
+// Cache response metadata only. Active jobs and atomic project writes invalidate it.
+const paintSnapshots=new Map();
+function sendPaintSnapshot(req,res,id,url){
+  const known=url.searchParams.get('knownRevision');
+  const version=known===null?null:projectFileVersion(id);
+  const cached=version?paintSnapshots.get(id):null;
+  const sameDocument=!!cached&&cached.version===version&&cached.revision===known;
+  const jobsVersion=jobUpdates(),clientTag=req.headers['if-none-match'];
+  if(sameDocument&&cached.jobsVersion===jobsVersion&&clientTag===cached.tag){
+    res.writeHead(304,{'ETag':cached.tag,'Cache-Control':'no-store'});res.end();return;
+  }
+  const doc=sameDocument?null:read(id);
+  if(doc&&doc.workflowType!==PAINT){send(res,404,{error:'接口不存在'});return;}
+  const jobs=listJobs(id);
   if(known===null){send(res,200,{document:doc,jobs});return;}
-  const tag='"'+crypto.createHash('sha256').update(JSON.stringify([doc.id,doc.revision,jobs])).digest('hex')+'"';
+  const revision=doc?String(doc.revision):cached.revision;
+  const tag='"'+crypto.createHash('sha256').update(JSON.stringify([id,revision,jobs])).digest('hex')+'"';
+  if(version){
+    paintSnapshots.delete(id);
+    paintSnapshots.set(id,{version,revision,tag,jobsVersion});
+    if(paintSnapshots.size>32)paintSnapshots.delete(paintSnapshots.keys().next().value);
+  }
   const headers={'ETag':tag,'Cache-Control':'no-store'};
-  const unchanged=known===String(doc.revision);
-  if(unchanged&&req.headers['if-none-match']===tag){res.writeHead(304,headers);res.end();return;}
-  send(res,200,{document:unchanged?null:doc,jobs},headers);
+  if(known===revision&&clientTag===tag){res.writeHead(304,headers);res.end();return;}
+  send(res,200,{document:known===revision?null:doc,jobs},headers);
 }
 async function body(req,limit=50*1024*1024){
   const decoder=new StringDecoder('utf8');
@@ -195,9 +212,10 @@ const server=http.createServer(async(req,res)=>{
       else if(req.method==='POST'){const b=await body(req);if(b.workflowType!==PAINT)throw Error('请选择涂装工程');const doc=await createPaint(b);send(res,201,doc);}
       else send(res,405,{error:'方法不支持'});return;
     }
-    const id=parts[2];let doc=read(id);
+    const id=parts[2],action=parts[3];
+    if(req.method==='GET'&&action==='paint'&&parts.length===4){sendPaintSnapshot(req,res,id,url);return;}
+    let doc=read(id);
     if(parts.length===3&&req.method==='GET'){send(res,200,doc);return;}
-    const action=parts[3];
     if(action==='paint'&&doc.workflowType===PAINT){
       const operation=parts[4];
       if(req.method==='GET'&&operation==='guide'&&parts.length===6&&['silhouette','receiver','protected'].includes(parts[5])){
@@ -229,7 +247,6 @@ const server=http.createServer(async(req,res)=>{
       if(req.method==='GET'&&operation==='render-objects'){send(res,200,renderSceneObjects(doc));return;}
       if(req.method==='GET'&&operation==='model-state'){send(res,200,modelGeometryStatus(doc));return;}
       if(req.method==='GET'&&operation==='model-log'){file(res,modelGeometryLog(doc,url.searchParams.get('binding')));return;}
-      if(req.method==='GET'&&parts.length===4){sendPaintSnapshot(req,res,doc,url);return;}
       if(req.method!=='POST'){send(res,405,{error:'方法不支持'});return;}
       const b=await body(req);
       doc=read(id);
