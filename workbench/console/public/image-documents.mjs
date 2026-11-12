@@ -107,8 +107,11 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
               checkStroke({uv:true,rect:stroke.clip,...uvShapePayload(stroke),opacity:1,value:0},true);
           }
           else{
-            const keys=['uv','radius','hardness','opacity','flow','spacing','stamps','breaks','clip',...uvShapeFields,'rect',...(mask?['value']:['color','erase'])];
+            const keys=['uv','radius','hardness','opacity','flow','spacing','stamps','breaks','clone','clip',...uvShapeFields,'rect',...(mask?['value']:['color','erase'])];
             if(!exact(stroke,keys)||stroke.uv!==true||!mask&&!ink(stroke.color))throw Error('图像只接受二维 RGB 笔触');
+            if(stroke.clone!==undefined&&(mask||stroke.rect!==undefined||stroke.erase!==false||
+              !exact(stroke.clone,['offset'])||!pair(stroke.clone.offset,n=>Number.isFinite(n)&&n>=-1&&n<=1)))
+              throw Error('仿制源偏移无效');
             checkStroke(imageStrokeToMaterial(stroke,mask),mask,true);
           }
           stamps+=stroke.stamps?.length??1;

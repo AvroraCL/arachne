@@ -43,6 +43,7 @@ export const workspaceIcons = {
   adjustment: svg('<circle cx="10" cy="10" r="6.8"/><path d="M10 3.2a6.8 6.8 0 0 1 0 13.6Z" fill="currentColor" stroke="none"/>'),
   clippingMask: svg('<path d="M6 4v8h9m-3-3 3 3-3 3"/>'),
   paintBucket: svg('<path d="M4 9 9 4l6 6-5 5a1.5 1.5 0 0 1-2 0l-4-4a1.5 1.5 0 0 1 0-2Zm2-6 4 4m-5 3h10m2 2c0 0-2 2-2 3.5a2 2 0 1 0 4 0C19 14 17 12 17 12Z"/>'),
+  cloneStamp: svg('<path d="M5 12h10l2 2v3H3v-3Zm2 0V9l-1-2a4 4 0 1 1 8 0l-1 2v3M3 15h14"/>'),
   ellipseMarquee: svg('<circle cx="10" cy="10" r="7" stroke-dasharray="2 2"/>'),
   lasso: svg('<path d="M5.5 13.5C2 12.3 2 8.3 4.4 6.3c2.9-2.5 9.5-2.7 12.2.2 2.1 2.3.4 5.5-3.4 6.7-2.8.9-6.8.3-7.5 1.9-.9 1.8 1.8 2.4 2.6 1 .5-.9-.2-2.2-1.4-2.7"/>'),
   transform: svg('<path d="M3 7V3h4m6 0h4v4m0 6v4h-4m-6 0H3v-4m7-6v6M7 10h6"/>'),

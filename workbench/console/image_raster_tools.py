@@ -80,3 +80,33 @@ def flood_layer(surface, affected, paint, stroke, color, encode):
     if stroke.get('feather'):
         weights *= surface._feathered_selection(rect, stroke)[rows, columns]/255
     return surface._paint_strokes([stroke], {'color':True}, color, affected, paint, lambda _:(ids, weights))
+
+
+def clone_layer(surface, affected, paint, stroke):
+    if not len(affected) or 'color' not in paint:
+        return affected, paint
+    ids, brush = surface.stroke(stroke)
+    dx, dy = stroke['clone']['offset']
+    visible = paint['color'][0] > 0
+    samples = []
+    # Sample the entire stroke before writing any pixel. When source and
+    # destination overlap, the brush cannot pick up its own new pixels.
+    for start in range(0, len(ids), 131072):
+        end = start+131072
+        batch, coverage = ids[start:end], brush[start:end]
+        u, v = surface._texel_uv(batch)
+        _, sampled = surface._sample_uv_paint(u+dx, v+dy, affected, visible, paint)
+        alpha, premult = sampled['color']
+        keep = alpha > 0
+        if np.any(keep):
+            weight = coverage[keep]
+            samples.append((batch[keep], alpha[keep]*weight, premult[keep]*weight[:, None]))
+    if not samples:
+        return affected, paint
+    affected, paint = surface._expand_paint(affected, paint, np.concatenate([tile[0] for tile in samples]))
+    alpha, premult = paint['color']
+    for targets, opacity, color in samples:
+        index = np.searchsorted(affected, targets)
+        premult[index] = premult[index]*(1-opacity[:, None])+color
+        alpha[index] = alpha[index]*(1-opacity)+opacity
+    return affected, paint

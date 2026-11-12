@@ -6,7 +6,9 @@ const $=id=>document.getElementById(id);
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const vec=v=>new Vector3(...v);
 
-export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,place,sample,isHandHeld,uvClip,swapInk,onIdle=()=>{},elements=null,settingsKey:customKey=null,preserveUnavailableMode=false,stickySample=false,sampleAnyLayer=false}){
+export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,place,sample,isHandHeld,uvClip,swapInk,
+  onIdle=()=>{},elements=null,settingsKey:customKey=null,preserveUnavailableMode=false,stickySample=false,sampleAnyLayer=false,
+  cloneTool=()=>null}){
   const $=id=>elements?.[id]||document.getElementById(id);
   const gizmo=$('projector-gizmo');
   const radiusInput=$('brush-radius'),brushCursor=$('brush-cursor');
@@ -28,10 +30,11 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   const initialControls=savedControls.map(readControl);
   const presets={hard:[.14,32,1,1],soft:[.25,72,.2,.55],scuff:[.08,20,.5,.35]};
   const settingsKey=customKey||'arachne-paint-brush-v1';
-  let eraserProfile=drawingBrush&&eraseControl.checked,brushAnchor=null;
-  const profileKey=()=>settingsKey+(eraserProfile?':eraser':'');
+  let profile=drawingBrush&&eraseControl.checked?'eraser':'paint',brushAnchor=null;
+  const profileKey=()=>settingsKey+(profile==='paint'?'':':'+profile);
   let mode='orbit',beforeSample='orbit',gesture=null,mirrorX=false,hover=null,hoverFrame=null,uvHover=null;
-  const brushMode=()=>mode==='paint'||mode==='mask';
+  const brushMode=()=>mode==='paint'||mode==='mask'||mode==='clone';
+  const pixelBrush=()=>mode==='paint'||mode==='clone';
   uvCursor.hidden=true;
   uvCursor.setAttribute('aria-hidden','true');
 
@@ -73,6 +76,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   function clearUVCursor(){
     uvHover=null;
     setUVCursorVisible(false);
+    if(mode==='clone')cloneTool()?.track(null);
   }
   function hideCursors(){
     hideSurfaceCursors();
@@ -129,10 +133,15 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     state??=context();
     const {x,y,buttons,sampling,overControls}=uvHover;
     if(!state.uvEnabled||!state.layer?.visible||state.layer.locked||
-       (mode==='paint'&&state.layer.kind!=='paint')||isHandHeld()||sampling||
-       (buttons&&!gesture?.uv)||overControls)return setUVCursorVisible(false);
+       (pixelBrush()&&state.layer.kind!=='paint')||isHandHeld()||
+       (buttons&&!gesture?.uv)||overControls){
+      if(mode==='clone')cloneTool()?.track(null);
+      return setUVCursorVisible(false);
+    }
     const canvasBounds=uvCanvas.getBoundingClientRect(),bounds=uvHost.getBoundingClientRect();
-    if(!uvPoint(x,y,canvasBounds)||x<bounds.left||x>bounds.right||y<bounds.top||y>bounds.bottom)
+    const point=uvPoint(x,y,canvasBounds);
+    if(mode==='clone')cloneTool()?.track(point,gesture?.stroke?.clone?.offset,sampling);
+    if(!point||sampling||x<bounds.left||x>bounds.right||y<bounds.top||y>bounds.bottom)
       return setUVCursorVisible(false);
     const radius=gesture?.uv?gesture.stroke.radius:Number(uvRadius.value)/4096;
     const diameter=2*radius*canvasBounds.width;
@@ -186,7 +195,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   function render(){
     const state=context(),{layer,enabled,uvEnabled}=state;
     const writable=layer&&!layer.locked&&!state.busy,canSample=!!layer&&!state.busy&&(sampleAnyLayer||(writable&&layer.kind==='paint'));
-    const unavailable=(mode==='paint'&&(!writable||layer.kind!=='paint'))||
+    const unavailable=(pixelBrush()&&(!writable||layer.kind!=='paint'))||
       (mode==='sample'&&!canSample)||
       (['mask','fill'].includes(mode)&&!writable);
     if(unavailable&&!preserveUnavailableMode)mode='orbit';
@@ -206,7 +215,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     $('surface-sample').disabled=!canSample;
     if(state.brushColor||layer?.values.color)$('brush-ink-color').value=state.brushColor||layer.values.color;
     $('surface-mask').disabled=$('surface-fill').disabled=!writable;
-    $('surface-brush').hidden=!['paint','mask'].includes(mode);
+    $('surface-brush').hidden=!brushMode();
     $('surface-material').hidden=mode!=='paint';
     $('surface-mask-ink').hidden=!['mask','fill'].includes(mode);
     $('surface-fill-region').hidden=mode!=='fill';
@@ -227,8 +236,9 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
       if(mode==='sample')next=beforeSample;
       else beforeSample=mode;
     }
-    if(drawingBrush&&eraserProfile!==eraseControl.checked){
-      eraserProfile=eraseControl.checked;
+    const nextProfile=next==='clone'?'clone':eraseControl.checked?'eraser':'paint';
+    if(drawingBrush&&profile!==nextProfile){
+      profile=nextProfile;
       restoreBrush();
     }
     mode=next;render();
@@ -314,14 +324,16 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   }
   function beginStroke(event,uv=false){
     const state=context();
-    if(!(uv?state.uvEnabled:state.enabled)||!state.layer||state.layer.locked||!brushMode()||(mode==='paint'&&state.layer.kind!=='paint')||state.layer.visible===false)return;
-    const target=mode==='paint'?'material':'mask',params=strokeInk(state.layer,target,state);
+    if(!(uv?state.uvEnabled:state.enabled)||!state.layer||state.layer.locked||!brushMode()||(pixelBrush()&&state.layer.kind!=='paint')||state.layer.visible===false)return;
+    const target=pixelBrush()?'material':'mask',params=strokeInk(state.layer,target,state);
     if(!params)return;
     const isDrawing=uv&&drawingBrush;
     if(isDrawing&&amount(opacity)===0)return;
+    const clone=mode==='clone'?cloneTool()?.prepare(uvPoint(event.clientX,event.clientY),state):null;
+    if(mode==='clone'&&!clone)return;
     const clip=uv?uvClip():null;
     const pressure=event.pointerType==='pen'&&pressureControl.checked?clamp(event.pressure,0,1):null;
-    const anchorKey=isDrawing?JSON.stringify([state.id,state.imageDocumentId,state.layer.id,target,eraseControl.checked]):null;
+    const anchorKey=isDrawing&&!clone?JSON.stringify([state.id,state.imageDocumentId,state.layer.id,target,eraseControl.checked]):null;
     gesture={pointer:event.pointerId,state,layerId:state.layer.id,target,uv,x:event.clientX,y:event.clientY,pressure,
       isDrawing,anchorKey,
       anchor:event.shiftKey&&anchorKey&&brushAnchor?.key===anchorKey?brushAnchor.point:null,
@@ -329,6 +341,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
       stroke:{radius:uv?Number(uvRadius.value)/4096:Number(radiusInput.value),hardness:amount(hardness),
         opacity:amount(opacity),stamps:[],
         ...(isDrawing?{flow:amount(flow),spacing:amount(spacingControl),breaks:[]}:{}),
+        ...(clone?{clone:{offset:clone}}:{}),
         ...(uv?{uv:true,...clip}:mirrorX?{mirrorX}:{}),...params}};
     hideCursors();
     if(uv)trackUVCursor(event);
@@ -349,6 +362,12 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     if(!state.uvEnabled)return;
     const uv=uvPoint(event.clientX,event.clientY);
     if(!uv)return;
+    if(mode==='clone'&&event.altKey&&state.layer?.kind==='paint'&&!state.layer.locked){
+      cloneTool()?.pick(uv,state);
+      event.target.focus({preventScroll:true});
+      event.preventDefault();event.stopImmediatePropagation();
+      return;
+    }
     if(mode==='sample'||event.altKey&&mode==='paint'){
       if(state.layer&&(sampleAnyLayer||(state.layer.kind==='paint'&&!state.layer.locked))&&sample({u:uv[0],v:uv[1]},state)&&mode==='sample'&&!stickySample)setMode(beforeSample);
       event.preventDefault();event.stopImmediatePropagation();
@@ -461,7 +480,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     render();
     if(event.type==='pointerup'){
       if(g.stroke?.stamps.length){
-        if(g.isDrawing){
+        if(g.anchorKey){
           brushAnchor={key:g.anchorKey,point:g.stroke.stamps.at(-1)};
           if(g.anchor)g.stroke.stamps.unshift(g.anchor);
         }

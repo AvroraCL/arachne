@@ -132,6 +132,7 @@ const tools=[
     '调整图层用 op:image、action:addLayer、kind:adjustment 和 patch.adjustment 创建。可用 updateLayer 修改。支持 '+Object.keys(imageAdjustments).join('、')+'，影响下方图层，并可使用蒙版和不透明度。',
     '二维图像笔刷可同时指定 flow（0.01–1）与 spacing（笔尖直径的 0.05–2 倍）。这时 stamps 表示连续轨迹，按图像空间的固定间距盖印，并在单笔 opacity 上限内逐步积累流量。breaks 可指定提笔后新轨迹段的起始下标。',
     '油漆桶用 action:stroke、target:pixels 和 stroke:{uv:true,color,erase:false,opacity,flood:{point:[u,v],tolerance,contiguous}}。容差为 0–255，取样当前层该笔之前的像素，可用 clip、regions 和 feather 限制写入。',
+    '仿制笔触在二维像素笔刷参数上追加 clone:{offset:[du,dv]}，相对目标位置取样当前层落笔前的 RGBA 像素。偏移归一化到 −1 至 1，可按相同偏移继续后续笔触。',
     '原子图层命令。add 用 kind/patch，可用 parentId 指定文件夹。group 用 id 或同级 ids 收进新文件夹。arrange 用 id 或同级 ids 与 parentId/anchorId/placement 移动图层，parentId 为 null 时移到根层。remove 可解散文件夹，保留子层。base/update 用 patch，move 用 index，duplicate 用 id。图层顺序从底到顶。',
     'update 的 patch.locked 锁定图层或文件夹。文件夹锁覆盖子层，仍可切换显隐。锁定冲突会拒绝整批命令。',
     '三维贴花 patch.projector 为 {center,normal,up,size,depth,rotation}，坐标使用 Blender 世界坐标，normal 朝投影来源。',

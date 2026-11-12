@@ -617,8 +617,67 @@ try{
   await canvas.waitFor();
   assert.equal(await bucket.getAttribute('aria-pressed'),'true');
   assert.equal(await editor.getByRole('checkbox',{name:'只填充连续区域'}).isChecked(),false);
-  assert.deepEqual(pageErrors,[]);
   console.log('PASS Paint Bucket, G tool group, tolerance, connected and disconnected pixels, transparency and reopen');
+
+  const cloneDoc='clone-document',cloneLayer='clone-pixels';
+  const cloneSeed=await api(paintRoute+'/commands',{revision:globalFill.revision,operations:[
+    {op:'image',action:'create',documentId:cloneDoc,patch:{name:'仿制图章验收'}},
+    {op:'image',action:'addLayer',documentId:cloneDoc,layerId:cloneLayer,kind:'pixel',patch:{name:'仿制素材'}},
+    {op:'image',action:'stroke',documentId:cloneDoc,layerId:cloneLayer,target:'pixels',
+      stroke:{uv:true,rect:[.15,.22,.24,.4],opacity:.6,color:'#e24b3f',erase:false}},
+    {op:'image',action:'stroke',documentId:cloneDoc,layerId:cloneLayer,target:'pixels',
+      stroke:{uv:true,rect:[.24,.22,.33,.4],opacity:.8,color:'#39ad70',erase:false}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(cloneDoc,{force:true});
+  await page.getByRole('button',{name:'仿制素材',exact:true}).click();
+  await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+  await canvas.focus();
+  await page.keyboard.press('s');
+  const stamp=editor.getByRole('button',{name:'仿制图章',exact:true});
+  assert.equal(await stamp.getAttribute('aria-pressed'),'true');
+  await setBrushOption('像素半径',128);
+  await page.keyboard.down('Alt');
+  await page.mouse.click(...await point([.2,.3]));
+  await page.keyboard.up('Alt');
+  await editor.locator('.document-clone-source').waitFor({state:'visible'});
+  await drag([.55,.35],[.63,.35]);
+  const cloneStrokes=current=>current.paint.imageDocuments[cloneDoc].layers[0].strokes;
+  const firstClone=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>cloneSeed.revision&&cloneStrokes(current).at(-1).clone&&current;
+  },'从当前像素层复制源像素');
+  assert.ok(Math.abs(cloneStrokes(firstClone).at(-1).clone.offset[0]+.35)<.005);
+  await until(()=>stamp.isEnabled(),'第一笔仿制已保存');
+  await page.mouse.click(...await point([.65,.35]));
+  const alignedClone=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>firstClone.revision&&cloneStrokes(current).length===4&&current;
+  },'对齐仿制跨笔沿用偏移');
+  assert.deepEqual(cloneStrokes(alignedClone).at(-1).clone,cloneStrokes(firstClone).at(-1).clone);
+  await until(()=>stamp.isEnabled(),'第二笔仿制已保存');
+  await editor.getByRole('checkbox',{name:'对齐仿制源'}).uncheck();
+  await page.mouse.click(...await point([.8,.6]));
+  const unalignedClone=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>alignedClone.revision&&cloneStrokes(current).length===5&&current;
+  },'从原始取样点开始新一笔');
+  assert.ok(Math.abs(cloneStrokes(unalignedClone).at(-1).clone.offset[0]+.6)<.005);
+  const [,clonedPixels]=rgba(await imagePng('clone-stamp.png',unalignedClone.revision,cloneDoc),
+    [[.55,.35],[.65,.35],[.8,.6],[.8,.35],[.2,.3]].map(([x,y])=>xy(x,y)));
+  assert.deepEqual(clonedPixels[0].slice(0,3),[226,75,63]);
+  assert.deepEqual(clonedPixels[1].slice(0,3),[57,173,112]);
+  assert.deepEqual(clonedPixels[2], [226,75,63,153]);
+  assert.deepEqual(clonedPixels[3], [0,0,0,0]);
+  assert.deepEqual(clonedPixels[4], [226,75,63,153]);
+  await page.screenshot({path:path.join(data,'clone-tool.png')});
+  await page.reload();
+  await canvas.waitFor();
+  assert.equal(cloneStrokes(await api(projectRoute)).length,5);
+  assert.equal(await editor.getByRole('checkbox',{name:'对齐仿制源'}).isChecked(),false);
+  assert.deepEqual(pageErrors,[]);
+  console.log('PASS Clone Stamp source cursor, aligned and unaligned strokes, original RGBA pixels and reopen');
 }catch(error){
   console.error(logs);
   throw error;

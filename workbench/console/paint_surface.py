@@ -529,7 +529,7 @@ class Surface:
         for stroke in strokes:
             transform = stroke.get('transformUV')
             clear = stroke.get('clearUV')
-            raster = raster_edit is not None and 'flood' in stroke
+            raster = raster_edit is not None and ('flood' in stroke or 'clone' in stroke)
             if transform is None and clear is None and not raster:
                 batch.append(stroke)
                 continue

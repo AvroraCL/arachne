@@ -138,7 +138,7 @@ function checkStroke(s,isMask,image=false){
     return;
   }
   fields(s,['radius','hardness','opacity','stamps','mirrorX','uv','clip',...uvShapeFields,'surfaceBinding',...inkFields,
-    ...(image?['flow','spacing','breaks']:[])]);
+    ...(image?['flow','spacing','breaks','clone']:[])]);
   const uv=s.uv===true;
   const brushPath=s.flow!==undefined||s.spacing!==undefined||s.breaks!==undefined;
   if((s.uv!==undefined&&!uv)||(uv&&s.mirrorX!==undefined)||
