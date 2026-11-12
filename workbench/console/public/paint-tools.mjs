@@ -18,6 +18,12 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   const hardness=$('brush-hardness'),opacity=$('brush-opacity'),eraseControl=$('brush-erase');
   const flow=elements?.['brush-flow'],spacingControl=elements?.['brush-spacing'];
   const drawingBrush=!!flow;
+  const tipNotice=drawingBrush?document.createElement('output'):null;
+  if(tipNotice){
+    tipNotice.className='document-brush-tip-readout';tipNotice.hidden=true;
+    tipNotice.setAttribute('aria-label','笔尖调节');
+    uvHost.append(tipNotice);
+  }
   const sliders=[radiusInput,uvRadius,hardness,opacity];
   const savedControls=[...sliders,pressureControl,...(drawingBrush?[flow,spacingControl]:[])];
   const factor=control=>control.hasAttribute('data-brush-percent')?100:1;
@@ -32,7 +38,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   const settingsKey=customKey||'arachne-paint-brush-v1';
   let profile=drawingBrush&&eraseControl.checked?'eraser':'paint',brushAnchor=null;
   const profileKey=()=>settingsKey+(profile==='paint'?'':':'+profile);
-  let mode='orbit',beforeSample='orbit',gesture=null,mirrorX=false,hover=null,hoverFrame=null,uvHover=null;
+  let mode='orbit',beforeSample='orbit',gesture=null,tipGesture=null,mirrorX=false,hover=null,hoverFrame=null,uvHover=null;
   const brushMode=()=>mode==='paint'||mode==='mask'||mode==='clone';
   const pixelBrush=()=>mode==='paint'||mode==='clone';
   uvCursor.hidden=true;
@@ -75,6 +81,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   }
   function clearUVCursor(){
     uvHover=null;
+    if(tipGesture){drawTipGesture();return;}
     setUVCursorVisible(false);
     if(mode==='clone')cloneTool()?.track(null);
   }
@@ -91,7 +98,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   }
   mirrorButton.onclick=toggleMirror;
   function adjustRadius(direction,uv=false){
-    if(!brushMode()||gesture)return false;
+    if(!brushMode()||gesture||tipGesture)return false;
     if(uv){
       const value=Number(uvRadius.value);
       uvRadius.value=clamp(value+direction*Math.max(1,Math.round(value*.15)),Number(uvRadius.min),Number(uvRadius.max));
@@ -129,6 +136,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     refreshUVCursor();
   }
   function refreshUVCursor(state){
+    if(tipGesture){drawTipGesture();return;}
     if(!uvHover||!brushMode())return setUVCursorVisible(false);
     state??=context();
     const {x,y,buttons,sampling,overControls}=uvHover;
@@ -246,9 +254,11 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   function cancel({preserveMode=false}={}){
     const prior=gesture;
     gesture=null;
+    const adjusting=finishTipGesture(false);
     clearUVCursor();
     if(preserveMode)render();else setMode(mode==='sample'?beforeSample:'orbit');
     if(prior){preview(null,prior.state);onIdle();}
+    return !!prior||adjusting;
   }
   function projectorAt(hit){
     const view=viewport.viewFrame();
@@ -356,12 +366,60 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     event.target.setPointerCapture(event.pointerId);
     event.preventDefault();event.stopImmediatePropagation();
   }
+  function drawTipGesture(){
+    const bounds=uvHost.getBoundingClientRect(),diameter=Math.max(3,2*amount(uvRadius)*uvCanvas.getBoundingClientRect().width/4096);
+    const x=tipGesture.x-bounds.left,y=tipGesture.y-bounds.top;
+    uvCursor.style.setProperty('--brush-diameter',diameter+'px');
+    uvCursor.style.setProperty('--brush-hardness',Math.round(100*amount(hardness))+'%');
+    uvCursor.removeAttribute('data-small');uvCursor.setAttribute('data-tip-adjust','');
+    uvCursor.style.left=x+'px';uvCursor.style.top=y+'px';
+    setUVCursorVisible(true);
+    const label=tipNotice.textContent=`半径 ${uvRadius.value} px · 硬度 ${Math.round(amount(hardness)*100)}%`;
+    if(tipNotice.getAttribute('aria-label')!==label)tipNotice.setAttribute('aria-label',label);
+    tipNotice.style.left=clamp(x+16,4,Math.max(4,bounds.width-160))+'px';
+    tipNotice.style.top=clamp(y+16,4,Math.max(4,bounds.height-32))+'px';
+    tipNotice.hidden=false;
+  }
+  function startTipGesture(event){
+    tipGesture={pointer:event.pointerId,x:event.clientX,y:event.clientY,radius:amount(uvRadius),hardness:amount(hardness)};
+    uvHover=null;
+    event.target.focus({preventScroll:true});
+    uvHost.setPointerCapture(event.pointerId);
+    drawTipGesture();
+    event.preventDefault();event.stopImmediatePropagation();
+  }
+  function moveTipGesture(event){
+    const precision=event.shiftKey ? .25 : 1;
+    const dx=(event.clientX-tipGesture.x)*precision,dy=(event.clientY-tipGesture.y)*precision;
+    writeControl(uvRadius,Math.round(tipGesture.radius*Math.exp(dx/105)));
+    writeControl(hardness,Math.round((tipGesture.hardness-dy/160)*100)/100);
+    uvRadius.oninput();
+    event.preventDefault();event.stopImmediatePropagation();
+  }
+  function finishTipGesture(commit){
+    const current=tipGesture;
+    if(!current)return false;
+    tipGesture=null;
+    if(uvHost.hasPointerCapture(current.pointer))uvHost.releasePointerCapture(current.pointer);
+    uvCursor.removeAttribute('data-tip-adjust');
+    tipNotice.hidden=true;
+    if(commit)saveBrush();
+    else{writeControl(uvRadius,current.radius);writeControl(hardness,current.hardness);}
+    uvRadius.oninput();clearUVCursor();
+    return true;
+  }
   function beginUV(event){
-    if(event.button!==0||gesture||isHandHeld()||uvControl(event))return;
+    if(gesture||tipGesture||isHandHeld()||uvControl(event))return;
     const state=context();
     if(!state.uvEnabled)return;
     const uv=uvPoint(event.clientX,event.clientY);
     if(!uv)return;
+    if(drawingBrush&&brushMode()&&state.layer?.visible&&!state.layer.locked&&event.altKey&&
+       (event.button===2||event.button===0&&event.ctrlKey)){
+      startTipGesture(event);
+      return;
+    }
+    if(event.button!==0)return;
     if(mode==='clone'&&event.altKey&&state.layer?.kind==='paint'&&!state.layer.locked){
       cloneTool()?.pick(uv,state);
       event.target.focus({preventScroll:true});
@@ -406,6 +464,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     event.preventDefault();event.stopImmediatePropagation();
   }
   function move(event){
+    if(tipGesture?.pointer===event.pointerId){moveTipGesture(event);return;}
     const g=gesture;
     if(g?.pointer!==event.pointerId)return;
     let x=event.clientX,y=event.clientY;
@@ -467,6 +526,10 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     event.preventDefault();event.stopImmediatePropagation();
   }
   function finish(event){
+    if(tipGesture?.pointer===event.pointerId){
+      finishTipGesture(event.type==='pointerup');onIdle();event.preventDefault();event.stopImmediatePropagation();
+      return;
+    }
     const g=gesture;
     if(g?.pointer!==event.pointerId){
       if(event.currentTarget===uvHost&&event.type==='pointerup')trackUVCursor(event);
@@ -513,9 +576,12 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   uvHost.addEventListener('pointerenter',event=>trackUVCursor(event));
   uvHost.addEventListener('pointermove',event=>{if(!gesture?.uv)trackUVCursor(event);},true);
   uvHost.addEventListener('pointerleave',clearUVCursor);
+  if(drawingBrush)uvHost.addEventListener('contextmenu',event=>{
+    if(brushMode()&&(event.altKey||tipGesture))event.preventDefault();
+  });
   for(const name of ['pointerup','pointercancel','lostpointercapture'])uvHost.addEventListener(name,finish,true);
   const observer=new ResizeObserver(render);observer.observe(host);
-  return {dispose(){cancel();observer.disconnect();hideCursors();},render,setMode,cancel,projectorAt,toggleMirror,adjustRadius,fillUV,refreshUVCursor,isEditing:()=>!!gesture,
+  return {dispose(){cancel();observer.disconnect();hideCursors();},render,setMode,cancel,projectorAt,toggleMirror,adjustRadius,fillUV,refreshUVCursor,isEditing:()=>!!gesture||!!tipGesture,
     getSettings:()=>({worldRadius:Number(radiusInput.value),uvRadius:Number(uvRadius.value),hardness:amount(hardness),
       opacity:amount(opacity),pressure:pressureControl.checked,mirror:mirrorX}),
     setSettings(settings,{persist=true}={}){

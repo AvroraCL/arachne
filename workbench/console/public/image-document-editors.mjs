@@ -296,6 +296,7 @@ export function createDocumentEditor(ctx,bridge){
   }
   elements['uv-transform-tool'].title='自由变换 · V / Ctrl T / ⌘T · 方向键微移 · Shift 十像素';
   elements['uv-transform-tool'].setAttribute('aria-keyshortcuts','V Control+T Meta+T');
+  for(const id of ['surface-paint','uv-eraser-tool'])elements[id].title+=' · Control + Option 拖动调节笔尖';
   const textTool=button('文字工具',()=>{selection.stop();setMode('text');});
   chromeButton(textTool,'text');textTool.title='文字工具 · T';textTool.setAttribute('aria-keyshortcuts','T');toolList.append(textTool);
   const shapeButton=button('形状工具',()=>{selection.stop();setMode('shape');stage.focus({preventScroll:true});});
@@ -547,7 +548,12 @@ export function createDocumentEditor(ctx,bridge){
       event.preventDefault();event.stopPropagation();
       return true;
     }
-    if(key!=='escape'&&(drawingGesture()||selection.isDragging()||nav)){
+    if(key==='escape'){
+      nav=null;
+      if(!painter.cancel({preserveMode:true})&&!gradientTool.cancel()&&!shapeTool.cancel()&&!selection.cancel())selection.clear();
+      event.preventDefault();event.stopPropagation();return true;
+    }
+    if(drawingGesture()||selection.isDragging()||nav){
       event.preventDefault();event.stopPropagation();return true;
     }
     let handled=true;
@@ -596,10 +602,7 @@ export function createDocumentEditor(ctx,bridge){
       }
     }else if(event.altKey)handled=false;
     else if(key===' '){space=true;painter.refreshUVCursor();}
-    else if(key==='escape'){
-      nav=null;painter.cancel({preserveMode:true});
-      if(!gradientTool.cancel()&&!shapeTool.cancel()&&!selection.cancel())selection.clear();
-    }else if(key==='m'){
+    else if(key==='m'){
       const elliptical=selectionShape==='ellipse';
       const tool=event.shiftKey!==elliptical?'uv-ellipse-tool':'uv-select-tool';
       elements[tool].click();
@@ -1278,7 +1281,10 @@ export function createImagePanel(type,ctx){
       blend.value=layer?.blend||'normal';
       blend.disabled=!canEdit;
       controls.append(blend);
-      addControl(controls,'不透明度','number',Math.round((layer?.opacity??1)*100),value=>command(project,{action:'updateLayer',layerId:layer.id,patch:{opacity:value/100}}),{min:0,max:100,disabled:!canEdit});
+      const opacity=addControl(controls,'不透明度','number',Math.round((layer?.opacity??1)*100),
+        value=>command(project,{action:'updateLayer',layerId:layer.id,patch:{opacity:value/100}}),{min:0,max:100,disabled:!canEdit});
+      opacity.dataset.scrubSuffix='%';
+      opacity.parentElement.firstChild.replaceWith(el('span','document-opacity-caption','不透明度'));
       const alphaLock=chromeButton(button('锁定透明像素',()=>{
         const origin=imageSelectionOrigin(project);
         void run(()=>commandAt(project,origin,{action:'updateLayer',layerId:layer.id,patch:{alphaLocked:!layer.alphaLocked}}));
