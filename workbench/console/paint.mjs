@@ -1,7 +1,7 @@
 import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers} from './public/image-documents.mjs';
 import {imageStrokeQueueLimit} from './public/image-stroke-queue.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
-import {paintChannels,legacyChannels,channelSpecs,activePaintChannels} from './public/paint-channels.mjs';
+import {paintChannels,legacyChannels,channelSpecs,activePaintChannels,channelBlendChoices} from './public/paint-channels.mjs';
 import {validateLibraries,libraryOperation,compileLibraryMaterial} from './public/paint-library.mjs';
 import {compileMaterialGraph} from './public/material-graph.mjs';
 import {pinSurfaceInputs,validateSurfaceBindings} from './paint-surface-bindings.mjs';
@@ -48,9 +48,9 @@ const fields=(patch,keys)=>{
   if(!patch||typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).some(k=>!keys.includes(k)))throw Error('不支持的属性');
   return patch;
 };
-const blendModes=['normal','multiply','screen','overlay'];
+const supportsBlend=(channel,blend)=>channelBlendChoices(channel).some(([mode])=>mode===blend);
 const folderFields=['name','visible','locked'];
-const layerFields=[...folderFields,'opacity','channelOpacity','channels','values','x','y','scale','rotation','image','mask','maskBase','maskEnabled','maskEffects','blend','maps','tiling','projector','space','uvScale','materialId','documentMaps'];
+const layerFields=[...folderFields,'opacity','channelOpacity','channelBlend','channels','values','x','y','scale','rotation','image','mask','maskBase','maskEnabled','maskEffects','blend','maps','tiling','projector','space','uvScale','materialId','documentMaps'];
 const revisionError=doc=>Object.assign(Error('工程修订已变化'),{status:409,currentRevision:doc.revision});
 const materialValues=v=>v&&legacyChannels.every(k=>Object.hasOwn(v,k))&&Object.keys(v).every(k=>channels.includes(k)&&(channelSpecs[k].type==='color'?color(v[k]):unit(v[k])));
 const channelFlags=v=>v&&legacyChannels.every(k=>Object.hasOwn(v,k))&&Object.keys(v).every(k=>channels.includes(k)&&typeof v[k]==='boolean');
@@ -274,7 +274,7 @@ function validate(doc){
     if(l.materialId!=null&&(l.kind!=='fill'||typeof l.materialId!=='string'||!Object.hasOwn(doc.paint.materials??{},l.materialId)))throw Error('填充层引用的材质不存在');
     if(l.kind==='group')continue;
     if(!['fill','decal','paint'].includes(l.kind)||
-       !(l.blend===undefined||blendModes.includes(l.blend))||!unit(l.opacity)||!materialValues(l.values)||
+       !(l.blend===undefined||supportsBlend('color',l.blend))||!unit(l.opacity)||!materialValues(l.values)||
        !channelFlags(l.channels))throw Error('图层属性无效');
     if(l.kind==='decal'&&(!asset(doc,l.image)||![l.x,l.y,l.scale,l.rotation].every(Number.isFinite)||
        !unit(l.x)||!unit(l.y)||l.scale<.01||l.scale>4))throw Error('贴花素材或变换无效');
@@ -295,6 +295,8 @@ function validate(doc){
       stampCount+=(stroke.stamps?.length??1)*(stroke.mirrorX?2:1);
     if(l.channelOpacity!==undefined&&Object.values(fields(l.channelOpacity,channels)).some(n=>!unit(n)))
       throw Error('通道不透明度须为 0 至 1');
+    if(l.channelBlend!==undefined&&Object.entries(fields(l.channelBlend,channels.filter(key=>key!=='color')))
+      .some(([channel,mode])=>!supportsBlend(channel,mode)))throw Error('所选通道不支持该混合模式');
     if(l.maps!==undefined){
       if(l.kind==='paint')throw Error('绘制层的通道由笔触写入');
       const maps=fields(l.maps,l.kind==='fill'?channels:channels.filter(k=>k!=='color'));

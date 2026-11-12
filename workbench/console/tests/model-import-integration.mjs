@@ -743,6 +743,53 @@ try{
   await reopened.reload();
   assert.deepEqual((await api(texturedRoute)).paint.layers,[sourceLayer]);
   console.log('PASS GLB source maps, sRGB factors, transformed ORM, cutout alpha, unsupported UV feedback, 4K bake and layer undo');
+  const details=await api(texturedPaint+'/commands',{revision:2,operations:[{op:'add',kind:'fill',patch:{
+    name:'粗糙和法线细节',channels:{color:false,metallic:false,roughness:true,normal:true},
+    values:{color:'#000000',metallic:0,roughness:.4,normal:'#80b8ef'}
+  }}]});
+  const detail=details.paint.layers.at(-1);
+  await reopened.locator('[data-area-mode=material]').click();
+  await reopened.getByRole('button',{name:detail.name,exact:true}).click();
+  const stackChannel=reopened.getByRole('button',{name:'图层栈通道',exact:true});
+  const blendMode=reopened.getByRole('button',{name:'图层混合模式',exact:true});
+  await stackChannel.click();
+  await reopened.getByRole('option',{name:'粗糙度',exact:true}).click();
+  await blendMode.click();
+  await reopened.getByRole('option',{name:'正片叠底',exact:true}).click();
+  await until(async()=>(await api(texturedRoute)).paint.layers.at(-1).channelBlend?.roughness==='multiply');
+  const opacity=reopened.locator('#drawing-layer-opacity');
+  await opacity.fill('50');
+  await opacity.press('Tab');
+  await until(async()=>(await api(texturedRoute)).paint.layers.at(-1).channelOpacity?.roughness===.5);
+  await stackChannel.click();
+  await reopened.getByRole('option',{name:'法线',exact:true}).click();
+  await blendMode.click();
+  assert.equal(await reopened.getByRole('option',{name:'正片叠底',exact:true}).count(),0);
+  await reopened.getByRole('option',{name:'叠加法线细节',exact:true}).click();
+  const mixed=await until(async()=>{
+    const current=await api(texturedRoute);
+    return current.paint.layers.at(-1).channelBlend?.normal==='normalCombine'&&current;
+  });
+  assert.equal(mixed.paint.layers.at(-1).opacity,1);
+  assert.equal(mixed.paint.layers.at(-1).blend,'normal');
+  const invalidBlend=await fetch(origin+texturedPaint+'/commands',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({revision:mixed.revision,operations:[{op:'update',id:detail.id,patch:{channelBlend:{normal:'multiply'}}}]})
+  });
+  assert.equal(invalidBlend.status,400);
+  await reopened.screenshot({path:path.join(data,'material-channel-blending.png')});
+  const mixBake=await texturedJob(await api(texturedPaint+'/preview',{revision:mixed.revision,requestId:'channel-blending'}));
+  const mixedMaps=['roughness','normal'].map(channel=>path.join(data,'mixed-'+channel+'.png'));
+  for(const [index,channel] of ['roughness','normal'].entries())
+    await fs.writeFile(mixedMaps[index],Buffer.from(await (await fetch(origin+mixBake.materialUrls[channel])).arrayBuffer()));
+  const [rough,normal]=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',
+    'import json,sys;from PIL import Image;print(json.dumps([Image.open(f).getpixel((0,0)) for f in sys.argv[1:]]))',
+    ...mixedMaps],{encoding:'utf8'}));
+  assert.equal(rough,28);
+  assert.ok(normal[0]>151&&normal[1]>165&&normal[2]>215);
+  await api(texturedPaint+'/undo',{revision:mixed.revision});
+  assert.deepEqual((await api(texturedRoute)).paint.layers.at(-1).channelBlend,{roughness:'multiply'});
+  console.log('PASS per-channel material opacity, linear roughness blending, normal detail, guarded inputs and undo');
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
 }finally{

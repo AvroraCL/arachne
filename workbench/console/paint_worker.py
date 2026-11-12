@@ -28,13 +28,34 @@ def color(text):
     return decode(np.array(list(bytes.fromhex(text[1:]))) / 255)
 
 
-def blend_color(backdrop, paint, mode):
+def blend_channel(backdrop, paint, mode):
     if mode == 'multiply':
         return backdrop * paint
     if mode == 'screen':
         return backdrop + paint - backdrop * paint
     if mode == 'overlay':
         return np.where(backdrop <= .5, 2 * backdrop * paint, 1 - 2 * (1 - backdrop) * (1 - paint))
+    if mode == 'add':
+        return np.minimum(1, backdrop + paint)
+    if mode == 'subtract':
+        return np.maximum(0, backdrop - paint)
+    if mode == 'darken':
+        return np.minimum(backdrop, paint)
+    if mode == 'lighten':
+        return np.maximum(backdrop, paint)
+    if mode == 'difference':
+        return np.abs(backdrop - paint)
+    if mode == 'normalCombine':
+        # Whiteout blending preserves the tangent direction of either input
+        # when the other is flat.
+        base, detail = backdrop * 2 - 1, paint * 2 - 1
+        base_xy, detail_xy = base[..., :2], detail[..., :2]
+        base_xy = np.where(np.abs(base_xy) <= 1 / 255 + 1e-6, 0, base_xy)
+        detail_xy = np.where(np.abs(detail_xy) <= 1 / 255 + 1e-6, 0, detail_xy)
+        combined = np.concatenate((base_xy + detail_xy, base[..., 2:] * detail[..., 2:]), axis=-1)
+        length = np.linalg.norm(combined, axis=-1, keepdims=True)
+        return np.divide(combined, length, out=np.broadcast_to([0., 0., 1.], combined.shape).copy(),
+                         where=length > 1e-8) * .5 + .5
     return paint
 
 
@@ -406,8 +427,9 @@ def composite(cfg, step):
                         value,document_alpha=sample_document(texture['document'],map_u,map_v,name,repeat=tiling is not None,linear=texture['colorSpace']=='linear')
                         channel_weight*=document_alpha
                     else:value = sample(texture,map_u,map_v,repeat=tiling is not None)
-                if name=='color':
-                    value = blend_color(backdrop,value,layer.get('blend','normal'))
+                blend = layer.get('blend','normal') if name=='color' else layer.get('channelBlend',{}).get(name,'normal')
+                if blend!='normal':
+                    value = blend_channel(backdrop,value,blend)
                 alpha = channel_weight[:,None] if name in RGB else channel_weight
                 result[selected,col] = backdrop*(1-alpha)+value*alpha
         if graph.plan:

@@ -10,7 +10,7 @@ import {setupCommandPicker} from './paint-command-picker.mjs';
 import {setupRenderCameraBatch} from './render-camera-batch.mjs';
 import {setupPaintColorPicker} from './paint-color-picker.mjs';
 import {setupProjectPicker} from './paint-project-picker.mjs';
-import {paintChannels,channelSpecs,effectiveValues,baseChannelEnabled} from './paint-channels.mjs';
+import {paintChannels,channelSpecs,effectiveValues,baseChannelEnabled,channelBlendChoices,layerChannelBlend} from './paint-channels.mjs';
 import {installPaintTooltips} from './paint-tooltips.mjs';
 import {setupPaintAreas} from './paint-area-adapter.mjs';
 import {createContextActions} from './area-chrome.mjs';
@@ -102,12 +102,21 @@ function syncBusyControls(){
 }
 function renderDrawingLayerSettings(){
   const item=doc&&selection.size===1?layer():null;
+  const channel=$('layer-channel').value,blendChannel=channel||'color';
   const available=!!item&&item.kind!=='group'&&!lockOwner(item)&&!busy&&!uvSelection.isTransforming()&&!surfaceTools.isEditing();
   const blend=$('drawing-layer-blend'),opacity=$('drawing-layer-opacity');
-  blend.disabled=opacity.disabled=!available;
-  if(!busy&&blend.value!==(item?.blend||'normal'))setSelectValue(blend,item?.blend||'normal');
+  blend.disabled=opacity.disabled=!available||!!channel&&!item?.channels?.[channel];
+  const blendMode=layerChannelBlend(item,blendChannel);
+  if(blend.dataset.channel!==blendChannel){
+    blend.dataset.channel=blendChannel;
+    blend.replaceChildren(...channelBlendChoices(blendChannel).map(([value,label])=>new Option(label,value)));
+  }
+  blend.title=channelSpecs[blendChannel].name+'混合';
+  opacity.title=channel?channelSpecs[channel].name+'不透明度':'整层不透明度';
+  if(!busy&&blend.value!==blendMode)setSelectValue(blend,blendMode);
+  else syncSelectMenu(blend);
   if(!busy&&document.activeElement!==opacity&&!$('drawing-opacity-label').classList.contains('scrubbing'))
-    opacity.value=Number(((item?.opacity??1)*100).toFixed(2));
+    opacity.value=Number(((channel?item?.channelOpacity?.[channel]??1:item?.opacity??1)*100).toFixed(2));
 }
 const areaViews={modeling:'three',material:'split',drawing:'uv'};
 let workArea='modeling',modelWireframe=false;
@@ -710,8 +719,8 @@ function renderProperties(form=$('properties'),scope=null){
   }
   if(l){
     const general=propertySection(form,'layer','图层设置',{open:false});
-    general.append(field('颜色混合','select',l.blend||'normal',blend=>editTarget({blend}),
-      {choices:[['normal','正常'],['multiply','正片叠底'],['screen','滤色'],['overlay','叠加']]}));
+    general.append(field('颜色混合','select',layerChannelBlend(l,'color'),blend=>editTarget({blend}),
+      {choices:channelBlendChoices('color')}));
     const visibility=field('可见','checkbox',l.visible,visible=>editTarget({visible}));
     visibility.dataset.lockAction='visibility';
     general.append(field('名称','text',l.name,name=>editTarget({name})),visibility,
@@ -1180,7 +1189,7 @@ function openMaterialLayerMenu(event,id,rename=startLayerRename){
   materialLayerMenu.open(event,single?.name||items.length+' 个图层',actions);
 }
 $('layers').addEventListener('contextmenu',event=>openMaterialLayerMenu(event,event.target.closest('[data-layer-id]')?.dataset.layerId));
-$('layer-channel').onchange=renderLayers;
+$('layer-channel').onchange=()=>{renderLayers();renderDrawingLayerSettings();};
 const layerSearch=$('layer-search'),layerSearchToggle=$('toggle-layer-search');
 function setLayerSearch(open,interactive=true){
   layerSearch.hidden=!open;
@@ -2669,15 +2678,19 @@ uvPane.addEventListener('pointermove',event=>{
 new MutationObserver(renderCanvasChrome).observe(uvPane,{attributes:true,attributeFilter:['data-selection-tool','data-text-placement']});
 new MutationObserver(renderCanvasChrome).observe($('viewport'),{attributes:true,attributeFilter:['data-tool']});
 $('drawing-layer-blend').onchange=()=>{
-  const blend=$('drawing-layer-blend').value;
-  void run(()=>{if(selection.size===1&&layer()?.kind!=='group'&&!lockOwner(layer()))return edit({blend});});
+  const blend=$('drawing-layer-blend').value,channel=$('layer-channel').value;
+  const target=doc&&layer();
+  if(selection.size!==1||!target||target.kind==='group'||lockOwner(target)||channel&&!target.channels[channel])return;
+  const patch=channel&&channel!=='color'?{channelBlend:{...target.channelBlend,[channel]:blend}}:{blend};
+  void run(()=>edit(patch));
 };
 $('drawing-layer-opacity').onchange=()=>{
-  const field=$('drawing-layer-opacity');
+  const field=$('drawing-layer-opacity'),channel=$('layer-channel').value,target=doc&&layer();
   const opacity=field.valueAsNumber/100;
-  if(field.value&&field.validity.valid)void run(()=>{
-    if(selection.size===1&&layer()?.kind!=='group'&&!lockOwner(layer()))return edit({opacity});
-  });
+  if(field.value&&field.validity.valid){
+    if(selection.size!==1||!target||target.kind==='group'||lockOwner(target)||channel&&!target.channels[channel])return;
+    void run(()=>edit(channel?{channelOpacity:{...target.channelOpacity,[channel]:opacity}}:{opacity}));
+  }
   else{field.blur();renderDrawingLayerSettings();}
 };
 $('drawing-layer-opacity').onblur=renderDrawingLayerSettings;

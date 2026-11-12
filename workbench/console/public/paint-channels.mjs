@@ -10,6 +10,13 @@ export const channelSpecs={
   ao:{name:'环境遮蔽',type:'scalar',value:1,offset:14,file:'f_16xl_ao.png'}
 };
 export const paintChannels=Object.keys(channelSpecs),legacyChannels=paintChannels.slice(0,3);
+const materialBlendChoices=[
+  ['normal','正常'],['multiply','正片叠底'],['screen','滤色'],['overlay','叠加'],
+  ['add','相加'],['subtract','相减'],['darken','取较小值'],['lighten','取较大值'],['difference','差值']
+];
+const normalBlendChoices=[['normal','替换'],['normalCombine','叠加法线细节']];
+export const channelBlendChoices=channel=>channel==='normal'?normalBlendChoices:materialBlendChoices;
+export const layerChannelBlend=(layer,channel)=>(channel==='color'?layer?.blend:layer?.channelBlend?.[channel])??'normal';
 export const channelDefaults=Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].value]));
 export const effectiveValues=values=>({...channelDefaults,...values});
 export const baseChannelEnabled=(paint,key)=>paint.baseChannels?.[key]!==false;
