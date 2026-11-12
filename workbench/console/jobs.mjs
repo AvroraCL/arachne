@@ -16,6 +16,7 @@ let baseUrl='',running=false,generation=0;
 const queue=[],active=new Map();
 export const setBaseUrl=url=>{baseUrl=url;};
 export const jobUpdates=()=>generation;
+export const hasPendingJobs=()=>active.size>0||queue.some(job=>!job.cancelRequested);
 const safe=id=>{if(!/^[\w-]+$/.test(id))throw Error('任务ID无效');return id;};
 export const jobDir=(pid,jid)=>path.join(projectDir(pid),'jobs',safe(jid));
 export const getJob=(pid,jid)=>JSON.parse(fs.readFileSync(path.join(jobDir(pid,jid),'job.json'),'utf8'));

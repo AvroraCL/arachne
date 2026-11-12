@@ -1,8 +1,9 @@
-import {app,BrowserWindow,dialog,ipcMain,Menu,nativeTheme,session,shell} from 'electron';
+import {app,BrowserWindow,dialog,ipcMain,Menu,nativeTheme,screen,session,shell} from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startRelease,userRoot} from '../workspace/workbench/console/scripts/release-runtime.mjs';
+import {restoreWindowState} from './window-state.mjs';
 
 const appName='阿拉克涅',projectId=/^[\w-]{1,100}$/;
 const stateFile=path.join(userRoot,'desktop.json');
@@ -10,7 +11,7 @@ const icon=path.join(import.meta.dirname,'arachne.ico');
 const controller=new AbortController();
 const downloads=new Set();
 let service,starting,main,origin,checkingClose=false,closing=false,quitStarted=false,quitReady=false;
-let state={};
+let state={},windowSaveTimer;
 
 function sameOrigin(value){
   try{const url=new URL(value);return url.origin===origin&&!url.username&&!url.password;}catch{return false;}
@@ -29,6 +30,13 @@ function saveState(){
     fs.writeFileSync(pending,JSON.stringify(state));
     fs.renameSync(pending,stateFile);
   }catch(error){console.error('无法保存桌面设置',error);}
+}
+
+function rememberWindow(win){
+  clearTimeout(windowSaveTimer);
+  if(win.isDestroyed()||win.isMinimized()||win.isFullScreen())return;
+  state.window={bounds:win.getNormalBounds(),maximized:win.isMaximized()};
+  saveState();
 }
 
 function buildMenus(){
@@ -57,25 +65,35 @@ function buildMenus(){
 }
 
 async function canClose(win){
-  let status;
+  let status='unavailable';
   if(sameOrigin(win.webContents.getURL())){
     try{
       for(let n=0;n<20;n++){
-        status=(await win.webContents.executeJavaScript('(async()=>{const host=window.arachneNativeHost;return (host?.prepareToCloseAsync?await host.prepareToCloseAsync():host?.prepareToClose())?.state;})()'))||'ready';
+        status=(await win.webContents.executeJavaScript('(async()=>{const host=window.arachneNativeHost;return (host?.prepareToCloseAsync?await host.prepareToCloseAsync():host?.prepareToClose())?.state;})()'))||'unavailable';
         if(status!=='saving')break;
         await delay(100);
       }
-    }catch{status='error';}
+    }catch{status='unavailable';}
+  }
+  if(['ready','jobs'].includes(status)){
+    if(!service.owned)status='ready';
+    else try{
+      const response=await fetch(origin+'/api/desktop-activity',{signal:AbortSignal.timeout(4000)});
+      if(!response.ok)throw Error('无法读取本机工作台状态');
+      const activity=(await response.json()).state;
+      status=['ready','saving','jobs'].includes(activity)?activity:'unavailable';
+    }catch{status='unavailable';}
   }
   if(downloads.size)status='downloads';
+  if(status==='ready')return true;
+  const block=['saving','editing'].includes(status);
   const detail={
-    saving:'工程正在保存。',error:'工程最近一次保存失败。',editing:'还有未完成的编辑。',
-    jobs:'烘焙或渲染任务还在运行。',downloads:'文件正在下载。'
-  }[status];
-  if(!detail)return true;
-  const {response}=await dialog.showMessageBox(win,{type:'warning',message:'退出阿拉克涅？',detail,
-    buttons:['继续工作','退出'],defaultId:0,cancelId:0,noLink:true});
-  return response===1;
+    saving:'正在保存或导入工程，请等待当前操作完成。',error:'工程最近一次保存失败。',editing:'请先确认或取消当前编辑。',
+    jobs:'退出会中断由此应用启动的后台任务。',downloads:'文件正在下载。'
+  }[status]||'无法检查保存或任务状态。退出可能丢失未保存的修改。';
+  const {response}=await dialog.showMessageBox(win,{type:'warning',message:block?'请先完成当前操作':'退出阿拉克涅？',detail,
+    buttons:block?['继续工作']:['继续工作','退出'],defaultId:0,cancelId:0,noLink:true});
+  return !block&&response===1;
 }
 
 function configureSession(){
@@ -120,7 +138,9 @@ async function start(){
 
   configureSession();
   app.on('web-contents-created',(_event,contents)=>restrictNavigation(contents));
-  const win=main=new BrowserWindow({title:appName,icon,width:1440,height:900,minWidth:900,minHeight:600,
+  const {bounds,minWidth,minHeight,maximized}=restoreWindowState(state.window,
+    screen.getAllDisplays().map(display=>display.workArea),screen.getPrimaryDisplay().workArea);
+  const win=main=new BrowserWindow({title:appName,icon,...bounds,minWidth,minHeight,
     backgroundColor:'#202124',show:false,webPreferences:{preload:path.join(import.meta.dirname,'preload.cjs'),
       contextIsolation:true,sandbox:true,nodeIntegration:false,webviewTag:false,navigateOnDragDrop:false}});
   win.on('page-title-updated',event=>event.preventDefault());
@@ -130,10 +150,14 @@ async function start(){
     if(checkingClose)return;
     checkingClose=true;
     void canClose(win).then(approved=>{
-      if(approved&&!win.isDestroyed()){closing=true;win.close();}
+      if(approved&&!win.isDestroyed()){rememberWindow(win);closing=true;win.close();}
     }).catch(console.error).finally(()=>checkingClose=false);
   });
-  win.on('closed',()=>{main=null;app.quit();});
+  win.on('closed',()=>{clearTimeout(windowSaveTimer);main=null;app.quit();});
+  for(const event of ['move','resize','maximize','unmaximize','leave-full-screen'])win.on(event,()=>{
+    clearTimeout(windowSaveTimer);
+    windowSaveTimer=setTimeout(()=>rememberWindow(win),250);
+  });
   ipcMain.on('arachne:project',(event,id,name)=>{
     if(event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame||
        !sameOrigin(event.senderFrame?.url)||typeof id!=='string'||!projectId.test(id)||typeof name!=='string')return;
@@ -141,7 +165,7 @@ async function start(){
     if(state.project!==id){state.project=id;saveState();}
   });
   buildMenus();
-  win.once('ready-to-show',focus);
+  win.once('ready-to-show',()=>{if(maximized)win.maximize();focus();});
   await win.loadURL(target.href);
   if(service.owned)void service.exit.then(()=>{
     if(quitStarted||closing)return;

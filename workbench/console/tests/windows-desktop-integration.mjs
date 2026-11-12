@@ -9,7 +9,8 @@ import {demoProjectId} from '../demo-source.mjs';
 
 const [executable,appFolder]=process.argv.slice(2);
 if(!executable)throw Error('Specify the packaged desktop executable');
-const profile=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-desktop-test-'));
+const profile=await fs.mkdtemp(path.join(os.tmpdir(),'阿拉克涅 桌面验收-'));
+const screenshots=process.env.ARACHNE_DESKTOP_SCREENSHOTS;
 const withoutBlender=process.env.ARACHNE_TEST_WITH_BLENDER!=='1'||process.env.ARACHNE_TEST_WITHOUT_BLENDER==='1';
 const env={...process.env,ARACHNE_USER_DATA_DIR:profile,ARACHNE_CYCLES_INTERACTIVE:'0'};
 delete env.ELECTRON_RUN_AS_NODE;
@@ -51,12 +52,14 @@ async function close(){
 try{
   let page=await launch();
   const origin=new URL(page.url()).origin;
+  const seedId=new URL(page.url()).searchParams.get('project');
   const read=async route=>{
     const response=await page.request.get(new URL(route,page.url()).href,{timeout:35000});
     assert.equal(response.status(),200);
     return response.json();
   };
   assert.equal((await read('/api/health')).localOnly,true);
+  assert.deepEqual(await read('/api/desktop-activity'),{state:'ready'});
   const blenderRequests=[];
   const watchRenderer=request=>{
     if(/\/(?:render-view|cycles-session|cycles-devices)(?:\/|$)/.test(new URL(request.url()).pathname))blenderRequests.push(request.url());
@@ -153,14 +156,51 @@ try{
     const bytes=await fs.readFile(saved).catch(error=>{if(error.code!=='ENOENT')throw error;});
     return bytes&&createHash('sha256').update(bytes).digest('hex')===archiveDigest;
   },'native ZIP download');
+  // A job submitted from a different project is invisible to the open
+  // workbench. The native close guard must still check the shared service.
+  const other=await read('/api/projects/'+seedId);
+  const task=await page.request.post(origin+'/api/projects/'+seedId+'/paint/render',{
+    headers:{Origin:origin},data:{revision:other.revision,requestId:randomUUID(),
+      settings:{width:1024,height:768,samples:32,device:'cpu'}}
+  });
+  assert.equal(task.status(),202,task.ok()?'':await task.text());
+  const {id:taskId}=await task.json();
+  assert.deepEqual(await read('/api/desktop-activity'),{state:'jobs'});
+  await desktop.evaluate(({dialog,BrowserWindow})=>{
+    const show=dialog.showMessageBox;
+    globalThis.arachneQuitPrompt=new Promise(resolve=>{
+      dialog.showMessageBox=async (_win,options)=>{
+        dialog.showMessageBox=show;
+        resolve(options.detail);
+        return {response:0};
+      };
+    });
+    BrowserWindow.getAllWindows()[0].close();
+  });
+  assert.match(await Promise.race([desktop.evaluate(()=>globalThis.arachneQuitPrompt),
+    delay(10000,undefined,{ref:false})]),/后台任务/);
+  const cancelled=await page.request.post(origin+'/api/projects/'+seedId+'/jobs/'+taskId+'/cancel',{headers:{Origin:origin}});
+  assert.equal(cancelled.status(),200);
+  await waitFor(async()=> (await read('/api/desktop-activity')).state==='ready','renderer cleanup');
+  const bounds=await desktop.evaluate(({BrowserWindow,screen})=>{
+    const area=screen.getPrimaryDisplay().workArea;
+    const win=BrowserWindow.getAllWindows()[0];
+    win.setBounds({x:area.x+12,y:area.y+12,width:Math.min(area.width-24,1060),height:Math.min(area.height-24,680)});
+    return win.getBounds();
+  });
+  if(screenshots){
+    await fs.mkdir(screenshots,{recursive:true});
+    await page.screenshot({path:path.join(screenshots,'windows-modeling.png')});
+  }
   await close();
   assert.equal(await fetch(origin+'/api/health',{signal:AbortSignal.timeout(1000)}).then(()=>true,()=>false),false);
   page=await launch();
   assert.equal(new URL(page.url()).searchParams.get('project'),id);
   assert.equal((await read('/api/projects/'+id)).name,name);
+  assert.deepEqual(await desktop.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNormalBounds()),bounds);
   await close();
   await fs.rm(profile,{recursive:true,force:true,maxRetries:4,retryDelay:250});
-  console.log('PASS desktop GPU path tracing, formal PNG, project reopen, 4K bake, native ZIP save, '+
+  console.log('PASS desktop GPU path tracing, formal PNG, project and window reopen, Chinese path, 4K bake, native ZIP save, '+
     (withoutBlender?'GLB export without Blender':'Cycles render')+' and service shutdown');
 }catch(error){
   console.error('Desktop verification data:',profile);

@@ -131,4 +131,5 @@ export async function migrateBlendProject(doc){
   return promise;
 }
 
+export const hasBlendMigrations=()=>active.size>0;
 export function stopBlendMigrations(){for(const {controller} of active.values())controller.abort();}

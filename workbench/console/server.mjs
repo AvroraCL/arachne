@@ -20,10 +20,10 @@ import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 const compressLive=promisify(gzip);
 import {ROOT,DATA,list,read,commit,travel,projectHistory,projectDir,projectFileVersion} from './store.mjs';
-import {setBaseUrl,getJob,listJobs,jobUpdates,submit,submitRenderBatch,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes,readJobLog} from './jobs.mjs';
+import {setBaseUrl,getJob,listJobs,jobUpdates,hasPendingJobs,submit,submitRenderBatch,retryJob,cancel,jobDir,mime,recover,stop,paintExportTypes,readJobLog} from './jobs.mjs';
 import {workspaceRoot} from './workspace-paths.mjs';
 import {demoProjectId,nativeDemoProjectId} from './demo-source.mjs';
-import {migrateBlendProject,stopBlendMigrations} from './blend-migration.mjs';
+import {migrateBlendProject,hasBlendMigrations,stopBlendMigrations} from './blend-migration.mjs';
 import {viewportManifest,startViewport,viewportFile,viewportTopology,viewportTopologyFile,stopViewport} from './viewport.mjs';
 
 const personalLibrary=createPersonalLibrary({root:path.join(DATA,'personal-library'),readProject:read,projectFolder:projectDir,commitProject:commit});
@@ -195,6 +195,10 @@ const server=http.createServer(async(req,res)=>{
       const name=url.pathname==='/'?'index.html':url.pathname.slice(1);
       if(!/^[\w.-]+$/.test(name)){send(res,404,{error:'页面不存在'});return;}
       file(res,path.join(ROOT,'public',name));return;
+    }
+    if(parts[1]==='desktop-activity'&&parts.length===2&&req.method==='GET'){
+      const state=importingModel||importingPaintArchive?'saving':hasPendingJobs()||hasBlendMigrations()?'jobs':'ready';
+      send(res,200,{state});return;
     }
     if(parts[1]==='desktop-settings'&&parts.length===2){
       if(req.method==='GET'){send(res,200,readDesktopSettings());return;}

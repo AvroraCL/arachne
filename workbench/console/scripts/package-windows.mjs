@@ -129,12 +129,13 @@ try{
   const inputs=await stageWorkbench(path.join(resources,'workspace'));
   const native=path.join(root,'release-support/windows'),app=path.join(resources,'app');
   await copy(path.join(native,'app.json'),path.join(app,'package.json'));
-  for(const name of ['main.mjs','preload.cjs'])await copy(path.join(native,name),path.join(app,name));
+  for(const name of ['main.mjs','preload.cjs','window-state.mjs'])await copy(path.join(native,name),path.join(app,name));
   await stageIcon(staging,app);
   const mcp=await fs.readFile(path.join(native,'ArachneMCP.cmd'),'utf8');
   await fs.writeFile(path.join(bundle,'ArachneMCP.cmd'),mcp.replace(/\r?\n/g,'\r\n'));
   await copy(path.join(native,'Windows.md'),path.join(bundle,'使用说明.md'));
-  const info={version:APP_VERSION,packageVersion:PACKAGE_VERSION,buildId:randomUUID(),platform:'windows-x64',
+  const sourceCommit=run('git',['rev-parse','HEAD'],{stdio:'pipe',encoding:'utf8'}).trim();
+  const info={version:APP_VERSION,packageVersion:PACKAGE_VERSION,buildId:randomUUID(),sourceCommit,platform:'windows-x64',
     electron,python:pythonVersion,blender:includeBlender?blender:null,inputs,created:new Date().toISOString()};
   await write(path.join(resources,'build-info.json'),info);
 

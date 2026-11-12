@@ -170,29 +170,17 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
 
     // The owned service can also be used by MCP or another project window.
     // Check all projects before stopping it, not just the currently open one.
-    func runningJobs(_ completion:@escaping (Bool?)->Void) {
-        guard let address=url, var base=URLComponents(url:address,resolvingAgainstBaseURL:false) else { completion(nil);return }
-        base.path="/api/projects";base.query=nil;base.fragment=nil
-        guard let listURL=base.url else { completion(nil);return }
+    func serviceActivity(_ completion:@escaping (String)->Void) {
+        guard let address=url, var base=URLComponents(url:address,resolvingAgainstBaseURL:false) else { completion("unavailable");return }
+        base.path="/api/desktop-activity";base.query=nil;base.fragment=nil
+        guard let activityURL=base.url else { completion("unavailable");return }
         let configuration=URLSessionConfiguration.ephemeral;configuration.timeoutIntervalForRequest=5
         let session=URLSession(configuration:configuration)
-        session.dataTask(with:listURL) { data,response,error in
-            guard error==nil, (response as? HTTPURLResponse)?.statusCode==200, let data=data,
-                  let projects=(try? JSONSerialization.jsonObject(with:data)) as? [[String:Any]] else { DispatchQueue.main.async { session.invalidateAndCancel();completion(nil) };return }
-            let ids=projects.compactMap{$0["id"] as? String}.filter{$0.range(of:"^[A-Za-z0-9_-]{1,100}$",options:.regularExpression) != nil}
-            guard ids.count==projects.count else { DispatchQueue.main.async { session.invalidateAndCancel();completion(nil) };return }
-            let group=DispatchGroup(),lock=NSLock();var active=false,failed=false
-            for id in ids {
-                var endpoint=base;endpoint.path="/api/projects/\(id)/jobs"
-                guard let jobURL=endpoint.url else { failed=true;continue }
-                group.enter();session.dataTask(with:jobURL) { data,response,error in
-                    defer { group.leave() }
-                    guard error==nil, (response as? HTTPURLResponse)?.statusCode==200, let data=data,
-                          let jobs=(try? JSONSerialization.jsonObject(with:data)) as? [[String:Any]] else { lock.lock();failed=true;lock.unlock();return }
-                    if jobs.contains(where:{["queued","running"].contains($0["status"] as? String ?? "")}) { lock.lock();active=true;lock.unlock() }
-                }.resume()
-            }
-            group.notify(queue:.main) { session.finishTasksAndInvalidate();completion(failed ? nil : active) }
+        session.dataTask(with:activityURL) { data,response,error in
+            let activity=data.flatMap{(try? JSONDecoder().decode([String:String].self,from:$0))?["state"]}
+            let state=(error==nil && (response as? HTTPURLResponse)?.statusCode==200 && ["ready","saving","jobs"].contains(activity ?? ""))
+                ? activity ?? "unavailable" : "unavailable"
+            DispatchQueue.main.async { session.finishTasksAndInvalidate();completion(state) }
         }.resume()
     }
 
@@ -201,7 +189,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         workbench.show()
         let alert=NSAlert()
         switch state {
-        case "saving":alert.messageText="正在保存工程";alert.informativeText="请等待保存完成后再退出。"
+        case "saving":alert.messageText="正在保存或导入工程";alert.informativeText="请等待当前操作完成后再退出。"
         case "editing":alert.messageText="仍有操作未完成";alert.informativeText="请先确认或取消当前编辑，再退出。"
         case "error":alert.messageText="工程保存失败";alert.informativeText="退出可能丢失未保存的修改。"
         case "jobs":alert.messageText="后台任务正在运行";alert.informativeText="退出会中断由此应用启动的后台任务。"
@@ -226,10 +214,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         quitting=true
         workbench.prepareToQuit { [weak self] state in
             guard let self=self else { NSApp.reply(toApplicationShouldTerminate:false);return }
-            guard self.confirmQuit(state,workbench:workbench) else { self.finishQuit(false);return }
-            guard self.ownsService && state != "jobs" else { self.finishQuit(true);return }
-            self.runningJobs { result in
-                let check=result == nil ? "unavailable" : result! ? "jobs" : "ready"
+            guard self.ownsService && ["ready","jobs"].contains(state) else {
+                self.finishQuit(self.confirmQuit(state,workbench:workbench));return
+            }
+            self.serviceActivity { check in
                 self.finishQuit(self.confirmQuit(check,workbench:workbench))
             }
         }
