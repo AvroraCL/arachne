@@ -38,10 +38,11 @@ export function sampleMaterialFrame(frame,u,v){
 export function createLiveView({viewport,canvas,guide,context:readContext,onStatus,onFrame=()=>{},renderCanvas=true,rgba=false,retryDelays=defaultRetryDelays}){
   const ctx=canvas.getContext('2d',{alpha:rgba});
   const guideContext=guide.getContext('2d');
+  const page=canvas.ownerDocument;
   let intent=null,inFlight=null,queued=null,baseFrame=null,frame=null,drawn=null;
   let image=null,guideFrame=null,detailTimer=null,retryTimer=null,retrying=null;
-  let detailFailure=null,fastFailure=null,visible=true;
-  const context=()=>visible?readContext():null;
+  let detailFailure=null,fastFailure=null,visible=true,disposed=false;
+  const context=()=>visible&&!disposed&&!page?.hidden?readContext():null;
 
   function cancelRetry(){if(retryTimer!==null)clearTimeout(retryTimer);retryTimer=null;retrying=null;}
   function cancelPending(){
@@ -207,14 +208,19 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     },state.detailDelay??900);
   }
 
-  return {getFrame:()=>frame,
+  function suspend(){
+    cancelPending();
+    if(frame&&!frame.request.operation)intent=frame.request;
+  }
+  function onPageVisibility(){
+    if(page.hidden)suspend();
+    else view.refresh();
+  }
+  const view={getFrame:()=>frame,
     setVisible(next){
       if(visible===next)return;
       visible=next;
-      if(!visible){
-        cancelPending();
-        if(frame&&!frame.request.operation)intent=frame.request;
-      }
+      if(!visible)suspend();
     },
     refresh(){
       const state=context();
@@ -271,6 +277,14 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       viewport.showLivePaint(null);
       ctx.clearRect(0,0,canvas.width,canvas.height);
       guideContext.clearRect(0,0,guide.width,guide.height);
+    },
+    dispose(){
+      if(disposed)return;
+      disposed=true;
+      page?.removeEventListener('visibilitychange',onPageVisibility);
+      view.clear();
     }
   };
+  page?.addEventListener('visibilitychange',onPageVisibility);
+  return view;
 }

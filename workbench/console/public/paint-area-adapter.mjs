@@ -158,6 +158,6 @@ export function setupPaintAreas(hooks){
     pickRenderFocus:camera=>targetViewport()?.pickRenderFocus(camera)??false,
     get workspace(){return areas.name;},
     legacyKeyboard:event=>!!event.target.closest('#uv-view,#uv-transform-options,#surface-tools,.tool-rail')&&!!areas.active?.legacy,
-    dispose(){areas.dispose();registry.dispose();sharedPreview.clear();inspectionPreview.clear();}
+    dispose(){areas.dispose();registry.dispose();sharedPreview.dispose();inspectionPreview.dispose();}
   };
 }

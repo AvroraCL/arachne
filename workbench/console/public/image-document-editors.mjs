@@ -446,7 +446,7 @@ export function createDocumentEditor(ctx,bridge){
       if(!visible)gradientTool.cancel();
       if(visible)sync();
     },
-    dispose(){disposed=true;exportRequest?.abort();unsub();stopClipboard();gradientTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.clear();resize.disconnect();},setPaintMode(next){setMode(next);}};
+    dispose(){disposed=true;exportRequest?.abort();unsub();stopClipboard();gradientTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.dispose();resize.disconnect();},setPaintMode(next){setMode(next);}};
 }
 
 export function createImagePanel(type,ctx){

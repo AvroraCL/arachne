@@ -15,14 +15,14 @@ test('material picker interpolates color in linear light and samples scalar and 
   assert.equal(sampleMaterialFrame(frame,NaN,.5),null);
 });
 
-function fixture(t,detail=false,options={}) {
+function fixture(t,detail=false,{page,...options}={}) {
   const requests = [];
   t.mock.method(globalThis, 'fetch', (_url, {body,signal}) => new Promise((resolve,reject) => {
     requests.push({data: JSON.parse(body), resolve,reject,signal});
   }));
   let state = {id:'fixture',revision:1,key:'fixture:1',channel:'color',preview3D:true,detail};
   const drawn = [],statuses=[];let drawFailure=false;
-  const canvas = draw => ({getContext:()=>({
+  const canvas = draw => ({ownerDocument:page,getContext:()=>({
     createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),
     putImageData:({data})=>{if(drawFailure)throw new TypeError('画布不可用');draw(data[0]);},
     clearRect(){}
@@ -89,6 +89,42 @@ test('a suspended preview cancels pending work, retains its last frame and resum
   view.setVisible(true);view.refresh();
   assert.equal(requests[2].data.revision,3);
   await finish(2,12);assert.deepEqual(drawn,[7,12]);view.clear();
+});
+
+test('hidden tabs abort 4K preview, keep the last pixels and resume only visible editors',async t=>{
+  const page=Object.assign(new EventTarget(),{hidden:false});
+  const setHidden=hidden=>{page.hidden=hidden;page.dispatchEvent(new Event('visibilitychange'));};
+  const {view,requests,drawn,finish,revise}=fixture(t,false,{page});
+  view.refresh();
+  await finish(0,7);
+  const previous=view.getFrame();
+  view.retryDetail();
+  assert.equal(requests[1].data.resolution,4096);
+  setHidden(true);
+  assert.equal(requests[1].signal.aborted,true);
+  revise(2);
+  view.refresh();
+  await finish(1,9);
+  assert.equal(requests.length,2);
+  assert.equal(view.getFrame(),previous);
+  view.setVisible(false);
+  setHidden(false);
+  assert.equal(requests.length,2);
+  view.setVisible(true);
+  view.refresh();
+  assert.equal(requests[2].data.revision,2);
+  await finish(2,12);
+  setHidden(true);
+  revise(3);
+  setHidden(false);
+  assert.equal(requests[3].data.revision,3);
+  await finish(3,14);
+  assert.deepEqual(drawn,[7,12,14]);
+  view.dispose();
+  revise(4);
+  setHidden(true);
+  setHidden(false);
+  assert.equal(requests.length,4);
 });
 
 test('restoring the same revision does not republish its cached frame or read an aborted detail response',async t=>{
