@@ -858,6 +858,7 @@ export function createImagePanel(type,ctx){
   const adjustmentsMenu=type==='layers'?createContextActions('调整图层类型',failure=>ctx.error(failure)):null;
   const addAdjustment=type==='layers'?chromeButton(button('新建调整图层',openAdjustments),'adjustment'):null;
   addAdjustment?.setAttribute('aria-haspopup','menu');
+  if(addAdjustment)addAdjustment.title='新建调整或滤镜图层';
   if(add){
     actions.setAttribute('role','group');
     actions.setAttribute('aria-label','图层操作');
@@ -977,7 +978,7 @@ export function createImagePanel(type,ctx){
     if(!image||ctx.busy?.())return;
     const origin=imageSelectionOrigin(project),selection=ctx.imageSelection?.(origin);
     const rect=addAdjustment.getBoundingClientRect();
-    adjustmentsMenu.open({clientX:rect.left,clientY:rect.bottom},'新建调整图层',
+    adjustmentsMenu.open({clientX:rect.left,clientY:rect.bottom},'调整与滤镜',
       Object.entries(imageAdjustments).map(([type,{label}])=>({label,icon:'adjustment',run:()=>{
         const layerId=crypto.randomUUID();
         const operations=[{op:'image',action:'addLayer',documentId:origin.documentId,layerId,kind:'adjustment',
@@ -1381,7 +1382,7 @@ export function createImagePanel(type,ctx){
   function renderAdjustment(layer,busy){
     const adjustment=layer.adjustment,spec=imageAdjustments[adjustment.type],disabled=!!layerLockOwner(currentDocument(project).layers,layer)||busy;
     const section=el('section','document-adjustment-properties'),heading=el('div','document-adjustment-heading');
-    const reset=button('重置调整',()=>void run(()=>command(project,{
+    const reset=button(spec.filter?'重置滤镜':'重置调整',()=>void run(()=>command(project,{
       action:'updateLayer',layerId:layer.id,patch:{adjustment:newImageAdjustment(adjustment.type)}
     })));
     reset.disabled=disabled;
@@ -1421,7 +1422,7 @@ export function createImagePanel(type,ctx){
           ctx.imageAdjustment(owner,origin,{op:'image',action:'updateLayer',documentId:origin.documentId,
             layerId:layer.id,patch:{adjustment:{...adjustment,[key]:value}}});
         });
-      control.dataset.scrubSpeed=String(field.step===1?1:field.step);
+      control.dataset.scrubSpeed=String(field.scrubSpeed??field.step);
     }
     body.append(section);
   }

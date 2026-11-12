@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image, PngImagePlugin
 from paint_surface import Surface
 from image_adjustments import adjust_rgb, blend_rgb, neutral_adjustment
+from image_filters import alpha_bounds, blur_gaussian, gaussian_box
 from image_raster_tools import flood_layer, clone_layer
 
 
@@ -154,8 +155,11 @@ def shape_tiles(surface, layer, color):
         yield ids[keep], np.column_stack((premult[keep], alpha[keep]))
 
 
-def apply_adjustment(result, layer, surface, linear):
+def apply_adjustment(result, layer, surface, linear, clipped=False):
     params, mode = layer['adjustment'], layer['blend']
+    if params['type'] == 'gaussianBlur':
+        apply_gaussian_blur(result, layer, surface, clipped)
+        return
     if mode == 'normal' and neutral_adjustment(params):
         return
     masked = layer['maskEnabled']
@@ -177,6 +181,44 @@ def apply_adjustment(result, layer, surface, linear):
         if masked:
             opacity = opacity * mask_values(layer, mask, ids, surface)[:, None]
         result[ids, :3] = back[:, :3] + (mixed - back[:, :3]) * opacity
+
+
+def apply_gaussian_blur(result, layer, surface, clipped):
+    height, width = surface.uv_shape
+    radius = layer['adjustment']['radius'] * width / 4096
+    if radius <= 0:
+        return
+    half, edge = gaussian_box(radius)
+    canvas = result.reshape(height, width, 4)
+    bounds = alpha_bounds(canvas[:, :, 3], 3 * (half + 1))
+    if bounds is None:
+        return
+    top, bottom, left, right = bounds
+    source = canvas[top:bottom, left:right]
+    masked, opacity, mode = layer['maskEnabled'], layer['opacity'], layer['blend']
+    mask = surface.mask(layer.get('maskStrokes', [])) if masked else None
+    columns = np.arange(left, right)
+    with composite_buffer(source, 1) as filtered:
+        filtered[:] = source
+        blur_gaussian(filtered, half, edge)
+        for start in range(0, len(source), 32):
+            back = source[start:start + 32]
+            pixels = filtered[start:start + 32]
+            amount = opacity
+            if masked:
+                rows = np.arange(top + start, top + start + len(back))
+                ids = (rows[:, None] * width + columns).ravel()
+                amount = opacity * mask_values(layer, mask, ids, surface).reshape(*back.shape[:2], 1)
+            if clipped or mode != 'normal':
+                back_alpha, alpha = back[:, :, 3:], pixels[:, :, 3:]
+                base = np.divide(back[:, :, :3], back_alpha, out=np.zeros_like(back[:, :, :3]), where=back_alpha > 0)
+                color = np.divide(pixels[:, :, :3], alpha, out=base.copy(), where=alpha > 0)
+                if mode != 'normal':
+                    color += back_alpha * (blend_rgb(base, color, mode) - color)
+                if clipped:
+                    alpha[:] = back_alpha
+                pixels[:, :, :3] = color * alpha
+            back += (pixels - back) * amount
 
 
 def image_tiles(pixels):
@@ -217,7 +259,7 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
     if not layer['visible'] or not layer['opacity']:
         return
     if layer['kind']=='adjustment':
-        apply_adjustment(result, layer, surface, linear)
+        apply_adjustment(result, layer, surface, linear, clipped)
         return
     if layer['kind']=='pixel':
         def raster_edit(ids, paint, stroke):

@@ -530,7 +530,7 @@ function paintBinding(doc){const model=modelFingerprint(doc);return model?crypto
 let compositorFingerprint;
 export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
   compositorFingerprint??=crypto.createHash('sha256').update(JSON.stringify([
-    'paint_worker.py','paint_channels.py','paint_surface.py','paint_mask_generators.py','material_graph.py','image_documents.py','image_adjustments.py','image_raster_tools.py',
+    'paint_worker.py','paint_channels.py','paint_surface.py','paint_mask_generators.py','material_graph.py','image_documents.py','image_adjustments.py','image_filters.py','image_raster_tools.py',
     'project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
     '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
   ].map(file=>hash(path.join(ROOT,file))))).digest('hex');

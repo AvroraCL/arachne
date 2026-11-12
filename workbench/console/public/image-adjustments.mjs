@@ -43,7 +43,8 @@ export const imageAdjustments=Object.freeze({
     red:number('红色',21,-100,200),green:number('绿色',72,-100,200),blue:number('蓝色',7,-100,200)
   }},
   invert:{label:'反相',fields:{}},
-  posterize:{label:'色调分离',fields:{steps:number('色阶数',4,2,256)}}
+  posterize:{label:'色调分离',fields:{steps:number('色阶数',4,2,256)}},
+  gaussianBlur:{label:'高斯模糊',filter:true,fields:{radius:{...number('半径（像素）',12,0,256,.1),scrubSpeed:.5}}}
 });
 
 export function newImageAdjustment(type){

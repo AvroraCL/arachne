@@ -572,12 +572,71 @@ try{
   assert.equal(curvesLayer(restoredCurve).adjustment.points.red[1][1],152);
   console.log('PASS curve histogram, live point drag, independent RGB and red controls, exact numeric input, 4K alpha and undo');
 
+  const blurDoc='blur-document',blurPixels='blur-pixels';
+  await api(paintRoute+'/commands',{revision:restoredCurve.revision,operations:[
+    {op:'image',action:'create',documentId:blurDoc,patch:{name:'滤镜验收'}},
+    {op:'image',action:'addLayer',documentId:blurDoc,layerId:blurPixels,kind:'pixel',patch:{name:'半透明方形'}},
+    {op:'image',action:'stroke',documentId:blurDoc,layerId:blurPixels,target:'pixels',
+      stroke:{uv:true,rect:[.25,.25,.75,.75],opacity:.5,color:'#ec7c28',erase:false}}
+  ]});
+  await page.reload();
+  await canvas.waitFor();
+  await editor.locator('select[aria-label="图像文档"]').selectOption(blurDoc,{force:true});
+  await page.getByRole('button',{name:'半透明方形',exact:true}).click();
+  await editor.getByRole('button',{name:'适应画布',exact:true}).click();
+  await editor.getByRole('button',{name:'矩形选区',exact:true}).click();
+  await editor.getByRole('button',{name:'新建选区',exact:true}).click();
+  await drag([.12,.35],[.5,.65]);
+  await page.getByRole('button',{name:'新建调整图层',exact:true}).click();
+  await page.getByRole('menuitem',{name:'高斯模糊',exact:true}).click();
+  const blurRadius=page.locator('input.workspace-number-input[aria-label="半径（像素）"]');
+  const blurValue=blurRadius.locator('..');
+  await blurRadius.waitFor();
+  await blurValue.dblclick();
+  const blurEntry=blurValue.getByRole('spinbutton',{name:'输入数值'});
+  await blurEntry.fill('64');
+  await blurEntry.press('Enter');
+  const filterLayer=current=>current.paint.imageDocuments[blurDoc].layers[1];
+  const blurred=await until(async()=>{
+    const current=await api(projectRoute);
+    return filterLayer(current)?.adjustment.radius===64&&current;
+  },'保存高斯模糊半径');
+  assert.equal(filterLayer(blurred).maskBase,0);
+  assert.equal(filterLayer(blurred).maskStrokes.length,1);
+  await canvas.focus();
+  await page.keyboard.press('Control+d');
+  const probes=[[1000,2048],[1050,2048],[1300,2048],[3100,2048],[1000,1100]];
+  const [blurDimensions,blurredPixels]=rgba(await imagePng('masked-gaussian-blur.png',blurred.revision,blurDoc),probes);
+  assert.deepEqual(blurDimensions,[4096,4096]);
+  assert.deepEqual(blurredPixels.slice(2),[[236,124,40,128],[0,0,0,0],[0,0,0,0]]);
+  assert.ok(blurredPixels[0][3]>35&&blurredPixels[0][3]<55);
+  assert.ok(blurredPixels[1][3]>75&&blurredPixels[1][3]<94);
+  assert.deepEqual(blurredPixels.slice(0,2).map(pixel=>pixel.slice(0,3)),[[236,124,40],[236,124,40]]);
+  await page.screenshot({path:path.join(data,'masked-gaussian-blur-workbench.png')});
+  await page.keyboard.press('Control+z');
+  const undoBlur=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>blurred.revision&&filterLayer(current).adjustment.radius===12&&current;
+  },'撤销高斯模糊半径');
+  await page.keyboard.press('Control+Shift+z');
+  const redoBlur=await until(async()=>{
+    const current=await api(projectRoute);
+    return current.revision>undoBlur.revision&&filterLayer(current).adjustment.radius===64&&current;
+  },'重做高斯模糊半径');
+  await page.reload();
+  await blurRadius.waitFor();
+  assert.equal(await blurRadius.inputValue(),'64');
+  console.log('PASS non-destructive Gaussian blur, selection mask, premultiplied 4K pixels, undo, redo and reopen');
+  const finishedBlur=await api(paintRoute+'/commands',{revision:redoBlur.revision,operations:[
+    {op:'image',action:'remove',documentId:blurDoc}
+  ]});
+
   const fillDoc='bucket-document',bucketLayer='bucket-pixels';
   const swatches=[
     [[.1,.25,.24,.75],'#202040'],[[.36,.25,.5,.75],'#242640'],
     [[.66,.25,.8,.75],'#282444'],[[.86,.25,.96,.75],'#806040']
   ];
-  const bucketSeed=await api(paintRoute+'/commands',{revision:restoredCurve.revision,operations:[
+  const bucketSeed=await api(paintRoute+'/commands',{revision:finishedBlur.revision,operations:[
     {op:'image',action:'create',documentId:fillDoc,patch:{name:'油漆桶验收'}},
     {op:'image',action:'addLayer',documentId:fillDoc,layerId:bucketLayer,kind:'pixel',patch:{name:'色块'}},
     ...swatches.map(([rect,color])=>({op:'image',action:'stroke',documentId:fillDoc,layerId:bucketLayer,target:'pixels',
