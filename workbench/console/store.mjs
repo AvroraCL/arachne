@@ -1,4 +1,3 @@
-import {paintHistoryEntries,travelPaintHistory} from './public/paint-history-state.mjs';
 import {dataDirectory} from './release-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {clone,validate} from './public/model.mjs';
 import {resolveSource,portableSource} from './workspace-paths.mjs';
 import {recoverProjectTransaction,saveProjectTransaction} from './project-transaction.mjs';
+import {appendProjectHistory,listProjectHistory,restoreProjectHistory,storedProjectHistory,pruneHistorySnapshots} from './project-history-store.mjs';
 
 export const ROOT=path.dirname(fileURLToPath(import.meta.url));
 export const DATA=dataDirectory(ROOT);
@@ -59,26 +59,26 @@ export function list(){
   }
   return projects.sort((a,b)=>a.created-b.created);
 }
-function history(id){const file=path.join(projectDir(id),'history.json');return fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{undo:[],redo:[]};}
-function content(p){const q=clone(p);delete q.revision;delete q.updated;return q;}
 function saveRevision(id,doc,h,operation){
   const folder=projectDir(id);
-  saveProjectTransaction(folder,portableDocument(doc),h);
+  saveProjectTransaction(folder,portableDocument(doc),storedProjectHistory(h));
+  pruneHistorySnapshots(folder,h);
   try{fs.appendFileSync(path.join(folder,'operations.jsonl'),JSON.stringify({revision:doc.revision,time:doc.updated,...operation})+'\n');}
   catch(error){console.warn('工程已保存，无法写入操作日志',error.code);}
 }
 export function commit(id,expected,mutator,summary){
   const before=read(id);if(expected!==before.revision){const e=Error('项目已被修改，请读取最新版本再操作');e.status=409;throw e;}
-  const next=mutator(clone(before));validate(next);const h=history(id);h.undo.push(content(before));h.undo=h.undo.slice(-50);h.redo=[];
+  const next=mutator(clone(before));validate(next);
+  const h=appendProjectHistory(projectDir(id),before,next);
   next.revision=before.revision+1;next.updated=new Date().toISOString();
   saveRevision(id,next,h,{summary});return next;
 }
-export function projectHistory(id){const current=read(id);return paintHistoryEntries(current,history(id));}
+export function projectHistory(id){return listProjectHistory(projectDir(id),read(id));}
 export function travel(id,expected,direction,steps=1){
   const p=read(id);if(expected!==p.revision){const e=Error('版本已改变');e.status=409;throw e;}
-  const result=travelPaintHistory(p,history(id),direction,steps);if(!result.changed)return p;
+  const result=restoreProjectHistory(projectDir(id),p,direction,steps);if(!result)return p;
   const restored=result.restored;restored.revision=p.revision+1;restored.updated=new Date().toISOString();validate(restored);
-  saveRevision(id,restored,result.history,{summary:direction,...(steps>1?{steps}:{})});return restored;
+  saveRevision(id,restored,result.index,{summary:direction,...(steps>1?{steps}:{})});return restored;
 }
 export async function forkProject(sourceId,snapshot,name,prepareAssets){
   const sourceDir=projectDir(sourceId);const id=crypto.randomUUID(),dir=projectDir(id),doc=clone(snapshot);

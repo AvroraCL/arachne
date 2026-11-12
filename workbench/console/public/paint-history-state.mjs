@@ -16,7 +16,10 @@ function imageStrokeLabel(stroke){
 
 function imageLayerLabel(previous,layer){
   if(!previous){
-    if(layer.adjustment)return '新建'+(imageAdjustments[layer.adjustment.type]?.label||'图层')+'调整';
+    if(layer.adjustment){
+      const effect=imageAdjustments[layer.adjustment.type];
+      return effect?.filter?'添加'+effect.label:'新建'+(effect?.label||'图层')+'调整';
+    }
     return {pixel:'新建像素层',image:layer.text?'新建文字层':'置入图片',gradient:'新建渐变层',shape:'绘制形状',group:'新建图层组'}[layer.kind]||'新建图像层';
   }
   if(!layer)return previous.kind==='group'?'删除图层组':'删除图像层';
