@@ -1,21 +1,19 @@
-# Arachne · 阿拉克涅
+# Arachne
 
-[简体中文](README.md) · **English**
+**A local 3D texturing workbench for artists working on models and liveries.** Edit a mesh, build PBR materials, paint layered textures and render the result in one project. Available as an Apple Silicon Mac app, a Windows x64 desktop app or a workbench served locally in your browser.
 
-![Arachne mark beside an illustrated metal access panel shown in layers](docs/arachne-cover.svg)
+[简体中文](README.md) · **[Run from source](#run-from-source)** · [Desktop builds](#desktop-builds) · [Report an issue](https://github.com/AvroraCL/arachne/issues)
 
-Arachne is a local 3D texturing workbench. Build up bare metal, paint and wear on a model, edit markings in a layered 2D texture, then light and render the result in the same project. The model keeps its original UVs, and the material and texture layers stay editable.
+![Arachne’s drawing workspace with a gradient stripe selected on the canvas and its layer properties open on the right](docs/drawing-workspace.png)
 
-[Run from source](#run-from-source) · [Desktop builds](#desktop-builds) · [Workbench guide (Chinese)](README.md#工作台快捷入口)
+The screenshot shows the drawing workspace in use. The number, graphic and stripe sit on separate layers. Drag the stripe’s gradient handles on the canvas or change either color in the properties panel.
 
-## Texture an access panel
+## A typical texturing workflow
 
-| Step | In the workbench |
-| --- | --- |
-| **Start with a mesh** | Open a GLB with UVs and choose the material to paint. To try the tools first, start with the built-in cube. |
-| **Build the finish** | Use fill layers for the metal and topcoat. Set their color, metallic and roughness values independently, then use an edge-wear mask to expose the metal along raised edges. |
-| **Add markings** | Place a panel number and a stripe on separate layers in a 4K texture document. Use selections and masks to confine them. Bind the document to a material channel and return to it when a marking needs to move. |
-| **Inspect and deliver** | Press `C` in the 3D view to inspect channels and `M` to return to the full material. Set up the lighting and camera for a PNG or OpenEXR render, or deliver the GLB, PBR maps and editable project. |
+1. **Prepare the mesh.** Import a GLB, glTF or OBJ model and select the material to paint. You can also start with a built-in plane, cube or sphere.
+2. **Build the surface.** Use fill layers for base color, metallic and roughness. Reveal the underlying material with painted masks, edge wear and surface noise. Save a layer group as a smart material to reuse it.
+3. **Paint the texture.** Combine images, shapes, gradients and adjustments in a layered 4K document. Use selections and masks to place a marking, bind the document to a material channel, and return to edit it later.
+4. **Inspect and deliver.** Check individual channels on the model, set up lights and a camera, and render a PNG or floating-point OpenEXR. Package the model, PBR maps and editable project together.
 
 ## Run from source
 
