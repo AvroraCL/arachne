@@ -7,7 +7,7 @@ export async function maskThumbnailKey(doc,layer){
   if(!geometryKeys.has(doc))geometryKeys.set(doc,digest([doc.source.files,doc.modeling,doc.paint.surfaceBindings]));
   // Layer color, opacity and mask enablement do not change the raw mask.
   return [doc.id,layer.id,await geometryKeys.get(doc),await digest([
-    layer.kind,layer.mask,layer.maskBase,layer.maskStrokes,layer.maskStrokeOrder,
+    layer.maskEffects?.some(e=>e.kind==='anchor')?doc.revision:null,layer.kind,layer.mask,layer.maskBase,layer.maskStrokes,layer.maskStrokeOrder,
     layer.maskEffects?.map(({id,...effect})=>effect),
     layer.image,layer.projector,layer.space,layer.x,layer.y,layer.scale,layer.rotation,layer.uvScale
   ])].join(':');
@@ -16,7 +16,7 @@ export async function maskThumbnailKey(doc,layer){
 export async function layerThumbnailKey(doc,layer){
   if(!geometryKeys.has(doc))geometryKeys.set(doc,digest([doc.source.files,doc.modeling,doc.paint.surfaceBindings]));
   const {name,visible,locked,parentId,...content}=layer;
-  return [doc.id,'paint-layer',layer.id,await geometryKeys.get(doc),await digest([content,layer.materialId?doc.paint.materials?.[layer.materialId]?.graph:null])].join(':');
+  return [doc.id,'paint-layer',layer.id,await geometryKeys.get(doc),await digest([layer.maskEffects?.some(e=>e.kind==='anchor')?doc.revision:null,content,layer.materialId?doc.paint.materials?.[layer.materialId]?.graph:null])].join(':');
 }
 
 export function createMaskThumbnails({context,canRun}){

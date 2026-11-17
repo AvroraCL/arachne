@@ -4,6 +4,16 @@ export const materialMaskFields=['mask','maskBase','maskEnabled','maskEffects','
 export const hasMaterialMask=layer=>!!layer&&(!!layer.mask||layer.maskBase===0||!!layer.maskStrokes?.length||
   !!layer.maskEffects?.length||typeof layer.maskEnabled==='boolean');
 
+// Paint order is bottom to top within each folder. A layer ID survives renames.
+export function paintAnchorSources(layers,target){
+  return layers.slice(0,layers.indexOf(target)).filter(layer=>layer.kind==='paint'&&layer.anchorPoint&&layerParent(layer)===layerParent(target));
+}
+
+export function remapPaintAnchors(layer,ids){
+  for(const effect of layer.maskEffects??[])
+    if(effect.kind==='anchor'&&ids.has(effect.source))effect.source=ids.get(effect.source);
+}
+
 export function layerTreeOrder(layers,parentId=null){
   return layerChildren(layers,parentId).flatMap(layer=>[
     layer,...(layer.kind==='group'?layerTreeOrder(layers,layer.id):[])

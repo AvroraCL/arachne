@@ -59,7 +59,7 @@ p=np.tile(v,(2,1));normalize_normals(p);assert np.allclose(np.linalg.norm(p[:,5:
 from paint_surface import Surface
 surface=object.__new__(Surface)
 stroke=dict(channels=dict(height=True,normal=True,emission=True,alpha=True,ao=True),values=dict(normal='#8080ff',emission='#808080',height=.8,alpha=.3,ao=.4),erase=False)
-ids,paint=surface._paint_strokes([stroke],stroke['channels'],lambda s:decode(np.array(list(bytes.fromhex(s[1:])))/255),np.empty(0,dtype=np.int32),{},lambda s:(np.array([0],dtype=np.int32),np.array([.5])))
+ids,paint=surface._paint_strokes([(stroke,np.array([0],dtype=np.int32),np.array([.5]))],stroke['channels'],lambda s:decode(np.array(list(bytes.fromhex(s[1:])))/255),np.empty(0,dtype=np.int32),{})
 assert paint['normal'][1].shape==(1,3) and paint['emission'][1].shape==(1,3)
 assert np.allclose(paint['alpha'][1],.15) and np.allclose(paint['height'][1],.4)
 `;

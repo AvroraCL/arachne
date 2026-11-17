@@ -35,18 +35,40 @@ export function sampleMaterialFrame(frame,u,v){
   return values;
 }
 
+function strokeWindow(edits,visible,bleed=0){
+  if(!visible)return;
+  const bounds=[4096,4096,0,0];
+  for(const {stroke} of edits){
+    const reach=(stroke.radius*((stroke.tip?.tipAsset?Math.SQRT2:1)+(stroke.tip?.scatter??0)))*4096+4+bleed;
+    for(const stamp of stroke.stamps){
+      for(let axis=0;axis<2;axis++){
+        const center=stamp[axis]*4096;
+        bounds[axis]=Math.min(bounds[axis],center-reach);
+        bounds[axis+2]=Math.max(bounds[axis+2],center+reach);
+      }
+    }
+  }
+  const ranges=visible.map(([start,end],axis)=>[Math.max(0,start-24,bounds[axis]),Math.min(4096,end+24,bounds[axis+2])]);
+  if(ranges.some(([start,end])=>start>=end))return;
+  const required=Math.ceil(Math.max(...ranges.map(([start,end])=>end-start)))+2;
+  const side=[256,512,768,1024,1536,2048].find(size=>size>=required);
+  return side?[...ranges.map(([start,end])=>clamp(Math.round((start+end-side)/2),0,4096-side)),side]:undefined;
+}
+
 export function createLiveView({viewport,canvas,guide,context:readContext,onStatus,onFrame=()=>{},renderCanvas=true,rgba=false,retryDelays=defaultRetryDelays}){
   const ctx=canvas.getContext('2d',{alpha:rgba});
   const guideContext=guide.getContext('2d');
   const page=canvas.ownerDocument;
-  let intent=null,inFlight=null,queued=null,baseFrame=null,frame=null,drawn=null;
+  let intent=null,inFlight=null,queued=null,detailInFlight=null,baseFrame=null,frame=null,drawn=null;
   let image=null,guideFrame=null,detailTimer=null,retryTimer=null,retrying=null;
-  let detailFailure=null,fastFailure=null,visible=true,disposed=false;
+  let detailFailure=null,fastFailure=null,visible=true,disposed=false,patched=null;
   const context=()=>visible&&!disposed&&!page?.hidden?readContext():null;
+  const fastSize=state=>rgba&&[512,1024].includes(state?.fastSize)?state.fastSize:workingSize;
 
   function cancelRetry(){if(retryTimer!==null)clearTimeout(retryTimer);retryTimer=null;retrying=null;}
   function cancelPending(){
     inFlight?.controller?.abort();
+    detailInFlight?.controller?.abort();
     cancelRetry();intent=null;queued=null;detailFailure=null;fastFailure=null;
     clearTimeout(detailTimer);detailTimer=null;
   }
@@ -69,10 +91,17 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
   }
 
   function status(phase,message,failedSize,failed=false){
-    if(!context())return;
+    const state=context();
+    if(!state)return;
     const request=frame?.request;
     const size=request?.size||0,revision=request?.revision;
-    phase??=size===detailSize?'ready':'fast';
+    if(!phase&&detailFailure?.key===state.key){
+      phase='error';message=detailFailure.message;failedSize=detailSize;
+    }else if(!phase&&retrying?.request===intent){
+      phase='retrying';message=retrying.message;failedSize=intent.size;
+    }
+    const refining=detailInFlight?.key===state.key&&detailInFlight.group===intent?.group&&!detailInFlight.controller.signal.aborted;
+    phase??=size===detailSize&&request?.key===state.key?'ready':refining?'refining':'fast';
     onStatus(failed?message:request?'实时材质 · r'+revision:'正在准备实时预览…',failed,{size,revision,phase,message,...(failedSize?{failedSize}:{})});
   }
 
@@ -83,7 +112,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     retryTimer=setTimeout(()=>{
       retryTimer=null;retrying=null;const state=context();
       if(intent!==request||state?.key!==request.key||(request.size===detailSize&&!state.detail&&!request.manualDetail))return;
-      queued=request;void flush();
+      send(request);
     },delay);
     status('retrying',error.message,request.size);return true;
   }
@@ -96,7 +125,12 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     const channel=state.inspectMask?'color':state.channel;
     const solo=!!(state.inspectMask||state.solo);
     const {preview3D}=state;
-    if(drawn?.pixels===pixels&&drawn.channel===channel&&drawn.solo===solo&&drawn.preview3D===preview3D)return;
+    if(patched&&size!==detailSize&&!request.operation&&state.detail&&!detailFailure&&
+       patched.holdKey===request.key){
+      status('refining');return;
+    }
+    if(drawn?.pixels===pixels&&drawn.channel===channel&&drawn.solo===solo&&drawn.preview3D===preview3D&&
+       (!patched||intent?.operation&&intent.key===request.key))return;
     if(!image||canvas.width!==size){
       canvas.width=canvas.height=size;
       image=ctx.createImageData(size,size);
@@ -107,6 +141,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       for(let i=0,j=0;i<pixels.length;i+=stride,j+=4){const [r,g,b]=palette[pixels[i+5]&3];image.data[j]=r;image.data[j+1]=g;image.data[j+2]=b;}
     }
     ctx.putImageData(image,0,0);
+    patched=null;
     if(!rgba)drawGuide(state.id,pixels,size);
     if(preview3D){
       viewport.showLivePaint(pixels,size,solo?image.data:null,{revision:request.revision,draft:!!request.operation});
@@ -116,18 +151,34 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     status();
   }
 
-  async function flush(){
+  function flush(){
     if(inFlight||!queued)return;
     const request=queued;
     queued=null;inFlight=request;
+    void load(request);
+  }
+
+  function send(request){
+    if(request.size===detailSize){
+      detailInFlight=request;
+      void load(request);
+    }else{
+      queued=request;
+      flush();
+    }
+  }
+
+  async function load(request){
     request.controller=new AbortController();
     if(request.size===detailSize)status('refining');
-    const {id,revision,inspectMask,isolatedLayer,operation,key,size}=request;
-    const isCurrent=()=>!request.controller.signal.aborted&&context()?.key===key&&intent?.group===request.group;
+    const {id,revision,inspectMask,isolatedLayer,operation,key,size,window}=request;
+    const isCurrent=()=>!request.controller.signal.aborted&&context()?.key===key&&intent?.group===request.group&&
+      (operation||frame?.request.group!==request.group||frame.request.operation||frame.request.size<=size);
     try{
       if(context()?.modeling&&frame?.request.revision!==revision)onStatus('正在更新建模后的材质与表面…');
-      const draft=Array.isArray(operation)?{operations:operation}:{operation};
-      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:size}:{revision,...draft,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
+      const draft=rgba&&operation?.textDraft?{textDraft:operation.textDraft}:
+        Array.isArray(operation)?{operations:operation}:{operation};
+      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:size,window}:{revision,...draft,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
       const response=await transport(()=>fetch('/api/projects/'+id+'/paint/'+(rgba?'image-live':'live'),{
         method:'POST',headers:{'Content-Type':'application/json'},signal:request.controller.signal,
         body
@@ -146,38 +197,66 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       if(reportedSize&&Number(reportedSize)!==size||reportedRevision&&Number(reportedRevision)!==revision)
         throw Error('实时贴图修订或尺寸不一致');
       const next=new Uint8Array(await transport(()=>response.arrayBuffer()));
+      if(window&&response.headers?.get('X-Paint-Window')===window.join(',')){
+        if(!isCurrent())return;
+        const [x,y,side]=window;
+        if(next.length!==side*side*4||canvas.width!==detailSize||!image)throw Error('局部预览尺寸无效');
+        if(patched&&patched.window.join(',')!==window.join(',')){
+          const [left,top,side]=patched.window;
+          ctx.putImageData(image,0,0,left,top,side,side);
+        }
+        ctx.putImageData(new ImageData(new Uint8ClampedArray(next.buffer),side,side),x,y);
+        patched={window,request};
+        onFrame({request,pixels:next,window});
+        return;
+      }
       if(rgba?next.length!==size*size*4:![6,15].includes(liveStride(next,size)))throw Error('实时贴图尺寸无效');
       if(!isCurrent())return;
-      detailFailure=null;
+      if(size===detailSize)detailFailure=null;
       const candidate={request,pixels:next},previousFrame=frame,previousDrawn=drawn;onFrame(candidate);
       if(!isCurrent())return;
       frame=candidate;
       try{draw();}catch(error){frame=previousFrame;drawn=previousDrawn;throw error;}
-      if(!operation)baseFrame=candidate;
+      if(!operation){
+        baseFrame=candidate;
+        if(size===detailSize){
+          // A late fast response for this revision must not replace this frame.
+          if(inFlight?.group===request.group)inFlight.controller.abort();
+          if(queued?.group===request.group)queued=null;
+        }
+      }
     }catch(error){
       if(error.name==='AbortError'||request.controller.signal.aborted||intent!==request||context()?.key!==key)return;
       if(retryTransient(request,error))return;
       if(size===detailSize){
         detailFailure={key,message:error.message};
+        if(patched)draw();
         status('error',error.message,size);
       }else if(error.status!==409){fastFailure={key,request,message:error.message};status('error',error.message,size,true);}
     }finally{
-      inFlight=null;
-      if(queued)void flush();
-      else scheduleDetail();
+      if(inFlight===request)inFlight=null;
+      if(detailInFlight===request)detailInFlight=null;
+      flush();
+      scheduleDetail();
     }
   }
 
-  function requestFrame(state,operation,size=workingSize){
+  function requestFrame(state,operation,size=fastSize(state)){
     cancelRetry();fastFailure=null;
-    clearTimeout(detailTimer);
-    detailTimer=null;
     // Consecutive moves in one gesture can display intermediate frames. A
     // cancel, revision change or source switch invalidates the whole gesture.
     const continued=intent?.key===state.key&&Boolean(intent.operation)===Boolean(operation);
-    if(inFlight&&(inFlight.size===detailSize||!continued||inFlight.key!==state.key))inFlight.controller?.abort();
+    if(!continued||size===detailSize){
+      clearTimeout(detailTimer);
+      detailTimer=null;
+    }
+    if(!continued)inFlight?.controller.abort();
+    detailInFlight?.controller.abort();
     if(size!==detailSize)detailFailure=null;
-    intent={...state,operation,size,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
+    const strokes=Array.isArray(operation)?operation:[operation];
+    const window=rgba&&frame?.request.size===detailSize&&frame.request.key===state.key&&
+      strokes.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke.stamps)?strokeWindow(strokes,state.visiblePixels,state.strokeBleed):undefined;
+    intent={...state,operation,size,window,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
     if(!operation&&baseFrame?.request.key===state.key&&baseFrame.request.size>=size){
       queued=null;
       intent={...intent,size:baseFrame.request.size};
@@ -193,19 +272,20 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       scheduleDetail();
       return;
     }
-    queued=intent;
-    void flush();
+    send(intent);
+    scheduleDetail();
   }
 
   function scheduleDetail(){
     const state=context();
-    if(detailTimer!==null||retryTimer!==null||!state?.detail||detailFailure?.key===state.key||intent?.operation||intent?.size===detailSize||
-       inFlight||queued||baseFrame?.request.key!==state.key||baseFrame.request.size>=detailSize)return;
-    const previous=intent;
+    if(detailTimer!==null||!state?.detail||intent?.key!==state.key||intent.operation||intent.size===detailSize||
+       detailFailure?.key===state.key||baseFrame?.request.key===state.key&&baseFrame.request.size>=detailSize)return;
+    // Count idle time from the committed revision while its fast frame loads.
+    const group=intent.group;
     detailTimer=setTimeout(()=>{
       detailTimer=null;
       const latest=context();
-      if(latest?.key===state.key&&latest.detail&&intent===previous)requestFrame(latest,null,detailSize);
+      if(latest?.key===state.key&&latest.detail&&intent?.group===group)requestFrame(latest,null,detailSize);
     },state.detailDelay??900);
   }
 
@@ -227,7 +307,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       const state=context();
       if(!state)return;
       if(intent?.key!==state.key)requestFrame(state);
-      else if(retryTimer===null&&fastFailure?.request!==intent&&detailFailure?.key!==state.key&&frame?.request!==intent&&!queued&&!inFlight)requestFrame(state,intent.operation);
+      else if(retryTimer===null&&fastFailure?.request!==intent&&detailFailure?.key!==state.key&&frame?.request!==intent&&!queued&&!inFlight&&!detailInFlight)requestFrame(state,intent.operation);
       draw();
       if(!inFlight&&!queued){
         if(retryTimer!==null&&retrying?.request===intent)status('retrying',retrying.message,intent.size);
@@ -237,27 +317,35 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       }
       scheduleDetail();
     },
+    interactionResolutionChanged(){
+      const state=context();
+      if(!state||intent?.key!==state.key)return;
+      const edits=Array.isArray(intent.operation)?intent.operation:[intent.operation];
+      const moved=intent.window&&intent.window.join(',')!==strokeWindow(edits,state.visiblePixels,state.strokeBleed)?.join(',');
+      if(moved||intent.size<fastSize(state))requestFrame(state,intent.operation);
+    },
     preferencesChanged(){
       detailFailure=null;
       clearTimeout(detailTimer);detailTimer=null;
       if(!context()?.detail){
         if(retrying?.request.size===detailSize&&!retrying.request.manualDetail){const request=retrying.request;cancelRetry();if(intent===request)intent={...intent,size:workingSize,group:Symbol()};}
-        if(queued?.size===detailSize&&!queued.manualDetail)queued=null;
-        if(inFlight?.size===detailSize&&!inFlight.manualDetail){
-          inFlight.controller?.abort();
-          // Invalidate this generation even if a transport delivers after abort.
-          intent={...intent,group:Symbol()};
+        if(detailInFlight&&!detailInFlight.manualDetail&&!detailInFlight.controller.signal.aborted){
+          detailInFlight.controller.abort();
+          if(intent===detailInFlight){
+            const fast=queued??inFlight;
+            intent=fast?.group===intent.group?fast:{...intent,size:fastSize(context())};
+          }
         }
         if(frame)status();
       }else{
-        if(intent?.size===detailSize&&frame?.request.size!==detailSize&&(!inFlight||inFlight.controller?.signal.aborted))
+        if(intent?.size===detailSize&&frame?.request.size!==detailSize&&(!detailInFlight||detailInFlight.controller.signal.aborted))
           intent={...intent,size:workingSize};
         scheduleDetail();
       }
     },
     retryDetail(){
       const state=context();
-      if(!state||inFlight||queued)return;
+      if(!state||inFlight||queued||(detailInFlight&&!detailInFlight.controller.signal.aborted))return;
       if(retryTimer!==null&&retrying?.request===intent){const request=retrying.request;requestFrame(state,request.operation,request.size);}
       else if(fastFailure?.request===intent)requestFrame(state,intent.operation,intent.size);
       else if(!intent?.operation){detailFailure=null;requestFrame(state,null,detailSize);}
@@ -266,13 +354,20 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       const state=context();
       return state&&!state.inspectMask&&frame?.request.key===state.key?sampleMaterialFrame(frame,u,v):null;
     },
-    update(operation){
+    update(operation,committedStroke){
       const state=context();
       if(!state)return;
+      // Keep exact pixels through their own save. Later edits must show their
+      // fast frame even when a previous patch is still waiting for detail.
+      if(patched && committedStroke && patched.request.revision+1===state.revision &&
+         patched.request.id===state.id && patched.request.documentId===state.documentId &&
+         patched.request.inspectMask===state.inspectMask &&
+         JSON.stringify(patched.request.operation)===JSON.stringify(committedStroke))
+        patched.holdKey=state.key;
       requestFrame(state,operation);
     },
     clear(){
-      cancelPending();baseFrame=null;frame=null;drawn=null;
+      cancelPending();baseFrame=null;frame=null;drawn=null;patched=null;
       onStatus('',false,{size:0,phase:'hidden'});
       guideFrame=null;
       viewport.showLivePaint(null);

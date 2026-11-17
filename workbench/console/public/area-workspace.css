@@ -156,7 +156,6 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .render-settings-row>span:first-child{color:var(--ui-text,#ddd)}
 .render-settings-row :is(.custom-select,.workspace-range-field){min-width:0;width:100%}
 .render-settings-row input[type=number]{width:100%;min-width:0}
-.render-settings-row[data-viewport-adaptive-off]{display:none}
 .render-settings-readout{color:#b8b8b8;text-align:left}
 .render-settings-hardware{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px 10px;margin:5px 0 2px}
 .render-settings-hardware[hidden]{display:none}

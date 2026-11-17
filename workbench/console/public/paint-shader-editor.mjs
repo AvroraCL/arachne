@@ -1,22 +1,22 @@
 import {channelSpecs} from './paint-channels.mjs';
-import {libraryNodeTypes,compileLibraryMaterial,defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph} from './paint-library.mjs';
+import {libraryNodeTypes,compileLibraryMaterial,defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph,isBrushImage} from './paint-library.mjs';
 import {editMaterialLinks,materialLinkKey,insertMaterialNode,rerouteMaterialLinks,copyMaterialNodes,pasteMaterialNodes,duplicateMaterialNodes,removeMaterialNodes,vacantMaterialPosition,parseMaterialClipboard,materialClipboardPrefix} from './material-graph-edit.mjs';
 import {polylinesIntersect,closestPolylinePoint,polylineCrossing} from './node-link-geometry.mjs';
 import {scrubNumber} from './studio-fields.mjs';
-import {nodeTypes as materialNodeTypes,portNames as materialPortNames,makeGraphNode,defaultMaterialGraph as defaultOutputGraph,compileNodeGraph,resolveGraphSockets} from './material-graph.mjs';
+import {nodeTypes as materialNodeTypes,portNames as materialPortNames,makeGraphNode,defaultMaterialGraph as defaultOutputGraph,compileNodeGraph,resolveGraphSockets,brushParamRanges,brushImageFields} from './material-graph.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {compositionKey} from './text-input.mjs';
 import {readNodeClipboard,writeNodeClipboard} from './node-clipboard.mjs';
 
-const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',pressure:'压感',mirror:'镜像 X',red:'红色',green:'绿色',blue:'蓝色'};
+const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',flow:'流量',spacing:'间距',smoothing:'平滑',tipAngle:'笔尖角度',roundness:'圆度',scatter:'散布',grain:'纹理深度',tipAsset:'图片笔尖',textureAsset:'笔刷纹理',pressure:'压感不透明度',pressureSize:'压感大小',mirror:'镜像 X',red:'红色',green:'绿色',blue:'蓝色'};
 const operations={add:'加',subtract:'减',multiply:'乘',divide:'除',minimum:'最小值',maximum:'最大值'};
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 export function createShaderEditor({host,read,save,draft:onDraft,busy,importImage,viewAsset,readTarget=()=>null,onIdle=()=>{},viewKey='',initialView=null,onViewChange=()=>{}}){
   const lifecycle=new AbortController(),signal=lifecycle.signal;let disposed=false;host.classList.add('shader-editor');
   let target=null,nodeTypes=materialNodeTypes,socketSpecs=new Map();
   const nodeWidth=node=>node.type==='reroute'?20:224;
-  const portNames={...materialPortNames,brush:'笔刷',worldRadius:'三维半径',uvRadius:'二维半径',hardness:'硬度',opacity:'不透明度'};
+  const portNames={...materialPortNames,brush:'笔刷',worldRadius:'三维半径',uvRadius:'二维半径',hardness:'硬度',opacity:'不透明度',flow:'流量',spacing:'间距',smoothing:'平滑',tipAngle:'笔尖角度',roundness:'圆度',scatter:'散布',grain:'纹理深度'};
   const draft=(graph,at=origin)=>onDraft(graph,at);
   const compileMaterialGraph=(graph,assets)=>target?.library==='materials'?compileLibraryMaterial(graph,assets):target?.library==='brushes'?(evaluateBrushGraph(graph),compileNodeGraph(graph,assets)):compileNodeGraph(graph,assets);
   const defaultMaterialGraph=()=>target?.library==='brushes'?defaultBrushGraph():target?.library==='materials'?defaultLibraryMaterial():defaultOutputGraph();
@@ -200,7 +200,8 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
       }
       if(outputs.children.length)box.append(outputs);
       const params=el('div','shader-params'),incoming=new Map(graph.links.filter(link=>link.to.node===node.id).map(link=>[link.to.port,link.from]));
-      for(const param of ['operation','asset','colorSpace'])if(Object.hasOwn(values,param))params.append(parameterRow(param,values[param]));
+      const menuParams=['operation','asset','colorSpace','tipAsset','textureAsset'];
+      for(const param of menuParams)if(Object.hasOwn(values,param))params.append(parameterRow(param,values[param]));
       for(const [port,type] of Object.entries(spec.inputs)){
         if(!incoming.has(port)&&Object.hasOwn(values,port)){params.append(parameterRow(port,values[port]));continue;}
         const row=el('div','shader-input-row'),caption=el('span','shader-param-name',portNames[port]),from=incoming.get(port);
@@ -211,24 +212,34 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
         }else row.append(el('span','shader-unlinked','未连接'));
         params.append(row);
       }
-      for(const [param,value] of Object.entries(values))if(!Object.hasOwn(spec.inputs,param)&&!['operation','asset','colorSpace'].includes(param))params.append(parameterRow(param,value));
+      for(const [param,value] of Object.entries(values))if(!Object.hasOwn(spec.inputs,param)&&!menuParams.includes(param))params.append(parameterRow(param,value));
       function parameterRow(param,value){
         const row=el('div','shader-parameter-row'),caption=el('span','shader-param-name',labels[param]),inputOrigin=origin&&structuredClone(origin);let input;
-        if(['asset','operation','colorSpace'].includes(param)){
+        if(menuParams.includes(param)){
           input=el('select');
           if(param==='asset'){input.append(new Option('选择素材…',''));for(const [id,asset] of Object.entries(read().paint.assets))input.append(new Option(asset.name,id));}
+          else if(brushImageFields.includes(param)){
+            input.append(new Option('无',''));
+            for(const [id,asset] of Object.entries(read().paint.assets))if(isBrushImage(asset))input.append(new Option(asset.name,id));
+          }
           else if(param==='colorSpace')input.append(new Option('颜色（sRGB）','srgb'),new Option('数据（线性）','linear'));
           else for(const [id,text] of Object.entries(operations))input.append(new Option(text,id));
         }else{
           input=el('input');input.type=typeof value==='boolean'?'checkbox':typeof value==='string'?'color':'number';
-          if(input.type==='number'){input.step='any';input.dataset.scrubSpeed=param==='rotation'?'.5':'.01';if(['factor','metallic','roughness','height','alpha','ao','hardness','opacity','red','green','blue'].includes(param)){input.min='0';input.max='1';}if(param==='worldRadius'){input.min='.02';input.max='.65';}if(param==='uvRadius'){input.min='2';input.max='256';input.dataset.scrubSpeed='1';}}
+          if(input.type==='number'){
+            input.step='any';
+            input.dataset.scrubSpeed=['uvRadius','smoothing','tipAngle','roundness','scatter','grain'].includes(param)?'1':param==='rotation'?'.5':'.01';
+            const limits=node.type==='brush'?brushParamRanges[param]:
+              ['factor','metallic','roughness','height','alpha','ao','red','green','blue'].includes(param)?[0,1]:null;
+            if(limits)[input.min,input.max]=limits.map(String);
+          }
         }
         input.value=value;if(input.type==='checkbox')input.checked=value;input.setAttribute('aria-label',`${spec.name} ${labels[param]}`);input.dataset.param=param;row.append(caption,input);
         if(Object.hasOwn(spec.inputs,param))row.append(socket(node,param,'in',spec.inputs[param]));
         if(inlineOutputs.has(param)){row.classList.add('out');row.append(socket(node,param,'out',spec.outputs[param]));}
         input.oninput=()=>{try{if(!input.isConnected||!originCurrent(inputOrigin))throw Error('工程已在其他客户端更新，请重新编辑当前修订');const next=structuredClone(graph),n=next.nodes.find(n=>n.id===node.id);if(!n)throw Error('节点已变化，请重新编辑');n.params[param]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value;compileMaterialGraph(next,read().paint.assets);draft(JSON.stringify(next)===JSON.stringify(graph)?null:next,inputOrigin);showError('');}catch(e){showError(e);}};
         input.onchange=()=>{if(!input.isConnected||!originCurrent(inputOrigin))return;const next=structuredClone(graph),n=next.nodes.find(n=>n.id===node.id);if(!n)return;n.params[param]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value;void commit(next,inputOrigin);};
-        if(input.type==='number')scrubNumber(caption,input,{key:param,speed:param==='rotation'?.5:.01,canStart:allowed,onDraft:()=>input.oninput()});
+        if(input.type==='number')scrubNumber(caption,input,{key:param,speed:Number(input.dataset.scrubSpeed),canStart:allowed,onDraft:()=>input.oninput()});
         if(input.tagName==='SELECT')enhanceSelectMenu(input);
         return row;
       }

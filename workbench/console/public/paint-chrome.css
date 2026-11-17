@@ -166,8 +166,6 @@
 #workspace .area-header .editor-scene-search input{flex:1;width:100%;min-width:0;max-width:none;min-height:24px;padding:1px 4px;border:0;background:transparent;outline:0;font-size:12px}
 #workspace .area-header .editor-scene-search input::-webkit-search-cancel-button{appearance:none}
 #workspace .area-header .editor-scene-search .outline-search-clear{width:22px;min-width:22px;min-height:22px;padding:0;margin-inline-end:1px;color:#aaa}
-#workspace .area-header .editor-scene-tools>.area-icon-button{width:24px;min-width:24px;margin-left:auto}
-#workspace .area-header .editor-scene-tools>.area-icon-button+.area-icon-button{margin-left:0}
 #workspace .area-header .outline-filter{width:25px}
 #workspace .area-header .outline-filter>.custom-select-button{
   display:grid;place-items:center;padding:0;background:none;color:#aaa;
@@ -177,40 +175,37 @@
 #workspace .area-header .outline-filter:is(.open,[data-filter-active])>.custom-select-button{
   background:var(--chrome-hover);color:#eee;
 }
+@container(max-width:260px){
+  #workspace [data-editor=scene]>.area-header>.area-caption{display:none}
+  #workspace .area-header .editor-scene-tools{gap:1px}
+  #workspace .area-header .outline-filter{width:22px;min-width:22px}
+}
 .custom-select-menu.outline-filter-menu{--select-menu-width:132px;--select-menu-align:right}
 .outline-filter-menu .custom-select-option{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .outline-filter-menu .custom-select-option[aria-selected=false] .select-option-check{visibility:hidden}
 #workspace .editor-scene-list{
-  --outline-row:25px;--outline-eye:29px;--outline-step:17px;--outline-start:5px;--outline-line:#ffffff24;
-  --outline-actions:calc(var(--outline-eye)*2);
-  --outline-column:#212121;--outline-list:#252525;
-  padding:0;gap:0;background:var(--outline-list);scrollbar-gutter:auto;
-}
-#workspace .editor-scene-list:has(>.editor-layer-row){
-  scrollbar-gutter:stable;
-  background:linear-gradient(to left,var(--outline-column) var(--outline-actions),var(--outline-list) var(--outline-actions));
+  --outline-row:25px;--outline-eye:26px;--outline-step:16px;--outline-start:6px;--outline-line:#4b4b4b;
+  padding:0;gap:0;background:#282828;scrollbar-gutter:auto;
 }
 #workspace .editor-scene-list:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
-#workspace .editor-scene-list .editor-layer-row{
-  background:linear-gradient(to left,var(--outline-column) var(--outline-actions),var(--outline-background,transparent) var(--outline-actions));
-}
 #workspace .editor-scene-list .editor-outline-root{
-  top:0;min-height:var(--outline-row);width:100%;justify-content:flex-start;
-  padding:0 var(--outline-start);gap:4px;border:0;background:#303030;font-weight:500;font-size:13px;
+  top:0;width:100%;height:var(--outline-row);min-height:var(--outline-row);justify-content:flex-start;
+  padding:0 var(--outline-start);gap:0;border:0;background:#282828;color:#ddd;font-size:13px;font-weight:500;
 }
-#workspace .editor-scene-list .editor-outline-root[aria-expanded=false]{
-  background:#2b2b2b;box-shadow:inset 0 -1px #ffffff0a;
+#workspace .editor-scene-list button.editor-outline-root:hover{background:#353535}
+#workspace .editor-scene-list .outline-fold-count{margin-inline-start:8px;color:#aaa;font-size:12px;font-weight:400}
+#workspace .editor-scene-list .editor-outline-root[data-expanded] .outline-fold-count{display:none}
+#workspace .editor-list.editor-scene-list .editor-layer-row{
+  min-height:var(--outline-row);padding:0 3px 0 var(--outline-start);border-radius:0;box-shadow:none;background:transparent;
 }
-#workspace .editor-scene-list button.editor-outline-root:hover{background:#383838}
-#workspace .editor-scene-list .editor-outline-root>.outline-disclosure{background:transparent}
-#workspace .editor-scene-list .editor-layer-row{min-height:var(--outline-row);border-radius:0;padding:0 0 0 var(--outline-start)}
-#workspace .editor-list.editor-scene-list .editor-layer-row:nth-child(even){--outline-background:#292929}
-#workspace .editor-list.editor-scene-list .editor-layer-row:hover{--outline-background:#333}
-#workspace .editor-scene-list .editor-layer-name{min-height:var(--outline-row);padding:1px 5px 1px 0;gap:6px}
+#workspace .editor-list.editor-scene-list .editor-layer-row:nth-child(even){background:#2c2c2c}
+#workspace .editor-list.editor-scene-list .editor-layer-row:hover{background:#373737}
+#workspace .editor-scene-list .editor-layer-name{min-height:var(--outline-row);padding:0 4px 0 0;gap:5px}
 #workspace .editor-list.editor-scene-list .editor-layer-name:is(:hover,[aria-pressed=true]){background:none}
 #workspace .editor-scene-list :is(.outline-disclosure,.outline-disclosure-space){width:var(--outline-step);min-width:var(--outline-step);height:var(--outline-row);min-height:var(--outline-row)}
-#workspace .editor-scene-list .editor-object-icon{opacity:.8}
-#workspace .editor-scene-list .editor-object-icon svg{width:15px;height:15px}
+#workspace .editor-scene-list .editor-object-icon{width:16px;align-items:center;justify-content:center;color:#e4a466}
+#workspace .editor-scene-list .editor-object-icon svg{width:16px;height:16px}
+#workspace .editor-scene-list .editor-outline-root .editor-object-icon{margin-inline-end:5px;color:#d0d0d0}
 #workspace .editor-scene-list .outline-indent{
   display:flex;align-self:stretch;flex:none;width:min(calc(var(--outline-depth)*var(--outline-step)),35%);
 }
@@ -222,25 +217,40 @@
 #workspace .editor-scene-list .outline-guide.branch::after{
   content:'';position:absolute;inset:50% 0 auto 50%;border-top:1px solid var(--outline-line);
 }
-#workspace .editor-list.editor-scene-list .editor-layer-row[data-selected-object]{--outline-background:#3d3d3d}
-#workspace .editor-list.editor-scene-list .editor-layer-row[data-selected-object]:hover{--outline-background:#464646}
-#workspace .editor-list.editor-scene-list .editor-layer-row[data-active-object]{--outline-background:#565656;box-shadow:inset 2px 0 #c0c0c0}
-#workspace .editor-list.editor-scene-list .editor-layer-row[data-active-object]:hover{--outline-background:#606060}
-#workspace .editor-scene-list [data-selected-object] .editor-object-icon{color:#c7c7c7;opacity:1}
-#workspace .editor-scene-list [data-active-object] .editor-object-icon{color:#fff;opacity:1}
-#workspace .editor-scene-list [data-active-object] .mesh-face{fill:#ffffff1c;stroke-width:1.7}
-#workspace .editor-scene-list [data-active-object] .editor-object-label{color:#fff;font-weight:600}
-#workspace .editor-scene-list [data-selected-object]:not([data-active-object]) .editor-object-label{color:#cecece}
-#workspace .editor-scene-list .editor-layer-row>.editor-layer-name:focus-visible{outline:1px solid #aaa;outline-offset:-2px}
-#workspace .editor-scene-list .editor-layer-row>.editor-visibility{
-  min-height:var(--outline-row);width:var(--outline-eye);min-width:var(--outline-eye);align-self:stretch;
-  padding:3px 6px;border-radius:0;background:none;color:#969696;
+#workspace .editor-scene-list .outline-indent:has(+.outline-disclosure-space:empty)>.branch::after{
+  inset-inline-end:calc(4px - var(--outline-step));
 }
-#workspace .editor-scene-list .editor-layer-row>.editor-visibility .chrome-icon{width:14px;height:14px}
-#workspace .editor-scene-list .editor-layer-row:is(:hover,[data-active-object],[data-object-hidden])>.editor-visibility{color:#b5b5b5}
-#workspace .editor-scene-list .editor-layer-row>.editor-visibility:hover:not(:disabled){background:#ffffff15;color:#eee}
-#workspace .editor-scene-list .editor-layer-row[data-render-excluded]>.editor-render-visibility{color:#d0a885}
-#workspace .editor-scene-status{min-height:23px;padding:3px 9px;font-size:11px;background:#292929}
+#workspace .editor-list.editor-scene-list .editor-layer-row[data-selected-object]{background:#1d314d;--outline-line:#546279}
+#workspace .editor-list.editor-scene-list .editor-layer-row[data-active-object]{background:#334d80;--outline-line:#7488ab}
+#workspace .editor-scene-list [data-selected-object] .editor-object-icon{color:#f29b48}
+#workspace .editor-scene-list [data-active-object] .editor-object-icon{color:#ffb43d}
+#workspace .editor-scene-list [data-selected-object] .editor-object-label{color:#e2e8f1}
+#workspace .editor-scene-list [data-active-object] .editor-object-label{color:white;font-weight:600}
+#workspace .editor-scene-list [data-object-hidden] .editor-layer-name{opacity:.62}
+#workspace .editor-scene-list .editor-layer-row>.editor-layer-name:focus-visible{outline:1px solid #b6c9df;outline-offset:-2px}
+#workspace .editor-scene-list .editor-layer-row>.editor-visibility{
+  width:var(--outline-eye);min-width:var(--outline-eye);min-height:var(--outline-row);align-self:stretch;
+  padding:0;border:0;border-radius:0;background:none;color:#a9a9a9;
+}
+#workspace .editor-scene-list .editor-layer-row>.editor-visibility .chrome-icon{width:15px;height:15px}
+#workspace .editor-scene-list .editor-layer-row:is(:hover,[data-selected-object])>.editor-visibility{color:#d3d8df}
+#workspace .editor-scene-list .editor-layer-row>.editor-visibility:hover:not(:disabled){background:#ffffff16;color:white}
+#workspace .editor-scene-list .editor-layer-row[data-render-excluded]>.editor-render-visibility{color:#e4b085}
+#workspace .editor-scene-footer{
+  display:flex;align-items:center;flex:none;gap:0;min-width:0;padding:0 3px 0 8px;
+  background:#292929;border-top:1px solid var(--area-line);
+}
+#workspace .editor-scene-status{
+  flex:1;min-width:0;min-height:0;padding:0;border:0;background:none;color:#b9b9b9;
+  font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#workspace .editor-scene-footer .area-icon-button{
+  display:grid;place-items:center;flex:none;width:26px;height:24px;min-height:24px;
+  padding:0;border:0;border-radius:2px;color:#b8b8b8;background:none;
+}
+#workspace .editor-scene-footer .area-icon-button svg{width:15px;height:15px}
+#workspace .editor-scene-footer .area-icon-button:hover:enabled{color:white;background:#393939}
+#workspace .editor-scene-footer .area-icon-button:disabled{opacity:.38}
 .scene-context-menu{position:fixed;inset:auto;margin:0;min-width:220px;max-width:min(340px,calc(100vw - 12px));max-height:calc(100vh - 12px);overflow:auto;padding:5px;border:1px solid #1b1b1b;border-radius:4px;background:#2b2b2b;color:#ddd;box-shadow:0 4px 12px #0006;font-size:13px}
 .scene-context-menu:not(:popover-open){display:none}
 .scene-context-title{padding:5px 8px;color:#999;font-size:12px}

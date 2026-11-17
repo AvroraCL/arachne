@@ -1,4 +1,5 @@
 import {connectDesktopWorkspace} from './paint-desktop-workspace.mjs';
+import {isSelectionAsset} from './uv-selection-region.mjs';
 import {compositionKey} from './text-input.mjs';
 import {connectDesktopSettings} from './paint-desktop-settings.mjs';
 import {setupProjectFiles} from './paint-project-files.mjs';
@@ -29,6 +30,7 @@ import {createViewport} from './viewport3d.mjs';
 import {createUVSelection} from './paint-uv-selection.mjs';
 import {createPaintModeling} from './paint-modeling.mjs';
 import {createModelOutliner} from './paint-model-outliner.mjs';
+import {createMeshMapDialog} from './mesh-map-dialog.mjs';
 import {createMaskEditor} from './paint-mask.mjs';
 import {createPaintRenderResults} from './paint-render-results.mjs';
 import {viewportSamplingOptions,updateViewportSampling} from './cycles-viewport-sampling.mjs';
@@ -50,7 +52,7 @@ import {setupPaintSettings} from './paint-settings.mjs';
 import {enhanceSelectMenu,setSelectValue,syncSelectMenu} from './paint-select.mjs';
 import {scrubNumber} from './studio-fields.mjs';
 import {decorateWorkspaceButtons,workspaceIcons} from './workspace-icons.mjs';
-import {layerParent,layerChildren,layerIsVisible,layerLockOwner,materialLayerRows,hasMaterialMask as hasLayerMask} from './paint-layer-tree.mjs';
+import {layerParent,layerChildren,layerIsVisible,layerLockOwner,materialLayerRows,paintAnchorSources,hasMaterialMask as hasLayerMask} from './paint-layer-tree.mjs';
 import {createMaterialLayerDrag} from './material-layer-drag.mjs';
 import {navigationCommand,projectionCamera} from './viewport-navigation.mjs';
 import {canvasZoomPercent,canvasScale,zoomCanvas,resizeCanvas} from './paint-canvas-navigation.mjs';
@@ -245,15 +247,15 @@ function renderProjectState(){
   $('project-detail-updated').textContent=doc?.updated?new Date(doc.updated).toLocaleString():'—';
   $('open-glb-migration').hidden=!(doc?.source.bindingVersion===2&&doc.source.format!=='glb'&&/\.blend$/i.test(doc.source.reviewSource));
 }
-async function api(url,data){
-  const write=data!==undefined&&url.match(/^\/api\/projects\/([^/]+)\/paint\/(?:commands|model|undo|redo|assets|text|library-import)$/);
+async function api(url,data,signal){
+  const write=data!==undefined&&url.match(/^\/api\/projects\/([^/]+)\/paint\/(?:commands|model|undo|redo|assets|text|library-import|image-layer-bake|mesh-bake|mesh-mask)$/);
   const id=write?.[1];
   if(id){projectWrites.set(id,(projectWrites.get(id)||0)+1);renderProjectState();}
   try{
-    const response=await fetch(url,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),
+    const response=await fetch(url,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal,
       ...(data?.strokeRequestId?{signal:AbortSignal.timeout(15000)}:{})});
     const result=await responseJson(response);if(id)projectSaveErrors.delete(id);return result;
-  }catch(error){if(id)projectSaveErrors.set(id,error.message);throw error;}
+  }catch(error){if(id&&!signal?.aborted)projectSaveErrors.set(id,error.message);throw error;}
   finally{if(id){projectWrites.set(id,projectWrites.get(id)-1);renderProjectState();}}
 }
 async function responseJson(response){
@@ -353,7 +355,7 @@ const assetViewer=createImageViewer({resolve:id=>{
 }});
 function filteredAssets(assets){
   const terms=searchTerms($('asset-search').value);
-  return assets.filter(asset=>matchesSearch(asset.name,terms));
+  return assets.filter(asset=>!isSelectionAsset(asset)&&matchesSearch(asset.name,terms));
 }
 function showAsset(id,from,visibleAssets){
   if(!doc?.paint.assets[id])return;
@@ -471,6 +473,19 @@ const paintTextEditor=createPaintTextEditor(async(state,text,error)=>{
   },error);
   if(saved)onSaved?.(result.layerId);
   return saved;
+},{
+  readFonts:()=>doc?.paint.textFonts??{},
+  importFont:async(state,file)=>{
+    if(file.size>32*1024*1024)throw Error('字体不能超过 32 MiB');
+    const data=await fileBase64(file);
+    let result;
+    const saved=await run(async()=>{
+      if(doc?.id!==state.projectId)throw Error('工程已切换，请重新打开文字编辑');
+      result=await api('/api/projects/'+state.projectId+'/paint/fonts',{revision:state.revision,name:file.name,data});
+    },$('paint-text-dialog').querySelector('[role=alert]'));
+    if(!saved)throw Error($('paint-text-dialog').querySelector('[role=alert]').textContent||'请结束当前操作后再添加字体');
+    return result;
+  }
 });
 function viewportReady(){
   return !!doc&&$('viewport').dataset.projectId===doc.id&&$('viewport').dataset.state==='ready';
@@ -674,8 +689,10 @@ $('brush-ink').onchange=()=>{
   if(value!=='custom')changePaintColors(()=>paintColors.set('mask',$('brush-erase').checked?'background':'foreground',value==='1'?'#ffffff':'#000000'),'mask');
 };
 const effectAxes=[['z','朝上'],['-z','朝下'],['x','X 正向'],['-x','X 负向'],['y','Y 正向'],['-y','Y 负向']];
+const meshMaps=createMeshMapDialog({read:()=>doc,api,refresh,assetUrl});
 function renderMaskEffects(form,l,editTarget,liveField){
   const effects=l.maskEffects||[],stack=element('section'),states=form.propertySections??={};
+  const sources=paintAnchorSources(doc.paint.layers,l).reverse();
   let dragged=null,marker=null;
   const key='effect:'+doc.id+':'+l.id+':',idFor=(effect,index)=>effect.id||'legacy-'+index;
   const stateKey=(effect,index)=>key+idFor(effect,index);
@@ -714,6 +731,10 @@ function renderMaskEffects(form,l,editTarget,liveField){
     const add=field('添加效果','select','',kind=>{
       if(!kind)return;
       const effect={...newMaskEffect(kind),id:crypto.randomUUID()};
+      if(kind==='anchor'){
+        if(!sources.length)throw Error('先在同一文件夹下方的材质绘制层中打开「图层设置 → 发布涂装锚点」');
+        Object.assign(effect,{source:sources[0].id,channel:'coverage',blend:'replace'});
+      }
       states[key+effect.id]=true;
       return applyEffects([...effects,effect]);
     },{choices:[['','添加效果…'],...Object.entries(maskEffectLabels)]});
@@ -795,7 +816,11 @@ function renderMaskEffects(form,l,editTarget,liveField){
     const numeric=(key,name,options)=>liveField(name,'number',effect[key],value=>replaceEffect({[key]:value}),{...options,previewMask:true});
     body.append(field(label+'合成','select',mode,blend=>change({blend}),{choices:maskEffectBlends}),
       numeric('opacity',label+'强度',{min:0,max:1}));
-    if(effect.kind==='levels'){
+    if(effect.kind==='anchor'){
+      body.append(field('来源锚点','select',effect.source,source=>change({source}),{choices:sources.map(layer=>[layer.id,layer.name])}),
+        field('锚点取样','select',effect.channel,channel=>change({channel}),{choices:[['coverage','颜色笔触覆盖'],['luminance','颜色亮度']]}));
+      summary.textContent=sources.find(layer=>layer.id===effect.source)?.name||summary.textContent;
+    }else if(effect.kind==='levels'){
       body.append(numeric('black','输入黑点',{min:0,max:effect.white-.0001}),numeric('white','输入白点',{min:effect.black+.0001,max:1}),
         numeric('gamma','中间调',{min:.1,max:5}));
     }else if(['height','facing'].includes(effect.kind)){
@@ -840,7 +865,7 @@ function renderProperties(form=$('properties'),scope=null){
   const actionBar=()=>layerActions(l,{issue:commandTarget,add:scoped?(...operations)=>{checkTarget();return addAndSelect(...operations);}:addAndSelect});
   const ensureSelected=()=>{if(scoped&&l&&(selected!==l.id||selection.size!==1)){setSelection([l.id]);render();}};
   const values=effectiveValues(l?.values||doc.paint.base);
-  const choices=Object.values(doc.paint.assets).map(a=>[a.id,a.name]);
+  const choices=Object.values(doc.paint.assets).filter(asset=>!isSelectionAsset(asset)).map(a=>[a.id,a.name]);
   form.replaceChildren();
   if(!scoped&&selection.size>1){
     propertyHeading(form,{name:'已选 '+selection.size+' 个图层',type:'多选'});
@@ -866,6 +891,7 @@ function renderProperties(form=$('properties'),scope=null){
     if(!l.mask)mask.append(field('蒙版底色','select',String(l.maskBase??1),value=>editTarget({maskBase:Number(value)}),
       {choices:[['1','白色 · 显示'],['0','黑色 · 遮盖']]}));
     if(hasLayerMask(l))mask.append(field('使用蒙版','checkbox',l.maskEnabled!==false,maskEnabled=>editTarget({maskEnabled})));
+    mask.append(localButton('网格贴图…',()=>{if(!busy)meshMaps.open(l);}));
     mask.append(button('编辑图片蒙版…',()=>maskEditor.open(maskOptions(l))));
     mask.append(localButton(areaSystem?'在三维视口中绘制蒙版':workArea==='drawing'?'在画布上绘制蒙版':'在模型上绘制蒙版',()=>{
       ensureSelected();
@@ -889,6 +915,7 @@ function renderProperties(form=$('properties'),scope=null){
   }
   if(l){
     const general=propertySection(form,'layer','图层设置',{open:false});
+    if(l.kind==='paint')general.append(field('发布涂装锚点','checkbox',!!l.anchorPoint,anchorPoint=>editTarget({anchorPoint})));
     general.append(field('颜色混合','select',layerChannelBlend(l,'color'),blend=>editTarget({blend}),
       {choices:channelBlendChoices('color')}));
     const visibility=field('可见','checkbox',l.visible,visible=>editTarget({visible}));
@@ -998,11 +1025,24 @@ function renderProperties(form=$('properties'),scope=null){
       projection.append(liveField(label,'number',l[key],value=>({[key]:value}),range));
     }
   }
-  if(!maskTarget&&l.kind==='fill'&&(l.materialId||Object.keys(l.maps||{}).length||Object.keys(l.documentMaps||{}).length)){
+  if(!maskTarget&&l.kind==='fill'){
     const tiling=l.tiling||{repeat:1,rotation:0,offsetX:0,offsetY:0};
-    const group=propertySection(form,'uv','UV 平铺',{open:!!l.tiling});
-    group.append(field('重复平铺','checkbox',!!l.tiling,enabled=>editTarget({tiling:enabled?tiling:null})));
-    if(l.tiling){
+    const projection=l.fillProjection||{mode:'uv',scale:1,rotation:[0,0,0],blend:.5};
+    const tri=projection.mode==='triplanar';
+    const group=propertySection(form,'uv','填充投影',{open:tri||!!l.tiling||!!l.materialId||!!Object.keys(l.maps||{}).length});
+    group.append(field('投影方式','select',projection.mode,mode=>editTarget({fillProjection:{...projection,mode}}),
+      {choices:[['uv','UV'],['triplanar','三平面']]}));
+    if(tri){
+      group.append(liveField('投影缩放','number',projection.scale,scale=>({fillProjection:{...projection,scale}}),
+        {min:.03125,max:20,dragSpeed:.01}));
+      for(const [i,axis] of ['X','Y','Z'].entries()){
+        group.append(liveField('旋转 '+axis+' (°)','number',projection.rotation[i],angle=>({
+          fillProjection:{...projection,rotation:projection.rotation.map((v,j)=>i===j?angle:v)}
+        }),{min:-360,max:360,dragSpeed:.5}));
+      }
+      group.append(liveField('轴向混合','number',projection.blend,blend=>({fillProjection:{...projection,blend}}),{min:0,max:1,dragSpeed:.01}));
+    }else group.append(field('重复平铺','checkbox',!!l.tiling,enabled=>editTarget({tiling:enabled?tiling:null})));
+    if(!tri&&l.tiling){
       const separate=tiling.repeatY!==undefined;
       group.append(field('独立控制 X / Y','checkbox',separate,enabled=>{
         const {repeatY,...common}=tiling;
@@ -1420,20 +1460,26 @@ function renderAssetRoles(){
     else if(!l.text)roles.push(['image','替换贴花']);
     roles.push(...paintChannels.filter(k=>k!=='color').map(k=>[k,names[k]+'贴图']));
   }
+  if(canAddLayer())roles.push(['newMaskedFill','新建蒙版填充层']);
   select.replaceChildren(...(roles.length?roles:[['','选择一个图层']]).map(([key,label])=>new Option(label,key)));
   if(roles.some(([key])=>key===previous))select.value=previous;
   select.disabled=$('apply-asset').disabled=!roles.length||!selectedAsset;
   $('uv-add-image').disabled=!selectedAsset||busy||(areaSystem?!areaSystem.project.document?.paint.imageDocuments?.[areaSystem.project.imageContext?.documentId]:!canAddLayer());
   $('asset-view').disabled=!selectedAsset;
+  syncAssetApplyLabel();
   syncSelectMenu(select);
 }
+function syncAssetApplyLabel(){
+  $('apply-asset').textContent=$('asset-role').value==='newMaskedFill'?'创建填充层':'应用到材质图层';
+}
+$('asset-role').addEventListener('change',syncAssetApplyLabel);
 function syncAssetSelection(){
   for(const item of $('assets').querySelectorAll('button[data-asset-id]')){
     item.setAttribute('aria-pressed',String(item.dataset.assetId===selectedAsset));
   }
 }
 function renderAssets(){
-  const assets=Object.values(doc.paint.assets);
+  const assets=Object.values(doc.paint.assets).filter(asset=>!isSelectionAsset(asset));
   if(!doc.paint.assets[selectedAsset])selectedAsset=null;
   const displayed=filteredAssets(assets);
   const key=JSON.stringify([doc.id,!!assets.length,displayed.map(a=>[a.id,a.name])]);
@@ -1590,6 +1636,8 @@ function renderDelivery(j,active,last){
       if(delivered.materialUrl)entries.push(deliveryLink('材质清单',delivered.materialUrl));
       if(delivered.blendUrl)entries.push(link('Blender',delivered.blendUrl));
       if(delivered.renderUrl)entries.push(deliveryLink('渲染 PNG',delivered.renderUrl));
+      if(delivered.render?.textureSampling?.reduced)
+        entries.push(element('span','贴图已降级至最大 '+delivered.render.textureSampling.atlas.join(' × ')));
       if(delivered.outputUrl)entries.push(Object.assign(link('OpenEXR',delivered.outputUrl),{download:name+'.exr'}));
       if(delivered.passesUrl)entries.push(Object.assign(link('通道 EXR',delivered.passesUrl),{download:name+'-Passes.exr'}));
       entries.push(deliveryLink('交付校验报告',delivered.validationUrl));
@@ -1910,6 +1958,9 @@ function updateProjectUrl(){
 }
 async function pngData(blob){
   if(blob.size>24*1024*1024)throw Error('PNG 不能超过 24 MiB');
+  return fileBase64(blob);
+}
+function fileBase64(blob){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
     reader.onload=()=>resolve(reader.result.split(',')[1]);
@@ -1942,7 +1993,15 @@ async function importAsset(blob,name,placement){
 
 $('apply-asset').onclick=()=>run(()=>{
   const l=layer(),role=$('asset-role').value;
-  if(selection.size!==1||!l||!role||!doc.paint.assets[selectedAsset])return;
+  const asset=doc.paint.assets[selectedAsset];
+  if(!role||!asset)return;
+  if(role==='newMaskedFill'){
+    if(!canAddLayer())return;
+    return addAndSelect({op:'add',kind:'fill',parentId:selectedParent(),patch:{
+      name:asset.name.replace(/\.png$/i,'').trim()||'蒙版填充层',mask:asset.id,maskEnabled:true
+    }});
+  }
+  if(selection.size!==1||!l)return;
   if(role==='image'||role==='mask')return edit({[role]:selectedAsset});
   const documentMaps={...l.documentMaps};delete documentMaps[role];
   return edit({maps:{...l.maps,[role]:selectedAsset},...(l.kind==='fill'?{documentMaps}:{}),channels:{...l.channels,[role]:true}});

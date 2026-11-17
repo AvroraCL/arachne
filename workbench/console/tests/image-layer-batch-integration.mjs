@@ -73,7 +73,7 @@ try{
   await row('target').getByRole('button',{name:'收起 目标图层组'}).click();
   await select('target-child').waitFor({state:'hidden'});
   await select('source').click();
-  for(const id of ['child','base','clip'])await select(id).click({modifiers:[modifier]});
+  for(const id of ['child','base','clip'])await row(id).locator('.document-layer-name').click({modifiers:[modifier]});
   assert.deepEqual(await panel.locator('.document-layer-row[data-selected]').evaluateAll(rows=>rows.map(row=>row.dataset.imageLayerId).sort()),
     ['base','child','clip','source']);
   await row('source').getByRole('button',{name:'收起 原图层组'}).click();
@@ -159,7 +159,7 @@ try{
   await page.reload();
   await panel.getByRole('button',{name:'图像图层文档',exact:true}).click();
   await page.getByRole('option',{name:'长图层列表',exact:true}).click();
-  await select('long-26').click();await select('long-25').click({modifiers:[modifier]});
+  await select('long-26').click();await row('long-25').locator('.document-layer-name').click({modifiers:[modifier]});
   const scroller=panel.locator('.document-panel.editor-scroll');
   const sourceRow=await select('long-26').boundingBox(),port=await scroller.boundingBox();
   const startX=sourceRow.x+sourceRow.width/2,startY=sourceRow.y+sourceRow.height/2,endY=port.y+port.height-8;

@@ -1,5 +1,11 @@
-import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers} from './public/image-documents.mjs';
-import {isolateImageLayer} from './public/image-layer-tree.mjs';
+import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
+import {textDefaults,textFonts,textEffects,checkStyleFields,hasImageStyle,paragraphOrigin} from './public/image-text-style.mjs';
+import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
+import {layoutKinds} from './public/image-layout.mjs';
+import {imagePlacement,warpPoint} from './public/image-warp.mjs';
+import {imageLayersThrough,isolateImageLayer} from './public/image-layer-tree.mjs';
+import {imageCombineLabels,planImageCombine} from './public/image-layer-combine.mjs';
+import {imageLayerLimit} from './public/image-layer-batch.mjs';
 import {imageStrokeQueueLimit,strokeReceiptLimit,strokeTarget} from './public/image-stroke-queue.mjs';
 import {validateObjectNames} from './public/scene-object-names.mjs';
 import {paintChannels,legacyChannels,channelSpecs,activePaintChannels,channelBlendChoices} from './public/paint-channels.mjs';
@@ -8,7 +14,7 @@ import {maskGeneratorFields,maskEffectBlendLabel,maskEffectLimit} from './public
 import {validateLibraries,libraryOperation,compileLibraryMaterial} from './public/paint-library.mjs';
 import {compileMaterialGraph} from './public/material-graph.mjs';
 import {pinSurfaceInputs,validateSurfaceBindings} from './paint-surface-bindings.mjs';
-import {modelFingerprint,validateModelState,preparePaintGeometry} from './project-model.mjs';
+import {modelFingerprint,validateModelState,prepareModelGeometry,preparePaintGeometry} from './project-model.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import {sha256File} from './file-fingerprint.mjs';
@@ -31,8 +37,12 @@ import {checkRenderPreset,renderBookmarkLimit} from './public/paint-delivery-opt
 import {checkRenderVisibility,updateRenderVisibility} from './public/render-visibility.mjs';
 import {checkRenderOptics} from './public/render-optics.mjs';
 import {checkRenderRegion,renderRegionPixels} from './public/render-region.mjs';
-import {layerParent,layerChildren,layerTreeOrder,layerIsVisible,layerLockOwner,hasMaterialMask,materialMaskFields} from './public/paint-layer-tree.mjs';
-import {uvShapeFields,uvShapePayload,uvRegionLimits,maxUVFeather} from './public/uv-selection-region.mjs';
+import {layerParent,layerChildren,layerTreeOrder,layerIsVisible,layerLockOwner,hasMaterialMask,materialMaskFields,paintAnchorSources,remapPaintAnchors} from './public/paint-layer-tree.mjs';
+import {uvShapeFields,imageSelectionFields,uvShapePayload,uvRegionLimits,maxUVFeather} from './public/uv-selection-region.mjs';
+import {checkStrokeBlock,isStrokeBlock} from './public/stroke-blocks.mjs';
+import {compactPaintStrokes,unpackStrokeBlock} from './stroke-compaction.mjs';
+import {livePaint} from './paint-live.mjs';
+import {pythonExecutable} from './python-runtime.mjs';
 
 export const PAINT='pbr_paint';
 const archiveFormat='arachne-pbr-paint-project';
@@ -53,21 +63,56 @@ const fields=(patch,keys)=>{
 };
 const supportsBlend=(channel,blend)=>channelBlendChoices(channel).some(([mode])=>mode===blend);
 const folderFields=['name','visible','locked','opacity','mask','maskBase','maskEnabled','maskEffects','maskStrokeOrder'];
-const layerFields=[...folderFields,'channelOpacity','channelBlend','channels','values','x','y','scale','rotation','image','blend','maps','tiling','projector','space','uvScale','materialId','documentMaps'];
+const layerFields=[...folderFields,'anchorPoint','channelOpacity','channelBlend','channels','values','x','y','scale','rotation','image','blend','maps','tiling','fillProjection','projector','space','uvScale','materialId','documentMaps'];
 const revisionError=doc=>Object.assign(Error('工程修订已变化'),{status:409,currentRevision:doc.revision});
 const materialValues=v=>v&&legacyChannels.every(k=>Object.hasOwn(v,k))&&Object.keys(v).every(k=>channels.includes(k)&&(channelSpecs[k].type==='color'?color(v[k]):unit(v[k])));
 const channelFlags=v=>v&&legacyChannels.every(k=>Object.hasOwn(v,k))&&Object.keys(v).every(k=>channels.includes(k)&&typeof v[k]==='boolean');
 const vector=(v,length,limit)=>Array.isArray(v)&&v.length===length&&v.every(n=>Number.isFinite(n)&&Math.abs(n)<=limit);
 const normal=v=>vector(v,3,2)&&Math.hypot(...v)>.1;
 const ranged=(v,min,max)=>Number.isFinite(v)&&v>=min&&v<=max;
-function checkedText(value){
-  const {content,color:ink,fontSize,weight,align}=fields(value,['content','color','fontSize','weight','align']);
+const textFontRegistry=doc=>doc.paint.textFonts??{};
+const fontName=name=>typeof name==='string'&&name.length>0&&name.length<=256&&!/[\u0000-\u001f\u007f]/.test(name);
+function checkedFontEntry(id,entry){
+  const {file,family,style,weight,italic,weights}=fields(entry,['file','family','style','weight','italic','weights']);
+  if(!sha256(id)||!['ttf','otf'].some(extension=>file==='font-'+id+'.'+extension)||!fontName(family)||!fontName(style)||
+     typeof italic!=='boolean'||!Array.isArray(weights)||!weights.every(pair=>Array.isArray(pair)&&pair.length===2&&
+       Number.isInteger(pair[0])&&ranged(pair[0],1,1000)&&fontName(pair[1]))||!weights.some(([value])=>value===weight))
+    throw Error('工程字体登记无效');
+  return entry;
+}
+export async function paintFontFile(doc,id){
+  const entry=Object.hasOwn(textFontRegistry(doc),id)&&checkedFontEntry(id,textFontRegistry(doc)[id]);
+  if(!entry)throw Object.assign(Error('工程中没有该字体'),{status:404});
+  const file=path.join(projectDir(doc.id),'assets',entry.file);
+  let digest;
+  try{digest=await sha256File(file);}
+  catch(error){if(error.code!=='ENOENT')throw error;}
+  if(digest!==id)throw Object.assign(Error('缺少字体或文件已变化：'+entry.family+' · '+entry.style+'。请重新添加原字体文件'),{status:422});
+  return file;
+}
+function checkedText(value,fonts={}){
+  const {content,color:ink,fontSize,weight,align,font,tracking,leading,box,effects}=fields(value,
+    ['content','color','fontSize','weight','align','font','tracking','leading','box','effects']);
   const text=typeof content==='string'?content.replace(/\r\n?/g,'\n'):'';
   if(!text.trim()||text.length>480||text.split('\n').length>12||
      /[\u0000-\u0009\u000b-\u001f\u007f]/u.test(text)||!color(ink)||
-     !Number.isInteger(fontSize)||!ranged(fontSize,16,512)||![400,700].includes(weight)||!['left','center','right'].includes(align))
+     !Number.isInteger(fontSize)||!ranged(fontSize,16,512)||!['left','center','right'].includes(align))
     throw Error('文字参数无效，支持 16–512 像素、最多 12 行和 480 个字符');
-  return {content:text,color:ink,fontSize,weight,align};
+  const allowedWeights=font===undefined?[400,700]:
+    (Object.hasOwn(textFonts,font)?textFonts[font].weights:Object.hasOwn(fonts,font)?fonts[font].weights:[]).map(([weight])=>weight);
+  if(!allowedWeights.includes(weight)||
+     tracking!==undefined&&(!Number.isInteger(tracking)||!ranged(tracking,-64,256))||
+     leading!==undefined&&(!Number.isInteger(leading)||!ranged(leading,0,1024)))throw Error('字体、字距或行距无效');
+  if(box!==undefined){
+    const {width,height}=fields(box,['width','height']);
+    if(![width,height].every(n=>Number.isInteger(n)&&ranged(n,16,4096)))throw Error('段落框宽高须在 16–4096 px 之间');
+  }
+  if(effects!==undefined){
+    fields(effects,Object.keys(textEffects));
+    for(const [id,settings] of Object.entries(effects))checkStyleFields(id,settings);
+  }
+  return {content:text,color:ink,fontSize,weight,align,...(font===undefined?{}:{font}),...(tracking===undefined?{}:{tracking}),
+    ...(leading===undefined?{}:{leading}),...(box===undefined?{}:{box}),...(effects===undefined?{}:{effects})};
 }
 function textLayerName(style){return '文字 · '+style.content.trim().split('\n')[0].trim().slice(0,80);}
 function checkMaskEffects(effects){
@@ -82,7 +127,10 @@ function checkMaskEffects(effects){
     }
     if(effect.blend!==undefined&&!maskEffectBlendLabel(effect.blend))throw Error('蒙版效果合成方式无效');
     if(effect.kind==='invert')fields(effect,common);
-    else if(effect.kind==='levels'){
+    else if(effect.kind==='anchor'){
+      fields(effect,[...common,'source','channel']);
+      if(typeof effect.source!=='string'||!['coverage','luminance'].includes(effect.channel))throw Error('请选择锚点及其取样通道');
+    }else if(effect.kind==='levels'){
       fields(effect,[...common,'black','white','gamma']);
       if(!unit(effect.black)||!unit(effect.white)||effect.white-effect.black<.0001||!ranged(effect.gamma,.1,5))
         throw Error('色阶需要有效的黑点、白点和中间调');
@@ -119,8 +167,9 @@ function validUVPolygon(polygon,rect,limit=256){
   return polygon.every(point=>vector(point,2,1)&&point.every(unit)&&
     ranged(point[0],left-tolerance,right+tolerance)&&ranged(point[1],top-tolerance,bottom+tolerance));
 }
-function validUVSelection(shape,rect){
-  const {polygon,regions,feather}=shape;
+function validUVSelection(shape,rect,image=false){
+  const {polygon,regions,feather,coverage}=shape;
+  if(coverage!==undefined&&(!image||!sha256(coverage)||polygon!==undefined||regions!==undefined||!validUVRect(rect)))return false;
   if(feather!==undefined&&(!validUVRect(rect)||!Number.isInteger(feather)||!ranged(feather,0,maxUVFeather)))return false;
   if(regions===undefined)return validUVPolygon(polygon,rect);
   if(polygon!==undefined||!validUVRect(rect)||!Array.isArray(regions)||!regions.length||regions.length>uvRegionLimits.rings)return false;
@@ -149,21 +198,29 @@ function checkStroke(s,isMask,image=false){
   const inkFields=isMask?['value']:['channels','values','erase'];
   const validInk=stroke=>isMask?unit(stroke.value):
     channelFlags(stroke.channels)&&materialValues(stroke.values)&&typeof stroke.erase==='boolean';
+  const shapeFields=image?imageSelectionFields:uvShapeFields;
   if(s?.rect!==undefined){
-    fields(s,['uv','rect',...uvShapeFields,'opacity',...inkFields,...(image?['preserveAlpha']:[])]);
-    if(s.uv!==true||!validUVRect(s.rect)||!validUVSelection(s,s.rect)||!unit(s.opacity)||!validInk(s))
+    fields(s,['uv','rect',...shapeFields,'opacity',...inkFields,...(image?['preserveAlpha']:[])]);
+    if(s.uv!==true||!validUVRect(s.rect)||!validUVSelection(s,s.rect,image)||!unit(s.opacity)||!validInk(s))
       throw Error('选区填充参数无效');
     return;
   }
-  fields(s,['radius','hardness','opacity','stamps','mirrorX','uv','clip',...uvShapeFields,'surfaceBinding',...inkFields,
-    ...(image?['flow','spacing','breaks','clone','preserveAlpha']:[])]);
+  fields(s,['radius','hardness','opacity','stamps','mirrorX','uv','clip',...shapeFields,'surfaceBinding',...inkFields,
+    ...(image?['flow','spacing','pressureMode','breaks','tip','clone','preserveAlpha']:[])]);
   const uv=s.uv===true;
   const brushPath=s.flow!==undefined||s.spacing!==undefined||s.breaks!==undefined;
+  if(s.tip!==undefined){
+    const {angle,roundness,scatter,grain,seed,tipAsset,textureAsset}=fields(s.tip,['angle','roundness','scatter','grain','seed','tipAsset','textureAsset']);
+    if(!image||!uv||!brushPath||!ranged(angle,-180,180)||!ranged(roundness,.1,1)||!unit(scatter)||!unit(grain)||
+       !Number.isSafeInteger(seed)||seed<0||seed>0xffffffff||
+       [tipAsset,textureAsset].some(id=>id!==undefined&&!sha256(id)))throw Error('笔尖参数无效');
+  }
   if((s.uv!==undefined&&!uv)||(uv&&s.mirrorX!==undefined)||
-     (s.clip!==undefined&&(!uv||!validUVRect(s.clip)))||!validUVSelection(s,s.clip)||
+     (s.clip!==undefined&&(!uv||!validUVRect(s.clip)))||!validUVSelection(s,s.clip,image)||
      !(uv?ranged(s.radius,1/4096,.125):ranged(s.radius,.01,2))||
      !unit(s.hardness)||!unit(s.opacity)||!Array.isArray(s.stamps)||!s.stamps.length||s.stamps.length>(brushPath?2048:1024)||
      s.stamps.some(stamp=>!validBrushStamp(stamp,uv))||
+     s.pressureMode!==undefined&&(!image||!uv||!['size','both'].includes(s.pressureMode))||
      brushPath&&(!image||!uv||!ranged(s.flow,.01,1)||!ranged(s.spacing,.05,2)||
        s.breaks!==undefined&&(!Array.isArray(s.breaks)||s.breaks.length>64||
          !s.breaks.every((index,i)=>Number.isInteger(index)&&index>(s.breaks[i-1]??0)&&index<s.stamps.length)))||
@@ -209,6 +266,8 @@ export async function savePaintCopy(doc,request){
   const title=typeof name==='string'?name.trim():'';
   if(!title||title.length>100||/[\u0000-\u001f\u007f]/.test(title))throw Error('请输入有效的工程名称');
   return forkProject(doc.id,doc,title,async destination=>{
+    for(const [id,entry] of Object.entries(textFontRegistry(doc)))
+      await fsp.copyFile(await paintFontFile(doc,id),path.join(destination,entry.file),fs.constants.COPYFILE_EXCL);
     for(const [id,entry] of Object.entries(doc.paint.assets)){
       if(!sha256(id)||entry.file!=='paint-'+id+'.png')throw Error('涂装素材登记无效');
       const copied=path.join(destination,entry.file);
@@ -256,7 +315,7 @@ function checkedSceneCursor(position){
   if(!vector(position,3,1e6))throw Error('三维游标坐标无效');
   return position.slice();
 }
-function validate(doc){
+function validate(doc,{unpackBlocks=false,checkPending=true}={}){
   if(doc.paint.sceneCursor!==undefined)checkedSceneCursor(doc.paint.sceneCursor);
   validateObjectNames(doc.paint.objectNames);
   if(doc.paint.renderVisibility!==undefined)checkRenderVisibility(doc.paint.renderVisibility);
@@ -270,9 +329,11 @@ function validate(doc){
     checkRenderPreset(doc.paint.renderPreset);
     if(doc.paint.renderPreset.framing==='saved'&&!doc.paint.renderCamera)throw Error('工程渲染预设需要已保存的相机');
   }
+  for(const [id,entry] of Object.entries(textFontRegistry(doc)))checkedFontEntry(id,entry);
   validateSurfaceBindings(doc.paint);
   validateLibraries(doc.paint);
-  validateImageDocuments(doc.paint,{checkStroke,checkedUVTransform,validateText:value=>isDeepStrictEqual(checkedText(value),value)});
+  validateImageDocuments(doc.paint,{checkStroke,checkedUVTransform,validateText:value=>isDeepStrictEqual(checkedText(value,textFontRegistry(doc)),value),
+    unpackStrokeBlock:unpackBlocks?unpackStrokeBlock:undefined,checkPending});
   compileMaterialGraph(doc.paint.materialGraph,doc.paint.assets);
   if(doc.paint.baseChannels!==undefined&&Object.values(fields(doc.paint.baseChannels,channels)).some(v=>typeof v!=='boolean'))throw Error('底层通道开关无效');
   if(!materialValues(doc.paint.base)||doc.paint.layers.length>64)throw Error('底层或图层数量无效');
@@ -292,9 +353,19 @@ function validate(doc){
     if(l.maskBase!==undefined&&!unit(l.maskBase)||
        l.maskEnabled!==undefined&&typeof l.maskEnabled!=='boolean'||
        l.maskStrokeOrder!==undefined&&!['before','after'].includes(l.maskStrokeOrder))throw Error('蒙版底色、顺序或启用状态无效');
-    if(l.maskEffects!==undefined)checkMaskEffects(l.maskEffects);
-    for(const stroke of [...(l.strokes||[]),...(l.maskStrokes||[])])
-      stampCount+=(stroke.stamps?.length??1)*(stroke.mirrorX?2:1);
+    if(l.anchorPoint!==undefined&&(l.kind!=='paint'||typeof l.anchorPoint!=='boolean'))throw Error('只有材质绘制层可发布涂装锚点');
+    if(l.maskEffects!==undefined){
+      checkMaskEffects(l.maskEffects);
+      for(const effect of l.maskEffects){
+        if(effect.kind==='anchor'&&!paintAnchorSources(layers,l).some(source=>source.id===effect.source))
+          throw Error('「'+l.name+'」的蒙版引用了下层锚点。请保留来源在同一文件夹的下方，或先移除引用。');
+      }
+    }
+    for(const [key,mask] of [['strokes',false],['maskStrokes',true]])
+      for(const stroke of l[key]??[]){
+        if(isStrokeBlock(stroke))checkStrokeBlock(stroke,{mask,spatial:true});
+        else stampCount+=(stroke.stamps?.length??1)*(stroke.mirrorX?2:1);
+      }
     if(l.opacity!==undefined&&!unit(l.opacity))throw Error('图层不透明度须为 0 至 1');
     if(l.materialId!=null&&(l.kind!=='fill'||typeof l.materialId!=='string'||!Object.hasOwn(doc.paint.materials??{},l.materialId)))throw Error('填充层引用的材质不存在');
     if(l.kind==='group')continue;
@@ -306,7 +377,7 @@ function validate(doc){
     if(l.space!==undefined&&(l.kind!=='decal'||l.space!=='uv'||l.projector!=null))throw Error('画布图片须使用 UV 坐标');
     if(l.uvScale!==undefined&&(l.space!=='uv'||!vector(l.uvScale,2,8)||!l.uvScale.every(n=>Math.abs(n)>=.05)))
       throw Error('画布图片缩放无效');
-    if(l.text!==undefined&&(l.space!=='uv'||!isDeepStrictEqual(checkedText(l.text),l.text)))
+    if(l.text!==undefined&&(l.space!=='uv'||!isDeepStrictEqual(checkedText(l.text,textFontRegistry(doc)),l.text)))
       throw Error('文字层属性无效');
     if(l.projector!=null){
       if(l.kind!=='decal')throw Error('三维投影仅适用于贴花');
@@ -321,6 +392,12 @@ function validate(doc){
       const maps=fields(l.maps,l.kind==='fill'?channels:channels.filter(k=>k!=='color'));
       if(Object.values(maps).some(id=>!asset(doc,id)))throw Error('属性贴图素材不存在');
     }
+    if(l.fillProjection!=null){
+      const {mode,scale,rotation,blend}=fields(l.fillProjection,['mode','scale','rotation','blend']);
+      if(l.kind!=='fill'||!['uv','triplanar'].includes(mode)||!ranged(scale,.03125,20)||
+         !Array.isArray(rotation)||rotation.length!==3||!rotation.every(angle=>ranged(angle,-360,360))||!unit(blend))
+        throw Error('填充层投影参数无效');
+    }
     if(l.tiling!=null){
       if(l.kind!=='fill')throw Error('平铺仅适用于填充层');
       const {repeat,repeatY=repeat,rotation,offsetX,offsetY}=fields(l.tiling,['repeat','repeatY','rotation','offsetX','offsetY']);
@@ -328,7 +405,7 @@ function validate(doc){
         !ranged(offsetX,-1,1)||!ranged(offsetY,-1,1))throw Error('平铺参数无效');
     }
   }
-  if(stampCount>30000)throw Error('工程笔触超出首版上限');
+  if(checkPending&&stampCount>120000)throw Error('待压实的材质笔触过多，请分批保存');
 }
 export {validate as validateProjectPaint};
 function makeFolder(patch,parentId){
@@ -372,17 +449,18 @@ function arrangeLayers(layers,items,{parentId=null,anchorId=null,placement}){
   remaining.splice(at,0,...items);
   return remaining;
 }
-function checkedUVTransform(value){
-  const {rect,offset,scale,angle,copy,interpolation}=
-    fields(value,['rect',...uvShapeFields,'offset','scale','angle','copy','interpolation']);
-  if(!validUVRect(rect)||!validUVSelection(value,rect)||
-     !vector(offset,2,2)||!vector(scale,2,8)||!scale.every(n=>Math.abs(n)>=.05)||!ranged(angle,-360,360)||
+function checkedUVTransform(value,image=false){
+  const {rect,offset,scale,angle,copy,interpolation,pivot}=
+    fields(value,['rect',...(image?imageSelectionFields:uvShapeFields),'offset','scale','angle','copy','interpolation','pivot']);
+  if(!validUVRect(rect)||!validUVSelection(value,rect,image)||
+     !vector(offset,2,pivot===undefined?2:8)||pivot!==undefined&&!vector(pivot,2,8)||
+     !vector(scale,2,8)||!scale.every(n=>Math.abs(n)>=.05)||!ranged(angle,-360,360)||
      (copy!==undefined&&typeof copy!=='boolean')||
      (interpolation!==undefined&&!['linear','nearest'].includes(interpolation)))
     throw Error('选区变换参数无效');
-  return {rect,...uvShapePayload(value),offset,scale,angle,copy,interpolation};
+  return {rect,...uvShapePayload(value),offset,scale,angle,copy,interpolation,...(pivot===undefined?{}:{pivot})};
 }
-function applyOperations(next,operations,sourceVisibility){
+function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
   if(!Array.isArray(operations)||!operations.length||operations.length>128)throw Error('需要 1–128 条制作命令');
   const p=next.paint,reproject=[];
   for(const o of operations){
@@ -440,7 +518,15 @@ function applyOperations(next,operations,sourceVisibility){
       else p.renderPreset=checkRenderPreset(o.preset);
       continue;
     }
-    if(op==='image'){imageDocumentOperation(p,o,{requireUnlocked});continue;}
+    if(op==='image'){
+      const source=o.action==='stroke'?o.stroke?.clone?.asset:undefined;
+      if(source!==undefined)registerImageSnapshot(next,source,'像素取样');
+      const backdrop=o.action==='stroke'?o.stroke?.clone?.backdrop:undefined;
+      if(backdrop!==undefined)registerImageSnapshot(next,backdrop,'修复画笔目标取样');
+      for(const coverage of imageCoverageSources(o))registerImageSnapshot(next,coverage,'选区覆盖图',true);
+      imageDocumentOperation(p,o,{requireUnlocked});
+      continue;
+    }
     if(op==='library'){libraryOperation(p,o);continue;}
     if(op==='shader'){if(o.graph===undefined)throw Error('请提供完整节点材质或 null');compileMaterialGraph(o.graph,p.assets);if(o.graph==null)delete p.materialGraph;else p.materialGraph=structuredClone(o.graph);continue;}
     if(op==='baseChannels'){p.baseChannels={...p.baseChannels,...fields(patch,channels)};continue;}
@@ -485,6 +571,7 @@ function applyOperations(next,operations,sourceVisibility){
       const copies=subtree.map(layer=>{
         const copy=structuredClone(layer);
         copy.id=ids.get(layer.id);
+        remapPaintAnchors(copy,ids);
         if(layer===item)copy.name=copy.name.slice(0,95)+' · 副本';
         else copy.parentId=ids.get(layerParent(layer));
         return copy;
@@ -520,7 +607,6 @@ function applyOperations(next,operations,sourceVisibility){
       item.mask=null;
     }else if(op==='transformUV'||op==='clearUV'){
       if(item.kind!=='paint'||!item.strokes?.length)throw Error('请选择已有笔触的绘制层');
-      if(item.strokes.length>=400)throw Error('此图层的笔触数量达到首版上限');
       if(op==='clearUV'){
         if(!validUVRect(o.rect)||!validUVSelection(o,o.rect))throw Error('选区参数无效');
         item.strokes.push({clearUV:o.rect,...uvShapePayload(o)});
@@ -535,12 +621,12 @@ function applyOperations(next,operations,sourceVisibility){
       checkStroke(o.stroke,isMask);
       const key=isMask?'maskStrokes':'strokes';
       layer[key]??=[];
-      if(layer[key].length>=400)throw Error('此图层的笔触数量达到首版上限');
       layer[key].push(o.stroke);
     }else throw Error('制作命令无效');
   }
   pinSurfaceInputs(next,{reproject});
-  validate(next);
+  validate(next,{checkPending:!compact});
+  if(compact)compactPaintStrokes(p);
   p.layers=layerTreeOrder(p.layers);
   return next;
 }
@@ -560,7 +646,7 @@ export function editPaint(doc,{revision,operations,strokeRequestId},sourceVisibi
   }
   if(doc.revision!==revision)throw revisionError(doc);
   return commit(doc.id,revision,next=>{
-    const edited=applyOperations(next,operations,sourceVisibility);
+    const edited=applyOperations(next,operations,sourceVisibility,{compact:true});
     if(receipt)edited.strokeSaveReceipts=[...(next.strokeSaveReceipts||[]),receipt].slice(-strokeReceiptLimit);
     return edited;
   },Array.isArray(operations)?operations.map(o=>({
@@ -571,7 +657,7 @@ function paintBinding(doc){const model=modelFingerprint(doc);return model?crypto
 let compositorFingerprint;
 export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
   compositorFingerprint??=crypto.createHash('sha256').update(JSON.stringify([
-    'paint_worker.py','paint_channels.py','paint_surface.py','paint_mask_generators.py','material_graph.py','image_documents.py','image_adjustments.py','image_filters.py','image_raster_tools.py',
+    'paint_worker.py','paint_channels.py','paint_surface.py','paint_mask_generators.py','fill_projection.py','material_graph.py','image_documents.py','image_adjustments.py','image_filters.py','image_raster_tools.py',
     'project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
     '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
   ].map(file=>hash(path.join(ROOT,file))))).digest('hex');
@@ -590,7 +676,7 @@ export function paintInput(doc,binding=paintBinding(doc)){
     assets:Object.fromEntries(Object.keys(doc.paint.assets).map(id=>[id,assetPath(doc,id)]))};
 }
 function liveOperationAllowed(doc,operation){
-  if(operation.op==='image')return ['stroke','transform','clear','updateLayer'].includes(operation.action)||
+  if(operation.op==='image')return ['stroke','transform','clear','updateLayer','layoutLayers','transformMask'].includes(operation.action)||
     operation.action==='addLayer'&&['gradient','shape'].includes(operation.kind);
   if(operation.op==='shader')return true;
   if(operation.op==='library')return operation.library==='materials'&&operation.action==='update'&&Object.hasOwn(doc.paint.materials??{},operation.id);
@@ -604,7 +690,7 @@ function liveOperationAllowed(doc,operation){
   if(!item)return false;
   if(item.kind==='group')return keys.every(key=>key==='opacity'||key==='maskEffects');
   const allowed=['opacity','values','maskEffects'];
-  if(item.kind==='fill')allowed.push('tiling');
+  if(item.kind==='fill')allowed.push('tiling','fillProjection');
   if(item.kind==='decal'){
     if(item.projector)allowed.push('projector');
     else allowed.push('x','y','scale','rotation',...(item.space==='uv'?['uvScale']:[]));
@@ -645,10 +731,17 @@ export function livePaintInput(doc,{revision,operation,operations,inspectMask,is
   if(rawLayer){input.paint={...input.paint,base:{color:'#383838',metallic:0,roughness:.5}};delete input.paint.baseChannels;delete input.paint.materialGraph;input.materialPlan=null;delete input.materialFingerprint;}
   return {...input,inspectMask,isolatedLayer,uvGuide:uvGuide===true,liveResolution:resolution,liveFormat:format};
 }
-export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,resolution=256}){
+export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,resolution=256}){
   if(doc.revision!==revision)throw revisionError(doc);
   const edits=liveDraftOperations(doc,operation,operations,documentId);
-  if(![64,128,256,512,4096].includes(resolution)||resolution===4096&&edits.length)throw Error('图像预览尺寸无效');
+  if(window!==undefined){
+    if(!Array.isArray(window)||window.length!==3||!window.every(Number.isInteger))throw Error('局部预览范围无效');
+    const [x,y,side]=window;
+    if(![256,512,768,1024,1536,2048].includes(side)||x<0||y<0||x+side>4096||y+side>4096||
+       isolatedImageLayer||beforeImageLayer!==undefined||!edits.length||edits.some(edit=>edit.action!=='stroke'||!edit.stroke.stamps))
+      throw Error('局部预览范围无效');
+  }
+  if(![64,128,256,512,1024,4096].includes(resolution)||resolution===4096&&edits.length)throw Error('图像预览尺寸无效');
   const next=edits.length?applyOperations(structuredClone(doc),edits):doc;
   if(!Object.hasOwn(next.paint.imageDocuments??{},documentId))throw Error('图像文档不存在');
   const image=next.paint.imageDocuments[documentId];
@@ -663,22 +756,26 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
     ?isolateImageLayer(image.layers,isolatedImageLayer)
     :before??image.layers;
   const layers=inspectMask
-    ?selected.filter(layer=>layer.id===inspectMask).map(({id,maskBase,maskStrokes,maskGradient})=>({id,maskBase,maskStrokes,...(maskGradient?{maskGradient}:{})}))
+    ?selected.filter(layer=>layer.id===inspectMask).map(({id,maskBase,maskStrokes,maskGradient,maskDensity,maskFeather,selectionSources,maskTransform,maskWarpSteps,brushSources})=>({
+      id,maskBase,maskStrokes,...(maskGradient?{maskGradient}:{}),...(maskDensity!==undefined?{maskDensity}:{}),
+      ...(maskFeather!==undefined?{maskFeather}:{}),...(selectionSources?{selectionSources}:{}),...(maskTransform?{maskTransform}:{}),
+      ...(maskWarpSteps?{maskWarpSteps}:{}),...(brushSources?{brushSources}:{})
+    }))
     :visibleImageLayers(selected);
-  const assetIds=new Set(inspectMask?[]:layers.filter(layer=>layer.kind==='image').map(layer=>layer.asset));
+  const assetIds=new Set(layers.flatMap(imageLayerAssets));
   return {
     paint:{imageDocuments:{[documentId]:{colorSpace:image.colorSpace,layers}}},
     assets:Object.fromEntries([...assetIds].map(id=>[id,assetPath(next,id)])),
     revision:next.revision,
     imageDocumentId:documentId,
-    imageInspectMask:inspectMask,
+    imageInspectMask:inspectMask,...(window?{imageWindow:window}:{}),
     liveResolution:resolution,
     liveFormat:'rgba'
   };
 }
 export function imageClipboardInput(doc,request){
-  const {revision,documentId,layerId,rect,merged=false,cut=false}=fields(request,['revision','documentId','layerId','rect','merged','cut',...uvShapeFields]);
-  if(!validUVRect(rect)||!validUVSelection(request,rect))throw Error('图像复制选区无效');
+  const {revision,documentId,layerId,rect,merged=false,cut=false,coverage}=fields(request,['revision','documentId','layerId','rect','merged','cut',...imageSelectionFields]);
+  if(!validUVRect(rect)||!validUVSelection(request,rect,true))throw Error('图像复制选区无效');
   if(typeof merged!=='boolean'||typeof cut!=='boolean'||merged&&(layerId!==undefined||cut))throw Error('图像复制来源无效');
   let raw;
   if(!merged){
@@ -691,16 +788,39 @@ export function imageClipboardInput(doc,request){
       if(layer.kind!=='pixel'||layer.alphaLocked)throw Error('请选择可编辑的像素图层并解锁透明像素');
       requireUnlocked(image.layers,layer);
       raw={colorSpace:image.colorSpace,layers:[{id:layer.id,kind:'pixel',visible:true,opacity:1,blend:'normal',
-        maskEnabled:false,strokes:layer.strokes??[]}]};
+        maskEnabled:false,raster:layer.raster,cloneSources:layer.cloneSources,selectionSources:layer.selectionSources,
+        brushSources:layer.brushSources,strokes:layer.strokes??[]}]};
     }
   }
   const input=imageDocumentInput(doc,{revision,documentId,isolatedImageLayer:merged?undefined:layerId,resolution:4096});
   if(raw)input.paint.imageDocuments[documentId]=raw;
+  if(coverage!==undefined)input.assets[coverage]=imageSnapshotPath(doc,coverage,'选区覆盖图',true);
   return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
 }
 export function imageExportInput(doc,request){
   const {revision,documentId}=fields(request,['revision','documentId']);
   return {...imageDocumentInput(doc,{revision,documentId,resolution:4096}),imagePng:true};
+}
+export function imageLayoutProbeInput(doc,request){
+  const {revision,documentId,layerIds,point,resolution=256}=fields(request,['revision','documentId','layerIds','point','resolution']);
+  if(![256,512,1024].includes(resolution)||point===undefined&&resolution!==256)
+    throw Error('画布取样分辨率无效');
+  const input=imageDocumentInput(doc,{revision,documentId,resolution});
+  const image=doc.paint.imageDocuments[documentId];
+  if(!Array.isArray(layerIds)||layerIds.length>image.layers.length||new Set(layerIds).size!==layerIds.length||
+     layerIds.some(id=>!image.layers.some(layer=>layer.id===id&&layoutKinds.includes(layer.kind)))||
+     point!==undefined&&(!Array.isArray(point)||point.length!==2||!point.every(unit)))throw Error('画布取样参数无效');
+  if(point){
+    input.imageLayoutProbe={point};
+    return input;
+  }
+  const selected=new Set(layerIds);
+  const layers=image.layers.filter(layer=>selected.has(layer.id));
+  input.paint.imageDocuments[documentId].layers=layers;
+  const ids=new Set(layers.flatMap(imageLayerAssets));
+  input.assets=Object.fromEntries([...ids].map(id=>[id,assetPath(doc,id)]));
+  input.imageLayoutProbe={layerIds};
+  return input;
 }
 function completePng(bytes){
   if(bytes.length<45||!bytes.subarray(0,8).equals(pngSignature)||
@@ -741,6 +861,29 @@ function ensurePaintAsset(doc,{entry,existing,bytes}){
     if(fs.existsSync(temporary))fs.unlinkSync(temporary);
   }
 }
+function imageSnapshotPath(doc,id,label,grayscale=false){
+  if(!sha256(id))throw Error(label+'无效');
+  const file=path.join(projectDir(doc.id),'assets','paint-'+id+'.png');
+  let descriptor;
+  try{descriptor=fs.openSync(file,'r');}
+  catch(error){
+    if(error.code!=='ENOENT')throw error;
+    throw Error(label+'已失效，请重新取样');
+  }
+  try{
+    const header=Buffer.alloc(26);
+    if(fs.readSync(descriptor,header,0,header.length,0)!==header.length||!header.subarray(0,8).equals(pngSignature)||
+       header.readUInt32BE(16)!==4096||header.readUInt32BE(20)!==4096||grayscale&&(header[24]!==8||header[25]!==0))
+      throw Error(label+'格式无效，请重新取样');
+  }finally{fs.closeSync(descriptor);}
+  return file;
+}
+function registerImageSnapshot(doc,id,label,grayscale=false){
+  if(asset(doc,id)&&!grayscale)return;
+  imageSnapshotPath(doc,id,label,grayscale);
+  doc.paint.assets[id]??={id,file:'paint-'+id+'.png',sha256:id,name:label,width:4096,height:4096,
+    ...(grayscale?{purpose:'selection'}:{})};
+}
 function writePaintAsset(doc,revision,png,summary,update){
   const {entry}=png;
   const document=commit(doc.id,revision,p=>{
@@ -751,6 +894,242 @@ function writePaintAsset(doc,revision,png,summary,update){
   },summary);
   return {document,asset:entry};
 }
+export async function captureImageCloneSource(doc,request,{signal}={}){
+  const {revision,documentId,layerId,mode}=fields(request,['revision','documentId','layerId','mode']);
+  const input=imageDocumentInput(doc,{revision,documentId,resolution:4096});
+  const image=doc.paint.imageDocuments[documentId];
+  const layer=image.layers.find(item=>item.id===layerId&&item.kind==='pixel');
+  if(!['current','below','visible'].includes(mode)||!layer)throw Error('请选择要修补的像素层');
+  if(mode==='below')input.paint.imageDocuments[documentId].layers=visibleImageLayers(imageLayersThrough(image.layers,layerId));
+  if(mode==='current'){
+    const {strokes,raster,cloneSources,selectionSources,brushSources}=layer;
+    const raw={id:layerId,kind:'pixel',visible:true,opacity:1,blend:'normal',maskEnabled:false,
+      strokes,raster,cloneSources,selectionSources,brushSources};
+    input.paint.imageDocuments[documentId].layers=[raw];
+    input.assets=Object.fromEntries(imageLayerAssets(raw).map(id=>[id,assetPath(doc,id)]));
+  }
+  const pixels=await livePaint({...input,imagePng:true},{signal});
+  signal?.throwIfAborted();
+  const latest=read(doc.id);
+  if(latest.revision!==revision)throw revisionError(latest);
+  const png=describePng(doc,pixels,'像素取样',64);
+  ensurePaintAsset(doc,png);
+  return {asset:png.entry.id};
+}
+function edgeSourceLayers(image,layerId){
+  const [root,...children]=isolateImageLayer(image.layers,layerId);
+  if(!root||!['image','pixel','shape'].includes(root.kind))throw Error('请选择要修边的图像、像素或形状图层');
+  const raw={...root,visible:true,opacity:1,blend:'normal',maskEnabled:false};
+  delete raw.styles;delete raw.blendIf;delete raw.edgeDecontaminate;
+  return [raw,...children];
+}
+export function imageEdgeViewInput(doc,request){
+  const {revision,documentId,layerId,view,selection}=fields(request,['revision','documentId','layerId','view','selection']);
+  if(!['original','black','white','overlay','mask'].includes(view))throw Error('检查视图无效');
+  const input=imageDocumentInput(doc,{revision,documentId,resolution:1024});
+  const layers=edgeSourceLayers(doc.paint.imageDocuments[documentId],layerId);
+  input.paint.imageDocuments[documentId].layers=layers;
+  input.assets=Object.fromEntries(layers.flatMap(imageLayerAssets).map(id=>[id,assetPath(doc,id)]));
+  if(selection){
+    fields(selection,['rect',...imageSelectionFields]);
+    if(!validUVRect(selection.rect)||!validUVSelection(selection,selection.rect,true))throw Error('当前选区无效');
+    if(selection.coverage)input.assets[selection.coverage]=imageSnapshotPath(doc,selection.coverage,'选区覆盖图',true);
+  }
+  return {...input,imageEdgeView:{view,selection}};
+}
+export async function sampleImageSelection(doc,request,{signal}={}){
+  const {revision,documentId,layerId,source,point,tolerance,contiguous,operation,previous,pixels,candidate,transform,path:curve,feather,edge}=fields(request,
+    ['revision','documentId','layerId','source','point','tolerance','contiguous','operation','previous','pixels','candidate','transform','path','feather','edge']);
+  const wand=source==='wand',range=source==='colorRange',refine=source==='refine',pen=source==='path';
+  const visibleAlpha=source==='visibleAlpha';
+  if(!['alpha','visibleAlpha','mask','wand','colorRange','refine','path'].includes(source)||
+     (wand||range?(!vector(point,2,1)||!point.every(unit)||!Number.isInteger(tolerance)||!ranged(tolerance,0,255)||
+       (wand?typeof contiguous!=='boolean':contiguous!==undefined)):point!==undefined||tolerance!==undefined||contiguous!==undefined))
+    throw Error('选区取样参数无效');
+  if(pen?(!validPenPath(curve)||!curve.closed||layerId!==undefined||
+      feather!==undefined&&(!Number.isInteger(feather)||!ranged(feather,0,maxUVFeather))):curve!==undefined||feather!==undefined)
+    throw Error('请选择有效的闭合路径');
+  const local=operation==='localEdge';
+  if(local){
+    fields(edge,['points','radius','amount','layerId','foreground','background']);
+    if(!refine||!Array.isArray(edge.points)||!edge.points.length||edge.points.length>2048||
+       edge.points.some(point=>!vector(point,2,1)||!point.every(unit))||
+       !Number.isInteger(edge.radius)||!ranged(edge.radius,2,512)||
+       !Number.isInteger(edge.amount)||!ranged(edge.amount,-64,64)||
+       edge.layerId!==undefined&&(typeof edge.layerId!=='string'||![edge.foreground,edge.background].every(point=>
+         point===undefined||vector(point,2,1)&&point.every(unit)))||
+       edge.layerId===undefined&&(edge.foreground!==undefined||edge.background!==undefined))throw Error('局部修边参数无效');
+  }else if(edge!==undefined)throw Error('局部修边参数无效');
+  const combine=['add','subtract','intersect'].includes(operation),sizeEdit=['expand','contract','smooth'].includes(operation);
+  if(!['replace','add','subtract','intersect','invert','expand','contract','smooth','reshape','localEdge'].includes(operation)||
+     !refine&&operation!=='replace'&&!combine||
+     (sizeEdit?!Number.isInteger(pixels)||!ranged(pixels,1,256):pixels!==undefined))
+    throw Error('选区修改参数无效');
+  const input=imageDocumentInput(doc,{revision,documentId,resolution:4096,inspectMask:source==='mask'?layerId:undefined});
+  const image=doc.paint.imageDocuments[documentId];
+  const layer=image.layers.find(item=>item.id===layerId);
+  if((source==='alpha'||visibleAlpha||source==='mask'||layerId!==undefined)&&(!layer||source==='mask'&&!hasImageLayerMask(layer)||source!=='mask'&&layer.kind==='adjustment'))
+    throw Error('请选择包含像素或蒙版的图层');
+  for(const shape of [previous,candidate])if(shape!==undefined){
+    fields(shape,['rect',...imageSelectionFields]);
+    if(!validUVRect(shape.rect)||!validUVSelection(shape,shape.rect,true))throw Error('当前选区无效');
+    if(shape.coverage)input.assets[shape.coverage]=imageSnapshotPath(doc,shape.coverage,'选区覆盖图',true);
+  }
+  if((candidate!==undefined)!==(refine&&combine)||(transform!==undefined)!==(operation==='reshape'))throw Error('选区修改参数无效');
+  if(transform){
+    fields(transform,['offset','scale','angle','pivot']);
+    if(!vector(transform.pivot,2,1)||!transform.pivot.every(unit))throw Error('选区变换中心无效');
+    checkedUVTransform({...transform,rect:previous?.rect},true);
+  }
+  let alphaInput;
+  if(visibleAlpha){
+    const ancestors=[];
+    for(let parent=layerParent(layer);parent;parent=layerParent(ancestors.at(-1)))
+      ancestors.push(image.layers.find(item=>item.id===parent));
+    const base=layer.clipped?imageClippingBase(image.layers,image.layers.indexOf(layer)):null;
+    const sources=[layer,base].filter(Boolean).map(item=>{
+      const [root,...children]=isolateImageLayer(image.layers,item.id);
+      delete root.blendIf;
+      if(root.kind!=='group')root.blend='normal';
+      return visibleImageLayers([root,...children]);
+    });
+    input.paint.imageDocuments[documentId].layers=sources[0];
+    const ids=new Set([...sources.flat(),...ancestors].flatMap(imageLayerAssets));
+    input.assets={...Object.fromEntries([previous?.coverage].filter(Boolean).map(id=>[id,input.assets[id]])),
+      ...Object.fromEntries([...ids].map(id=>[id,assetPath(doc,id)]))};
+    alphaInput={base:sources[1],ancestors};
+  }else if(refine||pen){
+    if(refine&&(layerId!==undefined||!previous&&(sizeEdit||local||operation==='reshape'||operation==='replace')))throw Error('请先在画布上建立选区');
+    const layers=edge?.layerId===undefined?[]:edgeSourceLayers(image,edge.layerId);
+    input.paint.imageDocuments[documentId].layers=layers;
+    input.assets={...Object.fromEntries([previous?.coverage,candidate?.coverage].filter(Boolean).map(id=>[id,input.assets[id]])),
+      ...Object.fromEntries(layers.flatMap(imageLayerAssets).map(id=>[id,assetPath(doc,id)]))};
+  }else if(layer&&source!=='mask'){
+    const [root,...children]=isolateImageLayer(image.layers,layerId);
+    const layers=visibleImageLayers([{...root,visible:true,opacity:1,blend:'normal',maskEnabled:false},...children]);
+    input.paint.imageDocuments[documentId].layers=layers;
+    const coverageInputs=Object.fromEntries([previous?.coverage,candidate?.coverage].filter(Boolean).map(id=>[id,input.assets[id]]));
+    input.assets={...coverageInputs,...Object.fromEntries(layers.flatMap(imageLayerAssets).map(id=>[id,assetPath(doc,id)]))};
+  }
+  const result=await livePaint({...input,imageSelectionSample:{source,point,tolerance,contiguous,operation,previous,pixels,candidate,transform,edge,
+    ...(pen?{vertices:flattenPenPath(curve),feather}:{}),...(source==='mask'?{maskId:layerId}:{}),
+    ...(alphaInput?{alphaInput}:{})}},{signal});
+  signal?.throwIfAborted();
+  const latest=read(doc.id);
+  if(latest.revision!==revision)throw revisionError(latest);
+  const length=result.readUInt32BE(0),outline=JSON.parse(result.toString('utf8',4,4+length));
+  if(!outline)return null;
+  const png=describePng(doc,result.subarray(4+length),'选区覆盖图',24);
+  ensurePaintAsset(doc,png);
+  return {...outline,coverage:png.entry.id};
+}
+export async function bakeImageLayers(doc,request,{signal}={}){
+  const {revision,documentId,action,layerIds,newLayerId}=fields(request,['revision','documentId','action','layerIds','newLayerId']);
+  const input=imageDocumentInput(doc,{revision,documentId,resolution:4096});
+  const image=doc.paint.imageDocuments[documentId];
+  if(typeof action!=='string'||!Object.hasOwn(imageCombineLabels,action)||!Array.isArray(layerIds)||
+     layerIds.length>image.layers.length||layerIds.some(id=>typeof id!=='string'))throw Error('图层操作参数无效');
+  const rasterize=action==='rasterize',stamp=action==='stampVisible';
+  let plan;
+  if(rasterize){
+    const layer=image.layers.find(item=>item.id===layerIds[0]);
+    const styled=layer&&(hasImageStyle(layer)||!!layer.edgeDecontaminate?.amount&&layer.maskEnabled);
+    if(layerIds.length!==1||!layer||!(['image','shape'].includes(layer.kind)||styled&&['pixel','group'].includes(layer.kind)))
+      throw Error('请选择要栅格化的图像、文字、形状或已应用样式的图层');
+    const children=layer.kind==='group'?layerTreeOrder(image.layers,layer.id):[];
+    for(const child of children)requireUnlocked(image.layers,child);
+    requireUnlocked(image.layers,layer);
+    const content={...layer,visible:true,blend:'normal',opacity:1,maskEnabled:!!styled&&layer.maskEnabled};
+    delete content.blendIf;
+    delete content.parentId;
+    delete content.clipped;
+    plan={render:[content,...children],name:layer.name,bottom:layer.id,styled,children:children.map(item=>item.id)};
+  }else{
+    plan=planImageCombine(image.layers,action,layerIds);
+    if(stamp&&(typeof newLayerId!=='string'||!/^[\w-]{1,100}$/.test(newLayerId)||image.layers.some(item=>item.id===newLayerId)))
+      throw Error('盖印图层编号无效');
+    if(stamp&&image.layers.length>=imageLayerLimit)throw Error('请先合并图层，为盖印结果腾出空间');
+  }
+  const layers=visibleImageLayers(plan.render);
+  input.paint.imageDocuments[documentId]={colorSpace:image.colorSpace,layers};
+  input.assets=Object.fromEntries(layers.flatMap(layer=>imageLayerAssets(layer).map(id=>[id,assetPath(doc,id)])));
+  const pixels=await livePaint({...input,imagePng:true},{signal});
+  signal?.throwIfAborted();
+  const png=describePng(doc,pixels,plan.name+' · 像素',64);
+  return writePaintAsset(doc,revision,png,imageCombineLabels[action],next=>{
+    const target=next.paint.imageDocuments[documentId];
+    const raster=png.entry.id;
+    if(rasterize){
+      const layer=target.layers.find(item=>item.id===plan.bottom);
+      for(const field of ['asset','text','textOrigin','shape','x','y','scale','rotation','stretch','warp','styles','strokes','edgeDecontaminate'])delete layer[field];
+      if(plan.styled)clearImageLayerMask(layer);
+      if(layer.blend==='passThrough')layer.blend='normal';
+      if(plan.children.length){
+        const detached=new Set(plan.children);
+        target.layers=target.layers.filter(item=>!detached.has(item.id));
+      }
+      Object.assign(layer,{kind:'pixel',raster});
+    }else{
+      const replacement={id:stamp?newLayerId:plan.bottom,kind:'pixel',name:plan.name,raster,...imageLayerDefaults,...plan.appearance,
+        ...(plan.parent?{parentId:plan.parent}:{})};
+      if(stamp){
+        // Preserve the source stack and avoid compositing its translucent
+        // pixels a second time under the stamp.
+        for(const layer of target.layers)if(layerParent(layer)===null&&layer.visible)layer.visible=false;
+        target.layers.push(replacement);
+      }
+      else {
+        const removed=new Set(plan.remove);
+        target.layers=target.layers.flatMap(layer=>layer.id===plan.bottom?[replacement]:removed.has(layer.id)?[]:[layer]);
+      }
+    }
+    validate(next);
+  }).document;
+}
+export async function meshMapOperation(doc,request,operation,signal){
+  const {revision}=request;
+  let config,names,target;
+  if(operation==='mesh-bake'){
+    const {resolution,idSource}=fields(request,['revision','resolution','idSource']);
+    if(![512,1024,2048].includes(resolution)||!['material','object','vertex'].includes(idSource))throw Error('网格贴图参数无效');
+    const {source}=await prepareModelGeometry(doc,{signal});
+    config={source,resolution,idSource};
+    names={ao:'环境遮蔽 AO',curvature:'曲率',id:{material:'材质槽 ID',object:'物体 ID',vertex:'顶点色 ID'}[idSource]};
+  }else{
+    const {image,layerId,mode,color:pick}=fields(request,['revision','image','layerId','mode','color']);
+    if(!asset(doc,image)||!['cavity','convex','concave','id'].includes(mode)||mode==='id'&&!color(pick))
+      throw Error('请选择有效的网格贴图与取样方式');
+    target=doc.paint.layers.find(layer=>layer.id===layerId);
+    if(!target)throw Error('请选择材质图层或文件夹');
+    requireUnlocked(doc.paint.layers,target);
+    config={file:assetPath(doc,image),mode,color:pick};
+    names={mask:'蒙版 · '+({cavity:'积灰',convex:'凸边',concave:'凹槽',id:pick}[mode])};
+  }
+  const scratch=await fsp.mkdtemp(path.join(projectDir(doc.id),'.mesh-bake-'));
+  try{
+    await fsp.writeFile(path.join(scratch,'input.json'),JSON.stringify({...config,ownerPid:process.pid}));
+    try{
+      await renderTextFile(pythonExecutable(),['-X','utf8',path.join(ROOT,'mesh_maps.py'),scratch],{windowsHide:true,signal});
+    }catch(error){
+      if(signal?.aborted)throw error;
+      throw Error(error.stderr?.trim().split(/\r?\n/).at(-1)||error.message);
+    }
+    const pictures={};
+    for(const [key,title] of Object.entries(names))
+      pictures[key]=describePng(doc,await fsp.readFile(path.join(scratch,key+'.png')),title+'.png',64);
+    signal?.throwIfAborted();
+    const updated=commit(doc.id,revision,next=>{
+      for(const png of Object.values(pictures)){
+        ensurePaintAsset(doc,png);
+        next.paint.assets[png.entry.id]=png.entry;
+      }
+      if(target)Object.assign(next.paint.layers.find(layer=>layer.id===target.id),{mask:pictures.mask.entry.id,maskEnabled:true});
+      return next;
+    },target?'从网格贴图提取蒙版':'烘焙网格贴图');
+    return {revision:updated.revision,maps:Object.fromEntries(Object.entries(pictures).map(([key,png])=>[key,png.entry.id]))};
+  }finally{await fsp.rm(scratch,{recursive:true,force:true});}
+}
+
 export async function importPaintMaps(doc,revision,files,scratch){
   if(doc.revision!==revision)throw revisionError(doc);
   const manifest=path.join(scratch,'maps.json');
@@ -816,36 +1195,132 @@ export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId
   });
 }
 const renderTextFile=promisify(execFile);
+export async function importPaintFont(doc,request){
+  const {revision,name,data}=fields(request,['revision','name','data']);
+  if(doc.revision!==revision)throw revisionError(doc);
+  const extension=typeof name==='string'&&name.match(/\.(ttf|otf)$/i)?.[1].toLowerCase();
+  const bytes=typeof data==='string'&&Buffer.from(data,'base64');
+  if(!extension||!bytes||bytes.length<12||bytes.length>32*1024*1024||
+     !(bytes.readUInt32BE(0)===0x10000||bytes.toString('ascii',0,4)==='OTTO'))throw Error('请选择有效的 TTF 或 OTF 字体（最大 32 MiB）');
+  const id=crypto.createHash('sha256').update(bytes).digest('hex');
+  const registered=textFontRegistry(doc)[id];
+  const file=registered?.file??'font-'+id+'.'+extension;
+  const assets=path.join(projectDir(doc.id),'assets');
+  await fsp.mkdir(assets,{recursive:true});
+  const scratch=await fsp.mkdtemp(path.join(assets,'.font-'));
+  try{
+    const temporary=path.join(scratch,file);
+    await fsp.writeFile(temporary,bytes);
+    let metadata;
+    try{
+      const {stdout}=await renderTextFile(process.env.ARACHNE_PYTHON||'python',
+        ['-X','utf8',path.join(ROOT,'paint_text.py'),'--inspect',temporary],{windowsHide:true,timeout:10_000,maxBuffer:256*1024});
+      metadata=JSON.parse(stdout);
+    }catch(error){
+      if(error.code==='ENOENT')throw error;
+      throw Error('无法读取该字体的家族、字形或字重');
+    }
+    const entry=checkedFontEntry(id,{file,...metadata});
+    const current=read(doc.id);
+    if(current.revision!==revision)throw revisionError(current);
+    fs.renameSync(temporary,path.join(assets,file));
+    const document=registered?current:commit(doc.id,revision,next=>{
+      next.paint.textFonts??={};
+      next.paint.textFonts[id]=entry;
+      return next;
+    },'添加工程字体');
+    return {document,id};
+  }finally{await fsp.rm(scratch,{recursive:true,force:true});}
+}
+async function withRenderedText(doc,style,consume,signal){
+  const assetFolder=path.join(projectDir(doc.id),'assets');
+  fs.mkdirSync(assetFolder,{recursive:true});
+  const scratch=fs.mkdtempSync(path.join(assetFolder,'.text-'));
+  try{
+    const input=path.join(scratch,'text.json'),output=path.join(scratch,'text.png');
+    fs.writeFileSync(input,JSON.stringify(style));
+    const files=textFonts[style.font||'sourceHan']?.paths;
+    const primary=files?path.join(ROOT,'public',files[style.weight===700&&files.length===2?1:0]):await paintFontFile(doc,style.font);
+    let origin;
+    try{
+      const {stdout}=await renderTextFile(process.env.ARACHNE_PYTHON||'python',['-X','utf8',path.join(ROOT,'paint_text.py'),
+        input,path.join(ROOT,'public',textFonts.sourceHan.paths[0]),output,primary],
+      {windowsHide:true,timeout:10_000,maxBuffer:256*1024,signal});
+      origin=JSON.parse(stdout);
+    }catch(error){
+      if(signal?.aborted)throw error;
+      throw Error(error.stderr?.trim().split(/\r?\n/).at(-1)||'无法生成文字贴图');
+    }
+    const png=describePng(doc,fs.readFileSync(output),textLayerName(style)+'.png');
+    return await consume(png,output,origin);
+  }finally{fs.rmSync(scratch,{recursive:true,force:true});}
+}
+function replaceTextLayer(doc,layer,style,entry,assetField,origin){
+  const old=asset(doc,layer[assetField]);
+  const prior=Math.max(old.width,old.height),edge=Math.max(entry.width,entry.height);
+  const inImage=assetField==='asset',anchored=inImage&&layer.textOrigin!==undefined;
+  const paragraph=inImage&&layer.text.box&&style.box;
+  const at=(text,asset,offset)=>warpPoint(layer.warp,offset||paragraph?
+    (offset??paragraphOrigin(text)).map((value,i)=>value/(i?asset.height:asset.width)):[.5,.5],false,true);
+  const before=inImage&&(anchored||paragraph||layer.warp)?
+    imagePlacement(layer,doc.paint.assets).toCanvas(at(layer.text,old,layer.textOrigin)):null;
+  layer.scale=Math.max(inImage?1/4096:.01,Math.min(4,layer.scale*edge/prior));
+  if(layer.name===textLayerName(layer.text))layer.name=textLayerName(style);
+  layer[assetField]=entry.id;
+  layer.text=style;
+  if(anchored)layer.textOrigin=style.box?paragraphOrigin(style):origin;
+  if(before){
+    const after=imagePlacement(layer,doc.paint.assets).toCanvas(at(style,entry,layer.textOrigin));
+    layer.x+=before[0]-after[0];
+    layer.y+=before[1]-after[1];
+  }
+}
+
+export async function previewImageText(doc,request,{signal}={}){
+  const {revision,documentId,resolution,textDraft,inspectMask}=fields(request,['revision','documentId','resolution','textDraft','inspectMask']);
+  if(doc.revision!==revision)throw revisionError(doc);
+  if(![256,512,1024].includes(resolution)||inspectMask!=null)throw Error('文字预览参数无效');
+  const {layerId,content,box}=fields(textDraft,['layerId','content','box']);
+  const documents=doc.paint.imageDocuments??{};
+  const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId&&item.text);
+  if(!layer)throw Error('请选择可编辑的文字层');
+  if(typeof content!=='string')throw Error('文字参数无效');
+  const inputFor=next=>imageDocumentInput(next,{revision,documentId,resolution});
+  if(!content.trim()){
+    const next=structuredClone(doc);
+    next.paint.imageDocuments[documentId].layers.find(item=>item.id===layerId).visible=false;
+    return livePaint(inputFor(next),{signal});
+  }
+  if(content===layer.text.content&&isDeepStrictEqual(box,layer.text.box))return livePaint(inputFor(doc),{signal});
+  const style=checkedText({...textDefaults,...layer.text,content,...(box===undefined?{}:{box})},textFontRegistry(doc));
+  return withRenderedText(doc,style,(png,file,origin)=>{
+    signal?.throwIfAborted();
+    const next=structuredClone(doc);
+    next.paint.assets[png.entry.id]=png.entry;
+    replaceTextLayer(next,next.paint.imageDocuments[documentId].layers.find(item=>item.id===layerId),style,png.entry,'asset',origin);
+    const input=inputFor(next);
+    if(Object.hasOwn(input.assets,png.entry.id))input.assets[png.entry.id]=file;
+    // Once queued, the compositor owns this temporary PNG until it replies.
+    return livePaint(input);
+  },signal);
+}
+
 export async function savePaintText(doc,{revision,text,placement,layerId,documentId}){
   if(doc.revision!==revision)throw revisionError(doc);
-  const style=checkedText(text);
+  const style=checkedText(text,textFontRegistry(doc));
   const inImage=documentId!==undefined,documents=doc.paint.imageDocuments??{};
   if(inImage&&(typeof documentId!=='string'||!Object.hasOwn(documents,documentId)))throw Error('图像文档不存在');
   const layers=inImage?documents[documentId].layers:doc.paint.layers,assetField=inImage?'asset':'image';
   const target=layerId===undefined?null:layers.find(item=>item.id===layerId&&item.text);
   if(layerId!==undefined&&!target)throw Error('请选择可编辑的文字层');
   requireUnlocked(layers,target);
-  const place=placement===undefined?null:fields(placement,inImage?['x','y','index','parentId']:['x','y','parentId']);
-  if((target&&place)||(!target&&(!place||!unit(place.x)||!unit(place.y))))throw Error('文字放置位置无效');
-  const assetFolder=path.join(projectDir(doc.id),'assets');
-  fs.mkdirSync(assetFolder,{recursive:true});
-  const scratch=fs.mkdtempSync(path.join(assetFolder,'.text-'));
-  let bytes;
-  try{
-    const input=path.join(scratch,'text.json'),output=path.join(scratch,'text.png');
-    fs.writeFileSync(input,JSON.stringify(style));
-    try{
-      await renderTextFile(process.env.ARACHNE_PYTHON||'python',['-X','utf8',path.join(ROOT,'paint_text.py'),
-        input,path.join(ROOT,'public','SourceHanSansSC-VF.ttf'),output],{windowsHide:true,timeout:10_000,maxBuffer:256*1024});
-    }catch(error){
-      throw Error(error.stderr?.trim().split(/\r?\n/).at(-1)||'无法生成文字贴图');
-    }
-    bytes=fs.readFileSync(output);
-  }finally{fs.rmSync(scratch,{recursive:true,force:true});}
+  const place=placement===undefined?null:fields(placement,inImage?['x','y','index','parentId','anchor']:['x','y','parentId']);
+  if((target&&place)||(!target&&(!place||!unit(place.x)||!unit(place.y)||place.anchor!==undefined&&place.anchor!=='start')))throw Error('文字放置位置无效');
+  const {png,origin}=await withRenderedText(doc,style,(png,_file,origin)=>({png,origin}));
   const current=read(doc.id);
   if(current.revision!==revision)throw revisionError(current);
-  const name=textLayerName(style),png=describePng(current,bytes,name+'.png'),{entry}=png;
-  const edge=Math.max(bytes.readUInt32BE(16),bytes.readUInt32BE(20));
+  const name=textLayerName(style),{entry}=png;
+  const {width,height}=entry,edge=Math.max(width,height);
   if(target&&target[assetField]===entry.id&&isDeepStrictEqual(target.text,style)){
     ensurePaintAsset(current,png);
     return {document:current,asset:entry,layerId};
@@ -855,17 +1330,17 @@ export async function savePaintText(doc,{revision,text,placement,layerId,documen
     const currentLayers=inImage?p.paint.imageDocuments[documentId].layers:p.paint.layers;
     const existingLayer=target&&currentLayers.find(item=>item.id===layerId);
     if(existingLayer){
-      const old=asset(p,existingLayer[assetField]);
-      const prior=Math.max(old.width,old.height);
-      existingLayer.scale=Math.max(.01,Math.min(4,existingLayer.scale*edge/prior));
-      if(existingLayer.name===textLayerName(existingLayer.text))existingLayer.name=name;
-      existingLayer[assetField]=entry.id;
-      existingLayer.text=style;
+      replaceTextLayer(p,existingLayer,style,entry,assetField,origin);
     }else if(inImage){
       selected=crypto.randomUUID();
+      const [left,top]=style.box?paragraphOrigin(style):origin??[0,0];
+      const x=place.anchor==='start'?place.x+(width/2-left)/4096:place.x;
+      const y=place.anchor==='start'?place.y+(height/2-top)/4096:place.y;
       applyOperations(p,[{op:'image',action:'addLayer',documentId,layerId:selected,kind:'image',index:place.index,parentId:place.parentId,
-        patch:{asset:entry.id,name,x:place.x,y:place.y,scale:Math.max(.01,edge/4096)}}]);
-      currentLayers.find(item=>item.id===selected).text=style;
+        patch:{asset:entry.id,name,x,y,scale:Math.max(.01,edge/4096)}}]);
+      const added=currentLayers.find(item=>item.id===selected);
+      added.text=style;
+      if(place.anchor==='start'&&!style.box&&origin)added.textOrigin=origin;
     }else{
       const known=new Set(p.paint.layers.map(item=>item.id));
       applyOperations(p,[{op:'add',kind:'decal',parentId:place.parentId,patch:{
@@ -912,9 +1387,9 @@ function validateRestoredLayers(layers){
     for(const key of ['strokes','maskStrokes']){
       if(layer[key]===undefined)continue;
       const isMask=key==='maskStrokes';
-      if((!isMask&&layer.kind!=='paint')||!Array.isArray(layer[key])||layer[key].length>400)
+      if((!isMask&&layer.kind!=='paint')||!Array.isArray(layer[key]))
         throw Error('图层笔触无效');
-      for(const stroke of layer[key]){
+      function validateStroke(stroke){
         if(!isMask&&stroke?.transformUV!==undefined){
           fields(stroke,['transformUV']);
           checkedUVTransform(stroke.transformUV);
@@ -922,6 +1397,10 @@ function validateRestoredLayers(layers){
           fields(stroke,['clearUV',...uvShapeFields]);
           if(!validUVRect(stroke.clearUV)||!validUVSelection(stroke,stroke.clearUV))throw Error('选区参数无效');
         }else checkStroke(stroke,isMask);
+      }
+      for(const stroke of layer[key]){
+        if(isStrokeBlock(stroke))for(const item of unpackStrokeBlock(stroke,{mask:isMask,spatial:true}))validateStroke(item);
+        else validateStroke(stroke);
       }
     }
   }
@@ -941,23 +1420,24 @@ export async function restorePaint(archive,scratch){
     ['format','version','name','revision','previewId','geometry','paint','modeling']);
   const geometry=fields(manifest.geometry,['material','modelSha256','uvSha256','registrationSha256','editedModelSha256','modelFingerprint']);
   const projectOnly=manifest.format===archiveFormat;
-  if(typeof manifest.name!=='string'||!manifest.name.trim()||manifest.name.length>100||
+  if(![1,2].includes(manifest.version)||typeof manifest.name!=='string'||!manifest.name.trim()||manifest.name.length>100||
      !Number.isSafeInteger(manifest.revision)||manifest.revision<0||
      typeof geometry.material!=='string'||!geometry.material||geometry.material.length>256||!sha256(geometry.modelSha256)||!sha256(geometry.registrationSha256)||
      (!projectOnly&&(typeof manifest.previewId!=='string'||!/^[\w-]{1,100}$/.test(manifest.previewId)||
        !sha256(geometry.uvSha256))))
     throw Error('涂装 ZIP 的可编辑清单无效');
-  const {base,baseChannels,layers,assets,surfaceBindings,materialGraph,materials,brushes,imageDocuments,objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility}=fields(manifest.paint,['base','baseChannels','layers','assets','surfaceBindings','materialGraph','materials','brushes','imageDocuments','objectNames','sceneCursor','renderCamera','renderBookmarks','renderAppearance','renderLighting','renderOptics','renderPreset','renderRegion','renderVisibility']);
+  const {base,baseChannels,layers,assets,textFonts:projectFonts,surfaceBindings,materialGraph,materials,brushes,imageDocuments,objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility}=fields(manifest.paint,['base','baseChannels','layers','assets','textFonts','surfaceBindings','materialGraph','materials','brushes','imageDocuments','objectNames','sceneCursor','renderCamera','renderBookmarks','renderAppearance','renderLighting','renderOptics','renderPreset','renderRegion','renderVisibility']);
   validateRestoredLayers(layers);
-  const paint={base,...(imageDocuments?{imageDocuments}:{}),...(baseChannels!==undefined?{baseChannels}:{}),layers,assets:{},...(materials?{materials}:{}),...(brushes?{brushes}:{}),...(materialGraph?{materialGraph}:{}),...(surfaceBindings?{surfaceBindings}:{})};
+  const paint={base,...(projectFonts?{textFonts:projectFonts}:{}),...(imageDocuments?{imageDocuments}:{}),...(baseChannels!==undefined?{baseChannels}:{}),layers,assets:{},...(materials?{materials}:{}),...(brushes?{brushes}:{}),...(materialGraph?{materialGraph}:{}),...(surfaceBindings?{surfaceBindings}:{})};
   for(const [id,item] of Object.entries(assets)){
-    fields(item,['name','path','sha256']);
+    fields(item,['name','path','sha256','purpose']);
     if(!sha256(id)||item.sha256!==id||typeof item.name!=='string'||!item.name.trim()||item.name.length>100)
       throw Error('交付包素材记录无效');
+    if(item.purpose!==undefined&&item.purpose!=='selection')throw Error('交付包素材用途无效');
     const file=path.join(folder,'paint-'+id+'.png');
     const png=describePng({paint},fs.readFileSync(file),item.name,64);
     if(png.entry.id!==id)throw Error('交付包素材指纹变化');
-    paint.assets[id]=png.entry;
+    paint.assets[id]={...png.entry,...(item.purpose?{purpose:item.purpose}:{})};
   }
   if(objectNames!==undefined){validateObjectNames(objectNames);paint.objectNames=objectNames;}
   if(renderCamera!==undefined)paint.renderCamera=checkedRenderCamera(renderCamera);
@@ -972,7 +1452,7 @@ export async function restorePaint(archive,scratch){
     const visibility=checkRenderVisibility(renderVisibility);
     if(Object.keys(visibility).length)paint.renderVisibility=visibility;
   }
-  validate({paint});
+  validate({paint},{unpackBlocks:true});
   let source;
   for(const id of new Set([nativeDemoProjectId,demoProjectId,...list().map(project=>project.id)])){
     let candidate;
@@ -1020,15 +1500,20 @@ async function prepareEditableFiles(doc,out,files){
   if(entries.length>32000)throw Error('可编辑涂装素材数量超出打包限制');
   for(const [id,item] of entries){
     const name='paint-'+id+'.png';
-    assets[id]={name:item.name,path:'assets/'+name,sha256:id};
+    assets[id]={name:item.name,path:'assets/'+name,sha256:id,...(item.purpose?{purpose:item.purpose}:{})};
     files['editable/'+assets[id].path]=assetPath(doc,id);
   }
   files[manifestPath]=path.join(out,manifestPath);
   const geometry={material:doc.source.material,modelSha256:doc.source.files[doc.source.reviewSource],
     registrationSha256:registrationFingerprint(doc.source),...(doc.modeling?{modelFingerprint:modelFingerprint(doc)}:{})};
+  const images=Object.values(doc.paint.imageDocuments??{});
+  const needsModernImageLayers=images.some(image=>image.selections?.length)||[...doc.paint.layers,...images.flatMap(image=>image.layers)]
+    .some(layer=>layer.raster||layer.warp||layer.maskDensity!==undefined||layer.maskFeather!==undefined||layer.maskLinked!==undefined||
+      layer.maskTransform||layer.maskWarpSteps?.length||layer.selectionSources?.length||layer.brushSources?.length||
+      layer.cloneSources?.length||layer.strokes?.some(isStrokeBlock)||layer.maskStrokes?.some(isStrokeBlock));
   const manifest={
-    format:archiveFormat,version:1,name:doc.name,revision:doc.revision,geometry,...(doc.modeling?{modeling:doc.modeling}:{}),
-    paint:{base:doc.paint.base,...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.sceneCursor?{sceneCursor:doc.paint.sceneCursor}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
+    format:archiveFormat,version:needsModernImageLayers?2:1,name:doc.name,revision:doc.revision,geometry,...(doc.modeling?{modeling:doc.modeling}:{}),
+    paint:{base:doc.paint.base,...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.sceneCursor?{sceneCursor:doc.paint.sceneCursor}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.textFonts?{textFonts:doc.paint.textFonts}:{}),...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
   };
   const metadata=JSON.stringify(manifest)+'\n';
   if(Buffer.byteLength(metadata)>64*1024*1024)throw Error('可编辑工程清单超过 64 MiB，无法生成可恢复的 ZIP');
@@ -1169,6 +1654,7 @@ async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,upda
     region,camera:result.camera,samples:result.samples,fileFormat:settings.fileFormat,bitDepth:settings.bitDepth,
     transparent:settings.transparent,...(result.exr?{colorSpace:'scene-linear sRGB',alphaMode:'premultiplied'}:{}),
     lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,visibility:renderVisibility,
+    textureSampling:result.textureSampling,
     modelSha256:model.sha256,uvSha256:model.uvSha256,materialFingerprint:report.materialFingerprint??null,
     textures:Object.fromEntries(applied.map(name=>[name,report.files[channelSpecs[name].file]])),
     pngSha256:hashBytes(result.png),...(result.exr?{exrSha256:hashBytes(result.exr)}:{}),

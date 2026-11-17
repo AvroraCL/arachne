@@ -1,3 +1,4 @@
+import {canvasPoint} from './image-canvas-coordinates.mjs';
 const el=(tag,text='')=>{const node=document.createElement(tag);node.textContent=text;return node;};
 
 export function createImageFillTool({stage,canvas,parameters,signal,settings={},context,onChange,commit,sample}){
@@ -30,8 +31,7 @@ export function createImageFillTool({stage,canvas,parameters,signal,settings={},
     const state=context();
     if(!state.enabled||!tolerance.checkValidity()||!opacity.checkValidity()||
        !Number.isFinite(tolerance.valueAsNumber)||!Number.isFinite(opacity.valueAsNumber))return;
-    const bounds=canvas.getBoundingClientRect();
-    const point=[(event.clientX-bounds.left)/bounds.width,(event.clientY-bounds.top)/bounds.height];
+    const point=canvasPoint(canvas,event);
     if(!point.every(n=>n>=0&&n<=1))return;
     stage.focus({preventScroll:true});
     event.preventDefault();event.stopImmediatePropagation();

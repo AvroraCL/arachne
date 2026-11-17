@@ -4,8 +4,86 @@ import {spawnSync} from 'node:child_process';
 import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand,hasImageLayerMask,imageDocumentLimit,imageClippingBase} from '../public/image-documents.mjs';
 import {imageDocumentInput} from '../paint.mjs';
 import {newImageAdjustment,checkImageAdjustment,imageBlendModes} from '../public/image-adjustments.mjs';
+import {mapImageMaskPoint} from '../public/image-warp.mjs';
+test('sparse replay keeps opacity, erasing, and transform order across batch flushes',()=>{
+ const script=`import numpy as np
+from image_documents import ImageSurface, composite_document
+
+def dab(x,y,color,opacity=.55,erase=False):
+ return dict(uv=True,stamps=[[x,y],[x+.008,y+.004]],radius=.024,hardness=.6,opacity=opacity,color=color,erase=erase)
+
+strokes=[dab(.15+(i%20)*.035,.16+(i//20)*.07,'#ba5c2b') for i in range(180)]
+strokes += [
+ dab(.325,.3,'#e2c875',.9,True),
+ dict(clearUV=[.25,.2,.45,.42],feather=8),
+ dict(transformUV=dict(rect=[.1,.1,.7,.55],offset=[.1,-.08],scale=[.84,.91],angle=12,copy=False,interpolation='linear')),
+ dab(.37,.42,'#2381b4',.7),
+ {**dab(.39,.44,'#c8b82e',.8),'preserveAlpha':True},
+]
+layer=dict(id='paint',kind='pixel',visible=True,opacity=.83,blend='normal',maskEnabled=False,strokes=strokes)
+doc=dict(colorSpace='srgb',layers=[layer])
+baseline=composite_document(doc,{},256)
+ImageSurface.paint_batch_size=8
+ImageSurface.paint_batch_pixels=0
+assert np.array_equal(baseline,composite_document(doc,{},256))
+ImageSurface.paint_batch_size=128
+ImageSurface.paint_batch_pixels=2000
+assert np.array_equal(baseline,composite_document(doc,{},256))
+assert baseline[:,:,3].max()>100 and baseline[:,:,3].min()==0
+`;
+ const result=spawnSync(process.env.ARACHNE_PYTHON||'python',['-B','-c',script],{cwd:new URL('../',import.meta.url),encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);
+});
 const defaults=()=>({layers:[],assets:{}}),options={requireUnlocked:()=>{}},checks={checkStroke:s=>{assert.equal(s.uv,true);assert.ok(s.rect||s.stamps);},checkedUVTransform:t=>assert.ok(t.rect)};
 const edit=(paint,action,extra={})=>imageDocumentOperation(paint,{op:'image',documentId:'doc',action,...extra},options);
+test('a linked mask follows repeated perspective and mesh edits, retaining the canvas space of newer strokes',()=>{
+ const paint=defaults(),layerId='shape';
+ const shape={kind:'rectangle',width:1024,height:1024,fill:'#ed6a25',stroke:null,strokeWidth:0,cornerRadius:0};
+ const perspective={mode:'perspective',points:[[.22,.04],[.92,.12],[1,1],[0,1]]};
+ const mesh={mode:'mesh',points:[[0,0],[.5,0],[1,0],[0,.5],[.72,.61],[1,.5],[0,1],[.5,1],[1,1]]};
+ const mark=(rect,value)=>edit(paint,'stroke',{layerId,target:'mask',stroke:{uv:true,rect,opacity:1,value}});
+ const update=patch=>edit(paint,'updateLayer',{layerId,patch});
+ const source=[.5,.5],gradient={kind:'linear',start:[.32,.32],end:[.67,.68],colors:['#cccccc','#ffffff'],alpha:[1,1]};
+ edit(paint,'create');
+ edit(paint,'addLayer',{layerId,kind:'shape',patch:{shape,scale:.6,maskGradient:gradient,maskEnabled:true}});
+ mark([.46,.46,.54,.54],0);
+ update({warp:perspective});
+ const layer=paint.imageDocuments.doc.layers[0],firstPoint=mapImageMaskPoint(layer,layer.maskStrokes[0],source);
+ assert.ok(Math.hypot(firstPoint[0]-.537615,firstPoint[1]-.477064)<1e-5);
+ mark([firstPoint[0]-.012,firstPoint[1]-.012,firstPoint[0]+.012,firstPoint[1]+.012],1);
+ update({warp:mesh});
+ update({x:.53});
+ const first=mapImageMaskPoint(layer,layer.maskStrokes[0],source);
+ const second=mapImageMaskPoint(layer,layer.maskStrokes[1],firstPoint);
+ assert.ok(Math.hypot(first[0]-.662,first[1]-.566)<1e-8);
+ assert.ok(Math.hypot(first[0]-second[0],first[1]-second[1])<1e-8);
+ const back=mapImageMaskPoint(layer,layer.maskStrokes[0],first,true);
+ assert.ok(Math.hypot(back[0]-.5,back[1]-.5)<1e-8);
+ const sampled=[first,mapImageMaskPoint(layer,layer.maskStrokes[0],[.528,.5])];
+ const guide=mapImageMaskPoint(layer,layer.maskGradient,gradient.start);
+ const beforeReset=structuredClone(paint.imageDocuments.doc);
+ update({warp:null});
+ const restored=mapImageMaskPoint(layer,layer.maskStrokes[0],source);
+ assert.ok(Math.hypot(restored[0]-.53,restored[1]-.5)<1e-8);
+ validateImageDocuments(paint,checks);
+ const script=`import json, sys
+from image_documents import composite_document
+before, after, probes, restored, guide = json.load(sys.stdin)
+def at(image, point, channel):
+ x,y = point
+ return int(image[int(y*512),int(x*512),channel])
+first = composite_document(before,{},512)
+second = composite_document(after,{},512)
+assert at(first,probes[0],3)==255 and at(first,probes[1],3)==0
+assert at(second,restored,3)==255
+mask = composite_document(before,{},512,'shape')
+assert abs(at(mask,guide,0)-204)<=1, at(mask,guide,0)
+`;
+ const result=spawnSync(process.env.ARACHNE_PYTHON||'python',['-B','-c',script],{
+   cwd:new URL('../',import.meta.url),encoding:'utf8',input:JSON.stringify([beforeReset,paint.imageDocuments.doc,sampled,restored,guide])
+ });
+ assert.equal(result.status,0,result.stderr);
+});
 test('alpha locking is recorded per pixel stroke without restricting independent mask edits',()=>{
  const paint=defaults(),layerId='pixels',stroke={uv:true,rect:[0,0,1,1],opacity:1,color:'#114477',erase:false};
  edit(paint,'create');
@@ -68,7 +146,13 @@ test('image adjustments have independent masks and validate exact parameters wit
  assert.equal(newImageAdjustment('curves').points.red.length,2);
  assert.throws(()=>checkImageAdjustment({...curves,points:{...curves.points,red:[[0,0],[0,1],[255,255]]}}),/控制点/);
  assert.throws(()=>edit(paint,'stroke',{layerId:'levels',target:'pixels',stroke:{}}),/像素层/);
- assert.equal(new Set(imageBlendModes).size,16);
+ assert.equal(new Set(imageBlendModes).size,20);
+ checkImageAdjustment({type:'hueSaturation',hue:0,saturation:0,lightness:0});
+ assert.throws(()=>checkImageAdjustment({...newImageAdjustment('hueSaturation'),width:0}),/范围半宽/);
+ const balance=newImageAdjustment('colorBalance');
+ balance.tones.midtones.red=25;
+ assert.equal(newImageAdjustment('colorBalance').tones.midtones.red,0);
+ assert.throws(()=>checkImageAdjustment({...balance,tones:{midtones:balance.tones.midtones}}),/分区参数/);
 });
 test('image documents and pixel layers are independent of material layers, binding is explicit and deletion protected',()=>{
  const paint=defaults();edit(paint,'create',{patch:{name:'独立贴图'}});edit(paint,'addLayer',{layerId:'pixel',kind:'pixel'});assert.equal(paint.layers.length,0);assert.equal(paint.imageDocuments.doc.layers[0].kind,'pixel');
@@ -232,6 +316,7 @@ test('image folders preserve sibling order, clipping ownership, nested masks and
 });
 test('independent compositor preserves transparency, mask edits, layer order, linear blending and transform',()=>{
  const script=`import numpy as np
+from PIL import Image
 from image_documents import composite_document,png_bytes
 from paint_worker import sample_document
 field=np.array([[[255,0,0,255],[0,0,0,0]]],dtype=np.uint8);v,a=sample_document(field,np.array([.5]),np.array([.5]),'color');assert np.allclose(v,[1,0,0]) and np.allclose(a,.5)
@@ -249,6 +334,34 @@ layer=dict(id='gradient',kind='gradient',visible=True,opacity=1,blend='normal',m
 doc['layers']=[layer];p=composite_document(doc,{},64)
 assert list(p[32,12])==[255,0,0,255] and p[32,52,3]==0 and p[0,12,3]==0
 assert list(p[32,31,:3])==[255,0,0] and abs(int(p[32,31,3])-131)<=1
+layer['gradientTransform']=[1,0,0,1,.125,.0625]
+shifted=composite_document(doc,{},64)
+assert np.array_equal(p[:-4,:-8],shifted[4:,8:])
+assert not shifted[:4,:,3].any() and not shifted[:,:8,3].any()
+layer['gradientTransform']=[1,0,0,1,2,0]
+assert not composite_document(doc,{},64).any()
+unclipped={k:v for k,v in gradient.items() if k!='clip'}
+layer['gradient']=unclipped
+assert composite_document(doc,{},64)[:,:,3].min()==255
+layer['gradient']=gradient
+del layer['gradientTransform']
+from pathlib import Path
+from tempfile import TemporaryDirectory
+with TemporaryDirectory() as root:
+ selection=Path(root)/'selection.png'
+ coverage=np.zeros((4096,4096),dtype=np.uint8)
+ coverage[1024:3072,1024:2048]=128
+ coverage[1024:3072,2048:3072]=255
+ Image.fromarray(coverage).save(selection)
+ layer['gradient']={**gradient,'clip':[.25,.25,.75,.75],'coverage':'soft','alpha':[1,1]}
+ assets={'soft':str(selection)}
+ before=composite_document(doc,assets,64)
+ assert before[25,22,3]==128 and before[25,42,3]==255
+ layer['gradientTransform']=[0,1,-1,0,1,0]
+ rotated=composite_document(doc,assets,64)
+ assert np.array_equal(rotated,np.rot90(before,-1))
+ layer['gradient']=gradient
+ del layer['gradientTransform']
 gradient.update(kind='radial',start=[.5,.5],end=[.75,.5],alpha=[1,1],polygon=[[.1,.1],[.9,.1],[.1,.9]])
 q=composite_document(doc,{},64)
 assert q[32,31,3]==0 and q[30,30,0]>q[30,30,2]
@@ -269,7 +382,6 @@ assert list(composite_document(doc,{},64)[32,32])==[255,0,0,255]
 folder.update(blend='passThrough',opacity=.5,maskEnabled=True,maskStrokes=[dict(uv=True,rect=[0,0,.5,1],value=0,opacity=1)])
 grouped=composite_document(doc,{},64)
 assert list(grouped[32,16])==[255,0,0,255] and list(grouped[32,48])==[188,188,188,255]
-from PIL import Image
 from io import BytesIO
 for color_space,key,value in [('linear','gamma',1),('srgb','srgb',0)]:
  with Image.open(BytesIO(png_bytes(p,color_space))) as encoded:

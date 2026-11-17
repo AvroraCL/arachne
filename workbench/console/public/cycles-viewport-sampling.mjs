@@ -1,21 +1,33 @@
-import {cyclesViewportLimits} from './cycles-limits.mjs';
+import {cyclesLimits} from './cycles-limits.mjs';
 
 export const viewportSamplingDefaults=Object.freeze({
-  draftSamples:8,detailSamples:24,adaptive:true,noiseThreshold:.01,denoise:true
+  maxSamples:24,adaptive:false,noiseThreshold:.1,minSamples:0,denoise:true,denoiseStart:8
 });
 
+const sampleCount=value=>Number.isInteger(value)&&value<=cyclesLimits.maxSamples;
 const validators={
-  draftSamples:value=>Number.isInteger(value)&&value>=1&&value<=cyclesViewportLimits.draft.samples,
-  detailSamples:value=>Number.isInteger(value)&&value>=1&&value<=cyclesViewportLimits.detail.samples,
+  maxSamples:value=>sampleCount(value)&&value>=0,
   adaptive:value=>typeof value==='boolean',
   noiseThreshold:value=>Number.isFinite(value)&&value>=0&&value<=1,
-  denoise:value=>typeof value==='boolean'
+  minSamples:value=>sampleCount(value)&&value>=0,
+  denoise:value=>typeof value==='boolean',
+  denoiseStart:value=>sampleCount(value)&&value>=1
 };
 
 export function viewportSamplingOptions(raw){
+  const values={...raw,maxSamples:raw?.maxSamples??raw?.detailSamples};
+  // Early versions saved a legacy Cycles flag that had no effect on the viewport.
+  if(raw?.maxSamples===undefined&&raw?.minSamples===undefined)delete values.adaptive;
   return Object.fromEntries(Object.entries(validators).map(([key,valid])=>[
-    key,valid(raw?.[key])?raw[key]:viewportSamplingDefaults[key]
+    key,valid(values[key])?values[key]:viewportSamplingDefaults[key]
   ]));
+}
+
+export function viewportConvergence({adaptive,noiseThreshold,minSamples,maxSamples}){
+  if(!adaptive)return null;
+  const threshold=noiseThreshold||Math.min(.1,1/Math.sqrt(maxSamples||256));
+  const minimum=minSamples||Math.max(8,Math.min(64,Math.ceil(1/Math.sqrt(threshold))));
+  return {threshold,minimum:Math.max(3,minimum)};
 }
 
 export function updateViewportSampling(current,patch){

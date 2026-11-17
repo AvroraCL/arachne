@@ -22,6 +22,15 @@ export function selectionContours(selection){
   return selection?.regions?.flat()||(selection?.polygon?[selection.polygon]:[]);
 }
 
+export function insideSelectionOutline({path,size},[u,v]){
+  const x=u*size,y=v*size;
+  let inside=false;
+  for(const [,col,top,bottom] of path.matchAll(/M(\d+) (\d+)V(\d+)/g)){
+    if(+col>x&&+top<=y&&y<+bottom)inside=!inside;
+  }
+  return inside;
+}
+
 export function combineUVSelections(previous,next,mode){
   if(mode==='replace'||!previous&&mode==='add')return next;
   if(!previous)return null;
@@ -42,4 +51,16 @@ export function offsetUVSelection(selection,[dx,dy]){
     ...(selection.polygon?{polygon:translate(selection.polygon)}:{}),
     ...(selection.regions?{regions:selection.regions.map(polygon=>polygon.map(translate))}:{}),
     ...(selection.feather?{feather:selection.feather}:{})};
+}
+
+export function transformUVSelection(selection,map){
+  const result=clipping.intersection(polygonGeometry(selection).map(polygon=>polygon.map(ring=>ring.map(map))),
+    [[uvCorners(canvasUVRect)]]);
+  if(!result.length)return null;
+  const regions=result.map(polygon=>polygon.map(ring=>ring.slice(0,-1)));
+  const rings=regions.flat(),points=rings.flat(),rect=uvBounds(points);
+  if(rect[2]-rect[0]<1/4096||rect[3]-rect[1]<1/4096)return null;
+  if(rings.length>uvRegionLimits.rings||points.length>uvRegionLimits.points)
+    throw Error('变换后的选区轮廓过于复杂');
+  return {rect,regions,...(selection.feather?{feather:selection.feather}:{})};
 }

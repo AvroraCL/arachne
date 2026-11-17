@@ -1,3 +1,4 @@
+import {canvasCoordinates,canvasPoint,svgCanvasMatrix} from './image-canvas-coordinates.mjs';
 import {imageShapeKinds} from './image-shapes.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 
@@ -66,13 +67,14 @@ export function createImageShapeTool({stage,canvas,parameters,signal,context,pre
     const g=gesture,rect=g?.rect;
     guide.toggleAttribute('hidden',!rect);
     if(!rect)return;
-    const box=canvas.getBoundingClientRect(),host=stage.getBoundingClientRect();
+    const project=canvasCoordinates(canvas).toLocal(stage.getBoundingClientRect());
     const [[left,right],[top,bottom]]=rect;
-    const x=box.left-host.left+left*box.width,y=box.top-host.top+top*box.height;
-    const w=(right-left)*box.width,h=(bottom-top)*box.height;
+    const x=left*resolution,y=top*resolution,w=(right-left)*resolution,h=(bottom-top)*resolution;
+    const matrix=svgCanvasMatrix(project,resolution);
+    rectangle.setAttribute('transform',matrix);ellipse.setAttribute('transform',matrix);
     rectangle.style.display=g.style.kind==='rectangle'?'':'none';
     ellipse.style.display=g.style.kind==='ellipse'?'':'none';
-    const round=Math.min(g.style.cornerRadius*box.width/resolution,w/2,h/2);
+    const round=Math.min(g.style.cornerRadius,w/2,h/2);
     for(const [key,value] of Object.entries({x,y,width:w,height:h,rx:round}))rectangle.setAttribute(key,value);
     for(const [key,value] of Object.entries({cx:x+w/2,cy:y+h/2,rx:w/2,ry:h/2}))ellipse.setAttribute(key,value);
   }
@@ -87,7 +89,7 @@ export function createImageShapeTool({stage,canvas,parameters,signal,context,pre
         x:(left+right)/2,y:(top+bottom)/2,scale:Math.max(width,height)/resolution}};
   }
   function update(event){
-    const box=canvas.getBoundingClientRect(),end=[(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height];
+    const end=canvasPoint(canvas,event);
     const current=gesture;
     current.rect=bounds(current.start,end,event);
     layout();
@@ -115,7 +117,7 @@ export function createImageShapeTool({stage,canvas,parameters,signal,context,pre
     if(!active||event.button!==0||gesture)return;
     const state=context(),style=getState();
     if(!state.enabled||!usable(style)||![style.strokeWidth,style.cornerRadius].every(Number.isInteger))return;
-    const box=canvas.getBoundingClientRect(),start=[(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height];
+    const start=canvasPoint(canvas,event);
     if(!start.every(n=>n>=0&&n<=1))return;
     gesture={pointer:event.pointerId,start,rect:bounds(start,start,event),origin:state.origin,insertion:state.insertion,
       colors:state.colors,style,layerId:crypto.randomUUID(),previewed:false};

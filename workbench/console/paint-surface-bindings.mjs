@@ -1,4 +1,5 @@
 import {modelFingerprint,validateModelState} from './model-binding.mjs';
+import {isStrokeBlock} from './public/stroke-blocks.mjs';
 
 const original='original';
 const owns=(map,key)=>Object.hasOwn(map,key);
@@ -24,7 +25,11 @@ export function validateSurfaceBindings(paint){
   }
   for(const layer of paint.layers){
     reference(layer,projected(layer));
-    for(const stroke of [...(layer.strokes||[]),...(layer.maskStrokes||[])])reference(stroke,spatialStroke(stroke));
+    for(const stroke of [...(layer.strokes||[]),...(layer.maskStrokes||[])]){
+      if(isStrokeBlock(stroke)){
+        for(const key of stroke.bindings??[])reference({surfaceBinding:key},true);
+      }else reference(stroke,spatialStroke(stroke));
+    }
   }
 }
 
@@ -46,7 +51,11 @@ export function pinSurfaceInputs(doc,{reproject=[]}={}){
       if(reproject.includes(layer.id))delete layer.surfaceBinding;
       pin(layer);
     }else delete layer.surfaceBinding;
-    for(const stroke of [...(layer.strokes||[]),...(layer.maskStrokes||[])])if(spatialStroke(stroke))pin(stroke);
+    for(const stroke of [...(layer.strokes||[]),...(layer.maskStrokes||[])]){
+      if(isStrokeBlock(stroke)){
+        for(const key of stroke.bindings??[])used.add(key);
+      }else if(spatialStroke(stroke))pin(stroke);
+    }
   }
   if(used.size)paint.surfaceBindings=Object.fromEntries([...used].map(key=>[key,bindings[key]]));
   else delete paint.surfaceBindings;

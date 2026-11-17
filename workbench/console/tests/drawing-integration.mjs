@@ -300,8 +300,8 @@ try{
   const brushTool=editor.getByRole('button',{name:'画笔',exact:true});
   const eraserTool=editor.getByRole('button',{name:'橡皮擦',exact:true});
   const option=label=>editor.locator('input.workspace-number-input[aria-label="'+label+'"]');
-  async function setBrushOption(label,value){
-    const control=option(label),wrapper=control.locator('..');
+  async function setBrushOption(label,value,control=option(label)){
+    const wrapper=control.locator('..');
     await wrapper.dblclick();
     const entry=wrapper.getByRole('spinbutton',{name:'输入数值'});
     await entry.fill(String(value));
@@ -530,7 +530,8 @@ try{
     const current=await api(projectRoute);
     return curvesLayer(current).adjustment.points.rgb.some(point=>Math.abs(point[0]-64)<=1&&Math.abs(point[1]-128)<=1)&&current;
   },'保存 RGB 曲线控制点');
-  await page.locator('select[aria-label="曲线通道"]').selectOption('red',{force:true});
+  await page.getByRole('button',{name:'曲线通道',exact:true}).click();
+  await page.getByRole('option',{name:'红色',exact:true}).click();
   await page.locator('.document-curves-graph[data-channel=red]:not([data-disabled])').waitFor();
   await page.mouse.click(...await graphPoint(128,148));
   const redCurve=await until(async()=>{
@@ -926,8 +927,9 @@ try{
   },'从图像属性更改形状填充色');
   await canvas.focus();
   await page.keyboard.press('Control+t');
-  await editor.locator('form.editor-toolbar [data-transform-field=angle]').waitFor();
-  await setBrushOption('旋转',30);
+  const shapeAngle=editor.locator('form.editor-toolbar [data-transform-field=angle]');
+  await shapeAngle.waitFor();
+  await setBrushOption('旋转',30,shapeAngle);
   await editor.getByRole('button',{name:'应用',exact:true}).click();
   const rotated=await until(async()=>{
     const current=await api(projectRoute);
@@ -1121,7 +1123,7 @@ try{
   await brushParams.click();
   const brushPopup=editor.getByRole('dialog',{name:'笔尖参数',exact:true});
   await brushPopup.waitFor();
-  await brushPopup.getByRole('checkbox',{name:'压感',exact:true}).waitFor();
+  await brushPopup.getByRole('checkbox',{name:'压感不透明度',exact:true}).waitFor();
   assert.equal(await brushPopup.locator('[data-brush-setting="brush-flow"]').count(),1);
   await page.screenshot({path:path.join(data,'compact-brush-options.png')});
   await page.keyboard.press('Escape');

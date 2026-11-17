@@ -19,7 +19,7 @@ export function createProjectState({write,travel,draft,selectLayer,selectResourc
   return {
     get imageContext(){return imageContext;},get imageEditor(){return imageEditor;},get editorDomain(){return editorDomain;},
     setEditorDomain(next){if(!['image','material'].includes(next)||next===editorDomain)return;editorDomain=next;emit('editorDomain');},
-    selectImage(next,source,{force=false}={}){if(!force&&JSON.stringify(next)===JSON.stringify(imageContext))return;imageContext=next;emit('imageSelection',source,{force});},
+    selectImage(next,source,{force=false,reveal=false}={}){if(!force&&JSON.stringify(next)===JSON.stringify(imageContext))return;imageContext=next;emit('imageSelection',source,{force,reveal});},
     activateImageEditor(id,selection){imageEditor=id;this.selectImage(selection,id);},
     releaseImageEditor(id){if(imageEditor===id)imageEditor=null;},
     get document(){return doc;},get layerId(){return layerId;},get resource(){return resource;},get frame(){return frame;},get scene(){return scene;},get previewStatus(){return previewStatus;},get brushDraft(){return brushDraft;},

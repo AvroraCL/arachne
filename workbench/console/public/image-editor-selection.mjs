@@ -29,9 +29,9 @@ export function createImageEditorSelection(shared,{areaId,saved,onChange=()=>{}}
     if(event.kind==='imageSelection'&&shared.imageEditor===areaId&&event.source!==areaId&&JSON.stringify(selection)!==JSON.stringify(shared.imageContext))remember(shared.imageContext);
     emit(event);
   });
-  function select(next,source,{force=false}={}){
+  function select(next,source,{force=false,reveal=false}={}){
     if(disposed)return;ensure();if(!projectId||!force&&JSON.stringify(next)===JSON.stringify(selection))return;
-    remember(next);if(shared.imageEditor===areaId)shared.selectImage(selection,areaId,{force});else if(!publishInitial())emit({kind:'imageSelection',source:areaId,force});
+    remember(next);if(shared.imageEditor===areaId)shared.selectImage(selection,areaId,{force,reveal});else if(!publishInitial())emit({kind:'imageSelection',source:areaId,force,reveal});
   }
   function subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);}
   const project=new Proxy(shared,{get(target,key){if(key==='imageContext'){ensure();return selection;}if(key==='selectImage')return select;if(key==='subscribe')return subscribe;if(key==='isImageEditorActive')return ()=>!disposed&&shared.imageEditor===areaId&&shared.editorDomain==='image';return Reflect.get(target,key,target);}});

@@ -23,7 +23,20 @@ export function surfaceControls(host,{drawing=false}={}){
     number('brush-hardness','硬度',1,0,1);
     number('brush-opacity','强度',1,0,1);
   }
-  checkbox('brush-uv-pressure','压感',true);checkbox('brush-mirror-enabled','镜像',false);
+  checkbox('brush-uv-pressure',drawing?'压感不透明度':'压感',true);
+  if(drawing){
+    checkbox('brush-pressure-size','压感大小',false);
+    number('brush-smoothing','平滑',0,0,100,1);
+    elements['brush-smoothing'].dataset.scrubSuffix='%';
+    for(const [key,label,min,max,value,suffix] of [
+      ['tipAngle','笔尖角度',-180,180,0,'°'],['roundness','圆度',10,100,100,'%'],
+      ['scatter','散布',0,100,0,'%'],['grain','纹理深度',0,100,0,'%']
+    ]){
+      number('brush-'+key,label,value,min,max,1);
+      elements['brush-'+key].dataset.scrubSuffix=suffix;
+    }
+  }
+  checkbox('brush-mirror-enabled','镜像',false);
   for(const id of ['brush-erase',...paintChannels.map(k=>'brush-'+k)]){const i=el('input');i.type='checkbox';i.checked=!['brush-erase','brush-metallic','brush-roughness'].includes(id);elements[id]=i;}
   for(const id of ['brush-ink','fill-region','brush-preset']){const s=el('select');s.append(new Option('0','0'),new Option('1','1'));if(id==='fill-region')s.append(new Option('多边形','polygon'));if(id==='fill-region')s.value='polygon';elements[id]=s;}
   for(const id of ['surface-orbit','surface-paint','surface-mask','surface-fill','surface-sample','uv-eraser-tool','brush-mirror'])elements[id]=el('button');

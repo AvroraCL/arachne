@@ -2,6 +2,7 @@ import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mj
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
+import {isSelectionAsset} from './uv-selection-region.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
 import {paintChannels,channelSpecs,activePaintChannels,renderChannel,liveStride} from './paint-channels.mjs';
 import {headerControls,chromeButton,areaIcons,createContextActions} from './area-chrome.mjs';
@@ -390,7 +391,7 @@ export function registerAreaEditors(registry,bridge){
       }:null;
       if(enabled)view.dataset.renderLighting=rig?'project':'viewport';else delete view.dataset.renderLighting;
       viewport.setRenderPreview({enabled,paused:cyclesPaused,suspended,interacting:navigating||wheelTimer!==null,
-        samples:bridge.preferences().autoDetail?sampling.detailSamples:sampling.draftSamples,project:rig},retry);
+        sampling,project:rig},retry);
     }
     const unsubscribeCyclesSettings=bridge.renderSettings?.subscribe(syncCameraFrame);
     function syncPreviewStatus(){
@@ -723,15 +724,16 @@ export function registerAreaEditors(registry,bridge){
   }
   registry.register('properties',ctx=>materialPanel(ctx,materialProperties));
   registry.register('layers',ctx=>materialPanel(ctx,inner=>legacy('layers',inner)||createMaterialLayerEditor(inner,bridge)));
-  registry.register('imageLayers',ctx=>createImagePanel('layers',{...ctx,busy:bridge.busy,openImageText:bridge.openImageText,imageSelection:bridge.imageSelection}));
-  registry.register('imageProperties',ctx=>createImagePanel('properties',{...ctx,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment}));
+  registry.register('imageLayers',ctx=>createImagePanel('layers',{...ctx,busy:bridge.busy,openImageText:bridge.openImageText,
+    imageSelection:bridge.imageSelection,sampleLayerSelection:bridge.sampleLayerSelection}));
+  registry.register('imageProperties',ctx=>createImagePanel('properties',{...ctx,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment,pickAdjustmentColor:bridge.pickAdjustmentColor}));
   registry.register('library',ctx=>legacy('library',ctx)||createLibraryEditor(ctx,bridge));
   registry.register('scene',ctx=>createSceneEditor(ctx));
   registry.register('renderResult',ctx=>createRenderResultEditor(ctx,bridge.renderResults));
   registry.register('renderSettings',ctx=>createRenderSettingsEditor(ctx,bridge.renderSettings,{
     propertyTarget:bridge.propertyTarget,busy:bridge.busy,
     material:(host,state,scope)=>materialProperties({...ctx,host,state},scope),
-    drawing:(host,tools,root,project)=>createImagePanel('properties',{...ctx,host,tools,root,project,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment})
+    drawing:(host,tools,root,project)=>createImagePanel('properties',{...ctx,host,tools,root,project,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment,pickAdjustmentColor:bridge.pickAdjustmentColor})
   }));
   registry.register('console',ctx=>createConsoleEditor(ctx));
 }
@@ -848,7 +850,7 @@ function createLibraryEditor(ctx,bridge){
   function execute(ops,origin){return project.commands(ops,origin).catch(error=>{status.textContent=error.message;ctx.error(error);return false;});}
   function matching(doc){
     const terms=searchTerms(query);
-    return Object.entries(doc.paint[kind]||{}).filter(([,item])=>matchesSearch(item.name,terms));
+    return Object.entries(doc.paint[kind]||{}).filter(([,item])=>!isSelectionAsset(item)&&matchesSearch(item.name,terms));
   }
   const personalHost=el('div','editor-scroll personal-editor-host');host.insertBefore(personalHost,status);
   personal=createPersonalShelf({
@@ -982,7 +984,10 @@ function createSceneEditor(ctx){
   enhanceSelectMenu(filter,{menuClass:'outline-filter-menu',iconOnly:true,triggerIcon:workspaceIcons.filter});
   const filterControl=filter.closest('.custom-select');filterControl.classList.add('outline-filter');
   const filtering=()=>!!search.value.trim()||filter.value!=='all';
-  list.tabIndex=0;list.setAttribute('aria-label','场景物体列表');toolbar.append(searchField,locate,show,filterControl);host.append(toolbar,list,status);
+  const footer=el('div','editor-scene-footer');
+  footer.append(status,locate,show);
+  searchField.addEventListener('click',event=>{if(!clear.contains(event.target))search.focus();});
+  list.tabIndex=0;list.setAttribute('aria-label','场景物体列表');toolbar.append(searchField,filterControl);host.append(toolbar,list,footer);
   const renderState=name=>renderObjectVisible(renderFlags,project.document?.paint.renderVisibility,name);
   async function changeRendered(ids,visible,origin=project.origin()){
     if(!origin||renderPending)return;
@@ -1096,7 +1101,8 @@ function createSceneEditor(ctx){
       if(!filtered){root.setAttribute('aria-expanded',String(expanded));root.setAttribute('aria-label',expanded?'折叠场景':'展开场景');root.title='Shift + 单击递归展开或折叠';}
       const disclosure=el('span','outline-disclosure');disclosure.innerHTML=arrow;
       const icon=el('span','editor-object-icon');icon.innerHTML=areaIcons.collection;
-      root.append(disclosure,icon,el('span','','场景集合'));list.append(root);
+      const count=el('span','outline-fold-count',items.length+' 个物体');
+      root.append(disclosure,icon,el('span','','场景集合'),count);list.append(root);
     }
     if(expanded)for(const {item,depth,ancestorGuides,hasNext,hasChildren,expanded:open,matched} of rows){
       const row=el('div','editor-layer-row'),name=button('',event=>{

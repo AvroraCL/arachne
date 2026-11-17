@@ -1,5 +1,8 @@
+import {canvasCoordinates,canvasPoint} from './image-canvas-coordinates.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {chromeButton} from './area-chrome.mjs';
+import {maskTransformIdentity} from './image-documents.mjs';
+import {mapImageMaskPoint} from './image-warp.mjs';
 
 const svgNS='http://www.w3.org/2000/svg';
 const clamp=n=>Math.max(0,Math.min(1,n));
@@ -7,6 +10,11 @@ const sameOrigin=(a,b)=>a.id===b.id&&a.revision===b.revision&&a.documentId===b.d
 const distance=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
 const usable=gradient=>distance(gradient.start,gradient.end)>=1/4096;
 const reversed=gradient=>({...gradient,colors:[...gradient.colors].reverse(),alpha:[...gradient.alpha].reverse()});
+function mapPoint([u,v],from,to){
+  const [a,b,d,e,x,y]=from,[A,B,D,E,X,Y]=to,determinant=a*e-b*d;
+  const sx=(e*(u-x)-d*(v-y))/determinant,sy=(-b*(u-x)+a*(v-y))/determinant;
+  return [A*sx+D*sy+X,B*sx+E*sy+Y];
+}
 
 function snapped(point,anchor){
   const [dx,dy]=point.map((value,i)=>value-anchor[i]);
@@ -54,6 +62,13 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
   let kind=settings.kind==='radial'?'radial':'linear',fade=settings.fade===true,flip=settings.flip===true;
   const isMask=state=>state.origin.target==='mask';
   const currentGradient=state=>isMask(state)?state.layer?.maskGradient:state.layer?.gradient;
+  function displayGradient(state,gradient=currentGradient(state)){
+    if(!gradient)return gradient;
+    const to=state.layer?.gradientTransform;
+    const point=isMask(state)?p=>mapImageMaskPoint(state.layer,gradient,p):
+      to?p=>mapPoint(p,maskTransformIdentity,to):p=>p;
+    return {...gradient,start:point(gradient.start),end:point(gradient.end)};
+  }
   function style(state,shapeValue=kind,transparent=fade){
     const stops={kind:shapeValue,colors:[state.colors.foreground,transparent?state.colors.foreground:state.colors.background],
       alpha:[1,transparent?0:1]};
@@ -67,7 +82,10 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
   function updateSelected(change){
     const state=context(),gradient=currentGradient(state);
     if(!gradient||!state.enabled||state.layer.locked||gesture)return;
-    void commit(operation(state.origin,state.layer.id,change(gradient)),state.origin,false);
+    const next=change(gradient);
+    if(isMask(state)&&state.layer.maskTransform)next.maskSpace??=[...maskTransformIdentity];
+    if(isMask(state)&&state.layer.maskWarpSteps?.length)next.maskWarpIndex??=0;
+    void commit(operation(state.origin,state.layer.id,next),state.origin,false);
   }
   shape.onchange=()=>{
     kind=shape.value;
@@ -87,12 +105,11 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
   };
 
   function layout(){
-    const state=context(),gradient=gesture?.gradient||currentGradient(state);
+    const state=context(),gradient=displayGradient(state,gesture?.gradient||currentGradient(state));
     const visible=active&&!!gradient&&!canvas.hidden;
     guide.toggleAttribute('hidden',!visible);
     if(!visible)return;
-    const rect=canvas.getBoundingClientRect(),box=stage.getBoundingClientRect();
-    const at=([x,y])=>[rect.left-box.left+x*rect.width,rect.top-box.top+y*rect.height];
+    const at=canvasCoordinates(canvas).toLocal(stage.getBoundingClientRect());
     const [a,b]=[at(gradient.start),at(gradient.end)];
     const path='M'+a.join(' ')+'L'+b.join(' ');
     for(const pathElement of [line,stroke])pathElement.setAttribute('d',path);
@@ -115,13 +132,12 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
     swatch.style.setProperty('--gradient-preview',`linear-gradient(90deg,${colors.join(',')})`);
     layout();
   }
-  function point(event,box){
-    return [(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height];
-  }
   function update(event){
     const current=gesture;
-    const position=point(event,canvas.getBoundingClientRect()).map(clamp);
-    current.gradient[current.handle]=event.shiftKey?snapped(position,current.anchor):position;
+    const position=canvasPoint(canvas,event).map(clamp);
+    const point=event.shiftKey?snapped(position,current.anchor):position;
+    current.gradient[current.handle]=current.mask?mapImageMaskPoint(current.layer,current.gradient,point,true):
+      current.space?mapPoint(point,current.space,maskTransformIdentity):point;
     layout();
     if(usable(current.gradient)&&!frame)frame=requestAnimationFrame(()=>{
       frame=0;
@@ -134,26 +150,35 @@ export function createImageGradientTool({stage,canvas,parameters,signal,context,
   function pointerDown(event){
     const state=context();
     if(!active||!state.enabled||event.button!==0||gesture)return;
-    const box=canvas.getBoundingClientRect(),pointIn=point(event,box);
+    const box=canvasCoordinates(canvas),pointIn=box.fromClient(event.clientX,event.clientY);
     if(!box.width||!box.height||pointIn.some(n=>n<0||n>1))return;
     const previous=currentGradient(state),layer=isMask(state)||previous?state.layer:null;
     if(layer?.locked)return;
-    const gradient=previous?structuredClone(previous):{...style(state),...state.selection};
+    let gradient;
     let handle='end',anchor=pointIn;
+    const mask=isMask(state),space=layer?.gradientTransform;
     if(previous){
+      const displayed=displayGradient(state,previous);
       const grabbed=event.target.dataset?.gradientHandle;
-      const startDistance=distance(gradient.start,pointIn)*box.width,endDistance=distance(gradient.end,pointIn)*box.width;
+      const startDistance=distance(displayed.start,pointIn)*box.width,endDistance=distance(displayed.end,pointIn)*box.width;
       if(grabbed||Math.min(startDistance,endDistance)<=11){
+        gradient=structuredClone(previous);
         handle=grabbed||(startDistance<=endDistance?'start':'end');
-        anchor=gradient[handle==='start'?'end':'start'];
-      }else{
-        gradient.start=pointIn;gradient.end=pointIn;
+        anchor=displayed[handle==='start'?'end':'start'];
+        if(mask&&layer.maskTransform)gradient.maskSpace??=[...maskTransformIdentity];
+        if(mask&&layer.maskWarpSteps?.length)gradient.maskWarpIndex??=0;
       }
-    }else{
-      gradient.start=pointIn;gradient.end=pointIn;
+    }
+    if(!gradient){
+      const start=!mask&&space?mapPoint(pointIn,space,maskTransformIdentity):pointIn;
+      const fields=previous&&(!mask||!layer.maskTransform&&!layer.maskWarpSteps?.length)?
+        structuredClone(previous):{...style(state),...state.selection};
+      gradient={...fields,start,end:start,
+        ...(mask&&layer.maskTransform?{maskSpace:[...layer.maskTransform]}:{}),
+        ...(mask&&layer.maskWarpSteps?.length?{maskWarpIndex:layer.maskWarpSteps.length}:{})};
     }
     gesture={origin:state.origin,layerId:layer?.id||crypto.randomUUID(),insertion:layer?null:state.insertion,
-      before:previous,gradient,handle,anchor,pointer:event.pointerId,previewed:false};
+      before:previous,gradient,handle,anchor,space,mask,layer,pointer:event.pointerId,previewed:false};
     stage.setAttribute('data-gradient-dragging','');
     stage.focus({preventScroll:true});stage.setPointerCapture(event.pointerId);
     event.preventDefault();event.stopImmediatePropagation();

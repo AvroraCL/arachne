@@ -1,12 +1,41 @@
 """Surface operations on the registered mesh and original UV samples."""
 from paint_channels import RGB, DEFAULTS, channel_value
+from base64 import b64decode
+from gzip import GzipFile
+from io import BytesIO
+import json
 import math
 from collections import OrderedDict
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
+from paint_kernel import brush_coverage_kernel
 from PIL import Image, ImageFilter
+
+
+def iter_strokes(strokes):
+    """Decode one lossless block at a time and retain authored stroke order."""
+    for item in strokes:
+        if 'strokeBlock' not in item:
+            yield item
+            continue
+        try:
+            limit = 8 * 1024 * 1024
+            with GzipFile(fileobj=BytesIO(b64decode(item['strokeBlock'], validate=True))) as stream:
+                data = stream.read(limit + 1)
+            if len(data) > limit:
+                raise ValueError('oversized block')
+            block = json.loads(data)
+            if (not isinstance(block, list) or not 1 <= len(block) == item['count'] <= 64 or
+                any(not isinstance(stroke, dict) or 'strokeBlock' in stroke for stroke in block)):
+                raise ValueError('invalid block')
+            if item.get('inverted'):
+                for stroke in block:
+                    stroke['value'] = 1-stroke['value']
+        except (KeyError, OSError, ValueError, EOFError) as error:
+            raise ValueError('无法读取压实笔触，原始工程未修改') from error
+        yield from block
 
 
 def drawing_brush_stamps(stroke):
@@ -18,10 +47,16 @@ def drawing_brush_stamps(stroke):
     # Use document-space spacing at every preview size. Bound raster work for
     # very long strokes with large tips while keeping spacing uniform.
     stamp_budget = max(256, min(16000, 128_000_000 / (diameter * 4096)**2))
-    spacing = max(1 / 4096, diameter * stroke['spacing'], length / stamp_budget)
+    spacing = diameter * stroke['spacing']
+    min_spacing = max(1 / 4096, length / stamp_budget)
+    sized = stroke.get('pressureMode') in ('size','both')
+
+    def step(pressure):
+        return max(min_spacing, spacing * max(.05, pressure) if sized else spacing)
+
     for path in paths:
         yield path[0]
-        remaining = spacing
+        remaining = step(path[0][2] if len(path[0]) == 3 else 1)
         for a, b in zip(path, path[1:]):
             dx, dy = b[0]-a[0], b[1]-a[1]
             distance = math.hypot(dx, dy)
@@ -29,9 +64,59 @@ def drawing_brush_stamps(stroke):
             pressure_b = b[2] if len(b) == 3 else 1
             while remaining <= distance:
                 t = remaining / distance
-                yield (a[0]+dx*t, a[1]+dy*t, pressure_a+(pressure_b-pressure_a)*t)
-                remaining += spacing
+                pressure = pressure_a+(pressure_b-pressure_a)*t
+                yield (a[0]+dx*t, a[1]+dy*t, pressure)
+                remaining += step(pressure)
             remaining -= distance
+
+
+def brush_offsets(seed, index, scatter, radius):
+    value = (seed + 0x9e3779b9 * (index+1)) & 0xffffffff
+    value = ((value ^ (value >> 16)) * 0x7feb352d) & 0xffffffff
+    value = ((value ^ (value >> 15)) * 0x846ca68b) & 0xffffffff
+    value ^= value >> 16
+    angle = (value & 0xffff) * (2*math.pi/65536)
+    distance = scatter*radius*math.sqrt((value >> 16)/65535)
+    return math.cos(angle)*distance, math.sin(angle)*distance
+
+
+def uv_dabs(stroke, stamps):
+    radius,tip = stroke['radius'],stroke.get('tip')
+    mode = stroke.get('pressureMode')
+    for index,stamp in enumerate(stamps):
+        u,y = stamp[:2]
+        pressure = stamp[2] if len(stamp)==3 else 1
+        if pressure==0:
+            continue
+        stamp_radius = radius*max(.05,pressure) if mode in ('size','both') else radius
+        strength = 1 if mode=='size' else pressure
+        if tip and tip['scatter']:
+            dx,dy = brush_offsets(tip['seed'],index,tip['scatter'],stamp_radius)
+            u += dx
+            y += dy
+        yield u,1-y,stamp_radius,strength
+
+
+def grain_coverage(x, y, size, depth):
+    # Use the same document-space grain in drafts and final output.
+    a = np.floor((x+.5)*(1024/size)).astype(np.uint32)
+    b = np.floor((y+.5)*(1024/size)).astype(np.uint32)
+    h = a * np.uint32(2246822519) ^ (b[:,None] * np.uint32(3266489917))
+    h = (h ^ (h >> 15)) * np.uint32(668265263)
+    return 1-depth*((h ^ (h >> 13)) & 255).astype(np.float32)/255
+
+
+def sample_brush_tip(pixels, x, y):
+    height,width = pixels.shape
+    u,v = (x*max(width,height)+width-1)*.5, (y*max(width,height)+height-1)*.5
+    left,top = np.floor(u).astype(np.int32),np.floor(v).astype(np.int32)
+    fx,fy = u-left,v-top
+    coverage = np.zeros(left.shape,dtype=np.float32)
+    for col,wx in ((left,1-fx),(left+1,fx)):
+        for row,wy in ((top,1-fy),(top+1,fy)):
+            valid = (col>=0)&(col<width)&(row>=0)&(row<height)
+            coverage[valid] += pixels[row[valid],col[valid]]*wx[valid]*wy[valid]
+    return coverage
 
 
 @lru_cache(maxsize=2)
@@ -127,6 +212,9 @@ def projector_visibility(triangles, coords):
 
 
 class Surface:
+    paint_batch_size = 8
+    paint_batch_pixels = 0
+
     def __init__(self, positions, valid, normals, objects, xyz, owner, allowed, live=False, *,
                  polygons=None, protected=None, edges_path=None, uv_shape=None):
         self.positions = positions
@@ -193,10 +281,12 @@ class Surface:
         if 'rect' in stroke:
             return self._rect_stroke(stroke)
         if stroke.get('uv'):
+            tip = stroke.get('tip')
             key = ('uv', stroke['radius'], stroke['hardness'], stroke['opacity'],
-                   tuple(stroke.get('clip', ())), self._selection_key(stroke),
+                   tuple(stroke.get('clip', ())), self._selection_cache_key(stroke),
                    stroke.get('feather', 0),
-                   stroke.get('flow'), stroke.get('spacing'), tuple(stroke.get('breaks', ())),
+                   stroke.get('flow'), stroke.get('spacing'), stroke.get('pressureMode'), tuple(stroke.get('breaks', ())),
+                   tuple(tip.get(key) for key in ('angle','roundness','scatter','grain','seed','tipAsset','textureAsset')) if tip else None,
                    tuple(map(tuple, stroke['stamps'])))
             return self._uv_stroke(stroke, key)
         if not self.live:
@@ -226,12 +316,19 @@ class Surface:
             regions = [[polygon]] if polygon is not None else []
         return tuple(tuple(tuple(map(tuple, ring)) for ring in region) for region in regions)
 
+    def _selection_cache_key(self, shape):
+        return (shape['coverage'],) if 'coverage' in shape else self._selection_key(shape)
+
+    def _selection_bytes(self, rect, shape):
+        return self._selection_tile(rect,shape).astype(np.uint8)*255
+
     def _selection_tile(self, rect, shape):
         regions = self._selection_key(shape)
         key = tuple(rect),regions
         if self.uv_selection_cache is not None and self.uv_selection_cache[0] == key:
             return self.uv_selection_cache[1]
         height,width = self.uv_shape
+        raster, col_offset, row_offset = getattr(self,'uv_window',(width,0,0))
         row0,row1,col0,col1 = self._uv_pixel_rect(rect)
         mask = np.full((row1-row0,col1-col0), not regions, dtype=bool)
         # Each polygon uses even-odd fill for its outer contour and holes.
@@ -240,20 +337,20 @@ class Surface:
             rings = [np.asarray(ring) for ring in region]
             x,y = np.concatenate(rings).T
             next_x,next_y = np.concatenate([np.roll(ring,-1,axis=0) for ring in rings]).T
-            first_row = max(row0, height-math.ceil(y.max()*height-.5))
-            last_row = min(row1, height-math.ceil(y.min()*height-.5))
+            first_row = max(row0, raster-math.ceil(y.max()*raster-.5)-row_offset)
+            last_row = min(row1, raster-math.ceil(y.min()*raster-.5)-row_offset)
             for row in range(first_row,last_row):
-                v = 1-(row+.5)/height
+                v = 1-(row+row_offset+.5)/raster
                 crossed = (y>v)!=(next_y>v)
                 xs = x[crossed]+(v-y[crossed])*(next_x[crossed]-x[crossed])/(next_y[crossed]-y[crossed])
-                columns = np.clip(np.ceil(np.sort(xs)*width-.5).astype(int),col0,col1)-col0
+                columns = np.clip(np.ceil(np.sort(xs)*raster-.5).astype(int)-col_offset,col0,col1)-col0
                 for left,right in zip(columns[::2],columns[1::2]):
                     mask[row-row0,left:right] = True
         self.uv_selection_cache = key,mask
         return mask
 
     def _selection_contains(self, ids, rect, shape):
-        if 'polygon' not in shape and 'regions' not in shape:
+        if 'polygon' not in shape and 'regions' not in shape and 'coverage' not in shape:
             return self._inside_uv(*self._texel_uv(ids),rect)
         width = self.uv_shape[1]
         row0,row1,col0,col1 = self._uv_pixel_rect(rect)
@@ -273,15 +370,14 @@ class Surface:
         return max(0, row0-pad), min(height, row1+pad), max(0, col0-pad), min(width, col1+pad)
 
     def _feathered_selection(self, rect, shape):
-        key = tuple(rect), self._selection_key(shape), shape['feather']
+        key = tuple(rect), self._selection_cache_key(shape), shape['feather']
         previous = getattr(self, 'uv_feather_cache', None)
         if previous and previous[0] == key:
             return previous[1]
         row0, row1, col0, col1 = self._selection_bounds(rect, shape)
         inner_row0, inner_row1, inner_col0, inner_col1 = self._uv_pixel_rect(rect)
         pixels = np.zeros((row1-row0, col1-col0), dtype=np.uint8)
-        inner = self._selection_tile(rect, shape)
-        pixels[inner_row0-row0:inner_row1-row0, inner_col0-col0:inner_col1-col0] = inner * np.uint8(255)
+        pixels[inner_row0-row0:inner_row1-row0, inner_col0-col0:inner_col1-col0] = self._selection_bytes(rect,shape)
         radius = shape['feather'] * self.uv_shape[1] / 4096
         softened = np.asarray(Image.fromarray(pixels).filter(ImageFilter.GaussianBlur(radius)))
         self.uv_feather_cache = key, softened
@@ -289,6 +385,14 @@ class Surface:
 
     def _selection_weights(self, ids, rect, shape):
         if not shape.get('feather'):
+            if 'coverage' in shape:
+                row0,row1,col0,col1 = self._uv_pixel_rect(rect)
+                rows,cols = np.divmod(ids,self.uv_shape[1])
+                keep = (rows>=row0)&(rows<row1)&(cols>=col0)&(cols<col1)
+                weights = np.zeros(len(ids),dtype=np.float32)
+                tile = self._selection_bytes(rect,shape)
+                weights[keep] = tile[rows[keep]-row0,cols[keep]-col0]/255
+                return weights
             return self._selection_contains(ids, rect, shape)
         row0, row1, col0, col1 = self._selection_bounds(rect, shape)
         rows, cols = np.divmod(ids, self.uv_shape[1])
@@ -308,6 +412,9 @@ class Surface:
         if stroke.get('feather'):
             soft = self._feathered_selection(rect, stroke)
             tile = tile & (soft > 0)
+        elif 'coverage' in stroke:
+            soft = self._selection_bytes(rect,stroke)
+            tile = tile & (soft > 0)
         elif 'polygon' in stroke or 'regions' in stroke:
             tile = tile & self._selection_tile(rect,stroke)
         rows, cols = np.nonzero(tile)
@@ -322,11 +429,20 @@ class Surface:
             self.strokes.move_to_end(key)
             return self.strokes[key]
         height, width = self.uv_shape
+        raster, col_offset, row_offset = getattr(self,'uv_window',(width,0,0))
         radius = stroke['radius']
         weights = None
         stamps = stroke['stamps']
         flow = stroke.get('flow')
         opacity = stroke['opacity']
+        tip = stroke.get('tip')
+        footprint = math.sqrt(2) if tip and tip.get('tipAsset') else 1
+        extent = radius * (footprint + tip['scatter']) if tip else radius
+        custom_tip = self.brush_image(tip['tipAsset'],True) if tip and 'tipAsset' in tip else None
+        texture = self.brush_image(tip['textureAsset'],False) if tip and 'textureAsset' in tip and tip['grain'] else None
+        if tip:
+            radians = math.radians(tip['angle'])
+            c,s = math.cos(radians),math.sin(radians)
         if flow is None and self.live and self.brush_prefix is not None:
             previous, known = self.brush_prefix
             count = len(previous[-1])
@@ -340,37 +456,59 @@ class Surface:
             points = np.array([stamp[:2] for stamp in stamps])
             low_x,low_y = points.min(axis=0)
             high_x,high_y = points.max(axis=0)
-            min_col = max(min_col,math.floor((low_x-radius)*width))
-            max_col = min(max_col,math.ceil((high_x+radius)*width))
-            min_row = max(min_row,math.floor((1-high_y-radius)*height))
-            max_row = min(max_row,math.ceil((1-low_y+radius)*height))
+            min_col = max(min_col,math.floor((low_x-extent)*raster)-col_offset)
+            max_col = min(max_col,math.ceil((high_x+extent)*raster)-col_offset)
+            min_row = max(min_row,math.floor((1-high_y-extent)*raster)-row_offset)
+            max_row = min(max_row,math.ceil((1-low_y+extent)*raster)-row_offset)
             if min_col>=max_col or min_row>=max_row:
                 return np.empty(0,dtype=np.int32),np.empty(0,dtype=np.float32)
             row_origin,col_origin = min_row,min_col
             weights = np.zeros((max_row-min_row,max_col-min_col),dtype=np.float32)
         elif weights is None:
             weights = np.zeros((height,width),dtype=np.float32)
-        for stamp in drawing_brush_stamps(stroke) if flow is not None else stamps:
-            u,y = stamp[:2]
-            pressure = stamp[2] if len(stamp)==3 else 1
-            if pressure==0:
-                continue
-            v = 1-y
-            left, right = max(min_col, math.floor((u-radius)*width)), min(max_col, math.ceil((u+radius)*width))
-            bottom, top = max(min_row, math.floor((v-radius)*height)), min(max_row, math.ceil((v+radius)*height))
-            if left>=right or bottom>=top:
-                continue
-            xs = (np.arange(left,right,dtype=np.float32)+.5)/width-u
-            ys = (np.arange(bottom,top,dtype=np.float32)+.5)/height-v
-            distance = np.hypot(xs,ys[:,None])/radius
-            tile = weights[bottom-row_origin:top-row_origin,left-col_origin:right-col_origin]
-            falloff = np.clip((1-distance)/max(.001,1-stroke['hardness']),0,1)
-            if flow is None:
-                np.maximum(tile, falloff*(opacity*pressure), out=tile)
-            else:
-                tile += (1-tile)*falloff*(flow*pressure)
+        if flow is not None:
+            dabs = uv_dabs(stroke, drawing_brush_stamps(stroke))
+            native = brush_coverage_kernel()
+        else:
+            dabs = uv_dabs(stroke, stamps)
+            native = None
+        if native is not None:
+            clip = min_col+col_offset, min_row+row_offset, max_col+col_offset, max_row+row_offset
+            native(weights,dabs,raster,col_origin+col_offset,row_origin+row_offset,clip,
+                   footprint,stroke['hardness'],flow,tip,custom_tip,texture)
+        else:
+            for u,v,stamp_radius,strength in dabs:
+                pad = stamp_radius*footprint
+                left, right = max(min_col, math.floor((u-pad)*raster)-col_offset), min(max_col, math.ceil((u+pad)*raster)-col_offset)
+                bottom, top = max(min_row, math.floor((v-pad)*raster)-row_offset), min(max_row, math.ceil((v+pad)*raster)-row_offset)
+                if left>=right or bottom>=top:
+                    continue
+                xs = (np.arange(left,right,dtype=np.float32)+col_offset+.5)/raster-u
+                ys = (np.arange(bottom,top,dtype=np.float32)+row_offset+.5)/raster-v
+                if custom_tip is not None:
+                    a,b = (c*xs-s*ys[:,None])/stamp_radius, -(s*xs+c*ys[:,None])/(tip['roundness']*stamp_radius)
+                    falloff = sample_brush_tip(custom_tip,a,b)
+                elif tip and tip['roundness'] < 1:
+                    distance = np.hypot(c*xs-s*ys[:,None],(s*xs+c*ys[:,None])/tip['roundness'])/stamp_radius
+                else:
+                    distance = np.hypot(xs,ys[:,None])/stamp_radius
+                tile = weights[bottom-row_origin:top-row_origin,left-col_origin:right-col_origin]
+                if custom_tip is None:
+                    falloff = np.clip((1-distance)/max(.001,1-stroke['hardness']),0,1)
+                if tip and tip['grain']:
+                    x,y = np.arange(left,right)+col_offset,np.arange(bottom,top)+row_offset
+                    if texture is None:
+                        falloff *= grain_coverage(x,y,raster,tip['grain'])
+                    else:
+                        tx = np.floor((x+.5)*4096/raster).astype(int)%texture.shape[1]
+                        ty = np.floor((raster-y-.5)*4096/raster).astype(int)%texture.shape[0]
+                        falloff *= 1-tip['grain']*(1-texture[ty[:,None],tx])
+                if flow is None:
+                    np.maximum(tile, falloff*(opacity*strength), out=tile)
+                else:
+                    tile += (1-tile)*falloff*(flow*strength)
         flat = weights.ravel()
-        shaped = 'polygon' in stroke or 'regions' in stroke or stroke.get('feather')
+        shaped = 'polygon' in stroke or 'regions' in stroke or 'coverage' in stroke or stroke.get('feather')
         if self.live:
             ids = np.flatnonzero((flat>0) & self.allowed).astype(np.int32)
             coverage = 1
@@ -522,22 +660,30 @@ class Surface:
             self.brush_prefix = key,weights
         return np.fromiter(weights.keys(),dtype=np.int32), np.fromiter(weights.values(),dtype=np.float32)
 
-    def paint(self, strokes, channels, color, sampler=None, raster_edit=None):
-        affected = np.empty(0,dtype=np.int32)
-        paint = {}
+    def paint(self, strokes, channels, color, sampler=None, raster_edit=None, convert=None, initial=None):
+        affected, paint = initial if initial is not None else (np.empty(0,dtype=np.int32), {})
+        sample = sampler or self.stroke
         batch = []
-        for stroke in strokes:
+        batch_pixels = 0
+        for source in iter_strokes(strokes):
+            stroke = convert(source) if convert else source
             transform = stroke.get('transformUV')
             clear = stroke.get('clearUV')
             raster = raster_edit is not None and ('flood' in stroke or 'clone' in stroke)
             if transform is None and clear is None and not raster:
-                batch.append(stroke)
+                ids, opacity = sample(stroke)
+                batch.append((stroke, ids, opacity))
+                batch_pixels += len(ids)
+                if len(batch) == self.paint_batch_size or self.paint_batch_pixels and batch_pixels >= self.paint_batch_pixels:
+                    affected, paint = self._paint_strokes(batch, channels, color, affected, paint)
+                    batch = []
+                    batch_pixels = 0
                 continue
-            affected, paint = self._paint_strokes(batch, channels, color, affected, paint, sampler)
+            affected, paint = self._paint_strokes(batch, channels, color, affected, paint)
             if clear is not None:
                 selected = self._selection_weights(affected,clear,stroke)
                 keep = selected < 1
-                if stroke.get('feather'):
+                if stroke.get('feather') or 'coverage' in stroke:
                     remainder = 1-selected
                     for alpha,value in paint.values():
                         alpha *= remainder
@@ -548,11 +694,12 @@ class Surface:
             else:
                 affected, paint = raster_edit(affected, paint, stroke)
             batch = []
-        return self._paint_strokes(batch, channels, color, affected, paint, sampler)
+            batch_pixels = 0
+        return self._paint_strokes(batch, channels, color, affected, paint)
 
     def _expand_paint(self, affected, paint, extra):
         if not len(affected):
-            return extra, paint
+            return extra, {}
         combined = np.union1d(affected, extra)
         if len(combined) == len(affected):
             return affected, paint
@@ -565,11 +712,10 @@ class Surface:
             expanded[name] = a,v
         return combined, expanded
 
-    def _paint_strokes(self, strokes, channels, color, affected, paint, sampler=None):
+    def _paint_strokes(self, samples, channels, color, affected, paint):
         # Each channel has its own stroke opacity and premultiplied value.
-        if not strokes:
+        if not samples:
             return affected,paint
-        samples = [(stroke,*(sampler or self.stroke)(stroke)) for stroke in strokes]
         expanding = [ids for stroke,ids,_ in samples if not stroke.get('preserveAlpha')]
         extra = np.unique(np.concatenate(expanding)) if expanding else np.empty(0, dtype=np.int32)
         affected,paint = self._expand_paint(affected,paint,extra)
@@ -620,14 +766,14 @@ class Surface:
             return affected,paint
         height,width = self.uv_shape
         left,top,right,bottom = transform['rect']
-        cx,cy = (left+right)/2,(top+bottom)/2
+        cx,cy = transform.get('pivot', ((left+right)/2,(top+bottom)/2))
         sx,sy = transform['scale']
         dx,dy = transform['offset']
         angle = math.radians(transform['angle'])
         c,s = math.cos(angle),math.sin(angle)
         x, y = self._texel_uv(affected)
         coverage = self._selection_weights(affected,transform['rect'],transform)
-        soft = bool(transform.get('feather'))
+        soft = bool(transform.get('feather') or transform.get('coverage'))
         ink = np.logical_or.reduce([alpha>0 for alpha,_ in paint.values()])
         selected = (coverage>0) & ink
         if not np.any(selected):
@@ -711,10 +857,10 @@ class Surface:
     def mask(self, strokes, sampler=None):
         if not strokes:
             return None
-        if any('region' in stroke for stroke in strokes):
-            alpha = np.zeros(len(self.owner),dtype=np.float32)
+        if any('region' in stroke or 'strokeBlock' in stroke for stroke in strokes):
+            alpha = np.zeros(len(self.allowed),dtype=np.float32)
             value = np.zeros_like(alpha)
-            for stroke in strokes:
+            for stroke in iter_strokes(strokes):
                 ids,opacity = (sampler or self.stroke)(stroke)
                 value[ids] = value[ids]*(1-opacity)+stroke['value']*opacity
                 alpha[ids] = alpha[ids]*(1-opacity)+opacity

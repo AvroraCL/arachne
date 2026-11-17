@@ -47,7 +47,7 @@ def crease_angles(surface):
     return result
 
 
-def edge_wear(surface, indexes, effect):
+def edge_wear(surface, indexes, effect, *, weight_angle=False):
     if not hasattr(surface, 'crease_angles'):
         surface.crease_angles = crease_angles(surface)
     owners, points = surface.owner[indexes], surface.xyz[indexes]
@@ -66,6 +66,8 @@ def edge_wear(surface, indexes, effect):
         along = np.clip(np.einsum('ij,ij->i', delta, edge) / np.maximum(1e-30, np.einsum('ij,ij->i',edge,edge)), 0, 1)
         distance = np.linalg.norm(delta - along[:, None]*edge, axis=1)
         value = smooth((1 - distance/width) / effect['softness'])
+        if weight_angle:
+            value *= np.minimum(angle[near] / 90, 1)
         output[near] = np.maximum(output[near], value)
     return output
 

@@ -12,7 +12,7 @@ export const maskGeneratorFields={
     {key:'seed',label:'随机种子',value:1,min:0,max:65535,step:1,integer:true,dragSpeed:1}
   ]
 };
-export const maskEffectLabels={invert:'反相',levels:'色阶',height:'位置渐变',facing:'表面朝向',edgeWear:'边缘磨损',surfaceNoise:'表面噪声'};
+export const maskEffectLabels={invert:'反相',levels:'色阶',height:'位置渐变',facing:'表面朝向',edgeWear:'边缘磨损',surfaceNoise:'表面噪声',anchor:'引用锚点'};
 export const maskEffectBlends=[
   ['replace','替换'],['multiply','相乘'],['add','相加'],['subtract','相减'],['max','取大'],['min','取小']
 ];

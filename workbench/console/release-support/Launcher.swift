@@ -61,7 +61,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         file.addItem(.separator());command(file,"保存工程","save","s")
         command(file,"另存为工程…","saveProjectCopy","s",[.command,.shift])
         command(file,"生成工程副本","createBackup");command(file,"下载工程副本…","downloadBackup")
-        command(file,"工程详情…","projectDetails");file.addItem(.separator());command(file,"导出…","export","e")
+        command(file,"工程详情…","projectDetails");file.addItem(.separator());command(file,"导出…","export","e",[.command,.option])
         let edit=group("编辑")
         command(edit,"撤销","undo","z");command(edit,"重做","redo","z",[.command,.shift]);edit.addItem(.separator())
         command(edit,"剪切","cut","x")

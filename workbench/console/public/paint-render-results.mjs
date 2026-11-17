@@ -61,6 +61,8 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
       selected.render?`${cyclesFormatLabel(selected.render.fileFormat)} · ${selected.render.bitDepth} 位${selected.render.fileFormat==='OPEN_EXR'?'浮点':''}`:
         selected.cycles?.render_effective?.bitDepth?`${cyclesFormatLabel(selected.cycles.render_effective.fileFormat)} · ${selected.cycles.render_effective.bitDepth} 位`:'',
       selected.cycles?.gpu_fallback?'已从 GPU 切换至 CPU':'',
+      selected.render?.textureSampling?.reduced
+        ?'受设备或内存预算限制，实际贴图最大尺寸 '+selected.render.textureSampling.atlas.join(' × '):'',
       result&&result.id!==selected.id?`画面显示最近成功的结果 · r${result.revision}`:'',
     ].filter(Boolean).join('\n'):'渲染会使用工程当前的模型、材质和 4K 贴图。';
     if(info.textContent!==detail)info.textContent=detail;

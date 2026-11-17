@@ -33,6 +33,9 @@ function start({result,fail}){
   return {request(id,config){child.stdin.write(JSON.stringify({id,config})+'\n');},stop(){child.kill();}};
 }
 const fastQueue=createPaintLiveQueue(start);
+// Canvas hit tests are user input. Keep thumbnail and brush preview bursts
+// from dropping a click when the preview queue is full.
+const layoutQueue=createPaintLiveQueue(start);
 
 export function livePaint(config,options={}){
   if(options.signal?.aborted)return Promise.reject(paintAbortError());
@@ -41,10 +44,12 @@ export function livePaint(config,options={}){
   }
   for(const [id,file] of Object.entries(config.assets))checkFile(file,id);
   if(config.liveResolution===4096)return livePaintDetail(config,options);
-  return fastQueue.submit(config,options).then(pixels=>Buffer.from(pixels,'base64'));
+  const queue=config.imageLayoutProbe?layoutQueue:fastQueue;
+  return queue.submit(config,options).then(pixels=>Buffer.from(pixels,'base64'));
 }
 
 export function stopLivePaint(){
   stopLivePaintDetails();
   fastQueue.stop();
+  layoutQueue.stop();
 }

@@ -76,6 +76,7 @@ def main():
         raise RuntimeError('Protection references missing participating material(s): '+', '.join(sorted(excluded_materials-material_names)))
     before = uv_digest(objects)
     positions, shading, normals, protected, uv_valid, object_ids, polygon_ids = [], [], [], [], [], [], []
+    triangle_uvs = []
     for oi, obj in enumerate(objects):
         if any(mod.show_viewport for mod in obj.modifiers) or obj.instance_type != 'NONE':
             raise RuntimeError('Apply geometry modifiers/instances in a separate asset copy first: ' + obj.name)
@@ -101,6 +102,7 @@ def main():
             poly = mesh.polygons[triangle.polygon_index]
             pts = vertices[list(triangle.vertices)]
             uv = np.asarray([tuple(layer.data[loop].uv) for loop in triangle.loops])
+            triangle_uvs.append(uv)
             positions.append(pts)
             shading.append(vertex_normals[list(triangle.vertices)])
             normals.append(tuple((normal_transform @ poly.normal).normalized()*sign))
@@ -117,7 +119,7 @@ def main():
     print('guide geometry objects=%d triangles=%d' % (len(objects), len(positions)), flush=True)
     np.savez_compressed(out/'surfaces.npz', positions=positions, shading_normals=shading,
                         polygon_normals=normals, object_ids=np.asarray(object_ids, dtype=np.int32),
-                        polygon_ids=np.asarray(polygon_ids, dtype=np.int32), protected=protected, uv_valid=uv_valid)
+                        polygon_ids=np.asarray(polygon_ids, dtype=np.int32), protected=protected, uv_valid=uv_valid, uv=np.asarray(triangle_uvs,dtype=np.float32))
     report = {'blender': bpy.app.version_string, 'resolution': cfg['resolution'],
               'objects': [o.name for o in objects], 'triangles': len(positions),
               'protected_triangles': int(protected.sum()), 'invalid_uv_triangles': int((~uv_valid).sum()),

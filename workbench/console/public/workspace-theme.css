@@ -294,3 +294,12 @@ button.primary {border-radius:8px;background:#e5e5e5;color:#171717}
 /* Review scope stays visible; a completed process is not artwork approval. */
 .internal-label{font-size:10px;color:#aaa;border:1px solid #414141;padding:3px 7px;border-radius:5px;white-space:nowrap}
 #flow-sidebar #review-summary{padding:14px;border:1px solid #4b4b4b;border-radius:10px;margin-bottom:18px;background:#202020}#review-summary h2{font-size:13px;margin-bottom:8px}#review-summary p,#review-summary li{font-size:11px;color:#bbb;line-height:1.75}#review-summary ul{padding-left:17px;margin:10px 0}#review-summary li+li{margin-top:6px}.scope-status{margin:0;padding:5px 14px;font-size:11px;color:#c6c6c6;border-top:1px solid #303030}.review-references{flex-wrap:wrap}
+
+@font-face{
+  font-family:'IBM Plex Mono';src:url('./fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf') format('truetype');
+  font-weight:400;font-style:normal;font-display:swap;
+}
+@font-face{
+  font-family:'IBM Plex Mono';src:url('./fonts/ibm-plex-mono/IBMPlexMono-Bold.ttf') format('truetype');
+  font-weight:700;font-style:normal;font-display:swap;
+}

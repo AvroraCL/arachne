@@ -1,4 +1,13 @@
+import os from 'node:os';
 import path from 'node:path';
+
+export function desktopUserRoot(env=process.env){
+  const home=os.homedir();
+  const defaultRoot=process.platform==='win32'
+    ?path.join(env.LOCALAPPDATA||path.join(home,'AppData','Local'),'Arachne','Workbench')
+    :path.join(home,'Library/Application Support/Arachne/Public Workbench');
+  return path.resolve(env.ARACHNE_USER_DATA_DIR||defaultRoot);
+}
 
 export function dataDirectory(root,env=process.env){
   const external=env.ARACHNE_ALLOW_EXTERNAL_DATA==='1',configured=env.ARACHNE_DATA_DIR;

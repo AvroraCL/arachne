@@ -1,3 +1,4 @@
+import {createGeometryQueue} from './geometry-queue.mjs';
 import {readDesktopWorkspace,writeDesktopWorkspace} from './desktop-workspaces.mjs';
 import {readDesktopSettings,writeDesktopSettings} from './desktop-settings.mjs';
 import {importGlbProject,importObjProject} from './model-registration.mjs';
@@ -5,7 +6,7 @@ import {embedGltf} from './gltf-embed.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
-import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,livePaintInput,savePaintText,restorePaint,imageDocumentInput,imageClipboardInput,imageExportInput,checkPaintPreview,validateProjectPaint} from './paint.mjs';
+import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,meshMapOperation,livePaintInput,savePaintText,previewImageText,importPaintFont,paintFontFile,restorePaint,imageDocumentInput,imageEdgeViewInput,imageClipboardInput,imageExportInput,imageLayoutProbeInput,bakeImageLayers,captureImageCloneSource,sampleImageSelection,checkPaintPreview,validateProjectPaint} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {assetPreview} from './asset-preview.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
@@ -30,9 +31,9 @@ import {migrateBlendProject,hasBlendMigrations,stopBlendMigrations} from './blen
 import {viewportManifest,startViewport,viewportFile,viewportTopology,viewportTopologyFile,stopViewport} from './viewport.mjs';
 import {acquireServiceProfile} from './service-owner.mjs';
 
-const personalLibrary=createPersonalLibrary({root:path.join(DATA,'personal-library'),readProject:read,projectFolder:projectDir,commitProject:commit,validatePaint:validateProjectPaint});
-const localWorkbenchMark=path.join(DATA,'workbench-mark.svg');
+const meshMapQueue=createGeometryQueue(),meshMapShutdown=new AbortController();
 
+const personalLibrary=createPersonalLibrary({root:path.join(DATA,'personal-library'),readProject:read,projectFolder:projectDir,commitProject:commit,validatePaint:validateProjectPaint});
 const portArg=process.argv.indexOf('--port');const PORT=portArg<0?8766:Number(process.argv[portArg+1]);
 if(!Number.isInteger(PORT)||PORT<1024||PORT>65535)throw Error('端口无效');
 const local=`http://127.0.0.1:${PORT}`;setBaseUrl(local);
@@ -257,10 +258,6 @@ const server=http.createServer(async(req,res)=>{
     const parts=url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     if(parts.some(p=>p==='..'||p==='.'||p.includes('/')||p.includes('\\')||p.includes('\0')))throw Error('路径无效');
     if(parts[0]!=='api'){
-      if(req.method==='GET'&&url.pathname==='/arachne-mark.svg'&&fs.statSync(localWorkbenchMark,{throwIfNoEntry:false})?.isFile()){
-        res.setHeader('Content-Security-Policy',"default-src 'none'; sandbox");
-        file(res,localWorkbenchMark);return;
-      }
       if(url.pathname==='/license'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','X-Content-Type-Options':'nosniff'});
         res.end(fs.readFileSync(path.join(workspaceRoot,'LICENSE')));return;
@@ -336,6 +333,9 @@ const server=http.createServer(async(req,res)=>{
         const source=doc.source.format==='glb'?(await prepareModelGeometry({...doc,modeling:undefined},{frozen:true})).source:doc.source;
         file(res,path.join(source.bundle,'top',parts[5]+'.png'));return;
       }
+      if(req.method==='GET'&&operation==='fonts'&&parts.length===6){
+        file(res,await paintFontFile(doc,parts[5]));return;
+      }
       if(req.method==='GET'&&operation==='assets'&&parts.length===6){
         const a=doc.paint.assets[parts[5]];if(!a)throw Error('涂装素材不存在');
         file(res,path.join(projectDir(id),'assets',a.file));return;
@@ -370,6 +370,19 @@ const server=http.createServer(async(req,res)=>{
       if(req.method==='GET'&&operation==='render-objects'){send(res,200,renderSceneObjects(doc));return;}
       if(req.method==='GET'&&operation==='model-state'){send(res,200,modelGeometryStatus(doc));return;}
       if(req.method==='GET'&&operation==='model-log'){file(res,modelGeometryLog(doc,url.searchParams.get('binding')));return;}
+      if(req.method==='GET'&&operation==='uv-layout'){
+        const controller=new AbortController();
+        const disconnect=()=>{if(!res.writableEnded)controller.abort();};
+        res.on('close',disconnect);
+        try{
+          const geometry=await prepareModelGeometry(doc,{signal:controller.signal});
+          if(res.destroyed||controller.signal.aborted)return;
+          const png=await livePaint({source:geometry.source,assets:{},uvLayout:true},{signal:controller.signal});
+          if(res.destroyed||controller.signal.aborted)return;
+          res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-UV-Sha256':doc.source.uvSha256||''});
+          res.end(png);return;
+        }finally{res.off('close',disconnect);}
+      }
       if(req.method!=='POST'){send(res,405,{error:'方法不支持'});return;}
       const b=await body(req);
       doc=read(id);
@@ -381,18 +394,52 @@ const server=http.createServer(async(req,res)=>{
       if(operation==='render-session'){
         updateCyclesSession(doc,b,()=>listJobs(id));send(res,202,{accepted:true});return;
       }
+      if(operation==='image-layer-bake'||operation==='image-clone-source'){
+        const controller=new AbortController();
+        res.on('close',()=>{if(!res.writableEnded)controller.abort();});
+        const action=operation==='image-layer-bake'?bakeImageLayers:captureImageCloneSource;
+        const result=await action(doc,b,{signal:controller.signal});
+        if(!res.destroyed)send(res,200,result);
+        return;
+      }
+      if(operation==='image-layout-probe'){
+        const controller=new AbortController();
+        res.on('close',()=>{if(!res.writableEnded)controller.abort();});
+        const probe=await livePaint(imageLayoutProbeInput(doc,b),{signal:controller.signal});
+        if(!res.destroyed)send(res,200,JSON.parse(probe.toString('utf8')));
+        return;
+      }
+      if(operation==='image-edge-view'){
+        const controller=new AbortController();
+        res.on('close',()=>{if(!res.writableEnded)controller.abort();});
+        const pixels=await livePaint(imageEdgeViewInput(doc,b),{signal:controller.signal});
+        if(!res.destroyed){
+          res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store'});res.end(pixels);
+        }
+        return;
+      }
+      if(operation==='image-select'){
+        const controller=new AbortController();
+        res.on('close',()=>{if(!res.writableEnded)controller.abort();});
+        const selection=await sampleImageSelection(doc,b,{signal:controller.signal});
+        if(!res.destroyed)send(res,200,{selection});
+        return;
+      }
       if(['image-live','image-clipboard','image-export'].includes(operation)){
         const inputFor={'image-live':imageDocumentInput,'image-clipboard':imageClipboardInput,'image-export':imageExportInput}[operation];
         if(b.revision!==doc.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
-        const input=inputFor(doc,b);
+        const textDraft=operation==='image-live'&&b.textDraft!==undefined;
+        const input=textDraft?null:inputFor(doc,b);
         const controller=new AbortController();
         res.on('close',()=>{if(!res.writableEnded)controller.abort();});
-        const pixels=await livePaint(input,{signal:controller.signal});
+        const pixels=textDraft?await previewImageText(doc,b,{signal:controller.signal}):await livePaint(input,{signal:controller.signal});
         if(res.destroyed)return;
         if(read(id).revision!==b.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
+        const window=input?.imageWindow&&pixels.length===input.imageWindow[2]**2*4+1&&pixels[0]===87?input.imageWindow:null;
         res.writeHead(200,{'Content-Type':operation==='image-live'?'application/octet-stream':'image/png','Cache-Control':'no-store',
-          'X-Paint-Resolution':String(input.liveResolution),'X-Paint-Revision':String(b.revision)});
-        res.end(pixels);return;
+          'X-Paint-Resolution':String(input?.liveResolution??b.resolution),'X-Paint-Revision':String(b.revision),
+          ...(window?{'X-Paint-Window':window.join(',')}:{})});
+        res.end(window?pixels.subarray(1):pixels);return;
       }
       if(operation==='live'){
         if(b.revision!==doc.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
@@ -436,9 +483,18 @@ const server=http.createServer(async(req,res)=>{
         }finally{res.off('close',disconnect);}
       }
       if(operation==='library-import'){send(res,200,personalLibrary.importResource({projectId:id,projectRevision:b.revision,revision:b.libraryRevision,id:b.id,placement:b.placement}));return;}
+      if(operation==='mesh-bake'||operation==='mesh-mask'){
+        const client=new AbortController();
+        res.once('close',()=>{if(!res.writableEnded)client.abort();});
+        const signal=AbortSignal.any([client.signal,meshMapShutdown.signal]);
+        const result=await meshMapQueue.submit(()=>meshMapOperation(doc,b,operation,signal),signal);
+        if(!res.destroyed)send(res,200,result);
+        return;
+      }
       if(operation==='model-prepare'){void preparePaintGeometry(doc).catch(()=>{});send(res,202,modelGeometryStatus(doc));return;}
       if(operation==='model'){send(res,200,saveProjectModel(doc,b));return;}
       if(operation==='assets')send(res,201,importPaint(doc,b));
+      else if(operation==='fonts'&&parts.length===5)send(res,201,await importPaintFont(doc,b));
       else if(operation==='text')send(res,201,await savePaintText(doc,b));
       else if(['undo','redo'].includes(operation))send(res,200,travel(id,b.revision,operation,b.steps));
       else if(operation==='preview'||operation==='draft')send(res,202,submit(id,operation==='draft'?'paint-draft':'paint-preview',b.revision,b.requestId));
@@ -492,6 +548,7 @@ const server=http.createServer(async(req,res)=>{
       const jid=parts[4];const j=getJob(id,jid);
       if(parts.length===5&&req.method==='GET'){send(res,200,j);return;}
       if(parts.length===6&&parts[5]==='log'&&req.method==='GET'){send(res,200,readJobLog(id,jid));return;}
+      if(j.status==='corrupt'){send(res,422,{error:j.error});return;}
       if(parts[5]==='cancel'&&req.method==='POST'){await body(req);send(res,200,await cancel(id,jid));return;}
       if(parts[5]==='snapshot'&&req.method==='GET'){file(res,path.join(jobDir(id,jid),'snapshot.json'));return;}
       if(parts[5]==='files'&&req.method==='GET'){
@@ -517,7 +574,7 @@ let stopping=false;
 async function shutdown(code=0){
   if(stopping)return;
   stopping=true;
-  server.close();stopCyclesDeviceProbe();
+  server.close();meshMapQueue.close();meshMapShutdown.abort();stopCyclesDeviceProbe();
   const previewStop=stopPaintCyclesView(),interactiveStop=stopCyclesSessions();
   stopLivePaint();stopViewport();stopModelGeometry();stopBlendMigrations();
   try{await Promise.all([stop(),previewStop,interactiveStop]);}

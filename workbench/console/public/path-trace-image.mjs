@@ -5,8 +5,10 @@ import {channelSpecs} from './paint-channels.mjs';
 import {createPathTracingEngine} from './path-tracing-engine.mjs';
 import {renderLightingDefaults} from './render-lighting.mjs';
 import {renderAppearanceDefaults} from './render-appearance.mjs';
-import {projectTone,projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
+import {projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
 import {applyProjectLens} from './path-trace-camera.mjs';
+import {useRenderTextureAtlas} from './render-texture-atlas.mjs';
+import {completedPathTraceTarget,drawPathTrace} from './path-trace-display.mjs';
 
 async function loadModel(input){
   const gltf=await new GLTFLoader().loadAsync('/input/model.glb');
@@ -75,29 +77,21 @@ function setupLighting(scene,library,lighting,center,radius,transparent){
   return environment;
 }
 
-function outputCanvas(source,settings,region,appearance){
+function pruneRenderHidden(root){
+  const hidden=[];
+  root.traverse(node=>{if(!node.visible&&node.parent)hidden.push(node);});
+  for(const node of hidden)node.removeFromParent();
+}
+
+function outputCanvas(source,settings,region){
   const canvas=document.createElement('canvas');
   [canvas.width,canvas.height]=region?.output||[settings.width,settings.height];
-  const context=canvas.getContext('2d',{alpha:settings.transparent===true,willReadFrequently:appearance.gamma!==1||appearance.look!=='None'});
+  const context=canvas.getContext('2d',{alpha:settings.transparent===true});
   if(region){
     const [left,top,right,bottom]=region.pixels,w=right-left,h=bottom-top;
     context.drawImage(source,left,top,w,h,region.crop?0:left,region.crop?0:top,w,h);
   }else context.drawImage(source,0,0);
-  if(appearance.gamma!==1||appearance.look!=='None'){
-    const data=context.getImageData(0,0,canvas.width,canvas.height);
-    const contrast=appearance.look.endsWith('High Contrast')?1.2:appearance.look.endsWith('Low Contrast')?.8:1;
-    const table=Uint8ClampedArray.from({length:256},(_,i)=>255*(.5+(Math.pow(i/255,1/appearance.gamma)-.5)*contrast));
-    for(let i=0;i<data.data.length;i+=4)for(let j=0;j<3;j++)data.data[i+j]=table[data.data[i+j]];
-    context.putImageData(data,0,0);
-  }
   return canvas;
-}
-
-function completedRenderTarget(engine){
-  const target=engine.target,pair=engine._pathTracer?._blendTargets;
-  // Version 0.0.24 exposes the first completed alpha buffer even on even passes.
-  // Its accumulator alternates the two buffers after each complete sample.
-  return pair?.[1]===target&&engine.samples%2===0?pair[0]:target;
 }
 
 async function downloadLinearExr(renderer,target,settings,region){
@@ -140,42 +134,44 @@ async function downloadLinearExr(renderer,target,settings,region){
 export async function renderImage(input){
   const {settings,region}=input,appearance=input.appearance||renderAppearanceDefaults;
   const renderer=new THREE.WebGLRenderer({alpha:true,preserveDrawingBuffer:true,antialias:false});
-  let engine,environment;
+  let engine,environment,textureAtlas;
   try{
     const gl=renderer.getContext(),limit=gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
     if(settings.width>limit||settings.height>limit)throw Error('当前图形设备不支持所选输出分辨率');
     renderer.setSize(settings.width,settings.height,false);
-    Object.assign(renderer,projectTone(appearance));
     const backend=await createPathTracingEngine(renderer);
     engine=backend.engine;
     engine.tiles.set(4,4);
     engine.bounces=Math.max(1,settings.maxBounces);
     engine.transmissiveBounces=settings.maxBounces;
-    engine.textureSize.set(2048,2048);
     const present=engine.renderToCanvasCallback;
     engine.renderToCanvasCallback=(target,output,quad)=>{
-      if(engine.samples===settings.samples)quad.material.map=completedRenderTarget(engine).texture;
+      quad.material.map=completedPathTraceTarget(engine).texture;
       present(target,output,quad);
     };
     const scene=new THREE.Scene(),root=await loadModel(input);
+    const bounds=new THREE.Box3().setFromObject(root);
+    // The backend's light collection doesn't inherit a hidden parent's flag.
+    pruneRenderHidden(root);
     scene.add(root);
-    const bounds=new THREE.Box3().setFromObject(root),center=bounds.getCenter(new THREE.Vector3());
+    const center=bounds.getCenter(new THREE.Vector3());
     const radius=Math.max(.001,bounds.getSize(new THREE.Vector3()).length()/2);
     const {camera,view}=makeCamera(settings,center,radius,input.optics,backend.library.PhysicalCamera);
     environment=setupLighting(scene,backend.library,input.lighting,center,radius,settings.transparent);
+    textureAtlas=useRenderTextureAtlas(engine,renderer,settings);
     engine.setScene(scene,camera);
     let sample=0;
     while(sample<settings.samples){
-      engine.renderSample();
+      drawPathTrace(engine,renderer,appearance);
       const next=Math.floor(engine.samples);
       if(next>sample){sample=next;await globalThis.reportRenderSample(sample);}
       else await new Promise(resolve=>setTimeout(resolve,0));
       if(gl.isContextLost())throw Error('路径追踪过程中图形设备连接中断');
     }
-    if(settings.fileFormat==='OPEN_EXR')await downloadLinearExr(renderer,completedRenderTarget(engine),settings,region);
-    const canvas=outputCanvas(renderer.domElement,settings,region,appearance);
-    return {png:canvas.toDataURL('image/png').split(',')[1],camera:view,samples:sample};
+    if(settings.fileFormat==='OPEN_EXR')await downloadLinearExr(renderer,completedPathTraceTarget(engine),settings,region);
+    const canvas=outputCanvas(renderer.domElement,settings,region);
+    return {png:canvas.toDataURL('image/png').split(',')[1],camera:view,samples:sample,textureSampling:textureAtlas.report()};
   }finally{
-    engine?.dispose();environment?.dispose();renderer.dispose();renderer.forceContextLoss();
+    textureAtlas?.dispose();engine?.dispose();environment?.dispose();renderer.dispose();renderer.forceContextLoss();
   }
 }

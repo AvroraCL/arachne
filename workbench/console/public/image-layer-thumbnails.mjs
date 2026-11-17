@@ -5,10 +5,10 @@ const canvases=new WeakMap();
 let tail=Promise.resolve();
 
 function thumbnailKey(slot,colorSpace,layer,mask){
-  const maskContent=[layer.maskBase,layer.maskStrokes,layer.maskGradient];
+  const maskContent=[layer.maskBase,layer.maskStrokes,layer.maskGradient,layer.maskDensity,layer.maskFeather,layer.maskTransform,layer.maskWarpSteps];
   const content=mask?maskContent:[
-    layer.kind,layer.visible,layer.opacity,layer.strokes,layer.gradient,
-    layer.kind==='image'?[layer.asset,layer.x,layer.y,layer.scale,layer.rotation,layer.stretch]:null,
+    layer.kind,layer.styles,layer.edgeDecontaminate,layer.visible,layer.opacity,layer.raster,layer.cloneSources,layer.strokes,layer.gradient,layer.gradientTransform,
+    ['image','shape'].includes(layer.kind)?[layer.asset,layer.shape,layer.x,layer.y,layer.scale,layer.rotation,layer.stretch,layer.warp]:null,
     layer.maskEnabled?maskContent:null
   ];
   return JSON.stringify([slot,colorSpace,content]);

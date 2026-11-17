@@ -23,12 +23,12 @@
 <link rel="stylesheet" href="/render-result-editor.css">
 <link rel="stylesheet" href="/image-documents.css">
 <link rel="stylesheet" href="/paint-responsive.css">
-<link rel="icon" href="/arachne-mark.svg" type="image/svg+xml">
+<link rel="icon" href="/arachne-icon.png" type="image/png">
 <script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/","three/examples/jsm/":"/vendor/three/examples/jsm/","three-gpu-pathtracer":"/vendor/three-gpu-pathtracer/build/index.module.js","three-mesh-bvh":"/vendor/three-mesh-bvh/build/index.module.js","polygon-clipping":"/polygon-clipping-browser.mjs"}}</script>
 </head>
 <body>
 <header class="paint-menubar">
-  <img class="paint-menubar-logo" src="/arachne-mark.svg" alt="阿拉克涅" width="32" height="32" draggable="false">
+  <img class="paint-menubar-logo" src="/arachne-icon.png" alt="阿拉克涅" width="32" height="32" draggable="false">
   <nav class="app-menus" aria-label="应用菜单">
     <details class="paint-menu" name="paint-menubar-menu"><summary>文件</summary><div class="paint-menu-content">
       <button id="new" type="button">新建工程</button>
@@ -588,6 +588,21 @@
   <div class="mask-area"><canvas id="mask-canvas" aria-label="灰度蒙版画布"></canvas></div>
   <div class="mask-footer"><span id="mask-status" role="status"></span><button id="mask-save" class="primary" type="button">保存蒙版</button></div>
 </dialog>
+<dialog id="mesh-map-dialog" class="paint-form-dialog" aria-labelledby="mesh-map-title">
+  <form>
+    <header><h2 id="mesh-map-title">网格贴图</h2><button type="button" data-close>关闭</button></header>
+    <div class="paint-form-content">
+      <label>烘焙分辨率<select name="resolution"><option>512</option><option selected>1024</option><option>2048</option></select></label>
+      <label>ID 来源<select name="idSource"><option value="material">材质槽</option><option value="object">物体</option><option value="vertex">顶点色 COLOR_0</option></select></label>
+      <button type="button" data-bake>烘焙 AO、曲率和 ID</button>
+      <label>提取范围<select name="mode"><option value="cavity">积灰 · AO 暗部</option><option value="convex">露漆 · 凸边</option><option value="concave">凹槽 · 凹边</option><option value="id">分色 · 颜色 ID</option></select></label>
+      <label>来源贴图<select name="image"></select></label>
+      <img data-preview alt="网格贴图预览" hidden>
+      <label data-pick hidden>ID 颜色<input type="color" name="pick" value="#ffffff" title="点击 ID 贴图取色，或直接选择颜色"></label>
+    </div>
+    <footer class="paint-form-footer"><output role="status"></output><button class="primary" type="submit">应用到蒙版</button></footer>
+  </form>
+</dialog>
 <dialog id="project-copy-dialog" class="paint-form-dialog" aria-labelledby="project-copy-title">
   <form id="project-copy-form">
     <header><strong id="project-copy-title">另存为工程</strong><button id="close-project-copy" type="button">关闭</button></header>
@@ -651,11 +666,20 @@
     <fieldset class="paint-form-content">
       <label>文字<textarea name="content" rows="4" maxlength="480" required placeholder="输入编号或标记"></textarea></label>
       <div class="paint-text-fields">
+        <label>字体<select name="font" aria-label="字体" data-searchable="true"></select></label>
         <label>字号（px）<input name="fontSize" type="number" min="16" max="512" step="1" required></label>
         <label>字重<select name="weight" aria-label="字重"><option value="400">常规</option><option value="700">粗体</option></select></label>
         <label>对齐<select name="align" aria-label="对齐"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
         <label>颜色<input name="color" type="color"></label>
       </div>
+      <div class="paint-text-fields">
+        <label>字距（px）<input name="tracking" type="number" min="-64" max="256" step="1" required></label>
+        <label>行距（0 为自动）<input name="leading" type="number" min="0" max="1024" step="1" required></label>
+        <label>段落宽（px）<input name="boxWidth" type="number" min="16" max="4096" step="1"></label>
+        <label>段落高（px）<input name="boxHeight" type="number" min="16" max="4096" step="1"></label>
+      </div>
+      <label>添加工程字体<input type="file" name="fontFile" accept=".ttf,.otf" aria-label="添加工程字体"></label>
+      <div class="paint-text-effects"></div>
       <div class="paint-text-sample" aria-hidden="true"></div>
     </fieldset>
     <div class="paint-form-footer"><span role="alert"></span><button type="submit" class="primary">应用</button></div>

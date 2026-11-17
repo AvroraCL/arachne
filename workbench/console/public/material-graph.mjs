@@ -32,6 +32,12 @@ const record=o=>o&&typeof o==='object'&&!Array.isArray(o);
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const hex=s=>typeof s==='string'&&/^#[a-f\d]{6}$/i.test(s);
 const number=n=>Number.isFinite(n)&&Math.abs(n)<=10000;
+export const brushTipDefaults=Object.freeze({tipAngle:0,roundness:100,scatter:0,grain:0});
+export const brushImageFields=['tipAsset','textureAsset'];
+export const brushImageMaxSize=1024;
+export const brushParamRanges={worldRadius:[.02,.65],uvRadius:[2,256],hardness:[0,1],opacity:[0,1],flow:[.01,1],spacing:[.05,2],smoothing:[0,100],
+  tipAngle:[-180,180],roundness:[10,100],scatter:[0,100],grain:[0,100]};
+const optionalBrushParams=['flow','spacing','smoothing','pressureSize',...Object.keys(brushTipDefaults),...brushImageFields];
 export function compileMaterialGraph(graph,assets={}){return compileGraph(graph,assets,nodeTypes,'f_16xl');}
 export function compileBrushGraph(graph){return compileGraph(graph,{},brushNodeTypes,'brush');}
 function compileGraph(graph,assets,nodeTypes,domain){
@@ -42,7 +48,7 @@ function compileGraph(graph,assets,nodeTypes,domain){
   const nodes=new Map();
   for(const node of graph.nodes){
     const spec=Object.hasOwn(nodeTypes,node?.type)?nodeTypes[node.type]:null;
-    if(!exact(node,['id','type','x','y','params'])||!spec||typeof node.id!=='string'||! /^[\w-]{1,100}$/.test(node.id)||nodes.has(node.id)||!number(node.x)||!number(node.y)||!exact(node.params,Object.keys(spec.defaults))||Object.keys(spec.defaults).some(key=>key!=='colorSpace'&&!(node.type==='pbr'&&paintChannels.includes(key)&&!legacyChannels.includes(key))&&!Object.hasOwn(node.params,key)))
+    if(!exact(node,['id','type','x','y','params'])||!spec||typeof node.id!=='string'||! /^[\w-]{1,100}$/.test(node.id)||nodes.has(node.id)||!number(node.x)||!number(node.y)||!exact(node.params,Object.keys(spec.defaults))||Object.keys(spec.defaults).some(key=>key!=='colorSpace'&&!(domain==='brush'&&node.type==='brush'&&optionalBrushParams.includes(key))&&!(node.type==='pbr'&&paintChannels.includes(key)&&!legacyChannels.includes(key))&&!Object.hasOwn(node.params,key)))
       throw Error('节点编号或参数无效');
     for(const [key,value] of Object.entries(node.params)){
       if(key==='asset'){
@@ -51,8 +57,10 @@ function compileGraph(graph,assets,nodeTypes,domain){
         if(!['srgb','linear'].includes(value))throw Error('图像颜色空间无效');
       }else if(key==='operation'){
         if(!['add','subtract','multiply','divide','minimum','maximum'].includes(value))throw Error('数学运算无效');
-      }else if(domain==='brush'&&node.type==='brush'&&['worldRadius','uvRadius','hardness','opacity'].includes(key)){
-        const [min,max]={worldRadius:[.02,.65],uvRadius:[2,256],hardness:[0,1],opacity:[0,1]}[key];
+      }else if(domain==='brush'&&node.type==='brush'&&brushImageFields.includes(key)){
+        if(value!==''&&!/^[a-f0-9]{64}$/.test(value))throw Error('笔刷图片无效');
+      }else if(domain==='brush'&&node.type==='brush'&&Object.hasOwn(brushParamRanges,key)){
+        const [min,max]=brushParamRanges[key];
         if(!Number.isFinite(value)||value<min||value>max)throw Error('笔刷参数超出范围');
       }else if(typeof spec.defaults[key]==='boolean'){
         if(typeof value!=='boolean')throw Error('笔刷开关无效');
@@ -104,8 +112,9 @@ function canonicalParams(node){
 export const brushNodeTypes={
   reroute:nodeTypes.reroute,
   value:nodeTypes.value,math:nodeTypes.math,
-  brush:{name:'笔刷参数',inputs:{worldRadius:'scalar',uvRadius:'scalar',hardness:'scalar',opacity:'scalar'},outputs:{brush:'brush'},
-    defaults:{worldRadius:.14,uvRadius:32,hardness:1,opacity:1,pressure:true,mirror:false}},
+  brush:{name:'笔刷参数',inputs:Object.fromEntries(Object.keys(brushParamRanges).map(key=>[key,'scalar'])),outputs:{brush:'brush'},
+    defaults:{worldRadius:.14,uvRadius:32,hardness:1,opacity:1,flow:1,spacing:.18,smoothing:0,pressure:true,pressureSize:false,mirror:false,
+      ...brushTipDefaults,tipAsset:'',textureAsset:''}},
   output:{name:'笔刷输出',inputs:{brush:'brush'},outputs:{},defaults:{}}
 };
 export function graphNodeTypes(graph){return graph?.material==='brush'?brushNodeTypes:nodeTypes;}

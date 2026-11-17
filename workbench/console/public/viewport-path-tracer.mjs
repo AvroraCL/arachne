@@ -1,18 +1,24 @@
 import * as THREE from 'three';
 import {createPathTracingEngine} from './path-tracing-engine.mjs';
-import {projectTone,projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
+import {projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
+import {renderAppearanceDefaults} from './render-appearance.mjs';
+import {completedPathTraceTarget,drawPathTrace,setPathTraceDisplay} from './path-trace-display.mjs';
 import {renderLightingDefaults} from './render-lighting.mjs';
 import {applyProjectLens} from './path-trace-camera.mjs';
+import {viewportConvergence} from './cycles-viewport-sampling.mjs';
+import {createViewportAdaptiveSampler} from './viewport-adaptive-sampler.mjs';
 
 const off={phase:'off',text:'',retry:false};
 
 export function createViewportPathTracer({renderer,host,request,accumulate=request,onStatus}){
   let options={enabled:false},status=off,engine=null,loading=false,failed=false,disposed=false;
-  let scene=null,sceneRoot=null,library=null,environment=null,environmentKey='',ground=null,lights=[],meshSignature='',materialSignature='',lightingSignature='',renderTone=null;
-  let previousCamera=null,lensCamera=null,lensKey='',previousLensKey='';
-  const cameraWorld=new THREE.Matrix4(),cameraProjection=new THREE.Matrix4();
+  let scene=null,sceneRoot=null,library=null,environment=null,environmentKey='',ground=null,lights=[],meshSignature='',materialSignature='',lightingSignature='',renderAppearance=null;
+  let previousCamera=null,lensCamera=null,lensKey='',previousLensKey='',presented=null;
+  let denoiseMaterial=null,denoiseStart=Infinity,adaptiveSampler=null;
+  const cameraWorld=new THREE.Matrix4(),cameraProjection=new THREE.Matrix4(),drawingSize=new THREE.Vector2();
 
   function publish(phase,text='',samples=0){
+    if(phase!=='off')host.dataset.renderSamples=String(samples);
     if(status.phase===phase&&status.text===text)return;
     status={phase,text,retry:phase==='error'};
     if(phase==='off'){
@@ -20,20 +26,27 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
       delete host.dataset.renderBackend;
       delete host.dataset.renderSamples;
       delete host.dataset.renderResolution;
+      delete host.dataset.renderDenoised;
+      delete host.dataset.renderConverged;
     }else{
       host.dataset.renderBackend='path-tracer';
       host.dataset.renderPhase=phase;
-      host.dataset.renderSamples=String(samples);
     }
     onStatus(status);
   }
 
   function release(){
+    adaptiveSampler?.dispose();
     engine?.dispose();
+    denoiseMaterial?.dispose();
     environment?.dispose();
     ground?.geometry.dispose();
     ground?.material.dispose();
-    engine=scene=sceneRoot=library=environment=ground=renderTone=previousCamera=lensCamera=null;
+    engine=scene=sceneRoot=library=environment=ground=renderAppearance=previousCamera=lensCamera=null;
+    presented=null;
+    denoiseMaterial=null;
+    adaptiveSampler=null;
+    denoiseStart=Infinity;
     lights=[];
     meshSignature=materialSignature=lightingSignature=environmentKey=previousLensKey='';
   }
@@ -41,6 +54,9 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
   function fail(error){
     release();
     failed=true;
+    delete host.dataset.renderResolution;
+    delete host.dataset.renderDenoised;
+    delete host.dataset.renderConverged;
     publish('error','路径追踪不可用 · '+error.message);
   }
 
@@ -53,6 +69,35 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
       engine=prepared;
       library=backend;
       engine.tiles.set(2,2);
+      // One untiled, quarter-size sample follows each new camera pose. Keep it
+      // visible until every tile of the first full-resolution sample is ready.
+      engine.dynamicLowRes=true;
+      engine.lowResScale=.25;
+      engine.rasterizeSceneCallback=()=>{}; // The viewport draws its own loading fallback.
+      const drawRaw=engine.renderToCanvasCallback;
+      engine.renderToCanvasCallback=(target,renderer,quad)=>{
+        target=adaptiveSampler?.image()||completedPathTraceTarget(engine);
+        quad.material.map=target.texture;
+        if(engine.samples<denoiseStart){drawRaw(target,renderer,quad);return;}
+        if(!denoiseMaterial){
+          denoiseMaterial=new library.DenoiseMaterial({
+            sigma:1.25,kSigma:1.6,threshold:.10,
+            premultipliedAlpha:renderer.getContextAttributes().premultipliedAlpha
+          });
+          // The filter accumulates premultiplied colors. Tone-map straight RGB
+          // before the shader applies the canvas's premultiplied alpha.
+          denoiseMaterial.fragmentShader=denoiseMaterial.fragmentShader.replace(
+            '#include <tonemapping_fragment>',
+            'gl_FragColor.rgb /= max(gl_FragColor.a, 0.00001);\n#include <tonemapping_fragment>'
+          );
+        }
+        const rawMaterial=quad.material;
+        setPathTraceDisplay(denoiseMaterial,renderAppearance||renderAppearanceDefaults);
+        denoiseMaterial.map=target.texture;
+        quad.material=denoiseMaterial;
+        try{drawRaw(target,renderer,quad);}
+        finally{quad.material=rawMaterial;}
+      };
       scene=new THREE.Scene();
       ground=new THREE.Mesh(new THREE.PlaneGeometry(1,1),
         new THREE.MeshStandardMaterial({side:THREE.DoubleSide}));
@@ -180,11 +225,7 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
   }
 
   function present(){
-    if(!renderTone){engine.renderSample();return;}
-    const {toneMapping,toneMappingExposure}=renderer;
-    Object.assign(renderer,renderTone);
-    try{engine.renderSample();}
-    finally{Object.assign(renderer,{toneMapping,toneMappingExposure});}
+    drawPathTrace(engine,renderer,renderAppearance);
   }
 
   return {
@@ -198,47 +239,83 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
         return;
       }
       if(retry){release();failed=false;}
-      if(retry||previous.enabled!==next.enabled||previous.paused!==next.paused||
-         previous.interacting!==next.interacting||previous.suspended!==next.suspended||
-         previous.samples!==next.samples||JSON.stringify(previous.project)!==JSON.stringify(next.project))request();
+      if(retry||previous.enabled!==next.enabled||previous.paused!==next.paused||previous.suspended!==next.suspended||
+         JSON.stringify(previous.project)!==JSON.stringify(next.project))request();
+      else if(previous.interacting!==next.interacting||
+         JSON.stringify(previous.sampling)!==JSON.stringify(next.sampling))accumulate();
     },
-    render(root,camera,bounds,settings,sourceLights,sceneChanged=true){
+    render(root,camera,bounds,settings,sourceLights,sceneChanged=true,animating=false){
       if(!options.enabled||!root||failed)return false;
       if(options.paused&&!options.suspended){
-        const samples=Math.floor(engine?.samples||0);
-        publish('paused','路径追踪 · 已暂停',samples);
-        if(samples<1)return false;
+        publish('paused','路径追踪 · 已暂停',presented?.samples||0);
+        if(!presented)return false;
+        host.dataset.renderResolution=presented.resolution;
+        // A window resize must not discard the frozen sample buffer.
+        engine.synchronizeRenderSize=false;
         try{engine.pausePathTracing=true;present();return true;}
         catch(error){fail(error);return false;}
+        finally{if(engine)engine.synchronizeRenderSize=true;}
       }
-      if(options.suspended||options.interacting){
-        publish('waiting',options.suspended?'路径追踪 · 编辑中':'路径追踪 · 等待视角稳定');
+      if(options.suspended){
+        delete host.dataset.renderDenoised;
+        delete host.dataset.renderConverged;
+        publish('waiting','路径追踪 · 编辑中');
         return false;
       }
       if(!engine){prepare();return false;}
       try{
-        const size=renderer.getDrawingBufferSize(new THREE.Vector2());
+        const size=renderer.getDrawingBufferSize(drawingSize);
         engine.renderScale=Math.min(settings.resolution,960/Math.max(size.x,size.y));
         engine.bounces=settings.bounces;
         if(sceneChanged||sceneRoot!==root){
           if(!syncScene(root,camera,bounds,settings,sourceLights)){
             sceneRoot=null;
+            presented=null;
+            delete host.dataset.renderResolution;
+            delete host.dataset.renderDenoised;
+            delete host.dataset.renderConverged;
             publish('waiting','路径追踪 · 没有可见物体');
             return false;
           }
           sceneRoot=root;
         }else syncCamera(camera);
-        const target=options.samples??settings.samples;
-        renderTone=options.project?projectTone(options.project.appearance||undefined):null;
-        engine.pausePathTracing=engine.samples>=target;
+        const {maxSamples=settings.samples,denoise=false,denoiseStart:start=8}=options.sampling||{};
+        const target=maxSamples||Infinity;
+        denoiseStart=denoise?start:Infinity;
+        renderAppearance=options.project?(options.project.appearance||renderAppearanceDefaults):null;
+        const moving=options.interacting||animating;
+        const convergence=viewportConvergence(options.sampling||{});
+        if(convergence&&!moving)adaptiveSampler??=createViewportAdaptiveSampler(engine,renderer);
+        adaptiveSampler?.configure(convergence);
+        engine.pausePathTracing=moving||engine.samples>=target||adaptiveSampler?.poll()===true;
         present();
         const samples=Math.floor(engine.samples);
-        const resolution=`${engine.target.width} × ${engine.target.height}`;
+        const draft=samples===0&&!engine.isCompiling;
+        const scale=draft?engine.lowResScale:1;
+        const resolution=`${Math.floor(engine.target.width*scale)} × ${Math.floor(engine.target.height*scale)}`;
+        if(engine.isCompiling&&samples===0){
+          presented=null;
+          delete host.dataset.renderResolution;
+          delete host.dataset.renderDenoised;
+          delete host.dataset.renderConverged;
+          publish('loading','路径追踪 · 正在编译着色器');
+          accumulate();
+          return false;
+        }
+        presented={samples,resolution};
         host.dataset.renderResolution=resolution;
-        if(engine.isCompiling&&samples===0)publish('loading','路径追踪 · 正在编译着色器');
-        else publish(samples>=target?'ready':'sampling',`路径追踪 · ${resolution} · ${samples} / ${target} 采样`,samples);
-        if(engine.samples<target)accumulate();
-        return samples>=1;
+        const denoised=samples>=denoiseStart;
+        const converged=adaptiveSampler?.poll()===true;
+        host.dataset.renderConverged=String(converged);
+        host.dataset.renderDenoised=String(denoised);
+        if(moving)publish('navigating',`路径追踪 · ${resolution} · ${draft?'快速预览':'移动视角'}`,samples);
+        else{
+          const progress=draft?'正在细化':`${samples}${maxSamples?' / '+maxSamples:''} 采样${converged?' · 已收敛':''}${denoised?' · 降噪':''}`;
+          const complete=converged||samples>=target;
+          publish(complete?'ready':'sampling',`路径追踪 · ${resolution} · ${progress}`,samples);
+          if(!complete)accumulate();
+        }
+        return true;
       }catch(error){fail(error);return false;}
     },
     state:()=>status,

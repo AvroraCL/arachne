@@ -5,10 +5,10 @@ const taskNames={
   'paint-draft':'草稿预览','paint-preview':'4K 烘焙','paint-render':'路径追踪出图',
   'paint-backup':'工程副本','paint-export':'交付 ZIP','paint-texture-export':'工程与贴图 ZIP','paint-glb-export':'模型 GLB',
 };
-const statusNames={queued:'排队中',running:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
+const statusNames={queued:'排队中',running:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断',corrupt:'记录损坏'};
 const taskTime=new Intl.DateTimeFormat('zh-CN',{timeStyle:'medium',hour12:false});
 const active=job=>job?.status==='running'||job?.status==='queued';
-const stopped=job=>['failed','cancelled','interrupted'].includes(job?.status);
+const stopped=job=>['failed','cancelled','interrupted','corrupt'].includes(job?.status);
 
 function matches(job,filter){
   if(filter==='active')return active(job);
@@ -43,9 +43,9 @@ export function setupTaskMonitor({project,jobs,busy,canOpen,loadLog,cancel,retry
       const row=document.createElement('li'),button=document.createElement('button');
       const name=document.createElement('span'),revision=document.createElement('small'),time=document.createElement('time'),status=document.createElement('span');
       name.className='task-row-name';status.className='task-row-status';
-      name.textContent=job.renderBookmark?.name||taskNames[job.type]||'工程任务';
+      name.textContent=job.status==='corrupt'?job.id:job.renderBookmark?.name||taskNames[job.type]||'工程任务';
       name.title=job.renderBookmark?'相机出图 · '+job.renderBookmark.name:name.textContent;
-      revision.textContent='r'+job.revision;
+      revision.textContent=Number.isInteger(job.revision)?'r'+job.revision:'';
       const created=Date.parse(job.created);
       if(Number.isFinite(created)){time.dateTime=job.created;time.textContent=taskTime.format(created);time.title=new Date(created).toLocaleString('zh-CN');}
       button.type='button';button.dataset.jobId=job.id;button.onclick=()=>select(job.id);
@@ -77,7 +77,10 @@ export function setupTaskMonitor({project,jobs,busy,canOpen,loadLog,cancel,retry
     if(shown!==selected){
       shown=selected;logRequest++;log.open=false;logText.textContent=logStatus.textContent='';
     }
-    setText(stage,job?(job.error||(active(job)&&cyclesProgressLabel(job.progress))||job.stage||''):'');
+    const stageText=job?(job.error||(active(job)&&cyclesProgressLabel(job.progress))||job.stage||''):'';
+    const textureSampling=job?.render?.textureSampling;
+    setText(stage,textureSampling?.reduced
+      ?stageText+' · 贴图已降级至最大 '+textureSampling.atlas.join(' × '):stageText);
     const sampling=job?.status==='running'&&job.progress?.phase==='sample'&&Number(job.progress.total)>0;
     progress.hidden=!sampling;
     if(sampling){progress.max=job.progress.total;progress.value=job.progress.sample;}

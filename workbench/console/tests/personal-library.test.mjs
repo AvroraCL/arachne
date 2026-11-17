@@ -94,3 +94,24 @@ test('smart material restores nested layers, maps and editable resources indepen
   assert.equal(again.document.paint.layers[7].maskEffects[0].width,newMaskEffect('edgeWear').width);
   assert.equal(new Set(Object.values(again.document.paint.imageDocuments).map(doc=>doc.name)).size,2);
 });
+
+test('each smart material instance resolves mask anchors to its own paint layer',t=>{
+  const {docs,library}=fixture(t);
+  const properties={visible:true,opacity:1,channels:{color:true,metallic:false,roughness:false},
+    values:{color:'#ffffff',metallic:0,roughness:.5}};
+  docs.get('a').paint.layers=[
+    {id:'folder',kind:'group',name:'覆漆',visible:true},
+    {...properties,id:'marks',kind:'paint',name:'笔迹',parentId:'folder',anchorPoint:true,strokes:[]},
+    {...properties,id:'coat',kind:'fill',name:'面漆',parentId:'folder',maskEffects:[
+      {kind:'anchor',source:'marks',channel:'coverage',opacity:1,enabled:true,blend:'replace'}]}
+  ];
+  const {item}=library.save({projectId:'a',projectRevision:0,revision:0,kind:'smartMaterials',resourceId:'folder'});
+  for(const projectRevision of [0,1]){
+    const imported=library.importResource({projectId:'b',projectRevision,revision:1,id:item.id});
+    const [,marks,coat]=imported.document.paint.layers.slice(-3);
+    assert.equal(coat.maskEffects[0].source,marks.id);
+    assert.notEqual(marks.id,'marks');
+  }
+  const layers=docs.get('b').paint.layers;
+  assert.notEqual(layers[2].maskEffects[0].source,layers[5].maskEffects[0].source);
+});

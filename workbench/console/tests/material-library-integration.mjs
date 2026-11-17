@@ -556,6 +556,23 @@ try{
   assert.equal(untilted.paint.layers[0].tiling.rotation,0);
   console.log('PASS independent UV tiling, rotated normal, fixed drawing overlay, channel inspection shortcuts and reopen');
 
+  await packedPage.reload();
+  await packedShelf.getByRole('tab',{name:'图片',exact:true}).click();
+  await packedShelf.locator('[data-asset-id="'+patternUpload.asset.id+'"]').click();
+  await packedShelf.getByRole('button',{name:'素材用途',exact:true}).click();
+  await packedPage.getByRole('option',{name:'新建蒙版填充层',exact:true}).click();
+  const createdFill=packedPage.waitForResponse(response=>response.url().endsWith(tiledPaint+'/commands'));
+  await packedShelf.getByRole('button',{name:'创建填充层',exact:true}).click();
+  const createdResponse=await createdFill;
+  assert.ok(createdResponse.ok(),await createdResponse.text());
+  const withMask=await createdResponse.json(),added=withMask.paint.layers.at(-1);
+  assert.equal(withMask.revision,untilted.revision+1);
+  assert.deepEqual(withMask.paint.layers.slice(0,-1),untilted.paint.layers);
+  assert.deepEqual([added.kind,added.mask,added.maskEnabled],['fill',patternUpload.asset.id,true]);
+  const unmaskedFill=await api(tiledPaint+'/undo',{revision:withMask.revision});
+  assert.deepEqual(unmaskedFill.paint.layers,untilted.paint.layers);
+  console.log('PASS a shelf image creates an independently editable masked fill in one undo step');
+
   assert.deepEqual(pageErrors,[]);
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
 }finally{

@@ -5,8 +5,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {stageReleaseDemo} from './release-demo.mjs';
+import {buildPaintKernel} from './build-paint-kernel.mjs';
 import {APP_VERSION,PACKAGE_VERSION,RELEASE_TAG} from '../public/app-version.mjs';
-import {dataDirectory} from '../release-paths.mjs';
 import {workspaceRoot} from '../workspace-paths.mjs';
 
 if(process.platform!=='darwin'||process.arch!=='arm64')throw Error('This builder requires Apple Silicon macOS');
@@ -18,6 +18,7 @@ async function writeJSON(file,value){await fs.mkdir(path.dirname(file),{recursiv
 async function hash(file){const h=crypto.createHash('sha256');for await(const data of createReadStream(file))h.update(data);return h.digest('hex');}
 async function copy(from,to){await fs.mkdir(path.dirname(to),{recursive:true});await fs.copyFile(from,to);}
 async function tree(from,to,filter=()=>true){await fs.cp(from,to,{recursive:true,dereference:true,filter:p=>filter(p)&&!['__pycache__','.DS_Store'].includes(path.basename(p))&&!p.endsWith('.pyc')});}
+
 const pkg=await readJSON(path.join(root,'package.json')),lock=await readJSON(path.join(root,'package-lock.json'));
 if(pkg.version!==PACKAGE_VERSION||lock.version!==PACKAGE_VERSION||lock.packages[''].version!==PACKAGE_VERSION)throw Error('Version metadata disagrees');
 await fs.mkdir(path.dirname(versionDir),{recursive:true});
@@ -29,6 +30,9 @@ try{
   console.log('Copying Web workbench and production dependencies');
   await fs.mkdir(consoleOut,{recursive:true});
   for(const entry of await fs.readdir(root))if(/\.(mjs|py)$/.test(entry)||['package.json','package-lock.json'].includes(entry))await copy(path.join(root,entry),path.join(consoleOut,entry));
+  await buildPaintKernel(consoleOut);
+  for(const name of ['Rust-LICENSE-APACHE.txt','Rust-LICENSE-MIT.txt'])
+    await copy(path.join(root,'release-support/licenses',name),path.join(licenses,name));
   await tree(path.join(root,'public'),path.join(consoleOut,'public'));
   for(const name of ['release-runtime.mjs','release-mcp.mjs'])await copy(path.join(import.meta.dirname,name),path.join(consoleOut,'scripts',name));
   for(const name of Object.keys(pkg.dependencies)){
@@ -55,7 +59,10 @@ try{
     for(const entry of [name,...metadata,...(await fs.readdir(site)).filter(n=>n.toLowerCase()===name.toLowerCase()+'.libs')])await tree(path.join(site,entry),path.join(pyOut,'lib/python3.12/site-packages',entry));
   }
   const pyEnv={...process.env,PYTHONHOME:pyOut,PYTHONNOUSERSITE:'1',PYTHONDONTWRITEBYTECODE:'1'};delete pyEnv.PYTHONPATH;delete pyEnv.VIRTUAL_ENV;
-  run(path.join(pyOut,'bin/python3.12'),['-c','import numpy,PIL,fontTools,ssl;print("Embedded Python imports passed")'],{env:pyEnv});
+  delete pyEnv.ARACHNE_PAINT_KERNEL;
+  run(path.join(pyOut,'bin/python3.12'),['-c',
+    'import numpy,PIL,fontTools,ssl;from paint_kernel import inverse_grid_kernel,brush_coverage_kernel;assert inverse_grid_kernel() and brush_coverage_kernel();print("Embedded Python and Rust drawing kernel imports passed")'],
+    {env:pyEnv,cwd:consoleOut});
   const browsers=process.env.PLAYWRIGHT_BROWSERS_PATH;
   let browser=process.env.ARACHNE_PACKAGE_BROWSER;
   if(!browser&&browsers){const names=(await fs.readdir(browsers)).filter(n=>n.startsWith('chromium_headless_shell-')).sort();browser=path.join(browsers,names.at(-1)||'', 'chrome-headless-shell-mac-arm64');}
@@ -70,34 +77,11 @@ try{
   run('/usr/bin/swiftc',['-swift-version','5','-O','-target','arm64-apple-macos14.0','-module-cache-path',path.join(staging,'.swift-cache'),'-framework','AppKit','-framework','WebKit',path.join(root,'release-support/Launcher.swift'),path.join(root,'release-support/NativeWorkbench.swift'),'-o',path.join(contents,'MacOS/Arachne')]);
   await copy(path.join(contents,'MacOS/Arachne'),path.join(contents,'MacOS/ArachneMCP'));
   const appIcon=path.join(resources,'Arachne.icns');
-  const localIcon=process.env.ARACHNE_PACKAGE_MAC_ICON||path.join(dataDirectory(root),'workbench-macos.icns');
-  const iconData=await fs.readFile(localIcon).catch(error=>{
-    if(error.code!=='ENOENT'||process.env.ARACHNE_PACKAGE_MAC_ICON)throw error;
-    return null;
-  });
-  if(iconData){
-    if(iconData.length<8||iconData.toString('ascii',0,4)!=='icns'||iconData.readUInt32BE(4)!==iconData.length)
-      throw Error('Invalid macOS application icon: '+localIcon);
-    await fs.writeFile(appIcon,iconData);
-  }else{
-    const {chromium}=await import('playwright-core');
-    const instance=await chromium.launch({executablePath:path.join(resources,'runtime/browser/chrome-headless-shell')});
-    const iconset=path.join(staging,'.icon.iconset');
-    await fs.mkdir(iconset);
-    try{
-      const page=await instance.newPage({viewport:{width:1024,height:1024},deviceScaleFactor:1});
-      const mark=await fs.readFile(path.join(root,'public/arachne-mark.svg'),'utf8');
-      await page.setContent('<style>html,body{margin:0;background:transparent}svg{display:block}</style>'+mark);
-      await page.screenshot({path:path.join(iconset,'icon_512x512@2x.png'),omitBackground:true});
-    }finally{await instance.close();}
-    for(const [name,size] of Object.entries({'16x16':16,'16x16@2x':32,'32x32':32,'32x32@2x':64,'128x128':128,'128x128@2x':256,'256x256':256,'256x256@2x':512,'512x512':512}))run('/usr/bin/sips',['-z',String(size),String(size),path.join(iconset,'icon_512x512@2x.png'),'--out',path.join(iconset,'icon_'+name+'.png')]);
-    run('/usr/bin/iconutil',['-c','icns',iconset,'-o',appIcon]);
-    await fs.rm(iconset,{recursive:true});
-  }
+  await copy(path.join(root,'release-support/Arachne.icns'),appIcon);
   await fs.writeFile(path.join(contents,'Info.plist'),`<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>CFBundleName</key><string>阿拉克涅</string><key>CFBundleDisplayName</key><string>阿拉克涅</string><key>CFBundleIdentifier</key><string>com.arachne.workbench.public</string><key>CFBundleExecutable</key><string>Arachne</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleIconFile</key><string>Arachne</string><key>CFBundleShortVersionString</key><string>0.0.1</string><key>CFBundleVersion</key><string>1</string><key>ArachneReleaseVersion</key><string>${APP_VERSION}</string><key>LSMinimumSystemVersion</key><string>14.0</string><key>NSHighResolutionCapable</key><true/><key>LSMultipleInstancesProhibited</key><true/><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict></dict></plist>\n`);
   for(const name of ['LICENSE','THIRD_PARTY.md'])await copy(path.join(workspaceRoot,name),path.join(workspace,name));
   await copy(path.join(root,'release-support/使用说明.md'),path.join(staging,'使用说明.md'));
-  const info={version:APP_VERSION,packageVersion:PACKAGE_VERSION,tag:RELEASE_TAG,buildId:crypto.randomUUID(),sourceCommit:run('git',['rev-parse','HEAD']).trim(),platform:'macos-arm64',minimumMacOS:'14.0',node:process.version,python:py.version,browser:run(path.join(resources,'runtime/browser/chrome-headless-shell'),['--version']).trim(),created:new Date().toISOString(),inputs};
+  const info={version:APP_VERSION,packageVersion:PACKAGE_VERSION,tag:RELEASE_TAG,buildId:crypto.randomUUID(),sourceCommit:run('git',['rev-parse','HEAD']).trim(),platform:'macos-arm64',minimumMacOS:'14.0',node:process.version,python:py.version,browser:run(path.join(resources,'runtime/browser/chrome-headless-shell'),['--version']).trim(),created:new Date().toISOString(),macIcon:{source:'bundled',sha256:await hash(appIcon)},inputs};
   await writeJSON(path.join(resources,'build-info.json'),info);
   run('/usr/bin/codesign',['--force','--sign','-',app]);run('/usr/bin/codesign',['--verify','--deep','--strict',app]);
   const files={};async function manifest(dir){for(const entry of await fs.readdir(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())await manifest(file);else if(entry.isFile())files[path.relative(staging,file)]=await hash(file);else throw Error('Unexpected symlink in release: '+file);}}

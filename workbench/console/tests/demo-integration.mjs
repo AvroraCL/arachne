@@ -128,8 +128,11 @@ try{
   catch(error){throw Error(error.message+'\n'+errors.join('\n')+'\n'+(await page.locator('body').innerText()).slice(0,1800));}
   const viewport=page.locator('.editor-viewport[data-state=ready]').first();
   const render=page.getByRole('button',{name:'渲染预览',exact:true}).first();
+  await page.getByRole('button',{name:'显示叠加层',exact:true}).first().click();
   await render.click();
   const canvas=viewport.locator('canvas').first();
+  // Inspect the WebGL image without viewport DOM labels or interactive overlays.
+  const imageOptions={style:'.editor-viewport canvas ~ *, .editor-viewport > :not(canvas) { visibility:hidden !important; }'};
   const phase=value=>viewport.locator('xpath=self::*[@data-render-phase="'+value+'"]');
   try{
     await phase('ready').waitFor({timeout:90000});
@@ -137,7 +140,8 @@ try{
     throw Error(error.message+'\n'+(await page.locator('.editor-preview-status').allTextContents()).join('\n')+'\n'+errors.join('\n'));
   }
   assert.ok(Number(await viewport.getAttribute('data-render-samples'))>1);
-  const before=await canvas.screenshot();
+  const detailWidth=Number((await viewport.getAttribute('data-render-resolution')).split(' × ')[0]);
+  const before=await canvas.screenshot(imageOptions);
   await page.getByRole('button',{name:'暂停路径追踪',exact:true}).first().click();
   await phase('paused').waitFor();
   const bounds=await canvas.boundingBox();
@@ -145,23 +149,44 @@ try{
   await page.mouse.down({button:'middle'});
   await page.mouse.move(bounds.x+bounds.width*.61,bounds.y+bounds.height*.52,{steps:4});
   await page.mouse.up({button:'middle'});
+  assert.deepEqual(await canvas.screenshot(imageOptions),before,'A paused trace must retain the previous image even when the camera moves');
   await page.getByRole('button',{name:'继续路径追踪',exact:true}).first().click();
   await phase('ready').waitFor({timeout:90000});
-  assert.notDeepEqual(await canvas.screenshot(),before,'Rotating the viewport must update the path traced image');
-  const rotated=await canvas.screenshot();
-  await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
-  await page.keyboard.down('Shift');
-  await page.mouse.down({button:'middle'});
-  await page.mouse.move(bounds.x+bounds.width*.54,bounds.y+bounds.height*.62,{steps:4});
-  await phase('waiting').waitFor();
-  await page.mouse.up({button:'middle'});
-  await page.keyboard.up('Shift');
-  await phase('ready').waitFor({timeout:90000});
-  const panned=await canvas.screenshot();
-  assert.notDeepEqual(panned,rotated,'Panning must update the path traced image');
-  for(let i=0;i<3;i++)await page.mouse.wheel(0,-80);
-  await phase('ready').waitFor({timeout:90000});
-  assert.notDeepEqual(await canvas.screenshot({path:path.join(data,'path-traced-viewport.png')}),panned,'Wheel zoom must update the path traced image');
+  let settled=await canvas.screenshot(imageOptions);
+  assert.notDeepEqual(settled,before,'Resuming must trace the current camera');
+  await viewport.evaluate(element=>{
+    const frames=[];
+    window.renderPhases=frames;
+    new MutationObserver(()=>{
+      const {renderPhase,renderResolution,renderSamples}=element.dataset;
+      frames.push({phase:renderPhase,width:Number(renderResolution?.split(' × ')[0]),samples:Number(renderSamples)});
+    }).observe(element,{attributes:true,attributeFilter:['data-render-phase','data-render-samples','data-render-resolution']});
+  });
+  for(const kind of ['orbit','pan','wheel']){
+    await page.evaluate(()=>{window.renderPhases.length=0;});
+    await page.mouse.move(bounds.x+bounds.width*.5,bounds.y+bounds.height*.5);
+    if(kind==='wheel'){
+      for(let i=0;i<3;i++)await page.mouse.wheel(0,-80);
+      await page.waitForFunction(()=>window.renderPhases.some(f=>f.phase==='navigating'&&f.samples===0));
+    }else{
+      if(kind==='pan')await page.keyboard.down('Shift');
+      await page.mouse.down({button:'middle'});
+      await page.mouse.move(bounds.x+bounds.width*.58,bounds.y+bounds.height*.57,{steps:4});
+      await phase('navigating').waitFor();
+      assert.equal(Number(await viewport.getAttribute('data-render-samples')),0);
+      assert.notDeepEqual(await canvas.screenshot(imageOptions),settled,`${kind} must display the changed camera before the mouse is released`);
+      await page.mouse.up({button:'middle'});
+      if(kind==='pan')await page.keyboard.up('Shift');
+    }
+    await phase('ready').waitFor({timeout:90000});
+    const frames=await page.evaluate(()=>window.renderPhases.slice());
+    assert.ok(frames.some(f=>f.phase==='navigating'&&f.width>0&&f.width<detailWidth&&f.samples===0),kind);
+    assert.ok(frames.some(f=>f.phase==='sampling'&&f.width===detailWidth&&f.samples>1),kind);
+    assert.ok(!frames.some(f=>f.phase==='waiting'||f.phase==='loading'),kind);
+    const updated=await canvas.screenshot({...imageOptions,...(kind==='wheel'?{path:path.join(data,'path-traced-viewport.png')}:{})});
+    assert.notDeepEqual(updated,settled,`${kind} must update the full-resolution trace`);
+    settled=updated;
+  }
   assert.deepEqual(blenderRequests,[]);
   await assert.rejects(fs.stat(blenderMarker),{code:'ENOENT'});
   assert.deepEqual(errors,[]);

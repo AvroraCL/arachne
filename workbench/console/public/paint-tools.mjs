@@ -1,6 +1,8 @@
+import {canvasCoordinates} from './image-canvas-coordinates.mjs';
 import {paintChannels,effectiveValues} from './paint-channels.mjs';
 import {Vector3} from 'three';
 import {setSelectValue} from './paint-select.mjs';
+import {brushTipDefaults} from './material-graph.mjs';
 
 const $=id=>document.getElementById(id);
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -17,7 +19,10 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   const pressureControl=$('brush-uv-pressure'),presetControl=$('brush-preset');
   const hardness=$('brush-hardness'),opacity=$('brush-opacity'),eraseControl=$('brush-erase');
   const flow=elements?.['brush-flow'],spacingControl=elements?.['brush-spacing'];
+  const pressureSize=elements?.['brush-pressure-size'],smoothing=elements?.['brush-smoothing'];
   const drawingBrush=!!flow;
+  const tipControls=drawingBrush?Object.fromEntries(Object.keys(brushTipDefaults).map(key=>[key,elements['brush-'+key]])):{};
+  let tipAsset='',textureAsset='';
   const tipNotice=drawingBrush?document.createElement('output'):null;
   if(tipNotice){
     tipNotice.className='document-brush-tip-readout';tipNotice.hidden=true;
@@ -25,9 +30,16 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     uvHost.append(tipNotice);
   }
   const sliders=[radiusInput,uvRadius,hardness,opacity];
-  const savedControls=[...sliders,pressureControl,...(drawingBrush?[flow,spacingControl]:[])];
+  const savedControls=[...sliders,pressureControl,...(drawingBrush?[flow,spacingControl,pressureSize,smoothing,...Object.values(tipControls)]:[])];
   const factor=control=>control.hasAttribute('data-brush-percent')?100:1;
   const amount=control=>Number(control.value)/factor(control);
+  function brushTip(assets=context().brushAssets){
+    if(!drawingBrush)return null;
+    const angle=amount(tipControls.tipAngle),roundness=amount(tipControls.roundness)/100;
+    const scatter=amount(tipControls.scatter)/100,grain=amount(tipControls.grain)/100;
+    const image=tipAsset&&Object.hasOwn(assets??{},tipAsset),texture=grain&&textureAsset&&Object.hasOwn(assets??{},textureAsset);
+    return roundness<1||scatter||grain||image?{angle,roundness,scatter,grain,...(image?{tipAsset}:{}),...(texture?{textureAsset}:{})}:null;
+  }
   const readControl=control=>control.type==='checkbox'?control.checked:amount(control);
   const writeControl=(control,value)=>{
     if(control.type==='checkbox')control.checked=value;
@@ -39,8 +51,9 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   let profile=drawingBrush&&eraseControl.checked?'eraser':'paint',brushAnchor=null;
   const profileKey=()=>settingsKey+(profile==='paint'?'':':'+profile);
   let mode='orbit',beforeSample='orbit',gesture=null,tipGesture=null,mirrorX=false,hover=null,hoverFrame=null,uvHover=null;
-  const brushMode=()=>mode==='paint'||mode==='mask'||mode==='clone';
-  const pixelBrush=()=>mode==='paint'||mode==='clone';
+  const repairMode=()=>['clone','heal','spot'].includes(mode);
+  const brushMode=()=>mode==='paint'||mode==='mask'||repairMode();
+  const pixelBrush=()=>mode==='paint'||repairMode();
   uvCursor.hidden=true;
   uvCursor.setAttribute('aria-hidden','true');
 
@@ -51,11 +64,12 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   }
   function saveBrush(){
     const settings=Object.fromEntries(savedControls.map(control=>[control.id||control.dataset.brushSetting,readControl(control)]));
-    try{localStorage.setItem(profileKey(),JSON.stringify({...settings,mirrorX}));}catch{}
+    try{localStorage.setItem(profileKey(),JSON.stringify({...settings,mirrorX,...(drawingBrush?{tipAsset,textureAsset}:{})}));}catch{}
     syncPreset();
   }
   function restoreBrush(){
     savedControls.forEach((control,index)=>writeControl(control,initialControls[index]));
+    tipAsset=textureAsset='';
     mirrorX=false;
     try{
       const settings=JSON.parse(localStorage.getItem(profileKey()));
@@ -65,6 +79,10 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
           if(control.type==='checkbox'?typeof value==='boolean':Number.isFinite(value))writeControl(control,value);
         }
         mirrorX=settings.mirrorX===true;
+        if(drawingBrush){
+          tipAsset=typeof settings.tipAsset==='string'?settings.tipAsset:'';
+          textureAsset=typeof settings.textureAsset==='string'?settings.textureAsset:'';
+        }
       }
     }catch{}
     mirrorButton.setAttribute('aria-pressed',String(mirrorX));
@@ -83,7 +101,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     uvHover=null;
     if(tipGesture){drawTipGesture();return;}
     setUVCursorVisible(false);
-    if(mode==='clone')cloneTool()?.track(null);
+    if(repairMode())cloneTool()?.track(null);
   }
   function hideCursors(){
     hideSurfaceCursors();
@@ -117,6 +135,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     refreshUVCursor();
   };
   for(const control of savedControls)control.addEventListener('change',saveBrush);
+  for(const control of Object.values(tipControls))control.addEventListener('input',()=>refreshUVCursor());
   presetControl.onchange=()=>{
     const name=presetControl.value;
     if(!Object.hasOwn(presets,name))return;
@@ -126,38 +145,44 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     saveBrush();
   };
   restoreBrush();
-  function uvPoint(x,y,bounds=uvCanvas.getBoundingClientRect()){
-    if(!bounds.width||!bounds.height)return null;
-    const u=(x-bounds.left)/bounds.width,v=(y-bounds.top)/bounds.height;
+  function uvPoint(x,y,coordinates=canvasCoordinates(uvCanvas)){
+    const [u,v]=coordinates.fromClient(x,y);
     return u>=0&&u<=1&&v>=0&&v<=1?[u,v]:null;
   }
   function trackUVCursor(event,x=event.clientX,y=event.clientY){
-    uvHover={x,y,buttons:event.buttons,sampling:event.altKey,overControls:uvControl(event)};
+    uvHover={x,y,buttons:event.buttons,sampling:event.altKey,penPressure:event.pointerType==='pen'?event.pressure:null,overControls:uvControl(event)};
     refreshUVCursor();
   }
   function refreshUVCursor(state){
     if(tipGesture){drawTipGesture();return;}
     if(!uvHover||!brushMode())return setUVCursorVisible(false);
     state??=context();
-    const {x,y,buttons,sampling,overControls}=uvHover;
+    const {x,y,buttons,sampling,penPressure,overControls}=uvHover;
     if(!state.uvEnabled||!state.layer?.visible||state.layer.locked||
        (pixelBrush()&&state.layer.kind!=='paint')||isHandHeld()||
        (buttons&&!gesture?.uv)||overControls){
-      if(mode==='clone')cloneTool()?.track(null);
+      if(repairMode())cloneTool()?.track(null);
       return setUVCursorVisible(false);
     }
-    const canvasBounds=uvCanvas.getBoundingClientRect(),bounds=uvHost.getBoundingClientRect();
+    const canvasBounds=canvasCoordinates(uvCanvas),bounds=uvHost.getBoundingClientRect();
     const point=uvPoint(x,y,canvasBounds);
-    if(mode==='clone')cloneTool()?.track(point,gesture?.stroke?.clone?.offset,sampling);
+    if(repairMode())cloneTool()?.track(point,gesture?.stroke?.clone?.offset,sampling);
     if(!point||sampling||x<bounds.left||x>bounds.right||y<bounds.top||y>bounds.bottom)
       return setUVCursorVisible(false);
     const radius=gesture?.uv?gesture.stroke.radius:Number(uvRadius.value)/4096;
-    const diameter=2*radius*canvasBounds.width;
+    const scale=gesture?.uv&&drawingBrush&&pressureSize.checked&&penPressure!==null?Math.max(.05,penPressure):1;
+    const diameter=2*radius*scale*canvasBounds.width;
     uvCursor.style.setProperty('--brush-diameter',Math.max(3,diameter)+'px');
+    setTipOutline(canvasBounds,diameter,gesture?.stroke.tip??brushTip());
     uvCursor.toggleAttribute('data-small',diameter<6);
     uvCursor.style.left=x-bounds.left+'px';
     uvCursor.style.top=y-bounds.top+'px';
     setUVCursorVisible(true);
+  }
+  function setTipOutline(coordinates,diameter,tip){
+    if(!drawingBrush)return;
+    uvCursor.style.setProperty('--brush-tip-height',Math.max(3,diameter*(tip?.roundness??1))+'px');
+    uvCursor.style.setProperty('--brush-tip-angle',coordinates.direction(tip?.angle??0)+'deg');
   }
   function uvControl(event){return event.target.closest('.uv-controls,#uv-wipe-control');}
   function showCursor(node,point,anchor,radius){
@@ -211,14 +236,18 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     refreshUVCursor(state);
     uvHost.toggleAttribute('data-brushing',uvEnabled&&!!layer?.visible&&!unavailable&&(brushMode()||mode==='sample'));
     host.dataset.tool=mode;
-    for(const tool of ['orbit','paint','mask','fill','sample'])$('surface-'+tool).setAttribute('aria-pressed',String(mode===tool));
+    const activeTool=state.imageTool??mode;
+    for(const tool of ['orbit','paint','mask','fill','sample']){
+      const pressed=activeTool===tool||state.imageTool==='mask'&&tool==='paint';
+      $('surface-'+tool).setAttribute('aria-pressed',String(pressed));
+    }
     if(uvHost.matches('[data-text-placement],[data-gradient-tool],[data-shape-tool],[data-fill-tool]')||
        uvHost.dataset.selectionTool&&uvHost.dataset.selectionTool!=='none')$('surface-orbit').setAttribute('aria-pressed','false');
     $('surface-paint').disabled=!writable||layer.kind!=='paint'&&!state.maskTarget;
     const erasing=brushMode()&&$('brush-erase').checked;
     $('uv-eraser-tool').disabled=!writable||!state.maskTarget&&(layer.kind!=='paint'||drawingBrush&&!!layer.alphaLocked);
     $('uv-eraser-tool').setAttribute('aria-pressed',String(erasing));
-    if(uvEnabled&&erasing)for(const id of ['surface-paint','surface-mask'])$(id).setAttribute('aria-pressed','false');
+    if((uvEnabled||state.imageTool)&&erasing)for(const id of ['surface-paint','surface-mask'])$(id).setAttribute('aria-pressed','false');
     $('surface-sample').hidden=(!sampleAnyLayer&&layer?.kind!=='paint')||state.maskTarget;
     $('surface-sample').disabled=!canSample;
     if(state.brushColor||layer?.values?.color)$('brush-ink-color').value=state.brushColor||layer.values.color;
@@ -244,7 +273,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
       if(mode==='sample')next=beforeSample;
       else beforeSample=mode;
     }
-    const nextProfile=next==='clone'?'clone':eraseControl.checked?'eraser':'paint';
+    const nextProfile=['clone','heal','spot'].includes(next)?next:eraseControl.checked?'eraser':'paint';
     if(drawingBrush&&profile!==nextProfile){
       profile=nextProfile;
       restoreBrush();
@@ -285,10 +314,18 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     if(pressure!==null)sample.push(+pressure.toFixed(4));
     stamps.push(sample);
   }
-  function drawingStamp(g,x,y,pressure){
+  function drawingStamp(g,x,y,pressure,finish=false){
     const {stamps}=g.stroke,uv=uvPoint(x,y);
-    if(!uv){g.lifted=true;return false;}
-    const sample=uv.map(value=>+value.toFixed(6)),last=stamps.at(-1);
+    if(!uv){g.lifted=true;g.smoothPoint=null;return false;}
+    if(g.smoothing&&!g.anchor){
+      if(g.smoothPoint&&!finish){
+        const distance=Math.hypot(uv[0]-g.smoothPoint[0],uv[1]-g.smoothPoint[1])*4096;
+        const lag=1+g.smoothing*g.smoothing*.015;
+        const response=1-Math.exp(-distance/lag);
+        g.smoothPoint=g.smoothPoint.map((value,index)=>value+(uv[index]-value)*response);
+      }else g.smoothPoint=uv;
+    }
+    const sample=(g.smoothPoint??uv).map(value=>+value.toFixed(6)),last=stamps.at(-1);
     if(pressure!==null)sample.push(+pressure.toFixed(4));
     if(!g.lifted&&last&&Math.hypot(sample[0]-last[0],sample[1]-last[1])<.25/4096&&
        Math.abs((sample[2]??1)-(last[2]??1))<.01)return false;
@@ -305,6 +342,15 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     if(g.lifted&&g.stroke.stamps.length&&g.stroke.breaks.length<64)g.stroke.breaks.push(g.stroke.stamps.length);
     g.lifted=false;
     g.stroke.stamps.push(sample);
+    return true;
+  }
+  function pauseDrawing(){
+    if(!gesture?.isDrawing||gesture.stroke.breaks.length>=64)return false;
+    gesture.lifted=true;
+    gesture.smoothPoint=null;
+    gesture.anchor=null;
+    gesture.axisStart=null;
+    gesture.axis=undefined;
     return true;
   }
   function strokeOp(g){
@@ -338,20 +384,24 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     const target=pixelBrush()?'material':'mask',params=strokeInk(state.layer,target,state);
     if(!params)return;
     const isDrawing=uv&&drawingBrush;
+    const tip=isDrawing?brushTip(state.brushAssets):null;
     if(isDrawing&&(amount(opacity)===0||target==='material'&&params.erase&&state.layer.alphaLocked))return;
-    const clone=mode==='clone'?cloneTool()?.prepare(uvPoint(event.clientX,event.clientY),state):null;
-    if(mode==='clone'&&!clone)return;
+    const clone=repairMode()?cloneTool()?.prepare(uvPoint(event.clientX,event.clientY),state):null;
+    if(repairMode()&&!clone)return;
     const clip=uv?uvClip():null;
-    const pressure=event.pointerType==='pen'&&pressureControl.checked?clamp(event.pressure,0,1):null;
+    const sizePressure=isDrawing&&pressureSize.checked;
+    const pressure=event.pointerType==='pen'&&(pressureControl.checked||sizePressure)?clamp(event.pressure,0,1):null;
     const anchorKey=isDrawing&&!clone?JSON.stringify([state.id,state.imageDocumentId,state.layer.id,target,eraseControl.checked]):null;
     gesture={pointer:event.pointerId,state,layerId:state.layer.id,target,uv,x:event.clientX,y:event.clientY,pressure,
-      isDrawing,anchorKey,
+      isDrawing,anchorKey,smoothing:isDrawing?Number(smoothing.value):0,
       anchor:event.shiftKey&&anchorKey&&brushAnchor?.key===anchorKey?brushAnchor.point:null,
       axisStart:uv&&event.shiftKey?[event.clientX,event.clientY]:null,
       stroke:{radius:uv?Number(uvRadius.value)/4096:Number(radiusInput.value),hardness:amount(hardness),
         opacity:amount(opacity),stamps:[],
         ...(isDrawing?{flow:amount(flow),spacing:amount(spacingControl),breaks:[]}:{}),
-        ...(clone?{clone:{offset:clone}}:{}),
+        ...(tip?{tip:{...tip,seed:tip.scatter?crypto.getRandomValues(new Uint32Array(1))[0]:0}}:{}),
+        ...(pressure!==null&&sizePressure?{pressureMode:pressureControl.checked?'both':'size'}:{}),
+        ...(clone?{clone}:{}),
         ...(uv?{uv:true,...clip}:mirrorX?{mirrorX}:{}),...params}};
     hideCursors();
     if(uv)trackUVCursor(event);
@@ -367,9 +417,10 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     event.preventDefault();event.stopImmediatePropagation();
   }
   function drawTipGesture(){
-    const bounds=uvHost.getBoundingClientRect(),diameter=Math.max(3,2*amount(uvRadius)*uvCanvas.getBoundingClientRect().width/4096);
+    const bounds=uvHost.getBoundingClientRect(),diameter=Math.max(3,2*amount(uvRadius)*canvasCoordinates(uvCanvas).width/4096);
     const x=tipGesture.x-bounds.left,y=tipGesture.y-bounds.top;
     uvCursor.style.setProperty('--brush-diameter',diameter+'px');
+    setTipOutline(canvasCoordinates(uvCanvas),diameter,brushTip());
     uvCursor.style.setProperty('--brush-hardness',Math.round(100*amount(hardness))+'%');
     uvCursor.removeAttribute('data-small');uvCursor.setAttribute('data-tip-adjust','');
     uvCursor.style.left=x+'px';uvCursor.style.top=y+'px';
@@ -420,7 +471,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
       return;
     }
     if(event.button!==0)return;
-    if(mode==='clone'&&event.altKey&&state.layer?.kind==='paint'&&!state.layer.locked){
+    if((mode==='clone'||mode==='heal')&&event.altKey&&state.layer?.kind==='paint'&&!state.layer.locked){
       cloneTool()?.pick(uv,state);
       event.target.focus({preventScroll:true});
       event.preventDefault();event.stopImmediatePropagation();
@@ -466,7 +517,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   function move(event){
     if(tipGesture?.pointer===event.pointerId){moveTipGesture(event);return;}
     const g=gesture;
-    if(g?.pointer!==event.pointerId)return;
+    if(g?.pointer!==event.pointerId||g.isDrawing&&isHandHeld())return;
     let x=event.clientX,y=event.clientY;
     if(g.axisStart){
       const [originX,originY]=g.axisStart,deltaX=x-originX,deltaY=y-originY;
@@ -492,7 +543,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
         event.preventDefault();event.stopImmediatePropagation();
         return;
       }
-      const spacing=g.uv?Math.max(.35,g.stroke.radius*uvCanvas.getBoundingClientRect().width*.35):3;
+      const spacing=g.uv?Math.max(.35,g.stroke.radius*canvasCoordinates(uvCanvas).width*.35):3;
       const distance=Math.hypot(dx,dy);
       const pressure=g.pressure===null?null:clamp(event.pressure,0,1);
       if(g.uv&&distance<spacing&&(pressure===null||Math.abs(pressure-g.pressure)<.03))return;
@@ -543,6 +594,11 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
     render();
     if(event.type==='pointerup'){
       if(g.stroke?.stamps.length){
+        if(g.isDrawing&&g.smoothing&&!g.anchor&&!g.lifted){
+          const last=g.stroke.stamps.at(-1);
+          const x=g.axis==='y'?g.axisStart[0]:event.clientX,y=g.axis==='x'?g.axisStart[1]:event.clientY;
+          drawingStamp(g,x,y,g.pressure===null?null:last[2]??g.pressure,true);
+        }
         if(g.anchorKey){
           brushAnchor={key:g.anchorKey,point:g.stroke.stamps.at(-1)};
           if(g.anchor)g.stroke.stamps.unshift(g.anchor);
@@ -581,12 +637,21 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   });
   for(const name of ['pointerup','pointercancel','lostpointercapture'])uvHost.addEventListener(name,finish,true);
   const observer=new ResizeObserver(render);observer.observe(host);
-  return {dispose(){cancel();observer.disconnect();hideCursors();},render,setMode,cancel,projectorAt,toggleMirror,adjustRadius,fillUV,refreshUVCursor,isEditing:()=>!!gesture||!!tipGesture,
+  return {dispose(){cancel();observer.disconnect();hideCursors();},render,setMode,cancel,projectorAt,toggleMirror,adjustRadius,fillUV,refreshUVCursor,pauseDrawing,isDrawing:()=>!!gesture?.isDrawing,isEditing:()=>!!gesture||!!tipGesture,
     getSettings:()=>({worldRadius:Number(radiusInput.value),uvRadius:Number(uvRadius.value),hardness:amount(hardness),
-      opacity:amount(opacity),pressure:pressureControl.checked,mirror:mirrorX}),
+      opacity:amount(opacity),pressure:pressureControl.checked,mirror:mirrorX,
+      ...(drawingBrush?{pressureSize:pressureSize.checked,smoothing:amount(smoothing),flow:amount(flow),spacing:amount(spacingControl),
+        tipAsset,textureAsset,...Object.fromEntries(Object.entries(tipControls).map(([key,control])=>[key,amount(control)]))}:{})}),
     setSettings(settings,{persist=true}={}){
       [settings.worldRadius,settings.uvRadius,settings.hardness,settings.opacity].forEach((value,index)=>writeControl(sliders[index],value));
       pressureControl.checked=settings.pressure;mirrorX=settings.mirror;
+      if(drawingBrush){
+        if(typeof settings.pressureSize==='boolean')pressureSize.checked=settings.pressureSize;
+        if(typeof settings.tipAsset==='string')tipAsset=settings.tipAsset;
+        if(typeof settings.textureAsset==='string')textureAsset=settings.textureAsset;
+        for(const [key,control] of Object.entries({smoothing,flow,spacing:spacingControl,...tipControls}))
+          if(Number.isFinite(settings[key]))writeControl(control,settings[key]);
+      }
       mirrorButton.setAttribute('aria-pressed',String(mirrorX));uvRadius.oninput();if(persist)saveBrush();else syncPreset();render();
     },invertInk(){
     if(!['mask','fill'].includes(mode))return;

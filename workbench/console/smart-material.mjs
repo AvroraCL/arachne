@@ -1,8 +1,9 @@
 import {randomUUID} from 'node:crypto';
-import {layerParent,layerTreeOrder} from './public/paint-layer-tree.mjs';
+import {layerParent,layerTreeOrder,remapPaintAnchors} from './public/paint-layer-tree.mjs';
 import {compileLibraryMaterial,libraryOperation} from './public/paint-library.mjs';
 import {imageDocumentLimit} from './public/image-documents.mjs';
 import {smartMaterialPlacement} from './public/smart-material-placement.mjs';
+import {isStrokeBlock} from './public/stroke-blocks.mjs';
 
 export function captureSmartMaterial(paint, groupId) {
   const group=paint.layers.find(layer=>layer.id===groupId);
@@ -11,8 +12,11 @@ export function captureSmartMaterial(paint, groupId) {
   if(!layers.some(layer=>layer.kind!=='group'))throw Error('请先在文件夹中添加材质图层');
   const materials={},documents={};
   for(const layer of layers){
+    if(layer.maskEffects?.some(effect=>effect.kind==='anchor'&&!layers.some(source=>source.id===effect.source)))
+      throw Error('请将引用的锚点一并放入智能材质文件夹');
     const spatial=layer.kind==='decal'&&layer.space!=='uv'||
-      [...(layer.strokes||[]),...(layer.maskStrokes||[])].some(stroke=>stroke.uv!==true&&!stroke.transformUV&&!stroke.clearUV);
+      [...(layer.strokes||[]),...(layer.maskStrokes||[])].some(stroke=>isStrokeBlock(stroke)?!!stroke.bindings?.length:
+        stroke.uv!==true&&!stroke.transformUV&&!stroke.clearUV);
     if(spatial)throw Error('「'+layer.name+'」包含绑定原模型的笔触或投影。可用 UV 贴图或生成器制作可复用的图层。');
     if(layer.materialId){
       const material=paint.materials[layer.materialId];
@@ -66,6 +70,7 @@ export function applySmartMaterial(paint, preset, name, placement) {
   const copies=preset.layers.map(layer=>{
     const copy=structuredClone(layer),parent=layerParent(copy);
     copy.id=ids.get(copy.id);
+    remapPaintAnchors(copy,ids);
     copy.parentId=parent===null?null:ids.get(parent);
     if(copy.materialId)copy.materialId=materials.get(copy.materialId);
     if(copy.documentMaps)copy.documentMaps=Object.fromEntries(Object.entries(copy.documentMaps).map(([channel,id])=>[channel,documents.get(id)]));

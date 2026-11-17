@@ -229,7 +229,7 @@ def build(config, out, model):
     save(cache/'resolved_config.json',settings)
     save(guides/'cameras.json',cameras)
     np.savez_compressed(guides/'surfaces.npz',positions=points,shading_normals=shading,
-        polygon_normals=normals,object_ids=objects,polygon_ids=polygons,protected=protected,uv_valid=valid)
+        polygon_normals=normals,object_ids=objects,polygon_ids=polygons,protected=protected,uv_valid=valid,uv=uv.astype(np.float32))
     geometry, norm, tex, ids, names, excludes = (v[valid] for v in (points,normals,uv,objects,labels,protected))
     centers = geometry.astype(np.float32).mean(axis=1)
     neighbors,edges,seams = adjacency(geometry,tex,norm,ids,names)

@@ -82,7 +82,7 @@ def read_checked(archive, name, limit, expected=None):
 def check_metadata(manifest, report, report_name):
     editable = report['editable']
     geometry = manifest['geometry']
-    require(type(manifest['version']) is int and manifest['version'] == 1 and
+    require(type(manifest['version']) is int and manifest['version'] in (1, 2) and
             manifest['revision'] == report['revision'] and
             editable['manifestPath'] == MANIFEST and geometry == editable['geometry'],
             '涂装包的修订或模型指纹不一致')

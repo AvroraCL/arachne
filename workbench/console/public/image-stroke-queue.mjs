@@ -147,7 +147,9 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
     if(task||!failure)return false;
     pending.length=0;active=null;draftChanged();reset();notify();return true;
   }
-  return {accepts,operations,preview,submit,retry,discard,restore,flush:()=>task||Promise.resolve(!pending.length),
+  return {accepts,operations,preview,submit,retry,discard,restore,
+    confirmedOperation:revision=>receipt(read(),pending[0])?.revision===revision?pending[0]?.operation:null,
+    flush:()=>task||Promise.resolve(!pending.length),
     get size(){return pending.length;},get saving(){return !!task;},get failure(){return failure;},get canRebase(){return canRebase;},
     get target(){return target?.slice()??null;}};
 }

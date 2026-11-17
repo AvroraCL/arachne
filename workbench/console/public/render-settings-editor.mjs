@@ -6,7 +6,7 @@ import {workspaceIcons} from './workspace-icons.mjs';
 import {capturePropertyTarget,propertyTargetStatus} from './property-targets.mjs';
 import {createObjectPropertyEditor} from './object-property-editor.mjs';
 import {createMaterialResourceProperties} from './material-resource-properties.mjs';
-import {cyclesLimits,cyclesFormats,cyclesViewportLimits} from './cycles-limits.mjs';
+import {cyclesLimits,cyclesFormats} from './cycles-limits.mjs';
 import {viewportSamplingDefaults} from './cycles-viewport-sampling.mjs';
 import {renderOpticsDefaults,renderOpticsFields} from './render-optics.mjs';
 import {renderRegionPixels} from './render-region.mjs';
@@ -66,21 +66,34 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   device.title='使用内置路径追踪器的默认图形后端，或明确使用 CPU 软件渲染';
   device.addEventListener('change',()=>{try{settings.set({device:device.value});}catch(error){ctx.error(error);sync();}});
   row(engine,'出图设备',device);
-  const sampling=section('render','sampling','渲染采样');
-  const samples=number(sampling,'samples','采样数',1,cyclesLimits.maxSamples,1);
   const viewportSampling=section('render','viewportSampling','视口采样',false);
-  const draftSamples=number(viewportSampling,'draftSamples','快速预览采样',1,cyclesViewportLimits.draft.samples,1,1,settings.setViewportSampling);
-  const detailSamples=number(viewportSampling,'detailSamples','细化预览采样',1,cyclesViewportLimits.detail.samples,1,1,settings.setViewportSampling);
-  detailSamples.title='开启自动细化后，视口停止移动时累积到此采样数';
+  const adaptive=check(viewportSampling,'adaptive','自适应采样',settings.setViewportSampling);
+  const noiseThreshold=number(viewportSampling,'noiseThreshold','噪波阈值',0,1,.001,.0001,settings.setViewportSampling);
+  const minSamples=number(viewportSampling,'minSamples','最小采样数',0,cyclesLimits.maxSamples,1,1,settings.setViewportSampling);
+  noiseThreshold.title='像素达到此噪波阈值后停止采样。设为 0 时自动选择阈值。';
+  minSamples.title='达到此采样数后才检查噪波。设为 0 时自动选择。';
+  const maxSamples=number(viewportSampling,'maxSamples','最大采样数',0,cyclesLimits.maxSamples,1,1,settings.setViewportSampling);
+  maxSamples.title='设为 0 时不限制采样次数。启用自适应采样后，视口可以在达到上限前收敛。';
+  const denoise=check(viewportSampling,'denoise','降噪',settings.setViewportSampling);
+  const denoiseStart=number(viewportSampling,'denoiseStart','起始采样',1,cyclesLimits.maxSamples,1,1,settings.setViewportSampling);
+  denoiseStart.title='达到此采样数后，对静止视口进行降噪';
+  const denoiseStartRow=denoiseStart.closest('.render-settings-row');
   const resetSampling=el('button','','恢复默认');resetSampling.type='button';resetSampling.title='恢复视口采样默认值';
   resetSampling.onclick=()=>settings.setViewportSampling(viewportSamplingDefaults);
   const viewportActions=el('div','render-settings-camera-actions');viewportActions.dataset.search='恢复默认 视口采样';viewportActions.append(resetSampling);
   viewportSampling.append(viewportActions);
+  const sampling=section('render','sampling','渲染采样');
+  const samples=number(sampling,'samples','最大采样数',1,cyclesLimits.maxSamples,1);
+  samples.title='仅用于正式出图';
   function syncViewportSampling(){
     const value=settings.readViewportSampling();
-    for(const [key,input] of Object.entries({draftSamples,detailSamples}))
+    for(const [key,input] of Object.entries({maxSamples,noiseThreshold,minSamples,denoiseStart}))
       if(!input.closest('.workspace-range-field')?.matches('[data-dragging],[data-editing]'))input.value=String(value[key]);
-    resetSampling.disabled=value.draftSamples===viewportSamplingDefaults.draftSamples&&value.detailSamples===viewportSamplingDefaults.detailSamples;
+    adaptive.checked=value.adaptive;
+    for(const input of [noiseThreshold,minSamples])input.closest('.render-settings-row').toggleAttribute('data-viewport-option-off',!value.adaptive);
+    denoise.checked=value.denoise;
+    denoiseStartRow.toggleAttribute('data-viewport-option-off',!value.denoise);
+    resetSampling.disabled=Object.keys(viewportSamplingDefaults).every(key=>value[key]===viewportSamplingDefaults[key]);
   }
   const paths=section('render','paths','光线路径',false),maxBounces=number(paths,'maxBounces','最大反弹',0,64,1);
   const film=section('render','film','胶片',false),transparent=check(film,'transparent','透明背景');
@@ -523,7 +536,11 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     for(const [key,group] of Object.entries(panels)){
       const titleMatch=group.dataset.searchTitle.toLocaleLowerCase().includes(query),rows=[...group.querySelectorAll('.render-settings-row,.render-settings-hardware,.render-settings-camera-actions')];
       let found=titleMatch;
-      for(const item of rows){const visible=!query||titleMatch||item.dataset.search.toLocaleLowerCase().includes(query);item.hidden=!visible;found||=visible;}
+      for(const item of rows){
+        const visible=!item.hasAttribute('data-viewport-option-off')&&
+          (!query||titleMatch||item.dataset.search.toLocaleLowerCase().includes(query));
+        item.hidden=!visible;found||=visible;
+      }
       group.hidden=!status(group.dataset.category).available||!!query&&!found;
       if(query&&found)group.open=true;else if(!query)group.open=openSections[key];
       if(group.dataset.category===active&&!group.hidden)matched++;

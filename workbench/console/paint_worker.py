@@ -12,9 +12,10 @@ import numpy as np
 from PIL import Image
 
 from paint_surface import Surface, registered_surface
+from fill_projection import projection_geometry, projected_channels, extend_uv_gutter
 from paint_mask_generators import preview_generator, smooth
 from material_graph import MaterialGraph, MaterialImages, PreviewImages
-from image_documents import document_pixels,composite_document,clipboard_png,png_bytes
+from image_documents import document_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
 
 
 def decode(srgb):
@@ -262,7 +263,7 @@ def blend_mask_value(previous, value, mode):
     return value
 
 
-def mask_effects(coverage, effects, generated, surface, ids):
+def mask_effects(coverage, effects, generated, surface, ids, read_anchor=None):
     eligible = surface.allowed[ids]
     selected = ids[eligible]
     if not len(selected):
@@ -272,6 +273,8 @@ def mask_effects(coverage, effects, generated, surface, ids):
         kind = effect['kind']
         if kind=='invert':
             value = 1-previous
+        elif kind=='anchor':
+            value = read_anchor(effect, selected)
         elif kind=='levels':
             black,white = effect['black'],effect['white']
             value = np.clip((previous-black)/(white-black),0,1)**(1/effect['gamma'])
@@ -295,13 +298,13 @@ def mask_effects(coverage, effects, generated, surface, ids):
     return coverage
 
 
-def mask_coverage(prepared, surface, ids, u, v):
+def mask_coverage(prepared, surface, ids, u, v, read_anchor=None):
     image, strokes, base, effects, after, generated = prepared
     coverage = sample(image,u,v,'mask') if image is not None else np.full(len(ids),base,dtype=np.float32)
     if not after:
         coverage = mask_strokes(coverage, strokes, ids)
     if effects:
-        coverage = mask_effects(coverage, effects, generated, surface, ids)
+        coverage = mask_effects(coverage, effects, generated, surface, ids, read_anchor)
     if after and strokes is not None:
         coverage = mask_strokes(coverage, strokes, ids)
         if generated:
@@ -309,10 +312,10 @@ def mask_coverage(prepared, surface, ids, u, v):
     return coverage
 
 
-def finish_layer_groups(stack, keep, result, written, surface, ids, u, v):
+def finish_layer_groups(stack, keep, result, written, surface, ids, u, v, read_anchor):
     while len(stack) > keep:
         (_, opacity, mask), backdrop, child_writes = stack.pop()
-        amount = opacity * mask_coverage(mask, surface, ids, u, v)
+        amount = opacity * mask_coverage(mask, surface, ids, u, v, read_anchor)
         if mask[-1]:
             child_writes |= np.any(result != backdrop, axis=1)
         result[:] = backdrop + (result - backdrop) * amount[:, None]
@@ -354,8 +357,24 @@ def composite_layers(cfg, step, material_images):
 
     inspect = cfg.get('inspectMask')
     isolated = cfg.get('isolatedLayer')
+    # In solo/mask inspection include upstream paint layers as read-only inputs.
+    # The saved stack is ordered bottom to top, with each folder before its children.
+    wanted = {inspect or isolated} if inspect or isolated else {layer['id'] for layer in paint['layers']}
+    if isolated:
+        for layer in paint['layers']:
+            if layer.get('parentId') in wanted:
+                wanted.add(layer['id'])
+    anchor_channels = {}
+    for layer in reversed(paint['layers']):
+        if layer['id'] in wanted and (layer.get('maskEnabled', True) or layer['id']==inspect):
+            for effect in layer.get('maskEffects', []):
+                if effect['kind']=='anchor' and effect['enabled'] and effect['opacity']:
+                    wanted.add(effect['source'])
+                    anchor_channels.setdefault(effect['source'], set()).add(effect['channel'])
     layers = []
     fill_graphs = {}
+    triplanar = {}
+    projection_normals = False
     has_generator = False
     folder_visibility, folder_scopes = {}, {}
     inspected_folder = None
@@ -369,7 +388,7 @@ def composite_layers(cfg, step, material_images):
         image = art(layer['mask'], 'mask') if layer.get('mask') else None
         strokes = surface.mask(layer.get('maskStrokes', []), stroke_sample)
         effects = [e for e in layer.get('maskEffects', []) if e['enabled'] and e['opacity']]
-        generated = any(e['kind'] in ('height', 'facing', 'edgeWear', 'surfaceNoise') for e in effects)
+        generated = any(e['kind'] in ('height', 'facing', 'edgeWear', 'surfaceNoise', 'anchor') for e in effects)
         return image, strokes, layer.get('maskBase', 1), effects, layer.get('maskStrokeOrder')=='after', generated
 
     for layer in paint['layers']:
@@ -391,7 +410,11 @@ def composite_layers(cfg, step, material_images):
                     scopes += ((layer['id'], opacity, prepared),)
             folder_scopes[layer['id']] = scopes
             continue
-        if not inspection and (inspect or not visible or not layer['opacity']):
+        input_only = bool(inspect or isolated and not visible) and not inspection
+        if input_only:
+            if layer['id'] not in anchor_channels or not layer['visible'] or not layer['opacity']:
+                continue
+        elif not inspection and (not visible or not layer['opacity']):
             continue
         opacity = {name: layer.get('channelOpacity', {}).get(name, 1)
                    for name, enabled in layer['channels'].items() if enabled}
@@ -417,14 +440,22 @@ def composite_layers(cfg, step, material_images):
         strokes = surface.paint(layer.get('strokes',[]),opacity,color,stroke_sample) if layer['kind']=='paint' and not inspection else None
         if material_id and material_id not in fill_graphs and not inspection:
             fill_graphs[material_id] = MaterialGraph(cfg['fillMaterialPlans'][material_id],cfg['assets'],material_images)
-        layers.append((layer,image,mask,maps,opacity,projection,canvas_bounds,strokes,reference_valid,reference_uv,scopes))
+        settings = layer.get('fillProjection')
+        if not inspection and settings and settings['mode']=='triplanar':
+            projected = set(opacity) if material_id else set(maps)
+            if projected:
+                triplanar[layer['id']] = projected
+                projection_normals |= 'normal' in projected
+        layers.append((layer,image,mask,maps,opacity,projection,canvas_bounds,strokes,reference_valid,reference_uv,scopes,input_only))
+    if triplanar:
+        projection_data = projection_geometry(surface, source, projection_normals)
     base = enabled_base(paint)
     graph = MaterialGraph(cfg.get('materialPlan') if not inspect else None,cfg['assets'],material_images)
     combined = np.empty((len(valid),14),dtype=np.uint8)
     if graph.plan and cfg.get('_captureGraphPaint'):
         cfg['_graphPaint'] = np.empty_like(combined)
     written = np.zeros(len(valid),dtype=bool)
-    chunk = 32768 if graph.plan or fill_graphs else 200000
+    chunk = 32768 if graph.plan or fill_graphs or triplanar else 200000
     for start in range(0,len(valid),chunk):
         end = min(start+chunk,len(valid))
         base_values = base_material_values(dict(color='#000000',metallic=0,roughness=.5) if inspect else base,color)
@@ -432,16 +463,17 @@ def composite_layers(cfg, step, material_images):
         chunk_written = written[start:end]
         stack = []
         scope_args = None
-        if inspected_folder is not None:
-            ids = np.arange(start, end)
-            u = (ids%shape[1])/(shape[1]-1)
-            v = 1-(ids//shape[1])/(shape[0]-1)
-            result[:, :3] = decode(mask_coverage(inspected_folder, surface, ids, u, v)[:, None])
-        for layer,image,mask,maps,opacity,projection,canvas_bounds,strokes,reference_valid,reference_uv,scopes in layers:
-            if stack or scopes:
+        # Keep only the requested scalar channels for this tile. No full-size anchor images.
+        anchor_tiles = {}
+        def read_anchor(effect, ids):
+            tile = anchor_tiles.get((effect['source'],effect['channel']))
+            return 0.0 if tile is None else tile[ids-start]
+
+        for layer,image,mask,maps,opacity,projection,canvas_bounds,strokes,reference_valid,reference_uv,scopes,input_only in layers:
+            if not input_only and (stack or scopes):
                 if scope_args is None:
                     ids = np.arange(start, end)
-                    scope_args = (surface, ids, (ids%shape[1])/(shape[1]-1), 1-(ids//shape[1])/(shape[0]-1))
+                    scope_args = (surface, ids, (ids%shape[1])/(shape[1]-1), 1-(ids//shape[1])/(shape[0]-1), read_anchor)
                 common = 0
                 for opened, required in zip(stack, scopes):
                     if opened[0] is not required:
@@ -451,6 +483,7 @@ def composite_layers(cfg, step, material_images):
                 for scope in scopes[common:]:
                     stack.append((scope, result.copy(), np.zeros(end-start, dtype=bool)))
             layer_writes = stack[-1][2] if stack else chunk_written
+            projected = triplanar.get(layer['id'])
             if projection is not None:
                 projected_ids, projected_uv = projection
                 span = at_range(projected_ids,start,end)
@@ -467,7 +500,9 @@ def composite_layers(cfg, step, material_images):
                 visible = (u>=0)&(u<=1)&(v>=0)&(v<=1)
                 ids,u,v = ids[visible],u[visible],v[visible]
             else:
-                if strokes is None:
+                if projected:
+                    ids = np.flatnonzero(surface.allowed[start:end])+start
+                elif strokes is None:
                     ids = np.arange(start,end)
                 else:
                     stroke_ids,_ = strokes
@@ -479,8 +514,8 @@ def composite_layers(cfg, step, material_images):
             uu = (ids%shape[1])/(shape[1]-1)
             vv = 1-(ids//shape[1])/(shape[0]-1)
             mask_u,mask_v = (uu,vv) if projection is not None else (u,v)
-            coverage = mask_coverage(mask, surface, ids, mask_u, mask_v)
-            if inspect:
+            coverage = mask_coverage(mask, surface, ids, mask_u, mask_v, read_anchor)
+            if layer['id']==inspect:
                 result[selected,:3] = decode(coverage[:,None])
                 continue
             weight = np.full(len(ids),layer['opacity'],dtype=float)
@@ -492,16 +527,31 @@ def composite_layers(cfg, step, material_images):
             else:
                 rgb = color(layer['values']['color'])
             weight *= coverage
-            if image is not None or mask[-1] and layer['kind']=='fill':
+            if projected or image is not None or mask[-1] and layer['kind']=='fill':
                 layer_writes[selected[weight>0]] = True
             material = fill_graphs.get(layer.get('materialId'))
             tiling=layer.get('tiling')
             graph_uv = None
-            if material and tiling is not None:
+            if material and not projected and tiling is not None:
                 gu, gv = texture_coords((ids%shape[1]+.5)/shape[1], 1-(ids//shape[1]+.5)/shape[0], tiling)
                 graph_uv = np.column_stack((gu, 1-gv))
-            material_values = material.evaluate(result[selected],ids,shape[1],shape[0],graph_uv) if material else None
-            map_u,map_v=texture_coords(u,v,tiling) if maps else (u,v)
+            material_values = material.evaluate(result[selected],ids,shape[1],shape[0],graph_uv) if material and not projected else None
+            map_u,map_v=texture_coords(u,v,tiling) if maps and not projected else (u,v)
+            if projected:
+                def read_plane(index, plane_u, plane_v):
+                    if material:
+                        picked = selected[index]
+                        fields = material.evaluate(result[picked],ids[index],shape[1],shape[0],np.column_stack((plane_u,plane_v)))
+                        return {key:fields[:,CHANNELS[key]] for key in projected}
+                    samples = {}
+                    for key in projected:
+                        texture = maps[key]
+                        if isinstance(texture,dict):
+                            samples[key] = sample_document(texture['document'],plane_u,1-plane_v,key,repeat=True,linear=texture['colorSpace']=='linear')
+                        else:
+                            samples[key] = sample(texture,plane_u,1-plane_v,key,repeat=True)
+                    return samples
+                plane_values,plane_alpha = projected_channels(surface,projection_data,ids,layer['fillProjection'],projected,read_plane)
             for name,col in CHANNELS.items():
                 value = rgb if name=='color' else channel_value(name,layer['values'].get(name,DEFAULTS[name]),color)
                 if name not in opacity:
@@ -516,12 +566,23 @@ def composite_layers(cfg, step, material_images):
                     if name not in RGB:
                         value = value[:,0]
                     channel_weight *= stroke_alpha
+                    if name=='color':
+                        for channel in anchor_channels.get(layer['id'], ()):
+                            tile = np.zeros(end-start, dtype=np.float32)
+                            # Stroke colors are straight linear RGB here. Weight already
+                            # includes the source mask, stroke and layer/channel opacities.
+                            tile[selected] = channel_weight if channel=='coverage' else channel_weight*(value @ [0.2126,0.7152,0.0722])
+                            anchor_tiles[layer['id'],channel] = tile
+                    if input_only:
+                        continue
                     layer_writes[selected[channel_weight>0]] = True
-                elif material_values is not None:
-                    value = material_values[:,col]
-                    if name=='normal' and tiling and tiling['rotation']:
+                elif material_values is not None or projected and name in projected:
+                    value = plane_values[name] if projected else material_values[:,col]
+                    if projected and name in plane_alpha:
+                        channel_weight *= plane_alpha[name]
+                    if not projected and name=='normal' and tiling and tiling['rotation']:
                         value = rotated_normal(value, tiling['rotation'])
-                    overlay=maps.get(name)
+                    overlay=maps.get(name) if material else None
                     if isinstance(overlay,dict):
                         drawing,alpha=sample_document(overlay['document'],u,v,name,linear=overlay['colorSpace']=='linear')
                         alpha=alpha[:,None] if name in RGB else alpha
@@ -541,6 +602,11 @@ def composite_layers(cfg, step, material_images):
                 result[selected,col] = backdrop*(1-alpha)+value*alpha
         if stack:
             finish_layer_groups(stack, 0, result, chunk_written, *scope_args)
+        if inspected_folder is not None:
+            ids = np.arange(start, end)
+            u = (ids%shape[1])/(shape[1]-1)
+            v = 1-(ids//shape[1])/(shape[0]-1)
+            result[:, :3] = decode(mask_coverage(inspected_folder, surface, ids, u, v, read_anchor)[:, None])
         if graph.plan:
             if '_graphPaint' in cfg:
                 original = result.copy()
@@ -552,8 +618,15 @@ def composite_layers(cfg, step, material_images):
         for name in SRGB:
             part=CHANNELS[name];result[:,part]=encode(np.clip(result[:,part],0,1))
         combined[start:end] = np.rint(np.clip(result,0,1)*255)
+    if triplanar and not inspect:
+        buffers = [combined]
+        if '_graphPaint' in cfg:
+            buffers.append(cfg['_graphPaint'])
+        # Same UV width in the live atlas and the final 4K maps (two preview
+        # texels at 256px). Coverage diagnostics continue to describe writes on geometry.
+        extend_uv_gutter(surface.owner,surface.allowed,protected,conflict,shape,32//step,*buffers)
     assert not np.any(written & (protected|conflict|~surface.allowed))
-    surface_scope = has_generator or any(layer.get('projector') or layer.get('space')=='uv' or
+    surface_scope = bool(triplanar) or has_generator or any(layer.get('projector') or layer.get('space')=='uv' or
                                          layer['kind']=='paint' for layer in paint['layers'])
     eligible = surface.allowed if surface_scope or cfg.get('uvGuide') else valid
     return combined.reshape((*shape,14))[::-1], (protected,conflict,written,eligible)
@@ -608,16 +681,51 @@ def diagnostic_codes(protected,conflict,written):
     return status
 
 
+def uv_layout(cfg):
+    source = cfg['source']
+    cache = Path(source['cacheRun'])
+    report = json.loads((cache/'geometry_report.json').read_bytes())
+    if not report.get('uv_unchanged') or source.get('uvSha256',report['uv_before_sha256'])!=report['uv_before_sha256']:
+        raise ValueError('UV 参考与登记模型的原 UV 不一致')
+    stem = next(item['file'] for item in report['materials'] if item['name']==source['material'])
+    with np.load(cache/'mapping'/f'{stem}.npz') as data:
+        # Raster coordinates in the image editor are top-down.
+        used = (data['owner'][::-1].reshape(1024,4,1024,4)>=0).any(axis=(1,3))
+        protected,conflict = (data[name][::-1].reshape(1024,4,1024,4).any(axis=(1,3))
+                              for name in ('protected','collision'))
+    padded = np.pad(used,1,constant_values=False)
+    inside = padded[1:-1,:-2]&padded[1:-1,2:]&padded[:-2,1:-1]&padded[2:,1:-1]
+    pixels = np.zeros((1024,1024,4),dtype=np.uint8)
+    pixels[used & ~inside] = (167,219,253,234)
+    pixels[protected] = (244,170,68,105)
+    pixels[conflict] = (253,100,115,112)
+    return png_bytes(pixels)
+
+
 def live_pixels(cfg):
+    if cfg.get('uvLayout'):
+        return uv_layout(cfg)
     if cfg.get('imageDocumentId'):
         doc=cfg['paint']['imageDocuments'][cfg['imageDocumentId']]
+        if 'imageLayoutProbe' in cfg:
+            return json.dumps(layout_probe(doc,cfg['assets'],cfg['liveResolution'],cfg['imageLayoutProbe'])).encode()
+        if 'imageEdgeView' in cfg:
+            return image_edge_view(doc,cfg['assets'],cfg['liveResolution'],cfg['imageEdgeView'])
+        if 'imageSelectionSample' in cfg:
+            return image_selection_sample(doc,cfg['assets'],cfg['imageSelectionSample'],cfg['liveResolution'])
         if cfg.get('isolatedImageLayer'):doc={**doc,'layers':[l for l in doc['layers'] if l['id']==cfg['isolatedImageLayer']]}
+        if cfg.get('imageWindow'):
+            window = exact_stroke_window(doc,cfg['assets'],cfg['imageWindow'],cfg.get('imageInspectMask'))
+            if window is not None:
+                return b'W'+window.tobytes()
         pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
         if cfg.get('clipboardRegion'):
-            return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'])
+            return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'],cfg['assets'])
         if cfg.get('imagePng'):
             return png_bytes(pixels,doc['colorSpace'])
-        return pixels.tobytes()
+        # Row reversal leaves a strided view. Copy rows once into a contiguous
+        # buffer and let stdout/base64 consume it without another bytes copy.
+        return memoryview(np.ascontiguousarray(pixels)).cast('B')
     step = 4096//cfg.get('liveResolution',256)
     pixels,(protected,conflict,written,eligible) = composite(cfg,step)
     codes = diagnostic_codes(protected,conflict,written)

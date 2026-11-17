@@ -4,9 +4,9 @@ import {createReadStream} from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {chromium} from 'playwright-core';
 import {registry} from 'playwright-core/lib/server/registry/index';
 import {stageReleaseDemo} from './release-demo.mjs';
+import {buildPaintKernel,paintKernelName} from './build-paint-kernel.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from '../public/app-version.mjs';
 import {workspaceRoot} from '../workspace-paths.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
@@ -77,19 +77,6 @@ async function stageWorkbench(workspace){
   return stageReleaseDemo(workspace,python);
 }
 
-async function stageIcon(staging,app){
-  const instance=await chromium.launch(process.env.ARACHNE_PACKAGE_BROWSER?
-    {executablePath:process.env.ARACHNE_PACKAGE_BROWSER}:{});
-  const png=path.join(staging,'icon.png');
-  try{
-    const page=await instance.newPage({viewport:{width:256,height:256}});
-    const svg=await fs.readFile(path.join(root,'public/arachne-mark.svg'),'utf8');
-    await page.setContent('<style>body{margin:0}svg{width:256px;height:256px}</style>'+svg);
-    await page.screenshot({path:png,omitBackground:true});
-  }finally{await instance.close();}
-  run(python,['-c','from PIL import Image; import sys; Image.open(sys.argv[1]).save(sys.argv[2], format="ICO")',png,path.join(app,'arachne.ico')]);
-}
-
 await fs.mkdir(output,{recursive:true});
 await fs.mkdir(cache,{recursive:true});
 const destination=path.join(output,baseName),zip=destination+'.zip';
@@ -127,10 +114,24 @@ try{
     throw Error('请先安装 Windows Chromium Headless Shell，跨平台构建可设置 ARACHNE_PACKAGE_WIN_BROWSER');
   await tree(renderBrowser,path.join(resources,'runtime/browser'));
   const inputs=await stageWorkbench(path.join(resources,'workspace'));
+  const consoleOut=path.join(resources,'workspace/workbench/console');
+  if(process.platform==='win32'&&process.arch==='x64'){
+    await buildPaintKernel(consoleOut);
+    const env={...process.env};delete env.ARACHNE_PAINT_KERNEL;
+    run(path.join(pythonRoot,'python.exe'),['-B','-c','from paint_kernel import inverse_grid_kernel,brush_coverage_kernel;assert inverse_grid_kernel() and brush_coverage_kernel()'],
+      {cwd:consoleOut,env});
+  }else{
+    const kernel=process.env.ARACHNE_WINDOWS_PAINT_KERNEL;
+    if(!kernel)throw Error('跨平台打包需要设置 ARACHNE_WINDOWS_PAINT_KERNEL，指向已构建的 Windows x64 原生库');
+    await copy(kernel,path.join(consoleOut,paintKernelName('win32')));
+  }
+  for(const name of ['Rust-LICENSE-APACHE.txt','Rust-LICENSE-MIT.txt'])
+    await copy(path.join(root,'release-support/licenses',name),path.join(resources,'licenses',name));
   const native=path.join(root,'release-support/windows'),app=path.join(resources,'app');
   await copy(path.join(native,'app.json'),path.join(app,'package.json'));
   for(const name of ['main.mjs','preload.cjs','window-state.mjs','download-target.mjs','close-check.mjs'])await copy(path.join(native,name),path.join(app,name));
-  await stageIcon(staging,app);
+  run(python,['-c','from PIL import Image; import sys; Image.open(sys.argv[1]).save(sys.argv[2], format="ICO")',
+    path.join(root,'public/arachne-icon.png'),path.join(app,'arachne.ico')]);
   const mcp=await fs.readFile(path.join(native,'ArachneMCP.cmd'),'utf8');
   await fs.writeFile(path.join(bundle,'ArachneMCP.cmd'),mcp.replace(/\r?\n/g,'\r\n'));
   await copy(path.join(native,'Windows.md'),path.join(bundle,'使用说明.md'));

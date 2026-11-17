@@ -17,6 +17,11 @@ test('brush scalar graph evaluates settings and rejects cycles, wrong sockets an
   graph.nodes.find(n=>n.id==='size').params.value=96;graph.nodes.find(n=>n.id==='half').params={operation:'multiply',a:1,b:.5};
   const connected=connectMaterialPorts(connectMaterialPorts(graph,{node:'size',port:'value'},{node:'half',port:'a'}),{node:'half',port:'value'},{node:'brush',port:'uvRadius'});
   assert.equal(evaluateBrushGraph(connected).uvRadius,48);assert.equal(evaluateBrushGraph(connected).pressure,true);
+  const legacy=structuredClone(connected);
+  for(const key of ['flow','spacing','smoothing','pressureSize'])delete legacy.nodes[0].params[key];
+  assert.deepEqual(evaluateBrushGraph(legacy),evaluateBrushGraph(connected));
+  const soft=defaultBrushGraph({pressureSize:true,smoothing:68,flow:.45,spacing:.25});
+  assert.deepEqual(evaluateBrushGraph(soft),{...evaluateBrushGraph(defaultBrushGraph()),pressureSize:true,smoothing:68,flow:.45,spacing:.25});
   assert.throws(()=>compileMaterialGraph(connected));
   const invalid=structuredClone(connected);invalid.nodes.find(n=>n.id==='size').params.value=900;assert.throws(()=>evaluateBrushGraph(invalid),/范围/);
   assert.throws(()=>connectMaterialPorts(graph,{node:'brush',port:'brush'},{node:'half',port:'a'}));

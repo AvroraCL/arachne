@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
-import {once} from 'node:events';
 import {StringDecoder} from 'node:string_decoder';
 import {ROOT,projectDir,read,list,atomic} from './store.mjs';
 import {pathTraceOptions} from './path-trace-render.mjs';
@@ -13,15 +12,68 @@ import {checkedTexturePreset} from './public/texture-export-presets.mjs';
 
 const PYTHON=process.env.ARACHNE_PYTHON||'python';
 export const paintExportTypes=['paint-export','paint-texture-export','paint-glb-export'];
-let baseUrl='',running=false,generation=0;
+let baseUrl='',stopping=false,generation=0;
 const queue=[],active=new Map();
+// Run one memory-heavy render or bake at a time. File tasks have a separate
+// bounded slot so a render does not hold up an independent project backup.
+const laneOf=type=>['paint-render','paint-export'].includes(type)?'render':
+  ['paint-preview','paint-draft'].includes(type)?'bake':'file';
 export const setBaseUrl=url=>{baseUrl=url;};
 export const jobUpdates=()=>generation;
 export const hasPendingJobs=()=>active.size>0||queue.some(job=>!job.cancelRequested);
-const safe=id=>{if(!/^[\w-]+$/.test(id))throw Error('任务ID无效');return id;};
+const validJobId=id=>typeof id==='string'&&/^[\w-]{1,100}$/.test(id);
+const safe=id=>{if(!validJobId(id))throw Error('任务ID无效');return id;};
 export const jobDir=(pid,jid)=>path.join(projectDir(pid),'jobs',safe(jid));
-export const getJob=(pid,jid)=>JSON.parse(fs.readFileSync(path.join(jobDir(pid,jid),'job.json'),'utf8'));
-export function listJobs(pid){const dir=path.join(projectDir(pid),'jobs');return fs.existsSync(dir)?fs.readdirSync(dir).filter(j=>fs.existsSync(path.join(dir,j,'job.json'))).map(j=>getJob(pid,j)).sort((a,b)=>b.created.localeCompare(a.created)):[];}
+const jobTypes=new Set([...paintExportTypes,'paint-preview','paint-draft','paint-backup','paint-render']);
+const jobStatuses=new Set(['queued','running','completed','failed','cancelled','interrupted']);
+const failedRecovery=new Map();
+function damagedJob(pid,jid,reason){
+  return {id:jid,projectId:pid,status:'corrupt',stage:'任务记录无法恢复',
+    error:`任务 ${jid} 无法恢复：${reason}。原始 job.json 已保留。`};
+}
+export function getJob(pid,jid){
+  const folder=jobDir(pid,jid),file=path.join(folder,'job.json');
+  let job;
+  try{
+    const stat=fs.lstatSync(file);
+    if(!stat.isFile()||stat.size>32*1024*1024)return damagedJob(pid,jid,'记录文件类型或大小无效');
+    job=JSON.parse(fs.readFileSync(file,'utf8'));
+  }
+  catch(error){
+    if(error.code==='ENOENT'||error.code==='ENOTDIR')throw error;
+    return damagedJob(pid,jid,error instanceof SyntaxError?'JSON 格式无效或文件不完整':`无法读取记录（${error.code||'读取失败'}）`);
+  }
+  if(!job||typeof job!=='object'||Array.isArray(job))return damagedJob(pid,jid,'记录必须是 JSON 对象');
+  const checks={
+    id:job.id===jid,projectId:job.projectId===pid,type:jobTypes.has(job.type),
+    status:jobStatuses.has(job.status),revision:Number.isSafeInteger(job.revision)&&job.revision>=0,
+    created:typeof job.created==='string'&&Number.isFinite(Date.parse(job.created)),
+    stage:typeof job.stage==='string',
+    progress:job.progress===undefined||job.progress&&typeof job.progress==='object'&&!Array.isArray(job.progress)
+  };
+  if(job.status==='completed'){
+    const outputs={
+      'paint-draft':'colorUrl','paint-preview':'colorUrl','paint-render':'renderUrl','paint-backup':'archiveUrl',
+      'paint-export':'packageUrl','paint-texture-export':'packageUrl','paint-glb-export':'glbUrl'
+    };
+    const key=outputs[job.type];
+    const url=key&&job[key];
+    if(typeof url!=='string'||!url.startsWith(`/api/projects/${pid}/jobs/${jid}/files/`))checks.output=false;
+  }
+  const invalid=Object.keys(checks).filter(key=>!checks[key]);
+  if(invalid.length)return damagedJob(pid,jid,'字段缺失或无效：'+invalid.join('、'));
+  return failedRecovery.get(file)||job;
+}
+export function listJobs(pid){
+  const dir=path.join(projectDir(pid),'jobs');
+  let entries;
+  try{entries=fs.readdirSync(dir,{withFileTypes:true});}
+  catch(error){if(error.code==='ENOENT')return [];throw error;}
+  return entries.filter(entry=>entry.isDirectory()&&validJobId(entry.name)).flatMap(entry=>{
+    try{return [getJob(pid,entry.name)];}
+    catch(error){if(['ENOENT','ENOTDIR'].includes(error.code))return [];throw error;}
+  }).sort((a,b)=>(b.created||'').localeCompare(a.created||'')||a.id.localeCompare(b.id));
+}
 export function readJobLog(pid,jid){
   const file=path.join(jobDir(pid,jid),'run.log');
   let fd;
@@ -37,8 +89,9 @@ export function readJobLog(pid,jid){
   }finally{fs.closeSync(fd);}
 }
 function update(j,patch){
-  Object.assign(j,patch,{updated:new Date().toISOString()});
-  atomic(path.join(jobDir(j.projectId,j.id),'job.json'),j);
+  const next={...j,...patch,updated:new Date().toISOString()};
+  atomic(path.join(jobDir(j.projectId,j.id),'job.json'),next);
+  Object.assign(j,next);
   generation++;
 }
 const fileUrl=(j,name)=>`/api/projects/${j.projectId}/jobs/${j.id}/files/${name}`;
@@ -54,16 +107,24 @@ export function runProcess(j,exe,args,{onLine}={}){
     if(!active.has(j.id))active.set(j.id,{});active.get(j.id).child=child;
     const decoder=new StringDecoder('utf8');
     let pendingLine='';
+    let logFailure;
+    const append=output=>{
+      if(logFailure)return;
+      try{log(j,output);}
+      catch(error){logFailure=error;child.kill();}
+    };
     child.stdout.on('data',b=>{
-      const output=decoder.write(b);log(j,output);
+      const output=decoder.write(b);append(output);
       if(!onLine)return;
       const lines=(pendingLine+output).split(/\r?\n/);pendingLine=lines.pop();
       if(pendingLine.length>65536)pendingLine='';
       for(const line of lines)onLine(line);
     });
-    child.stderr.on('data',b=>log(j,b.toString()));
-    child.on('error',reject);child.on('close',code=>{const tail=decoder.end();if(tail)log(j,tail);if(onLine&&pendingLine+tail)onLine(pendingLine+tail);const a=active.get(j.id);if(a?.child===child)delete a.child;
-      if(j.cancelRequested){const e=Error('任务已取消');e.cancelled=true;reject(e);}else if(code!==0)reject(Error('工具执行失败，请查看运行日志'));else resolve();});
+    child.stderr.on('data',b=>append(b.toString()));
+    child.on('error',reject);child.on('close',code=>{const tail=decoder.end();if(tail)append(tail);if(onLine&&pendingLine+tail)onLine(pendingLine+tail);const a=active.get(j.id);if(a?.child===child)delete a.child;
+      if(j.cancelRequested){const e=Error('任务已取消');e.cancelled=true;reject(e);}
+      else if(logFailure)reject(Error('无法写入任务日志，请检查工作台数据目录的空间和权限',{cause:logFailure}));
+      else if(code!==0)reject(Error('工具执行失败，请查看运行日志'));else resolve();});
   });
 }
 export function mime(name){return ({'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.svg':'image/svg+xml','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf','.otf':'font/otf','.ttc':'font/collection','.json':'application/json','.html':'text/html','.css':'text/css','.mjs':'text/javascript','.js':'text/javascript','.log':'text/plain','.glb':'model/gltf-binary'})[path.extname(name).toLowerCase()]||'application/octet-stream';}
@@ -72,6 +133,7 @@ function queuedJob(doc,type,requestId,retryOf=null,task=null){
     task:task?{labId:task.labId,taskId:task.taskId,attemptId:task.attemptId}:null,status:'queued',stage:'等待执行',created:new Date().toISOString()};
 }
 function enqueue(doc,items){
+  if(stopping)throw Object.assign(Error('工作台正在关闭'),{status:503});
   const created=[];
   let snapshot=null;
   fs.mkdirSync(path.join(projectDir(doc.id),'jobs'),{recursive:true});
@@ -95,7 +157,7 @@ function enqueue(doc,items){
     throw error;
   }
   queue.push(...items);
-  void drain();
+  drain();
 }
 export function submitRenderBatch(doc,{revision,requestId,bookmarkIds,settings}){
   if(doc.workflowType!==PAINT)throw Error('请选择涂装工程');
@@ -163,27 +225,56 @@ export function submit(pid,type,revision,requestId,task=null,retryOf=null,render
   return j;
 }
 export function retryJob(pid,jid,requestId,task=null){const old=getJob(pid,jid);if(!['failed','cancelled','interrupted'].includes(old.status))throw Error('只有失败、取消或中断任务可重试');return submit(pid,old.type,old.revision,requestId,task,jid);}
-async function drain(){if(running||!baseUrl)return;running=true;
-  try{while(queue.length){const j=queue.shift();if(j.cancelRequested)continue;active.set(j.id,{job:j,controller:new AbortController()});update(j,{status:'running'});
-    try{const doc=JSON.parse(fs.readFileSync(path.join(jobDir(j.projectId,j.id),'snapshot.json'),'utf8'));
-      const signal=active.get(j.id).controller.signal;
-      const native=action=>cyclesResource.run('production',action,{signal,onQueued:()=>stage(j,'等待当前渲染任务释放设备')});
-      const registerBrowser=browser=>{active.get(j.id).browser=browser;};
-      const action=()=>runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs,signal,registerBrowser});
-      await (['paint-preview','paint-render','paint-export'].includes(j.type)?native(action):action());
-      cancelled(j);update(j,{status:'completed',stage:'已完成'});
-    }catch(e){
-      if(j.cancelRequested||e.cancelled)update(j,{status:'cancelled',stage:'已取消'});
-      else{log(j,'\nERROR '+e.stack+'\n');update(j,{status:'failed',stage:e.message,error:e.message});}
+function drain(){
+  if(stopping||!baseUrl)return;
+  const lanes=new Set([...active.values()].map(entry=>entry.lane));
+  let heavy=lanes.has('render')||lanes.has('bake');
+  for(let i=0;i<queue.length;){
+    const job=queue[i],lane=laneOf(job.type);
+    if(job.cancelRequested){queue.splice(i,1);continue;}
+    if(lanes.has(lane)||(lane!=='file'&&heavy)){i++;continue;}
+    queue.splice(i,1);
+    lanes.add(lane);
+    if(lane!=='file')heavy=true;
+    const entry={job,lane,controller:new AbortController()};
+    active.set(job.id,entry);
+    entry.done=executeJob(entry).catch(error=>{
+      console.error(`无法记录任务 ${job.id} 的最终状态：${error.message}`);
+      const file=path.join(jobDir(job.projectId,job.id),'job.json');
+      failedRecovery.set(file,damagedJob(job.projectId,job.id,'无法保存任务状态'));
+      generation++;
+    }).finally(()=>{active.delete(job.id);drain();});
+  }
+}
+async function executeJob(entry){
+  const {job,lane,controller}=entry,signal=controller.signal;
+  try{
+    update(job,{status:'running'});
+    const snapshot=path.join(jobDir(job.projectId,job.id),'snapshot.json');
+    const doc=JSON.parse(fs.readFileSync(snapshot,'utf8'));
+    if(doc.id!==job.projectId||doc.revision!==job.revision)throw Error('任务快照与冻结修订不一致');
+    const registerBrowser=browser=>{entry.browser=browser;};
+    const action=()=>runPaintJob(job,doc,{stage,update,runProcess,getJob,listJobs,signal,registerBrowser});
+    if(lane==='file')await action();
+    else await cyclesResource.run('production',action,{signal,onQueued:()=>stage(job,'等待当前渲染任务释放设备')});
+    cancelled(job);
+    update(job,{status:'completed',stage:'已完成'});
+  }catch(error){
+    if(job.cancelRequested||error.cancelled)update(job,{status:'cancelled',stage:'已取消'});
+    else{
+      try{log(job,'\nERROR '+error.stack+'\n');}catch(logError){console.warn('无法记录任务日志',logError.code);}
+      update(job,{status:'failed',stage:error.message,error:error.message});
     }
-    finally{active.delete(j.id);}
-  }}finally{running=false;}
+  }
 }
 export async function cancel(pid,jid){
-  const q=queue.find(j=>j.id===jid&&j.projectId===pid);const live=q||[...active.keys()].includes(jid)&&queueJob(pid,jid);
+  const q=queue.find(j=>j.id===jid&&j.projectId===pid);
+  const current=active.get(jid),live=q||(current?.job.projectId===pid?current.job:null);
   const j=live||getJob(pid,jid);if(!['running','queued'].includes(j.status))return j;
-  j.cancelRequested=true;update(j,{cancelRequested:true,status:'cancelled',stage:'已取消'});
-  const a=active.get(jid);if(a?.job)a.job.cancelRequested=true;
+  j.cancelRequested=true;
+  const a=current?.job===j?current:null;
+  let failure;
+  try{update(j,{cancelRequested:true,status:'cancelled',stage:'已取消'});}catch(error){failure=error;}
   a?.controller?.abort();
   if(a?.browser)await a.browser.close().catch(()=>{});
   if(a?.child){
@@ -195,14 +286,32 @@ export async function cancel(pid,jid){
       child.once('close',()=>clearTimeout(force));
     }
   }
+  if(q)drain();
+  if(failure)throw failure;
   return j;
 }
-function queueJob(pid,jid){return active.get(jid)?.job||getJob(pid,jid);}
-export function recover(){for(const p of list())for(const j of listJobs(p.id))if(['queued','running'].includes(j.status))update(j,{status:'interrupted',stage:'服务重启，任务已中断；未自动重跑'});}
+export function recover(){
+  for(const project of list()){
+    let jobs;
+    try{jobs=listJobs(project.id);}
+    catch(error){console.warn(`无法读取工程 ${project.id} 的任务目录：${error.code||error.message}`);continue;}
+    for(const job of jobs){
+      if(job.status==='corrupt'){console.warn(`工程 ${project.id}：${job.error}`);continue;}
+      if(!['queued','running'].includes(job.status))continue;
+      try{update(job,{status:'interrupted',stage:'服务重启，任务已中断；未自动重跑'});}
+      catch(error){
+        const diagnostic=damagedJob(project.id,job.id,`无法写入中断状态（${error.code||'写入失败'}）`);
+        failedRecovery.set(path.join(jobDir(project.id,job.id),'job.json'),diagnostic);
+        console.warn(`工程 ${project.id}：${diagnostic.error}`);
+      }
+    }
+  }
+}
 export async function stop(){
-  const exits=Promise.allSettled([...active.values()].map(value=>value.child).filter(Boolean).map(child=>
-    child.exitCode!==null||child.signalCode!==null?Promise.resolve():once(child,'close')));
-  for(const j of [...queue])await cancel(j.projectId,j.id);
-  for(const[id,a]of active)if(a.job)await cancel(a.job.projectId,id);
-  await exits;
+  stopping=true;
+  const workers=[...active.values()];
+  const cancellations=await Promise.allSettled([...queue,...workers.map(entry=>entry.job)]
+    .map(job=>cancel(job.projectId,job.id)));
+  await Promise.allSettled(workers.map(entry=>entry.done));
+  for(const result of cancellations)if(result.status==='rejected')console.error('无法记录任务取消状态',result.reason);
 }

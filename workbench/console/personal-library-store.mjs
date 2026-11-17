@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {compileLibraryMaterial,evaluateBrushGraph,libraryOperation} from './public/paint-library.mjs';
+import {brushImageAssets,compileLibraryMaterial,evaluateBrushGraph,libraryOperation} from './public/paint-library.mjs';
 import {captureSmartMaterial,applySmartMaterial,smartMaterialAssets} from './smart-material.mjs';
 
 const kinds=['materials','brushes','images','smartMaterials'],sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -46,7 +46,18 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
       entry.layerCount=preset.layers.length-1;
       entry.color=preset.layers.find(layer=>layer.kind==='fill'&&layer.visible)?.values.color||'#808080';
       for(const id of smartMaterialAssets(preset))dependencies.add(id);
-    }else if(kind==='images'){entry.image=resourceId;dependencies.add(resourceId);}else{entry.graph=structuredClone(source.graph);if(kind==='materials'){compileLibraryMaterial(entry.graph,doc.paint.assets);for(const node of entry.graph.nodes)if(node.type==='image'&&node.params.asset)dependencies.add(node.params.asset);}else evaluateBrushGraph(entry.graph);}
+    }else if(kind==='images'){
+      entry.image=resourceId;dependencies.add(resourceId);
+    }else{
+      entry.graph=structuredClone(source.graph);
+      if(kind==='materials'){
+        compileLibraryMaterial(entry.graph,doc.paint.assets);
+        for(const node of entry.graph.nodes)if(node.type==='image'&&node.params.asset)dependencies.add(node.params.asset);
+      }else{
+        evaluateBrushGraph(entry.graph);
+        for(const id of brushImageAssets(entry.graph,doc.paint.assets))dependencies.add(id);
+      }
+    }
     const copies=[];for(const id of dependencies){const asset=doc.paint.assets[id];if(!asset)throw failure('材质图片依赖不存在');const bytes=assetBytes(asset,path.join(projectFolder(doc.id),'assets',path.basename(asset.file)));entry.assets[id]=structuredClone(asset);copies.push([path.join(blobs,asset.file),bytes]);}
     for(const [file,bytes] of copies)ensure(file,bytes);
     if(presetBytes)ensure(presetFile(entry.id),presetBytes);

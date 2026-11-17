@@ -12,3 +12,6 @@ __pycache__/
 /workbench/console/release/
 /workbench/console/test-data/
 *.log
+/workbench/console/libarachne_paint.dylib
+/workbench/console/libarachne_paint.so
+/workbench/console/arachne_paint.dll

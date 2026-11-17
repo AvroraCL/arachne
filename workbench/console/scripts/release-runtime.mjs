@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import net from 'node:net';
 import {spawn,execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -10,14 +9,12 @@ import {fileURLToPath} from 'node:url';
 import {demoProjectId,nativeDemoProjectId} from '../demo-source.mjs';
 import {APP_VERSION} from '../public/app-version.mjs';
 import {ownerIsRunning,readServiceOwner} from '../service-owner.mjs';
+import {desktopUserRoot} from '../release-paths.mjs';
 
 const consoleRoot=path.resolve(import.meta.dirname,'..'),workspace=path.resolve(consoleRoot,'../..');
 const resources=path.resolve(workspace,'..');
 const windows=process.platform==='win32';
-const applicationData=windows
-  ?path.join(process.env.LOCALAPPDATA||path.join(os.homedir(),'AppData','Local'),'Arachne','Workbench')
-  :path.join(os.homedir(),'Library/Application Support/Arachne/Public Workbench');
-export const userRoot=path.resolve(process.env.ARACHNE_USER_DATA_DIR||applicationData);
+export const userRoot=desktopUserRoot();
 const data=path.join(userRoot,'data'),record=path.join(userRoot,'current-server.json');
 async function json(file){return JSON.parse(await fs.readFile(file,'utf8'));}
 async function write(file,value){await fs.mkdir(path.dirname(file),{recursive:true});const tmp=file+'.'+process.pid+'.tmp';await fs.writeFile(tmp,JSON.stringify(value,null,2)+'\n');await fs.rename(tmp,file);}
@@ -77,12 +74,16 @@ export async function startRelease({signal}={}){
   const browser=path.join(resources,'runtime/browser',windows?'chrome-headless-shell.exe':'chrome-headless-shell');
   const bundledBlender=path.join(resources,'runtime/blender/blender.exe');
   if(!await exists(python)||(!windows&&!await exists(browser)))throw Error('内置运行时不完整，请重新解压完整发布包');
-  const env={...process.env,ARACHNE_DATA_DIR:data,ARACHNE_ALLOW_EXTERNAL_DATA:'1',ARACHNE_PATH_ALIASES:aliasesFile,ARACHNE_PYTHON:python,ARACHNE_BUILD_ID:build.buildId,PYTHONNOUSERSITE:'1',PYTHONDONTWRITEBYTECODE:'1'};
+  const kernel=path.join(consoleRoot,windows?'arachne_paint.dll':'libarachne_paint.dylib');
+  const env={...process.env,ARACHNE_DATA_DIR:data,ARACHNE_ALLOW_EXTERNAL_DATA:'1',ARACHNE_PATH_ALIASES:aliasesFile,
+    ARACHNE_PYTHON:python,ARACHNE_PAINT_KERNEL:kernel,ARACHNE_BUILD_ID:build.buildId,PYTHONNOUSERSITE:'1',PYTHONDONTWRITEBYTECODE:'1'};
   if(windows&&!env.ARACHNE_BLENDER&&await exists(bundledBlender))env.ARACHNE_BLENDER=bundledBlender;
   for(const name of ['PYTHONPATH','PYTHONHOME','VIRTUAL_ENV','ELECTRON_RUN_AS_NODE'])delete env[name];
   if(await exists(browser))env.ARACHNE_BROWSER=browser;
   if(!windows)env.PYTHONHOME=path.dirname(path.dirname(python));
-  execFileSync(python,['-B','-X','utf8','-c','import numpy,PIL,fontTools'],{env,stdio:'pipe',windowsHide:true,timeout:15000});
+  execFileSync(python,['-B','-X','utf8','-c',
+    'import numpy,PIL,fontTools;from paint_kernel import inverse_grid_kernel,brush_coverage_kernel;inverse_grid_kernel();brush_coverage_kernel()'],
+    {cwd:consoleRoot,env,stdio:'pipe',windowsHide:true,timeout:15000});
   const seed=path.join(consoleRoot,'seed');
   let seedId;
   for(const id of [nativeDemoProjectId,demoProjectId]){

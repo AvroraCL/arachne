@@ -1,11 +1,13 @@
 import {imageAdjustments} from './image-adjustments.mjs';
 import {hasImageLayerMask} from './image-documents.mjs';
+import {strokeCount,isStrokeBlock} from './stroke-blocks.mjs';
 
 const json=value=>JSON.stringify(value??null);
-const count=(layers,key)=>layers.reduce((total,layer)=>total+(layer[key]?.length||0),0);
+const count=(layers,key)=>layers.reduce((total,layer)=>total+strokeCount(layer[key]),0);
 function content(doc){const next=structuredClone(doc);delete next.revision;delete next.updated;return next;}
 
 function imageStrokeLabel(stroke){
+  if(isStrokeBlock(stroke))return '绘制记录';
   if(stroke.flood)return '油漆桶';
   if(stroke.clone)return '仿制图章';
   if(stroke.transformUV)return '自由变换';
@@ -23,7 +25,8 @@ function imageLayerLabel(previous,layer){
     return {pixel:'新建像素层',image:layer.text?'新建文字层':'置入图片',gradient:'新建渐变层',shape:'绘制形状',group:'新建图层组'}[layer.kind]||'新建图像层';
   }
   if(!layer)return previous.kind==='group'?'删除图层组':'删除图像层';
-  if((layer.strokes?.length||0)>(previous.strokes?.length||0))return imageStrokeLabel(layer.strokes.at(-1));
+  if(previous.kind!==layer.kind&&layer.raster)return '栅格化图层';
+  if(strokeCount(layer.strokes)>strokeCount(previous.strokes))return imageStrokeLabel(layer.strokes.at(-1));
   if(previous.name!==layer.name)return '重命名图层';
   if(previous.visible!==layer.visible)return layer.visible?'显示图层':'隐藏图层';
   if(previous.locked!==layer.locked)return layer.locked?'锁定图层':'解锁图层';
@@ -32,11 +35,16 @@ function imageLayerLabel(previous,layer){
   if(previous.clipped!==layer.clipped)return layer.clipped?'创建剪贴蒙版':'释放剪贴蒙版';
   if(hasImageLayerMask(previous)!==hasImageLayerMask(layer))return hasImageLayerMask(layer)?'添加图层蒙版':'删除图层蒙版';
   if(previous.maskEnabled!==layer.maskEnabled)return layer.maskEnabled?'启用图层蒙版':'停用图层蒙版';
+  if(previous.maskLinked!==layer.maskLinked)return layer.maskLinked===false?'解除蒙版链接':'链接蒙版';
+  if(json(previous.maskTransform)!==json(layer.maskTransform)&&
+     ['x','y','rotation','scale'].every(key=>previous[key]===layer[key])&&json(previous.strokes)===json(layer.strokes))return '变换蒙版';
+  if(previous.maskDensity!==layer.maskDensity||previous.maskFeather!==layer.maskFeather)return '调整蒙版属性';
   if(json(previous.maskGradient)!==json(layer.maskGradient))return '编辑渐变蒙版';
-  if((layer.maskStrokes?.length||0)>(previous.maskStrokes?.length||0))return '绘制蒙版';
+  if(strokeCount(layer.maskStrokes)>strokeCount(previous.maskStrokes))return '绘制蒙版';
   if(previous.maskBase!==layer.maskBase||json(previous.maskStrokes)!==json(layer.maskStrokes))return '编辑图层蒙版';
   if(json(previous.adjustment)!==json(layer.adjustment))return '调整'+(imageAdjustments[layer.adjustment?.type]?.label||'图层');
   if(json(previous.shape)!==json(layer.shape))return '编辑形状';
+  if(json(previous.warp)!==json(layer.warp))return layer.warp?'图层变形':'重置图层变形';
   if(json(previous.gradient)!==json(layer.gradient))return '编辑渐变';
   if(json(previous.text)!==json(layer.text))return '编辑文字';
   if(previous.blend!==layer.blend)return '更改混合模式';
@@ -55,6 +63,11 @@ function imageDocumentChanges(before,after){
     }
     if(previous.name!==image.name)result.push({label:'重命名贴图',detail:image.name});
     if(previous.colorSpace!==image.colorSpace)result.push({label:'切换图像颜色空间',detail:image.name});
+    if(json(previous.selections)!==json(image.selections)){
+      const saved=(image.selections??[]).find(selection=>!previous.selections?.some(item=>item.name===selection.name));
+      const removed=(previous.selections??[]).find(selection=>!image.selections?.some(item=>item.name===selection.name));
+      result.push({label:saved?'保存选区':'删除选区',detail:[image.name,(saved??removed)?.name].filter(Boolean).join(' · ')});
+    }
     const prior=new Map(previous.layers.map(layer=>[layer.id,layer])),next=new Map(image.layers.map(layer=>[layer.id,layer]));
     let changed=false;
     for(const layerId of new Set([...next.keys(),...prior.keys()])){

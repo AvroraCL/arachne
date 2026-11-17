@@ -79,3 +79,27 @@ test('channel and resolution changes reuse active textures and dispose released 
   result=updateLivePaintTextures(result.maps,size,[],create);
   assert.deepEqual(Object.keys(result.maps),['color','scalar']);assert.equal(created,6);assert.equal(disposed,4);
 });
+
+test('paint atlas protects matching UV edges only when the model-space surfaces differ', async () => {
+  const {touchingPaintBounds} = await import('../public/viewport-uv-contact.mjs');
+  const material = new THREE.MeshStandardMaterial();
+  material.name = 'panel';
+  const root = new THREE.Group();
+  function face(points) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('uv',new THREE.Float32BufferAttribute(points.flat(),2));
+    geometry.setAttribute('position',new THREE.Float32BufferAttribute(points.flatMap(([u,v])=>[u,v,0]),3));
+    geometry.setIndex([0,1,2]);
+    const mesh = new THREE.Mesh(geometry,material);
+    root.add(mesh);
+    return mesh;
+  }
+  const left = face([[0,0],[.5,0],[.5,1]]);
+  const right = face([[.5,1],[.5,0],[1,1]]);
+  assert.equal(touchingPaintBounds(root,'panel').size,0);
+  right.position.x = .5;
+  const guards = touchingPaintBounds(root,'panel');
+  assert.equal(guards.get(left).z,.5);
+  assert.equal(guards.get(right).x,.5);
+  assert.equal(touchingPaintBounds(root,'rivet').size,0);
+});

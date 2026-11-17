@@ -3,6 +3,27 @@ from functools import lru_cache
 import numpy as np
 
 
+def luminosity(rgb):
+    return rgb[:,0]*.3+rgb[:,1]*.59+rgb[:,2]*.11
+
+
+def set_luminosity(rgb, target):
+    shifted = rgb+(target-luminosity(rgb))[:,None]
+    low, high = shifted.min(axis=1), shifted.max(axis=1)
+    below, above = low < 0, high > 1
+    if np.any(below):
+        y = target[below,None]
+        shifted[below] = y+(shifted[below]-y)*y/np.maximum(y-low[below,None],1e-8)
+    if np.any(above):
+        y = target[above,None]
+        shifted[above] = y+(shifted[above]-y)*(1-y)/np.maximum(high[above,None]-y,1e-8)
+    return np.clip(shifted,0,1)
+
+
+def set_saturation(rgb, span, desired):
+    return (rgb-rgb.min(axis=1,keepdims=True))*np.divide(desired,span,out=np.zeros_like(span),where=span>0)[:,None]
+
+
 def blend_rgb(base, source, mode):
     if mode == 'normal':
         return source
@@ -37,6 +58,14 @@ def blend_rgb(base, source, mode):
         return np.maximum(0, base - source)
     if mode == 'divide':
         return np.minimum(1, base / np.maximum(source, 1e-8))
+    if mode == 'color':
+        return set_luminosity(source,luminosity(base))
+    if mode == 'luminosity':
+        return set_luminosity(base,luminosity(source))
+    if mode in ('hue','saturation'):
+        back_span,source_span = np.ptp(base,axis=1),np.ptp(source,axis=1)
+        hue = set_saturation(source,source_span,back_span) if mode=='hue' else set_saturation(base,back_span,source_span)
+        return set_luminosity(hue,luminosity(base))
     raise ValueError('Unknown image blend mode')
 
 
@@ -53,18 +82,28 @@ def neutral_adjustment(params):
         return params['hue'] == params['saturation'] == params['lightness'] == 0
     if kind == 'exposure':
         return params['exposure'] == params['offset'] == 0 and params['gamma'] == 1
+    if kind in ('colorBalance','selectiveColor'):
+        return all(not any(values.values()) for values in params['tones'].values())
     return False
+
+
+HUE_CENTERS = {'red':0,'yellow':60,'green':120,'cyan':180,'blue':240,'magenta':300}
+
+
+def hue_angle(rgb, high, delta):
+    red, green, blue = rgb.T
+    distance = np.maximum(delta,1e-7)
+    hue = np.where(high==red,(green-blue)/distance,
+                   np.where(high==green,(blue-red)/distance+2,(red-green)/distance+4))
+    return np.mod(hue*60,360)
 
 
 def _hue_saturation(rgb, params):
     high, low = rgb.max(axis=1), rgb.min(axis=1)
     delta, lightness = high - low, (high + low) * .5
     chromatic = delta > 1e-7
-    red, green, blue = rgb.T
-    distance = np.maximum(delta, 1e-7)
-    hue = np.where(high == red, (green - blue) / distance,
-                   np.where(high == green, (blue - red) / distance + 2, (red - green) / distance + 4))
-    hue = np.mod(hue / 6 + params['hue'] / 360, 1)
+    angle = hue_angle(rgb,high,delta)
+    hue = np.mod((angle+params['hue'])/360,1)
     saturation = np.clip(delta / np.maximum(1 - np.abs(2 * lightness - 1), 1e-7), 0, 1)
     strength = params['saturation'] / 100
     saturation += (1 - saturation if strength >= 0 else saturation) * strength
@@ -73,7 +112,63 @@ def _hue_saturation(rgb, params):
     lightness += (1 - lightness if light >= 0 else lightness) * light
     amplitude = saturation * np.minimum(lightness, 1 - lightness)
     position = np.mod(np.array([0, 8, 4], dtype=np.float32) + hue[:, None] * 12, 12)
-    return lightness[:, None] - amplitude[:, None] * np.clip(np.minimum(position - 3, 9 - position), -1, 1)
+    shifted = lightness[:, None] - amplitude[:, None] * np.clip(np.minimum(position - 3, 9 - position), -1, 1)
+    region = params.get('range','all')
+    if region=='all':
+        return shifted
+    center = HUE_CENTERS.get(region,params.get('center',0))
+    angular_distance = np.abs(np.mod(angle-center+180,360)-180)
+    width, falloff = params.get('width',30),params.get('falloff',20)
+    if falloff:
+        weight = np.clip(1-(angular_distance-width)/falloff,0,1)
+        weight *= weight*(3-2*weight)
+    else:
+        weight = angular_distance<=width
+    return rgb+(shifted-rgb)*(weight*chromatic)[:,None]
+
+
+def color_balance(rgb, params):
+    light = luminosity(rgb)
+    shadows = np.clip(1-2*light,0,1)
+    highlights = np.clip(2*light-1,0,1)
+    weights = (shadows,1-shadows-highlights,highlights)
+    shifts = np.array([[params['tones'][tone][key] for key in ('red','green','blue')]
+                       for tone in ('shadows','midtones','highlights')],dtype=np.float32)/200
+    shifted = rgb+np.column_stack(weights) @ shifts
+    return set_luminosity(shifted,light) if params['preserve'] else shifted
+
+
+def selective_color(rgb, params):
+    high,low = rgb.max(axis=1),rgb.min(axis=1)
+    chroma = high-low
+    angle = hue_angle(rgb,high,chroma)
+    weights = {key:chroma*np.clip(1-np.abs(np.mod(angle-center+180,360)-180)/60,0,1)
+               for key,center in HUE_CENTERS.items() if any(params['tones'][key].values())}
+    weights.update(white=np.maximum(2*low-1,0),black=np.maximum(1-2*high,0),
+                   neutral=np.clip(1-(np.abs(high-.5)+np.abs(low-.5)),0,1))
+    process = 1-rgb
+    shift = np.zeros_like(rgb)
+    for name,weight in weights.items():
+        tone = params['tones'][name]
+        if not any(tone.values()):
+            continue
+        cmy = np.array([tone[key] for key in ('cyan','magenta','yellow')],dtype=np.float32)/100
+        black = tone['black']/100
+        if params['method']=='relative':
+            delta = process*(cmy+black)
+        else:
+            delta = cmy+black
+        shift += weight[:,None]*np.clip(delta,-process,rgb)
+    return rgb-shift
+
+
+def gradient_map(rgb, params):
+    shades = np.array([list(bytes.fromhex(params[key][1:])) for key in ('shadow','middle','highlight')],dtype=np.float32)/255
+    tone = luminosity(rgb)
+    if params['reverse']:
+        tone = 1-tone
+    stops = [0,params['midpoint']/100,1]
+    return np.column_stack([np.interp(tone,stops,channel) for channel in shades.T]).astype(np.float32)
 
 
 @lru_cache(maxsize=128)
@@ -129,6 +224,12 @@ def adjust_rgb(rgb, params):
                                   for i, channel in enumerate(('red', 'green', 'blue'))])
     elif kind == 'hueSaturation':
         result = _hue_saturation(rgb, params)
+    elif kind == 'colorBalance':
+        result = color_balance(rgb, params)
+    elif kind == 'selectiveColor':
+        result = selective_color(rgb, params)
+    elif kind == 'gradientMap':
+        result = gradient_map(rgb, params)
     elif kind == 'exposure':
         result = np.power(np.maximum(0, rgb * (2 ** params['exposure']) + params['offset']), 1 / params['gamma'])
     elif kind == 'blackWhite':

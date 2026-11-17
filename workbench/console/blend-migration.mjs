@@ -11,6 +11,8 @@ import {verifyPaint} from './paint.mjs';
 import {registeredViewportModel} from './viewport.mjs';
 import {nativeModelSteps,validateModelState} from './model-binding.mjs';
 import {surfaceBindingKey,validateSurfaceBindings} from './paint-surface-bindings.mjs';
+import {isStrokeBlock} from './public/stroke-blocks.mjs';
+import {encodeStrokeBlock,unpackStrokeBlock} from './stroke-compaction.mjs';
 
 const execute=promisify(execFile),active=new Map();
 export const isLegacyPaint=doc=>doc.workflowType==='pbr_paint'&&doc.source.bindingVersion===2&&
@@ -37,9 +39,21 @@ function rebind(snapshot,glb,topology,meta){
     const next=bind(state),updated=surfaceBindingKey(next);
     lookup.set(key,updated);bindings[updated]=next;
   }
-  for(const layer of snapshot.paint.layers)
-    for(const item of [layer,...(layer.strokes||[]),...(layer.maskStrokes||[])])
-      if(item.surfaceBinding!==undefined)item.surfaceBinding=lookup.get(item.surfaceBinding);
+  function rebindItem(item){
+    if(item.surfaceBinding!==undefined)item.surfaceBinding=lookup.get(item.surfaceBinding);
+    return item;
+  }
+  for(const layer of snapshot.paint.layers){
+    rebindItem(layer);
+    for(const field of ['strokes','maskStrokes']){
+      if(!layer[field])continue;
+      layer[field]=layer[field].map(item=>{
+        if(!isStrokeBlock(item)||!item.bindings?.length)return rebindItem(item);
+        const strokes=unpackStrokeBlock(item,{mask:field==='maskStrokes',spatial:true});
+        return {...encodeStrokeBlock(strokes.map(rebindItem)),...(item.inverted?{inverted:true}:{})};
+      });
+    }
+  }
   snapshot.paint.surfaceBindings=bindings;
   validateSurfaceBindings(snapshot.paint);
 }

@@ -1,5 +1,6 @@
+import {canvasCoordinates,canvasPoint,svgCanvasMatrix} from './image-canvas-coordinates.mjs';
 import {uvShapePayload,maxUVFeather} from './uv-selection-region.mjs';
-import {canvasUVRect,uvBounds,uvCorners,uvSelectionModes,selectionContours,combineUVSelections,offsetUVSelection} from './uv-selection-geometry.mjs';
+import {canvasUVRect,uvBounds,uvCorners,uvSelectionModes,selectionContours,combineUVSelections,offsetUVSelection,transformUVSelection,insideSelectionOutline} from './uv-selection-geometry.mjs';
 
 const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
 const radians=degrees=>degrees*Math.PI/180;
@@ -24,17 +25,19 @@ function imageBounds(image){
 }
 
 export function createUVSelection({pane,canvas,context,isHandHeld,activate,preview,commit,fillOperation,onTransformState=()=>{},
-  selectionMode='replace',selectionFeather=0,onMode=()=>{},onError=()=>{},elements=null}) {
+  selectionMode='replace',selectionFeather=0,onMode=()=>{},onError=()=>{},requestSelection,wandOptions,elements=null}) {
   const $=id=>elements?.[id]||document.getElementById(id);
   const overlay=$('uv-selection-overlay'), border=$('uv-selection-border'), handles=$('uv-selection-handles');
   const lassoBorder=$('uv-lasso-border');
   const baseBorder=elements?.['uv-selection-base'];
   const modeControls=elements?.selectionModes||[];
   const inverseButton=elements?.['uv-selection-inverse'];
+  const transformBoundaryButton=elements?.['uv-transform-boundary'];
   const featherControl=elements?.['uv-selection-feather'];
   const selectTool=$('uv-select-tool'),lassoTool=$('uv-lasso-tool'),transformTool=$('uv-transform-tool');
   const ellipseTool=elements?.['uv-ellipse-tool'];
   const polygonTool=elements?.['uv-polygon-tool'];
+  const wandTool=elements?.['uv-wand-tool'],colorRangeTool=elements?.['uv-color-range-tool'];
   const options=$('uv-transform-options'), selectionOptions=$('uv-selection-options');
   const eraseButton=$('uv-selection-erase'), fillMaterial=$('uv-selection-fill-material'), fillMask=$('uv-selection-fill-mask');
   const maskValue=$('uv-selection-mask-value');
@@ -49,21 +52,60 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   });
   const traceAnchor=polygonTool?document.createElementNS('http://www.w3.org/2000/svg','circle'):null;
   if(traceAnchor){traceAnchor.classList.add('uv-polygon-anchor');traceAnchor.setAttribute('r','4');overlay.append(traceAnchor);}
-  let tool='none',region=null,owner=null,draft=null,gesture=null,trace=null,lastDeselected=null;
+  let tool='none',region=null,owner=null,draft=null,gesture=null,trace=null,lastDeselected=null,request=null;
   let combination=uvSelectionModes.includes(selectionMode)?selectionMode:'replace';
   let feather=featherControl&&Number.isInteger(selectionFeather)?clamp(selectionFeather,0,maxUVFeather):0;
   if(featherControl)featherControl.value=feather;
-  const selecting=()=>['rect','ellipse','lasso','polygon'].includes(tool);
-  const busySelection=()=>!!gesture||!!trace;
+  let refinementUndo=[],refinementRedo=[],refinementRevision=null;
+  const selecting=()=>['rect','ellipse','lasso','polygon','wand','colorRange'].includes(tool);
+  const busySelection=()=>!!gesture||!!trace||!!request;
   const sameOwner=(a,b)=>!!a&&!!b&&a.projectId===b.projectId&&
     (a.imageDocumentId||b.imageDocumentId?a.imageDocumentId===b.imageDocumentId:a.id===b.id);
-  const sameEditOwner=(a,b)=>sameOwner(a,b)&&a.id===b.id;
-  const assign=(next,state)=>{region=next;owner=next?state:null;};
+  const sameEditOwner=(a,b)=>sameOwner(a,b)&&a.id===b.id&&a.editTarget===b.editTarget;
+  const assign=(next,state,preserveHistory=false)=>{
+    if(!preserveHistory){refinementUndo=[];refinementRedo=[];refinementRevision=null;}
+    region=next;owner=next?state:null;
+  };
   const softened=next=>next&&feather?{...next,feather}:next;
   const selectedRegion=state=>sameOwner(owner,state)?region:null;
+  const payload=value=>value?{rect:value.rect,...uvShapePayload(value)}:undefined;
+  function stopRequest(){
+    if(!request)return false;
+    request.controller.abort();request=null;return true;
+  }
+  async function sample(spec,state=context(),before=selectedRegion(state),onResult){
+    stopRequest();
+    const task={state,controller:new AbortController()};
+    request=task;render();
+    try{
+      const value=await requestSelection({...spec,previous:payload(before)},state,task.controller.signal);
+      const current=context();
+      if(request!==task||!sameEditOwner(state,current)||state.revision!==current.revision||!current.active)return false;
+      if(!value&&onResult)throw Error('变换后的选区超出画布');
+      if(spec.operation==='localEdge'){
+        if(refinementRevision!==current.revision)refinementUndo=[];
+        refinementRevision=current.revision;refinementUndo.push(before);refinementRedo=[];
+        assign(value,current,true);
+      }else assign(value,current);
+      onResult?.();return true;
+    }catch(error){if(request===task&&error.name!=='AbortError')onError(error);return false;}
+    finally{if(request===task){request=null;render();}}
+  }
+  function combine(before,next,mode,state){
+    if(mode!=='replace'&&(before?.coverage||next?.coverage)){
+      assign(before,state);
+      void sample({source:'refine',operation:mode,candidate:payload(softened(next))},state,before);
+      return;
+    }
+    assign(softened(combineUVSelections(before,next,mode)),state);
+  }
   function point(event){
-    const box=canvas.getBoundingClientRect();
-    return [(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height];
+    return canvasPoint(canvas,event);
+  }
+  function selectionShift(selection,start,end){
+    const {rect}=selection;
+    return end.map((n,i)=>clamp(n-start[i],-rect[i],1-rect[i+2]))
+      .map(n=>selection.coverage?Math.round(n*resolution)/resolution:n);
   }
   function changed(){
     return draft&&(draft.angle!==0||draft.offset.some(n=>n!==0)||draft.scale.some(n=>n!==1));
@@ -92,80 +134,117 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     return [.05/magnitude,8/magnitude];
   }
   function draftAngle(state){return (state.owner.image?.rotation??0)+state.angle;}
+  function transformPoint(state,[x,y]){
+    const [cx,cy]=center(state.region.rect);
+    const [u,v]=rotate([(x-cx)*state.scale[0],(y-cy)*state.scale[1]],radians(draftAngle(state)));
+    return [cx+u+state.offset[0],cy+v+state.offset[1]];
+  }
   function relativeScale(state,i,value){
     return Math.sign(state.scale[i])*clamp(value,...scaleRange(state,i));
+  }
+  function transformUnavailable(state,selected){
+    if(!state.active)return '请先打开图像文档';
+    if(state.maskInspection||state.editTarget==='mask')return '请选择图层内容；蒙版可在解除链接后用移动工具移动';
+    if(selected&&state.imageDocumentId&&state.image)return '请先栅格化当前图层，再变换选区内的像素';
+    if(!state.canTransform)return state.transformReason||'请选择图片或已有内容的绘制层';
+    if(!selected&&!state.image)return '请先建立选区，或用移动工具变换整层';
+    return '';
   }
   function render(){
     const state=context(),selected=selectedRegion(state),rect=selected?.rect;
     const visible=!!(selected||draft)&&state.active;
+    if(wandOptions?.refine){
+      const unavailable=!selected||!!draft||busySelection();
+      if(unavailable&&wandOptions.refine.open)wandOptions.refine.open=false;
+      wandOptions.refine.toggleAttribute('hidden',unavailable);
+    }
     pane.dataset.selectionTool=state.active?tool:'none';
     if(state.active)$('surface-orbit').setAttribute('aria-pressed',
-      String(tool==='none'&&$('viewport').dataset.tool==='orbit'&&!pane.matches('[data-text-placement],[data-gradient-tool],[data-shape-tool],[data-fill-tool]')));
+      String(tool==='none'&&$('viewport').dataset.tool==='orbit'&&!pane.matches('[data-text-placement],[data-gradient-tool],[data-shape-tool],[data-fill-tool],[data-image-move],[data-image-warp],[data-rotate-view],[data-image-pen],[data-edge-refine]')));
     selectTool.setAttribute('aria-pressed',String(tool==='rect'&&state.active));
     lassoTool.setAttribute('aria-pressed',String(tool==='lasso'&&state.active));
     ellipseTool?.setAttribute('aria-pressed',String(tool==='ellipse'&&state.active));
     polygonTool?.setAttribute('aria-pressed',String(tool==='polygon'&&state.active));
+    wandTool?.setAttribute('aria-pressed',String(tool==='wand'&&state.active));
+    colorRangeTool?.setAttribute('aria-pressed',String(tool==='colorRange'&&state.active));
+    if(wandOptions?.host)wandOptions.host.hidden=tool!=='wand'||!!draft;
+    if(wandOptions?.rangeHost)wandOptions.rangeHost.hidden=tool!=='colorRange'||!!draft;
+    overlay.toggleAttribute('data-sampling',!!request);
     transformTool.setAttribute('aria-pressed',String(!!draft&&state.active));
-    transformTool.disabled=$('uv-transform-start').disabled=busySelection()||!(selected||state.image)||!state.canTransform;
-    $('uv-transform-start').title=state.maskInspection?'蒙版检查中可框选并填充蒙版':
-      state.canTransform?'自由变换 · V / ⌘T':'请选择图片或已有笔触的绘制层';
+    const transformReason=transformUnavailable(state,selected);
+    const transformTitle=transformReason||(state.imageDocumentId?(selected?'变换选区内容 · ⌘T':'自由变换图层 · ⌘T'):'自由变换 · V / ⌘T');
+    const transformStart=$('uv-transform-start');
+    if(state.imageDocumentId)transformStart.textContent=selected?'变换选区内容':'自由变换图层';
+    transformStart.disabled=transformTool.disabled=busySelection()||!!transformReason;
+    transformStart.title=transformTool.title=transformTitle;
     overlay.toggleAttribute('hidden',!visible);
     options.hidden=!visible||!draft;
-    onTransformState(!options.hidden);
+    onTransformState(!options.hidden,draft?.boundary);
     selectionOptions.hidden=!state.active||tool==='none'||!!draft;
     for(const control of modeControls){
       control.setAttribute('aria-pressed',String(combination===control.dataset.selectionMode));
       control.disabled=busySelection();
     }
     if(featherControl)featherControl.disabled=busySelection()||!!draft||!state.active;
-    $('uv-selection-size').textContent=trace?`${trace.points.length} 个顶点 · Enter 闭合`:selected
+    $('uv-selection-size').textContent=request?'正在计算选区…':trace?`${trace.points.length} 个顶点 · Enter 闭合`:selected
       ? Math.round((rect[2]-rect[0])*resolution)+' × '+Math.round((rect[3]-rect[1])*resolution)+' px'
       : {lasso:'沿边缘拖动，松开闭合选区',polygon:'逐点单击 · 双击或 Enter 闭合',
-        ellipse:'拖出椭圆 · Shift 正圆',rect:'拖出矩形 · Shift 正方形'}[tool]||'';
+        ellipse:'拖出椭圆 · Shift 正圆',rect:'拖出矩形 · Shift 正方形',wand:'点击要取样的颜色',colorRange:'点击取样 · Shift 添加 · Alt 减去'}[tool]||'';
     $('uv-selection-clear').disabled=!selected;
     if(inverseButton)inverseButton.disabled=!state.active||busySelection()||!!draft;
+    if(transformBoundaryButton)transformBoundaryButton.disabled=!selected||!state.interactive||busySelection()||!!draft;
     if(elements?.['uv-selection-fit'])elements['uv-selection-fit'].disabled=!selected||busySelection()||!!draft;
     eraseButton.disabled=!selected||!state.canClear||busySelection();
     fillMaterial.disabled=!selected||!state.canFillMaterial||busySelection();
     fillMask.disabled=!selected||!state.canFillMask||busySelection();
     if(traceAnchor)traceAnchor.style.display=trace?'':'none';
-    if(!visible)return;
+    if(!visible){overlay.removeAttribute('data-moving');return;}
 
-    const uv=canvas.getBoundingClientRect(),host=pane.getBoundingClientRect();
-    const project=([x,y])=>[uv.left-host.left+x*uv.width,uv.top-host.top+y*uv.height];
+    const host=pane.getBoundingClientRect(),project=canvasCoordinates(canvas).toLocal(host);
     const bounds=draft?.region.rect||rect;
     const [cx,cy]=center(bounds);
-    const transform=([x,y])=>{
-      if(!draft)return project([x,y]);
-      const [u,v]=rotate([(x-cx)*draft.scale[0],(y-cy)*draft.scale[1]],radians(draftAngle(draft)));
-      return project([cx+u+draft.offset[0],cy+v+draft.offset[1]]);
-    };
+    const shift=gesture?.kind==='move-selection'&&selected?.coverage?gesture.shift:null;
+    const transform=point=>project(draft?transformPoint(draft,point):shift?point.map((n,i)=>n+shift[i]):point);
     const points=uvCorners(bounds).map(transform);
     border.setAttribute('points',points.map(p=>p.join(',')).join(' '));
-    const contours=selectionContours(draft?.region||selected);
-    lassoBorder.style.display=contours.length?'':'none';
+    const boundary=draft?.region||selected,outline=boundary?.outline;
+    const contours=selectionContours(boundary);
+    lassoBorder.style.display=contours.length||outline?'':'none';
+    lassoBorder.removeAttribute('transform');
+    lassoBorder.toggleAttribute('data-pixel-outline',!!outline);
     if(trace){
       const points=trace.cursor?[...trace.points,trace.cursor]:trace.points;
       lassoBorder.setAttribute('d','M'+points.map(point=>transform(point).join(',')).join(' L'));
       const [x,y]=project(trace.points[0]);
       traceAnchor.setAttribute('cx',x);traceAnchor.setAttribute('cy',y);
       traceAnchor.toggleAttribute('data-close',trace.close===true);
+    }else if(outline){
+      lassoBorder.setAttribute('d',outline.path);
+      lassoBorder.setAttribute('transform',svgCanvasMatrix(transform,outline.size));
     }else if(contours.length)lassoBorder.setAttribute('d',shapePath(contours,transform));
     const selectionGesture=gesture||trace;
     const base=selectionGesture?.combination&&selectionGesture.combination!=='replace'?selectionGesture.before?.region:null;
     if(baseBorder){
       baseBorder.style.display=base?'':'none';
+      baseBorder.removeAttribute('transform');
+      baseBorder.toggleAttribute('data-pixel-outline',!!base?.outline);
       if(base){
-        const rings=selectionContours(base);
-        baseBorder.setAttribute('d',shapePath(rings.length?rings:[uvCorners(base.rect)],project));
+        if(base.outline){
+          baseBorder.setAttribute('d',base.outline.path);
+          baseBorder.setAttribute('transform',svgCanvasMatrix(project,base.outline.size));
+        }else{
+          const rings=selectionContours(base);
+          baseBorder.setAttribute('d',shapePath(rings.length?rings:[uvCorners(base.rect)],project));
+        }
       }
     }
     overlay.toggleAttribute('data-transforming',!!draft);
-    overlay.toggleAttribute('data-polygon',contours.length>0);
+    overlay.toggleAttribute('data-polygon',contours.length>0||!!outline);
     overlay.toggleAttribute('data-combining',!!base);
     overlay.toggleAttribute('data-tracing',!!trace);
+    overlay.toggleAttribute('data-moving',gesture?.kind==='move-selection'||gesture?.reposition===true);
     overlay.toggleAttribute('data-marquee',!draft&&selecting());
-    overlay.toggleAttribute('data-move-selection',!draft&&tool!=='polygon'&&selecting()&&combination==='replace'&&!busySelection());
+    overlay.toggleAttribute('data-move-selection',!draft&&!['polygon','wand','colorRange'].includes(tool)&&!selected?.coverage&&selecting()&&combination==='replace'&&!busySelection());
     handles.style.display=draft?'':'none';
     if(!draft)return;
     const pivot=transform([cx,cy]);
@@ -189,9 +268,10 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     });
     flipButtons.forEach((button,i)=>button.setAttribute('aria-pressed',String(draft.scale[i]<0)));
     copy.checked=draft.copy;
-    copy.closest('label').hidden=!!draft.owner.image;
+    copy.closest('label').hidden=!!draft.owner.image||draft.boundary;
   }
   function cancel(){
+    if(stopRequest()){render();return true;}
     if(!draft){
       if(trace){
         const {before}=trace;trace=null;
@@ -221,6 +301,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   }
   function sync(){
     const state=context();
+    if(request&&(!sameEditOwner(request.state,state)||request.state.revision!==state.revision||!state.active))stopRequest();
     if(owner&&!sameOwner(owner,state))clear();
     else if(draft&&(!sameEditOwner(draft.owner,state)||draft.owner.revision!==state.revision||!state.active))cancel();
     render();
@@ -239,6 +320,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     const state=context();
     if(!state.active||!state.interactive||busySelection()||draft)return false;
     const selected=selectedRegion(state),full={rect:canvasUVRect};
+    if(selected?.coverage){void sample({source:'refine',operation:'invert'},state,selected);return true;}
     try{assign(selected?softened(combineUVSelections(full,selected,'subtract')):full,state);}
     catch(error){onError(error);return false;}
     render();return true;
@@ -248,16 +330,29 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     if(!state.active||!state.interactive||busySelection()||draft||!sameOwner(lastDeselected?.owner,state))return false;
     assign(lastDeselected.region,state);render();return true;
   }
+  function loadSelection(selection){
+    const state=context();
+    if(!state.active||!state.interactive||busySelection()||draft)return false;
+    assign(structuredClone({...payload(selection),...(selection.outline?{outline:selection.outline}:{})}),state);
+    render();
+    return true;
+  }
   function setCombination(next){
     if(!uvSelectionModes.includes(next)||combination===next)return;
     combination=next;onMode(next);render();
   }
-  function start(){
+  function start(boundary=false){
     if(draft)return true;
     const state=context();
     const selected=selectedRegion(state);
-    if(busySelection()||!state.interactive||!(selected||state.image)||!state.canTransform||!activate())return false;
-    draft={owner:state,region:state.image?{rect:imageBounds(state.image)}:selected,
+    if(busySelection()||!state.interactive||boundary&&!selected)return false;
+    if(!boundary){
+      const reason=transformUnavailable(state,selected);
+      if(reason){if(state.imageDocumentId)onError(Error(reason));return false;}
+    }
+    if(!activate())return false;
+    const target=boundary?{...state,image:null}:state;
+    draft={owner:target,region:target.image?{rect:imageBounds(target.image)}:selected,boundary,
       selectionTool:tool,offset:[0,0],scale:[1,1],angle:0,copy:false};
     tool='transform';
     render();
@@ -265,8 +360,23 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     return true;
   }
   async function apply(){
-    if(!draft||gesture)return false;
+    if(!draft||gesture||request)return false;
     if(!changed()){cancel();return true;}
+    if(draft.boundary){
+      if(draft.region.coverage){
+        const current=draft;
+        return sample({source:'refine',operation:'reshape',transform:{offset:current.offset,scale:current.scale,angle:current.angle,
+          pivot:center(current.region.rect)}},current.owner,current.region,()=>{tool=current.selectionTool;draft=null;});
+      }
+      try{
+        const transformed=transformUVSelection(draft.region,point=>transformPoint(draft,point));
+        if(!transformed)throw Error('变换后的选区超出画布');
+        const state=draft.owner;
+        tool=draft.selectionTool;draft=null;
+        assign(transformed,state);render();
+        return true;
+      }catch(error){onError(error);return false;}
+    }
     const op=operation(),state=draft.owner,previous=draft,marquee=region;
     draft=null;assign(null,null);tool=previous.selectionTool;render();
     if(await commit(op,state))return true;
@@ -304,13 +414,18 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
       if(!selected)return false;
       const {rect}=selected;
       const shift=move.map((value,i)=>clamp(value,-rect[i],1-rect[i+2]));
+      if(selected.coverage){
+        if(shift.some(value=>value!==0))void sample({source:'refine',operation:'reshape',
+          transform:{offset:shift,scale:[1,1],angle:0,pivot:center(rect)}},state,selected);
+        return true;
+      }
       assign(offsetUVSelection(selected,shift),state);
       render();
     }
     return true;
   }
   function update(){
-    if(changed())preview(operation());else preview(null);
+    if(!draft.boundary){if(changed())preview(operation());else preview(null);}
     render();
   }
 
@@ -318,7 +433,10 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   lassoTool.onclick=()=>choose('lasso');
   if(ellipseTool)ellipseTool.onclick=()=>choose('ellipse');
   if(polygonTool)polygonTool.onclick=()=>choose('polygon');
-  transformTool.onclick=$('uv-transform-start').onclick=start;
+  if(wandTool)wandTool.onclick=()=>choose('wand');
+  if(colorRangeTool)colorRangeTool.onclick=()=>choose('colorRange');
+  transformTool.onclick=$('uv-transform-start').onclick=()=>start();
+  if(transformBoundaryButton)transformBoundaryButton.onclick=()=>start(true);
   $('uv-transform-cancel').onclick=cancel;
   $('uv-selection-clear').onclick=()=>clear(true);
   if(inverseButton)inverseButton.onclick=invert;
@@ -359,7 +477,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   });
 
   function updateLasso(end,final=false){
-    const box=canvas.getBoundingClientRect(),last=gesture.path.at(-1);
+    const box=canvasCoordinates(canvas),last=gesture.path.at(-1);
     const cursor=end.map(n=>clamp(n,0,1));
     const distance=Math.hypot((last[0]-cursor[0])*box.width,(last[1]-cursor[1])*box.height);
     if(distance&&(final||distance>=3)){
@@ -370,16 +488,39 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     region={rect:uvBounds(polygon),polygon};
   }
 
-  function updateMarquee(p,shift){
-    const {start,kind}=gesture,end=p.map(n=>clamp(n,0,1));
+  function updateMarquee(p,event){
+    const {kind}=gesture;
+    const previous=gesture.last;
+    gesture.last=p;
+    if(gesture.reposition){
+      const shift=selectionShift(region,previous,p);
+      gesture.start=gesture.start.map((n,i)=>n+shift[i]);
+      gesture.end=gesture.end.map((n,i)=>n+shift[i]);
+      region=offsetUVSelection(region,shift);
+      return;
+    }
+    const {start,offset}=gesture,end=p.map((n,i)=>clamp(n-offset[i],0,1));
+    if(!event.altKey)gesture.altMode=false;
+    const centered=event.altKey&&!gesture.altMode;
+    const limits=start.map(n=>Math.min(n,1-n));
+    if(centered)for(let i=0;i<2;i++)end[i]=clamp(end[i],start[i]-limits[i],start[i]+limits[i]);
+    const shift=lockShape(event);
     if(shift){
       const deltas=end.map((n,i)=>n-start[i]);
       const signs=deltas.map(n=>n<0?-1:1);
-      const size=Math.min(Math.max(...deltas.map(Math.abs)),...start.map((n,i)=>signs[i]<0?n:1-n));
+      const size=Math.min(Math.max(...deltas.map(Math.abs)),...(centered?limits:start.map((n,i)=>signs[i]<0?n:1-n)));
       for(let i=0;i<2;i++)end[i]=start[i]+signs[i]*size;
     }
-    const rect=rectFrom(start,end);
+    gesture.end=end;
+    const rect=rectFrom(centered?start.map((n,i)=>2*n-end[i]):start,end);
     region=kind==='ellipse'?{rect,polygon:ellipse(rect)}:{rect};
+  }
+  function repositionMarquee(held){
+    if(!['rect','ellipse'].includes(gesture?.kind))return false;
+    if(!held&&gesture.reposition)gesture.offset=gesture.last.map((n,i)=>n-gesture.end[i]);
+    gesture.reposition=held;
+    render();
+    return true;
   }
   function lockShape(event){
     if(!event.shiftKey)gesture.shiftMode=false;
@@ -391,7 +532,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     return {mode,modifier};
   }
   function updateTrace(event){
-    const raw=point(event),first=trace.points[0],box=canvas.getBoundingClientRect();
+    const raw=point(event),first=trace.points[0],box=canvasCoordinates(canvas);
     trace.close=trace.points.length>=3&&Math.hypot((raw[0]-first[0])*box.width,(raw[1]-first[1])*box.height)<=8;
     let next=raw.map(n=>clamp(n,0,1));
     if(trace.close)next=first;
@@ -414,7 +555,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     const {points,before,origin,combination}=trace,rect=uvBounds(points);
     if(rect[2]-rect[0]<1/resolution||rect[3]-rect[1]<1/resolution)return false;
     trace=null;
-    try{assign(softened(combineUVSelections(before.region,{rect,polygon:points},combination)),origin);}
+    try{combine(before.region,{rect,polygon:points},combination,origin);}
     catch(error){assign(before.region,before.owner);onError(error);}
     render();
     return true;
@@ -433,7 +574,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
       updateTrace(event);
       if(trace.close)return finishTrace();
       if(trace.points.length>=256){onError(Error('多边形套索最多支持 256 个顶点'));return true;}
-      const last=trace.points.at(-1),next=trace.cursor,box=canvas.getBoundingClientRect();
+      const last=trace.points.at(-1),next=trace.cursor,box=canvasCoordinates(canvas);
       if(Math.hypot((next[0]-last[0])*box.width,(next[1]-last[1])*box.height)>=1)trace.points.push(next);
     }
     renderTrace();
@@ -442,9 +583,20 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
 
   pane.addEventListener('pointerdown',event=>{
     const state=context();
-    if(!state.interactive||gesture||tool==='none'||event.button!==0||isHandHeld()||
+    if(!state.interactive||gesture||request||tool==='none'||event.button!==0||isHandHeld()||
        event.target.closest('.uv-controls,#uv-wipe-control'))return;
     const start=point(event);
+    if((tool==='wand'||tool==='colorRange')&&!draft){
+      if(start.every(n=>n>=0&&n<=1)){
+        const selected=selectedRegion(state),{mode}=gestureCombination(event,selected),range=tool==='colorRange';
+        const settings=range?wandOptions.readRange():wandOptions.read();
+        if(!settings.merged&&!state.canSampleLayer){onError(Error('请选择含像素的图层，或启用可见合成取样'));return;}
+        void sample({source:tool,point:start,operation:mode,tolerance:settings.tolerance,
+          ...(range?{}:{contiguous:settings.contiguous}),...(settings.merged?{}:{layerId:state.id})},state,selected);
+      }
+      pane.focus({preventScroll:true});event.preventDefault();event.stopImmediatePropagation();
+      return;
+    }
     if(tool==='polygon'&&!draft){
       if(traceClick(event,state,start)){
         pane.focus({preventScroll:true});
@@ -458,13 +610,15 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     }else if(start.every(n=>n>=0&&n<=1)){
       const selected=selectedRegion(state),before={region:selected,owner:state};
       const {mode,modifier}=gestureCombination(event,selected);
-      if((event.target===border||event.target===lassoBorder)&&selected&&mode==='replace'&&!event.shiftKey){
-        gesture={kind:'move-selection',pointer:event.pointerId,start,before};
+      if(selected&&mode==='replace'&&!event.shiftKey&&
+         (selected.outline?insideSelectionOutline(selected.outline,start):event.target===border||event.target===lassoBorder)){
+        gesture={kind:'move-selection',pointer:event.pointerId,start,before,shift:[0,0]};
       }else{
         const rect=rectFrom(start,start);
         assign(tool==='lasso'?{rect,polygon:[start]}:{rect},state);
         gesture={kind:tool,pointer:event.pointerId,start,path:tool==='lasso'?[start]:null,
-          before,combination:mode,shiftMode:!!(modifier&&event.shiftKey)};
+          before,combination:mode,shiftMode:!!(modifier&&event.shiftKey),altMode:!!(modifier&&event.altKey),
+          last:start,end:start,offset:[0,0]};
       }
     }else if(combination==='replace')clear(true);
     if(gesture){
@@ -481,10 +635,10 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     if(kind==='lasso'){
       updateLasso(p);render();
     }else if(kind==='rect'||kind==='ellipse'){
-      updateMarquee(p,lockShape(event));render();
+      updateMarquee(p,event);render();
     }else if(kind==='move-selection'){
-      const {rect}=before.region,shift=p.map((n,i)=>clamp(n-start[i],-rect[i],1-rect[i+2]));
-      region=offsetUVSelection(before.region,shift);
+      gesture.shift=selectionShift(before.region,start,p);
+      if(!before.region.coverage)region=offsetUVSelection(before.region,gesture.shift);
       render();
     }else if(kind==='move'){
       const delta=p.map((n,i)=>n-start[i]);
@@ -514,7 +668,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     const previous=gesture;
     if(event.type==='pointerup'){
       if(previous.kind==='lasso')updateLasso(point(event),true);
-      else if(previous.kind==='rect'||previous.kind==='ellipse')updateMarquee(point(event),lockShape(event));
+      else if(previous.kind==='rect'||previous.kind==='ellipse')updateMarquee(point(event),event);
     }
     gesture=null;
     if(['rect','ellipse','lasso'].includes(previous.kind)){
@@ -526,12 +680,23 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
         assign(before.region,before.owner);
         if(mode==='replace')clear(true);
       }else{
-        try{assign(softened(combineUVSelections(before.region,region,mode)),owner);}
+        try{combine(before.region,region,mode,owner);}
         catch(error){assign(before.region,before.owner);onError(error);}
       }
       render();
-    }else if(event.type!=='pointerup'&&previous.kind==='move-selection'){
-      assign(previous.before.region,previous.before.owner);render();
+    }else if(previous.kind==='move-selection'){
+      const {before,start}=previous;
+      if(event.type!=='pointerup')assign(before.region,before.owner);
+      else {
+        const shift=selectionShift(before.region,start,point(event));
+        if(!before.region.coverage)region=offsetUVSelection(before.region,shift);
+        else if(shift.some(n=>n!==0)){
+          const state=context();
+          void sample({source:'refine',operation:'reshape',
+            transform:{offset:shift,scale:[1,1],angle:0,pivot:center(before.region.rect)}},state,before.region);
+        }
+      }
+      render();
     }else if(event.type!=='pointerup'&&previous.before){
       draft=previous.before;update();
     }
@@ -542,8 +707,24 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     if(finishTrace()){event.preventDefault();event.stopImmediatePropagation();}
   },true);
   const observer=new ResizeObserver(render);observer.observe(pane);
-  return {dispose(){cancel();observer.disconnect();},choose,selectAll,invert,reselect,start,clear:()=>clear(true),erase,fill,nudge,stop,cancel,apply,sync,render,
-    getFeather:()=>feather,isTracing:()=>!!trace,finishTrace,removeTracePoint,
+  return {dispose(){stopRequest();cancel();observer.disconnect();},choose,selectAll,invert,reselect,loadSelection,start,clear:()=>clear(true),erase,fill,nudge,stop,cancel,apply,sync,render,
+    sampleLayer:(layerId,source,operation)=>{const state=context();return !draft&&!busySelection()&&state.active&&state.interactive&&
+      sample({layerId,source,operation},state);},
+    refineLocal:edge=>{const state=context(),selected=selectedRegion(state);return !!selected&&!busySelection()&&!draft&&state.interactive&&
+      sample({source:'refine',operation:'localEdge',edge},state,selected);},
+    canTravelRefinement:direction=>context().revision===refinementRevision&&!!(direction==='undo'?refinementUndo:refinementRedo).length,
+    travelRefinement(direction){
+      const state=context(),from=direction==='undo'?refinementUndo:refinementRedo,to=direction==='undo'?refinementRedo:refinementUndo;
+      if(state.revision!==refinementRevision||!from.length||busySelection()||!state.interactive)return false;
+      to.push(selectedRegion(state));assign(from.pop(),state,true);render();return true;
+    },
+    fromPath:(path,operation)=>{const state=context();return !draft&&!busySelection()&&state.active&&state.interactive&&
+      sample({source:'path',path,operation,feather},state);},
+    refine:(operation,pixels)=>{const state=context(),selected=selectedRegion(state);return !!selected&&!busySelection()&&!draft&&state.interactive&&
+      sample({source:'refine',operation,pixels},state,selected);},
+    getFeather:()=>feather,isTracing:()=>!!trace,finishTrace,removeTracePoint,repositionMarquee,
     clip:()=>{const selected=!trace&&selectedRegion(context());return selected?{clip:selected.rect.slice(),...uvShapePayload(selected)}:null;},
-    getCombination:()=>combination,hasSelection:()=>!!region&&!trace,isTransforming:()=>!!draft,isDragging:busySelection};
+    snapshot:()=>{const selected=selectedRegion(context());return selected?{...payload(selected),...(selected.outline?{outline:selected.outline}:{})}:null;},
+    getCombination:()=>combination,hasSelection:()=>!!region&&!trace,isTransforming:()=>!!draft,
+    isTransformingBoundary:()=>draft?.boundary===true,isDragging:busySelection};
 }

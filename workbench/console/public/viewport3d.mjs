@@ -2,6 +2,8 @@ import {channelSpecs,activePaintChannels,renderChannel} from './paint-channels.m
 import {applyModelState} from './paint-model-state.mjs';
 import {configureNavigation,attachOrbitInput,alignedCamera,projectionCamera,movedCamera} from './viewport-navigation.mjs';
 import {createUnlitMaterial,updateLivePaintTextures,fillLivePaintTextures} from './viewport-materials.mjs';
+import {layerIsVisible} from './paint-layer-tree.mjs';
+import {touchingPaintBounds,installPaintContactFilter} from './viewport-uv-contact.mjs';
 import {createViewportEnvironment} from './viewport-environment.mjs';
 import {sceneOptions} from './scene-options.mjs';
 import {depthRangeForBounds} from './viewport-depth.mjs';
@@ -56,7 +58,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
  let environment=null,displaySettings=sceneOptions(),cameraSignature='',pathTracer=null;
  function notifyCamera(){const data=camera.matrixWorld.elements.concat(camera.projectionMatrix.elements).map(n=>n.toPrecision(12)).join(',');if(data!==cameraSignature){cameraSignature=data;host.dataset.projection=camera.isOrthographicCamera?'orthographic':'perspective';host.dispatchEvent(new CustomEvent('viewport-camera'));}}
 
-  const materialState=new WeakMap();
+  const materialState=new WeakMap(), contactMaterials=new WeakSet();
   const materials=new Map(),loader=new GLTFLoader(),gizmoState={instance:null};
   const state=(text,kind='info')=>onStatus(text,kind);
   function drawAxis(){const root=host.querySelector('.vp-axis');if(!root||!camera)return;gizmoState.instance??=createAxisGizmo({root,getCamera:()=>camera,frameAxis,isMoving:()=>!!axisMotion});gizmoState.instance.draw();}
@@ -118,7 +120,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       }
     });
     try{
-      const traced=pathTracer.render(root,camera,modelBounds,displaySettings,scene.children.filter(object=>object.isDirectionalLight),scanScene);
+      const traced=pathTracer.render(root,camera,modelBounds,displaySettings,scene.children.filter(object=>object.isDirectionalLight),scanScene,!!axisMotion);
       if(!traced)renderScene();
       else if(pathTracer.state().phase==='paused')return;
       else drawTracedGrid();
@@ -149,7 +151,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       }else clearRenderedPaint();
       drawAxis();updateSceneCursor();updateViewLabel();
       renderer.domElement.dataset.frames=String(++frameCount);
-      if(axisMotion)request();
+      if(axisMotion)scheduleFrame(false);
     });
   }
   function size(){if(!renderer)return;const w=host.clientWidth,h=host.clientHeight;if(w<2||h<2)return;
@@ -159,7 +161,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     const aspect=w/h;if(camera.isPerspectiveCamera)camera.aspect=aspect;else{const half=camera.userData.half||radius;camera.left=-half*aspect;camera.right=half*aspect;camera.top=half;camera.bottom=-half;}
     camera.updateProjectionMatrix();request();
   }
-  function bindControls(target=center){controls?.dispose();controls=new OrbitControls(camera,renderer.domElement);configureNavigation(controls);controls.dampingFactor=.08;controls.target.copy(target);controls.minDistance=radius*.05;controls.maxDistance=radius*40;controls.addEventListener('change',request);controls.addEventListener('start',()=>host.dispatchEvent(new CustomEvent('viewport-interaction',{detail:{active:true}})));controls.addEventListener('end',()=>host.dispatchEvent(new CustomEvent('viewport-interaction',{detail:{active:false}})));controls.update();}
+  function bindControls(target=center){controls?.dispose();controls=new OrbitControls(camera,renderer.domElement);configureNavigation(controls);controls.dampingFactor=.08;controls.target.copy(target);controls.minDistance=radius*.05;controls.maxDistance=radius*40;controls.addEventListener('change',()=>scheduleFrame(false));controls.addEventListener('start',()=>host.dispatchEvent(new CustomEvent('viewport-interaction',{detail:{active:true}})));controls.addEventListener('end',()=>host.dispatchEvent(new CustomEvent('viewport-interaction',{detail:{active:false}})));controls.update();}
   function init(){if(renderer)return;renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1;renderer.domElement.tabIndex=0;renderer.domElement.setAttribute('aria-label','三维模型视口，中键旋转，Shift中键平移，滚轮缩放，F聚焦材质');host.append(renderer.domElement);scene=new THREE.Scene();objectOutline=createObjectOutline({renderer,scene});scene.add(new THREE.HemisphereLight(0xffffff,0x444444,2));for(const [pos,power] of [[[4,6,3],2.8],[[-3,2,-4],1.2]]){const light=new THREE.DirectionalLight(0xffffff,power);light.position.set(...pos);scene.add(light);}environment=createViewportEnvironment({renderer,scene,host,bounds:modelBounds,request});syncEnvironment();camera=new THREE.PerspectiveCamera(38,1,.001,100000);camera.position.set(2,1.5,2);bindControls();resizeObserver=new ResizeObserver(size);resizeObserver.observe(host);stopWatchingScale=watchViewportScale(window,next=>{pixelRatio=next;size();});attachOrbitInput(renderer.domElement,()=>controls);let down;renderer.domElement.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY,e.altKey?-1:e.button];});renderer.domElement.addEventListener('pointerup',e=>{if(!model||!down||down[2]!==0||Math.hypot(e.clientX-down[0],e.clientY-down[1])>4)return;if(!onModelingPick?.(e))selectMaterialAt(e);});renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();state('三维上下文丢失，请刷新视口','error');});size();}
   function selectMaterialAt(event) {
     const hit = pickModel(event, model);
@@ -252,7 +254,12 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     materials.clear();
     texture = null;for(const value of Object.values(scalarTextures))value.dispose();scalarTextures={};
   }
+  function hasProjectedFill(){
+    const layers=doc?.paint?.layers||[];
+    return layers.some(layer=>layer.fillProjection?.mode==='triplanar'&&layer.opacity>0&&layerIsVisible(layers,layer));
+  }
   function paintMaterials() {
+    const projected=hasProjectedFill();
     const enabled=new Set(livePaint?activePaintChannels(doc.paint):manifest?.activeChannels||activePaintChannels(doc?.paint));
     const liveMap=key=>livePaint?.[key==='ao'?'scalar':key==='height'||key==='alpha'?'detail':key];
     for (const [name, list] of materials) {
@@ -280,6 +287,13 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
           material.emissiveMap=emission||original.emissiveMap;material.emissive.copy(emission?new THREE.Color(1,1,1):original.emissive);material.emissiveIntensity=emission?1:original.emissiveIntensity;
           material.aoMap=ao||original.aoMap;material.aoMapIntensity=ao?1:original.aoMapIntensity;
         }
+        if(contactMaterials.has(material)){
+          material.defines??={};
+          if(projected&&material.map&&(material.map===livePaint?.color||material.map===texture||(inspectionChannel==='normal'&&material.map===inspectionMap)))material.defines.PAINT_CONTACT_COLOR=1;
+          else delete material.defines.PAINT_CONTACT_COLOR;
+          if(projected&&material.normalMap&&(material.normalMap===livePaint?.normal||material.normalMap===scalarTextures.normal))material.defines.PAINT_CONTACT_NORMAL=1;
+          else delete material.defines.PAINT_CONTACT_NORMAL;
+        }
         material.alphaMap = inspecting?null:alpha||original.alphaMap;
         material.opacity = (inspecting||alpha?1:original.opacity) * (dimmed ? .12 : 1);
         const paintedBlend=Boolean(alpha&&!material.alphaTest);
@@ -306,6 +320,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       while(next.status==='running'){await new Promise(resolve=>setTimeout(resolve,650));if(token!==sequence)return;const r=await fetch(`/api/projects/${nextDoc.id}/viewport`);next=await r.json();if(!r.ok)throw Error(next.error||'模型准备状态读取失败');}
       if(token!==sequence)return;if(next.status!=='ready')throw Error(next.error||'模型尚未准备好');
       state('正在载入模型与原 UV 贴图…');const gltf=await loader.loadAsync(next.modelUrl);if(token!==sequence){gltf.scene.traverse(o=>o.geometry?.dispose());return;}manifest=next;model=gltf.scene;scene.add(model);
+      const contactBounds=touchingPaintBounds(model,next.targetMaterial);
       model.traverse(object => {
         if (onModelingPick) {
           const mapping = gltf.parser.associations.get(object);
@@ -318,10 +333,13 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
           }
         }
         if (!object.isMesh) return;
+        const guard=contactBounds.get(object);
+        if(guard)object.material=object.material.clone();
         const original = Array.isArray(object.material) ? object.material : [object.material];
         object.userData.viewportOriginalMaterials = original;
         object.userData.viewportUnlitMaterials = original.map(createUnlitMaterial);
         for (const material of [...original, ...object.userData.viewportUnlitMaterials]) {
+          if(guard){installPaintContactFilter(material,guard);contactMaterials.add(material);}
           const name = material.userData.sourceMaterial || material.name;
           material.userData.sourceMaterial = name;
           if (!materials.has(name)) materials.set(name, new Set());
@@ -391,7 +409,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       eye,pivot,new THREE.Vector3().fromArray(end.up)));
     if(from.angleTo(to)<.00001){applyCamera(end);return;}
     axisMotion={end,pivot,from,to,distance:camera.position.distanceTo(pivot),start:performance.now()};
-    request();
+    scheduleFrame(false);
   }
   function advanceAxisMotion(now){
     const {end,pivot,from,to,distance,start}=axisMotion;
@@ -525,7 +543,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     fillLivePaintTextures(pixels,size,livePaint,solo);
     paintFrame={revision:metadata.revision,size,draft:metadata.draft===true};
     for(const map of Object.values(livePaint))map.needsUpdate=true;
-    const usage=JSON.stringify(channels);
+    const usage=JSON.stringify([channels,hasProjectedFill()]);
     if(changed||usage!==liveUsageKey){liveUsageKey=usage;paintMaterials();}else request();
   }
   function showMaskCanvas(canvas){

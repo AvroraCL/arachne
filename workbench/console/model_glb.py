@@ -135,7 +135,7 @@ class Model:
         if view.get('buffer',0) != 0 or view.get('extensions',{}).get('EXT_meshopt_compression'):
             raise ValueError('请使用内嵌未压缩的 GLB 网格')
         dtype = np.dtype(TYPES[entry['componentType']])
-        columns = {'SCALAR':1,'VEC2':2,'VEC3':3}[kind]
+        columns = {'SCALAR':1,'VEC2':2,'VEC3':3,'VEC4':4}[kind]
         item_size = dtype.itemsize*columns
         stride = view.get('byteStride',item_size)
         start = view.get('byteOffset',0)

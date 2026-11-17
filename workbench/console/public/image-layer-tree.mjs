@@ -150,3 +150,17 @@ export function imageLayersBefore(layers,item,clippedBase){
   return !clippedBase&&group?.blend===imageGroupBlend
     ?[...imageLayersBefore(layers,group,null),...previous]:previous;
 }
+
+// Keep the real group/clipping structure when sampling from the canvas down
+// to the active layer, including siblings under each ancestor of the target.
+export function imageLayersThrough(layers,id){
+  const path=new Map();
+  for(let item=byId(layers,id);item;item=byId(layers,layerParent(item)))path.set(layerParent(item),item);
+  if(!path.size)throw Error('仿制目标图层不存在');
+  function visit(parent){
+    const siblings=layerChildren(layers,parent),last=path.get(parent);
+    const included=last?siblings.slice(0,siblings.indexOf(last)+1):siblings;
+    return included.flatMap(item=>[item,...(item.kind==='group'?visit(item.id):[])]);
+  }
+  return visit(null);
+}

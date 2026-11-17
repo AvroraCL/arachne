@@ -1,4 +1,4 @@
-import {nodeTypes,brushNodeTypes,makeNode,compileMaterialGraph,compileBrushGraph} from './material-graph.mjs';
+import {nodeTypes,brushNodeTypes,brushParamRanges,brushImageFields,brushImageMaxSize,makeNode,compileMaterialGraph,compileBrushGraph} from './material-graph.mjs';
 
 export const libraryKinds=['materials','brushes'];
 export function defaultLibraryMaterial(values={color:'#808080',metallic:0,roughness:.5}){
@@ -6,7 +6,8 @@ export function defaultLibraryMaterial(values={color:'#808080',metallic:0,roughn
   return {version:1,material:'f_16xl',nodes:[pbr,makeNode('output',370,80,'output')],links:[{from:{node:'pbr',port:'surface'},to:{node:'output',port:'surface'}}]};
 }
 export function defaultBrushGraph(settings={}){
-  return {version:1,material:'brush',nodes:[{id:'brush',type:'brush',x:40,y:40,params:{...brushNodeTypes.brush.defaults,...settings}},
+  const keys=Object.keys(brushNodeTypes.brush.defaults),known=Object.fromEntries(keys.filter(key=>Object.hasOwn(settings,key)).map(key=>[key,settings[key]]));
+  return {version:1,material:'brush',nodes:[{id:'brush',type:'brush',x:40,y:40,params:{...brushNodeTypes.brush.defaults,...known}},
     {id:'output',type:'output',x:370,y:80,params:{}}],links:[{from:{node:'brush',port:'brush'},to:{node:'output',port:'brush'}}]};
 }
 export function compileLibraryMaterial(graph,assets){
@@ -25,10 +26,10 @@ export function evaluateBrushGraph(graph){
       const a=get('a'),b=get('b');
       values.set(node.id,{value:{add:()=>a+b,subtract:()=>a-b,multiply:()=>a*b,divide:()=>Math.abs(b)>1e-12?a/b:0,minimum:()=>Math.min(a,b),maximum:()=>Math.max(a,b)}[p.operation]()});
     }
-    if(node.type==='brush')values.set(node.id,{brush:Object.fromEntries(Object.keys(p).map(key=>[key,get(key)]))});
+    if(node.type==='brush')values.set(node.id,{brush:Object.fromEntries(Object.entries(brushNodeTypes.brush.defaults).map(([key,fallback])=>[key,get(key)??fallback]))});
     if(node.type==='output'){
       const settings=get('brush');
-      for(const [key,min,max] of [['worldRadius',.02,.65],['uvRadius',2,256],['hardness',0,1],['opacity',0,1]])
+      for(const [key,[min,max]] of Object.entries(brushParamRanges))
         if(!Number.isFinite(settings[key])||settings[key]<min||settings[key]>max)throw Error('笔刷 '+key+' 超出范围 '+min+'–'+max);
       return settings;
     }
@@ -36,6 +37,14 @@ export function evaluateBrushGraph(graph){
   throw Error('笔刷缺少输出');
 }
 const record=o=>o&&typeof o==='object'&&!Array.isArray(o);
+export function isBrushImage(asset){
+  return !!asset&&asset.purpose!=='selection'&&asset.width>0&&asset.height>0&&Math.max(asset.width,asset.height)<=brushImageMaxSize;
+}
+export function brushImageAssets(graph,assets){
+  const ids=[...new Set(graph.nodes.filter(node=>node.type==='brush').flatMap(node=>brushImageFields.map(key=>node.params[key]).filter(Boolean)))];
+  if(ids.some(id=>!isBrushImage(assets[id])))throw Error('笔刷图片缺失或大于 1024 × 1024');
+  return ids;
+}
 export function validateLibraries(paint){
   for(const kind of libraryKinds){
     const entries=paint[kind]??{};
@@ -43,7 +52,8 @@ export function validateLibraries(paint){
     for(const [id,item] of Object.entries(entries)){
       if(!/^[\w-]{1,100}$/.test(id)||!record(item)||Object.keys(item).some(k=>!['name','graph'].includes(k))||
          typeof item.name!=='string'||!item.name.trim()||item.name.length>100)throw Error('资源编号或名称无效');
-      if(kind==='materials')compileLibraryMaterial(item.graph,paint.assets);else evaluateBrushGraph(item.graph);
+      if(kind==='materials')compileLibraryMaterial(item.graph,paint.assets);
+      else {evaluateBrushGraph(item.graph);brushImageAssets(item.graph,paint.assets);}
     }
   }
 }

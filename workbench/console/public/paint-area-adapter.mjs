@@ -10,6 +10,7 @@ import {createLiveView} from './paint-live-view.mjs';
 import {createUVSelection} from './paint-uv-selection.mjs';
 import {createMaterialStrokeSave} from './material-stroke-save.mjs';
 import {addImageAsset as addImageAssetToDocument,imageSelectionOrigin} from './image-document-editors.mjs';
+import {imageCombineLabels} from './image-layer-combine.mjs';
 const $=id=>document.getElementById(id);
 export function setupPaintAreas(hooks){
   const workspace=$('workspace'),parking=document.createElement('div');parking.id='editor-parking';parking.setAttribute('aria-hidden','true');
@@ -29,8 +30,16 @@ export function setupPaintAreas(hooks){
     if(ok!==true)throw failure||Error('操作未完成，请结束当前编辑后重试');return value;
   };
   const project=createProjectState({
-    write:(operations,origin)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/commands',{revision:origin.revision,operations,
-      ...(origin.strokeRequestId?{strokeRequestId:origin.strokeRequestId}:{})}),origin.strokeRequestId?false:undefined),
+    write:(operations,origin)=>write(()=>{
+      const operation=operations.length===1?operations[0]:null;
+      const endpoint='/api/projects/'+origin.id+'/paint/';
+      if(operation?.op==='image'&&Object.hasOwn(imageCombineLabels,operation.action)){
+        const {documentId,action,layerIds,newLayerId}=operation;
+        return hooks.api(endpoint+'image-layer-bake',{revision:origin.revision,documentId,action,layerIds,newLayerId});
+      }
+      return hooks.api(endpoint+'commands',{revision:origin.revision,operations,
+        ...(origin.strokeRequestId?{strokeRequestId:origin.strokeRequestId}:{})});
+    },origin.strokeRequestId?false:undefined),
     beforeTravel:async()=>{
       if(materialStrokes.editing)throw Error('请先完成当前材质笔触');
       if(materialStrokes.size&&!await materialStrokes.flush())throw Error('请先保存或放弃待保存的材质笔触');
@@ -92,10 +101,27 @@ export function setupPaintAreas(hooks){
     saveStateChanged:hooks.saveStateChanged,legacyCameraProject:hooks.legacyCameraProject,renderSettings:hooks.renderSettings,renderResults:hooks.renderResults,openMaterial:layerId=>{if(areas.switchWorkspace('material')){project.selectLayer(layerId);project.setEditorDomain('material');}},renderProperties:hooks.renderProperties,propertyKey:hooks.propertyKey,propertyTarget:hooks.propertyTarget,parking,busy:hooks.busy,foreground:hooks.foreground,setForeground:hooks.setForeground,maskInk:hooks.maskInk,setMaskInk:hooks.setMaskInk,colorKey:hooks.colorKey,colorPair:hooks.colorPair,setColor:hooks.setColor,preferences:hooks.preferences,viewAsset:hooks.viewAsset,
     importPersonal:async(item,libraryRevision)=>{const origin=project.origin();if(!origin)throw Error('请先打开工程');const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id}));if(project.document?.id!==origin.id)throw Error('资源已导入原工程，请打开原工程查看');project.publish(result.document);return result;},
     createSelection:createUVSelection,openImageText:hooks.openImageText,
+    async saveImageText(origin,layer,placement,text){
+      const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/text',{
+        revision:origin.revision,documentId:origin.documentId,layerId:layer?.id,placement,text
+      }));
+      project.publish(result.document);
+      return result;
+    },
     imageSelection(origin){
       const editors=areas.editors();
       const editor=preferredCanvas?.kind==='image'&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(item=>item.kind==='image');
       return editor?.getSelection?.(origin)||null;
+    },
+    sampleLayerSelection(origin,layerId,source,operation){
+      const editors=areas.editors();
+      const editor=preferredCanvas?.kind==='image'&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(item=>item.kind==='image');
+      if(!editor)throw Error('请先打开图像编辑器');
+      return editor.sampleLayerSelection(origin,layerId,source,operation);
+    },
+    pickAdjustmentColor(origin,apply){
+      if(!imageEditor()?.pickAdjustmentColor(origin,apply))
+        throw Error('请打开同一贴图的图像编辑器，并结束当前操作');
     },
     imageAdjustment(owner,origin,operation){
       if(operation){
@@ -122,6 +148,12 @@ export function setupPaintAreas(hooks){
       const data=await hooks.pngData(file);await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/assets',{revision:origin.revision,nodeId,...(origin.target?{materialId:origin.target.id}:{}),name:file.name,data}));return true;
     },
     importAsset:file=>write(()=>hooks.importAsset(file,file.name)),
+    async importBrushImage(file,origin){
+      const data=await hooks.pngData(file);
+      const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/assets',{revision:origin.revision,name:file.name,data}));
+      if(project.document?.id===origin.id)project.publish(result.document);
+      return result.asset;
+    },
     importProjectMaps:hooks.importProjectMaps,
     importDocumentAsset:async(file,origin,layerId,position)=>{
       const data=await hooks.pngData(file);

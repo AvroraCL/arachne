@@ -43,7 +43,7 @@ function fixture(t,detail=false,{page,...options}={}) {
     async networkFail(index){requests[index].reject(new TypeError('网络暂时不可用'));await new Promise(resolve=>setImmediate(resolve));},
     async busyWithoutJson(index){requests[index].resolve(new Response('temporary failure',{status:503}));await new Promise(resolve=>setImmediate(resolve));},
     async finish(index,color,size=256){
-      requests[index].resolve(new Response(new Uint8Array(size*size*6).fill(color)));
+      requests[index].resolve(new Response(new Uint8Array(size*size*(options.rgba?4:6)).fill(color)));
       await new Promise(resolve=>setImmediate(resolve));
     }
   };
@@ -308,9 +308,12 @@ test('new strokes abort pending 4K; a late old revision never replaces their fas
   view.refresh();await finish(0,1);
   for(let i=0;i<60&&requests.length<2;i++)await new Promise(resolve=>setTimeout(resolve,25));
   view.update({op:'stroke',id:'layer'});assert.equal(requests[1].signal.aborted,true);
+  assert.equal(requests[2].data.operation.op,'stroke');
   revise(2);view.refresh();await finish(1,9,4096);
-  assert.equal(drawn.at(-1),1);assert.equal(requests[2].data.revision,2);
-  await finish(2,3);assert.equal(drawn.at(-1),3);
+  assert.equal(drawn.at(-1),1);
+  await finish(2,6);
+  assert.equal(drawn.at(-1),1);assert.equal(requests[3].data.revision,2);
+  await finish(3,3);assert.equal(drawn.at(-1),3);
   assert.equal(statuses.at(-1).revision,2);assert.equal(statuses.at(-1).size,256);
   view.clear();
 });
@@ -329,4 +332,74 @@ test('turning auto 4K off cancels pending detail, quick re-enable respects the n
   await finish(2,7,4096);assert.equal(drawn.at(-1),7);
   configure({detail:false});view.refresh();assert.equal(drawn.at(-1),7);
   assert.equal(requests.length,3);view.clear();
+});
+
+
+test('the saved revision counts down beside fast preview and a late fast response cannot downgrade 4K',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const {view,requests,drawn,configure,finish}=fixture(t,true,{rgba:true});
+  configure({detailDelay:300});
+  view.refresh();
+  assert.equal(requests[0].data.resolution,256);
+  t.mock.timers.tick(299);
+  assert.equal(requests.length,1);
+  t.mock.timers.tick(1);
+  assert.equal(requests[1].data.resolution,4096);
+  assert.equal(requests[0].signal.aborted,false);
+  await finish(1,9,4096);
+  assert.equal(requests[0].signal.aborted,true);
+  await finish(0,3);
+  assert.deepEqual(drawn,[9]);
+  view.clear();
+});
+
+test('fast preview can publish while 4K loads and a new stroke rejects its stale body',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const {view,requests,drawn,statuses,configure,finish,revise}=fixture(t,true,{rgba:true});
+  configure({detailDelay:300});
+  view.refresh();
+  t.mock.timers.tick(300);
+  await finish(0,7);
+  assert.equal(statuses.at(-1).phase,'refining');
+  const body=Promise.withResolvers();
+  requests[1].resolve({ok:true,headers:new Headers(),arrayBuffer:()=>body.promise});
+  await new Promise(resolve=>setImmediate(resolve));
+  view.update({op:'image',action:'stroke'});
+  assert.equal(requests[1].signal.aborted,true);
+  assert.equal(requests[2].data.resolution,256);
+  await finish(2,8);
+  t.mock.timers.tick(1200);
+  assert.equal(requests.length,3);
+  body.resolve(new Uint8Array(4096*4096*4).fill(9).buffer);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(drawn,[7,8]);
+
+  revise(2);view.refresh();
+  t.mock.timers.tick(300);
+  assert.equal(requests[4].data.revision,2);
+  await finish(3,3);await finish(4,5,4096);
+  assert.deepEqual(drawn,[7,8,3,5]);
+  view.clear();
+});
+
+test('an exact stroke patch survives its matching save and yields to the next committed fast frame',async t=>{
+  // Node has no DOM ImageData constructor. The fixture only reads its data.
+  const previous=globalThis.ImageData;
+  globalThis.ImageData=class {constructor(data){this.data=data;}};
+  t.after(()=>{if(previous)globalThis.ImageData=previous;else delete globalThis.ImageData;});
+  const {view,requests,drawn,finish,configure,revise}=fixture(t,true,{rgba:true});
+  t.after(()=>view.dispose());
+  configure({documentId:'ink',visiblePixels:[[0,4096],[0,4096]],detailDelay:60_000});
+  view.refresh();await finish(0,10);
+  view.retryDetail();await finish(1,11,4096);
+  const stroke={op:'image',action:'stroke',layerId:'color',target:'pixels',stroke:{radius:.001,stamps:[[.5,.5]]}};
+  view.update(stroke);
+  const {window}=requests[2].data;
+  requests[2].resolve(new Response(new Uint8Array(window[2]**2*4).fill(21),{headers:{'X-Paint-Window':window.join(',')}}));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(drawn.at(-1),21);
+  revise(2);view.update(null,structuredClone(stroke));await finish(3,20);
+  assert.equal(drawn.at(-1),21);
+  revise(3);view.refresh();await finish(4,30);
+  assert.equal(drawn.at(-1),30);
 });
