@@ -30,6 +30,7 @@ import {pngSizeIs,exrMatches} from './cycles-output.mjs';
 import {glbRegistrationFiles,installGlbRegistration} from './model-registration.mjs';
 import {primitiveRegistration} from './primitive-model.mjs';
 import {modelTemplates} from './public/model-templates.mjs';
+import {renderSceneObjects} from './render-scene-objects.mjs';
 import {renderPathTrace} from './path-trace-render.mjs';
 import {checkRenderAppearance} from './public/render-appearance.mjs';
 import {checkRenderLighting} from './public/render-lighting.mjs';
@@ -61,6 +62,14 @@ const fields=(patch,keys)=>{
   if(!patch||typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).some(k=>!keys.includes(k)))throw Error('不支持的属性');
   return patch;
 };
+function checkSourceMaterials(records,target,registered){
+  if(!records||typeof records!=='object'||Array.isArray(records))throw Error('模型材质记录无效');
+  for(const [name,factors] of Object.entries(records)){
+    if(!name||['__proto__','constructor','prototype',target].includes(name)||registered&&!registered.includes(name))throw Error('无法编辑该模型材质');
+    fields(factors,['color','metallic','roughness']);
+    if(!Object.keys(factors).length||Object.entries(factors).some(([key,value])=>key==='color'?!color(value):!unit(value)))throw Error('模型材质参数无效');
+  }
+}
 const supportsBlend=(channel,blend)=>channelBlendChoices(channel).some(([mode])=>mode===blend);
 const folderFields=['name','visible','locked','opacity','mask','maskBase','maskEnabled','maskEffects','maskStrokeOrder'];
 const layerFields=[...folderFields,'anchorPoint','channelOpacity','channelBlend','channels','values','x','y','scale','rotation','image','blend','maps','tiling','fillProjection','projector','space','uvScale','materialId','documentMaps'];
@@ -318,6 +327,7 @@ function checkedSceneCursor(position){
 function validate(doc,{unpackBlocks=false,checkPending=true}={}){
   if(doc.paint.sceneCursor!==undefined)checkedSceneCursor(doc.paint.sceneCursor);
   validateObjectNames(doc.paint.objectNames);
+  if(doc.paint.sourceMaterials!==undefined)checkSourceMaterials(doc.paint.sourceMaterials,doc.source?.material);
   if(doc.paint.renderVisibility!==undefined)checkRenderVisibility(doc.paint.renderVisibility);
   if(doc.paint.renderCamera!==undefined)checkedRenderCamera(doc.paint.renderCamera);
   if(doc.paint.renderBookmarks!==undefined)checkedRenderBookmarks(doc.paint.renderBookmarks);
@@ -465,6 +475,19 @@ function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
   const p=next.paint,reproject=[];
   for(const o of operations){
     const {op,id,patch}=o;
+    if(op==='sourceMaterial'){
+      fields(o,['op','name','patch']);
+      const names=renderSceneObjects(next).materials;
+      if(next.source.format!=='glb'||!names.includes(o.name)||o.name===next.source.material)throw Error('无法编辑该模型材质');
+      const records={...p.sourceMaterials};
+      if(patch===null)delete records[o.name];
+      else{
+        checkSourceMaterials({[o.name]:patch},next.source.material,names);
+        records[o.name]={...records[o.name],...patch};
+      }
+      if(Object.keys(records).length)p.sourceMaterials=records;else delete p.sourceMaterials;
+      continue;
+    }
     if(op==='renameObjects'){validateObjectNames(o.names);if(!o.names||!Object.keys(o.names).length)throw Error('请选择物体');p.objectNames={...p.objectNames,...o.names};continue;}
     if(op==='renderVisibility'){
       fields(o,['op','visibility']);
@@ -661,7 +684,7 @@ export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
     'project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
     '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
   ].map(file=>hash(path.join(ROOT,file))))).digest('hex');
-  const {objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,...content}=doc.paint;
+  const {objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,sourceMaterials,...content}=doc.paint;
   return crypto.createHash('sha256').update(JSON.stringify([compositorFingerprint,binding,content])).digest('hex');
 }
 export function materialFingerprint(doc){
@@ -1426,7 +1449,7 @@ export async function restorePaint(archive,scratch){
      (!projectOnly&&(typeof manifest.previewId!=='string'||!/^[\w-]{1,100}$/.test(manifest.previewId)||
        !sha256(geometry.uvSha256))))
     throw Error('涂装 ZIP 的可编辑清单无效');
-  const {base,baseChannels,layers,assets,textFonts:projectFonts,surfaceBindings,materialGraph,materials,brushes,imageDocuments,objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility}=fields(manifest.paint,['base','baseChannels','layers','assets','textFonts','surfaceBindings','materialGraph','materials','brushes','imageDocuments','objectNames','sceneCursor','renderCamera','renderBookmarks','renderAppearance','renderLighting','renderOptics','renderPreset','renderRegion','renderVisibility']);
+  const {base,baseChannels,layers,assets,textFonts:projectFonts,surfaceBindings,materialGraph,materials,brushes,imageDocuments,objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,sourceMaterials}=fields(manifest.paint,['base','baseChannels','layers','assets','textFonts','surfaceBindings','materialGraph','materials','brushes','imageDocuments','objectNames','sceneCursor','renderCamera','renderBookmarks','renderAppearance','renderLighting','renderOptics','renderPreset','renderRegion','renderVisibility','sourceMaterials']);
   validateRestoredLayers(layers);
   const paint={base,...(projectFonts?{textFonts:projectFonts}:{}),...(imageDocuments?{imageDocuments}:{}),...(baseChannels!==undefined?{baseChannels}:{}),layers,assets:{},...(materials?{materials}:{}),...(brushes?{brushes}:{}),...(materialGraph?{materialGraph}:{}),...(surfaceBindings?{surfaceBindings}:{})};
   for(const [id,item] of Object.entries(assets)){
@@ -1439,6 +1462,7 @@ export async function restorePaint(archive,scratch){
     if(png.entry.id!==id)throw Error('交付包素材指纹变化');
     paint.assets[id]={...png.entry,...(item.purpose?{purpose:item.purpose}:{})};
   }
+  if(sourceMaterials!==undefined)paint.sourceMaterials=sourceMaterials;
   if(objectNames!==undefined){validateObjectNames(objectNames);paint.objectNames=objectNames;}
   if(renderCamera!==undefined)paint.renderCamera=checkedRenderCamera(renderCamera);
   if(renderBookmarks!==undefined)paint.renderBookmarks=checkedRenderBookmarks(renderBookmarks);
@@ -1467,6 +1491,7 @@ export async function restorePaint(archive,scratch){
     break;
   }
   const restore=async source=>{
+    if(sourceMaterials)checkSourceMaterials(sourceMaterials,source.source.material,renderSceneObjects(source).materials);
     const doc=paintTemplate(source,paint);
     if(manifest.modeling){
       validateModelState(manifest.modeling);
@@ -1513,7 +1538,7 @@ async function prepareEditableFiles(doc,out,files){
       layer.cloneSources?.length||layer.strokes?.some(isStrokeBlock)||layer.maskStrokes?.some(isStrokeBlock));
   const manifest={
     format:archiveFormat,version:needsModernImageLayers?2:1,name:doc.name,revision:doc.revision,geometry,...(doc.modeling?{modeling:doc.modeling}:{}),
-    paint:{base:doc.paint.base,...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.sceneCursor?{sceneCursor:doc.paint.sceneCursor}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.textFonts?{textFonts:doc.paint.textFonts}:{}),...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
+    paint:{base:doc.paint.base,...(doc.paint.sourceMaterials?{sourceMaterials:doc.paint.sourceMaterials}:{}),...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.sceneCursor?{sceneCursor:doc.paint.sceneCursor}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.textFonts?{textFonts:doc.paint.textFonts}:{}),...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
   };
   const metadata=JSON.stringify(manifest)+'\n';
   if(Buffer.byteLength(metadata)>64*1024*1024)throw Error('可编辑工程清单超过 64 MiB，无法生成可恢复的 ZIP');
@@ -1621,7 +1646,7 @@ async function writePaintGlb(doc,{bake,input,model,out,stage,j,run,python,signal
   }));
   const activeChannels=(bake.activeChannels||Object.keys(maps)).filter(channel=>Object.hasOwn(maps,channel));
   await run('glb-input',{model,maps,activeChannels,out,material:doc.source.material,revision:doc.revision,
-    modeling:doc.modeling,verifyNativeUV:doc.source.format==='glb'},python,['-X','utf8',path.join(ROOT,'paint_glb.py')]);
+    modeling:doc.modeling,sourceMaterials:doc.paint.sourceMaterials,verifyNativeUV:doc.source.format==='glb'},python,['-X','utf8',path.join(ROOT,'paint_glb.py')]);
   return {sha256:await sha256File(out,{signal}),activeChannels};
 }
 
@@ -1636,7 +1661,7 @@ async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,upda
   stage(j,'路径追踪渲染冻结修订');
   const result=await renderPathTrace({
     settings,region,lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,
-    material:doc.source.material,channels:applied,modeling:doc.modeling,visibility:renderVisibility||{},
+    material:doc.source.material,sourceMaterials:doc.paint.sourceMaterials,channels:applied,modeling:doc.modeling,visibility:renderVisibility||{},
     defaultVisibility:model.metadata.render_visibility||{}
   },files,{signal,registerBrowser,onSample:sample=>{
     if(!signal?.aborted)update(j,{progress:{phase:'sample',sample,total:settings.samples}});

@@ -212,6 +212,18 @@ def main(config):
                   if primitive.get('material') == selected]
     if not primitives or any('TEXCOORD_0' not in primitive['attributes'] for primitive in primitives):
         raise ValueError('登记涂装材质缺少原 UV')
+    for original in scene['materials']:
+        override = config.get('sourceMaterials', {}).get(original.get('name'))
+        if not override:
+            continue
+        pbr = original.setdefault('pbrMetallicRoughness', {})
+        if 'color' in override:
+            rgb = [int(override['color'][i:i+2], 16) / 255 for i in (1, 3, 5)]
+            linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in rgb]
+            pbr['baseColorFactor'] = linear + [pbr.get('baseColorFactor', [1, 1, 1, 1])[3]]
+        for key in ('metallic', 'roughness'):
+            if key in override:
+                pbr[key + 'Factor'] = override[key]
     material = scene['materials'][selected]
     paint_material(scene, binary, material, config['maps'], set(config['activeChannels']))
     scene['asset'].setdefault('extras', {})['arachne'] = {

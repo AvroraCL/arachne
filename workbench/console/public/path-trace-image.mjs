@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {applySourceFactors} from './viewport-materials.mjs';
 import {applyModelState} from './paint-model-state.mjs';
 import {channelSpecs} from './paint-channels.mjs';
 import {createPathTracingEngine} from './path-tracing-engine.mjs';
@@ -20,8 +21,11 @@ async function loadModel(input){
       if(binding.meshes!==undefined)node.userData.modelingObject=binding.nodes;
       if((Object.hasOwn(input.visibility,name)?input.visibility[name]:input.defaultVisibility[name])===false)node.visible=false;
     }
-    if(node.isMesh)for(const material of [node.material].flat())
-      if((material.userData.sourceMaterial||material.name)===input.material)materials.add(material);
+    if(node.isMesh)for(const material of [node.material].flat()){
+      const name=material.userData.sourceMaterial||material.name;
+      if(name===input.material)materials.add(material);
+      else applySourceFactors(material,input.sourceMaterials?.[name]);
+    }
   });
   if(!materials.size)throw Error('登记 GLB 中找不到工程涂装材质');
   if(input.modeling?.steps?.length)applyModelState(root,input.modeling);

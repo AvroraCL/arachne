@@ -21,6 +21,15 @@ export function createUnlitMaterial(source) {
   return material;
 }
 
+export function applySourceFactors(material,factors){
+  if(!factors)return;
+  if(factors.color!==undefined)material.color.set(factors.color);
+  if('metalness' in material){
+    if(factors.metallic!==undefined)material.metalness=factors.metallic;
+    if(factors.roughness!==undefined)material.roughness=factors.roughness;
+  }
+}
+
 export function livePaintTextureSpaces(channels) {
   const spaces = {color: THREE.SRGBColorSpace, scalar: THREE.NoColorSpace};
   if (channels.includes('normal')) spaces.normal = THREE.NoColorSpace;

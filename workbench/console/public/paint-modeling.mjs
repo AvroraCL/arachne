@@ -971,7 +971,16 @@ export function createPaintModeling(report, project = {}) {
     if(!active)return null;const node=objects.get(id);if(!node)return null;
     node.updateWorldMatrix(true,false);
     const position=node.getWorldPosition(new THREE.Vector3()).applyQuaternion(worldAxes.clone().invert()).toArray();
-    return {id,label:node.userData.original.userData.modelingLabel||node.name||'未命名物体',position,visible:isVisible(node),binding:context.binding};
+    const materials=new Map();
+    function collect(part){
+      for(const material of part.userData.original?.userData.viewportOriginalMaterials||[]){
+        const slot=context.editableMaterial(material);
+        if(slot)materials.set(slot.name,slot);
+      }
+      for(const child of part.children)if(child.userData.modelingId===undefined)collect(child);
+    }
+    collect(node);
+    return {id,materials:[...materials.values()],label:node.userData.original.userData.modelingLabel||node.name||'未命名物体',position,visible:isVisible(node),binding:context.binding};
   }
 
   async function transformObject(id,kind,values,space='global'){

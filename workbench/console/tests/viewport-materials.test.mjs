@@ -1,7 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {createUnlitMaterial,livePaintTextureSpaces,updateLivePaintTextures,fillLivePaintTextures} from '../public/viewport-materials.mjs';
+import {applySourceFactors,createUnlitMaterial,livePaintTextureSpaces,updateLivePaintTextures,fillLivePaintTextures} from '../public/viewport-materials.mjs';
+
+test('source PBR edits retain texture bindings and alpha when a cap has no paint UV', () => {
+  const map=new THREE.Texture(),normalMap=new THREE.Texture();
+  const cap=new THREE.MeshStandardMaterial({map,normalMap,opacity:.4,transparent:true,roughness:.32,metalness:.2});
+  const unlit=createUnlitMaterial(cap);
+  for(const material of [cap,unlit]){
+    applySourceFactors(material,{color:'#474036',metallic:0});
+    assert.deepEqual(material.color,new THREE.Color('#474036'));
+    assert.equal(material.opacity,.4);
+    assert.equal(material.map,map);
+  }
+  assert.equal(cap.normalMap,normalMap);
+  assert.equal(cap.metalness,0);
+  assert.equal(cap.roughness,.32);
+  assert.equal('roughness' in unlit,false);
+});
 
 test('unlit view preserves alpha textures, cutouts and vertex colors without changing the source PBR material', () => {
   const source = new THREE.MeshPhysicalMaterial({
