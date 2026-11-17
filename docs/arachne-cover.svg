@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="248" viewBox="0 0 1120 248" role="img" aria-labelledby="title">
+  <title id="title">Arachne · layered material study</title>
+  <defs>
+    <linearGradient id="bg" x2="1" y2=".35" gradientUnits="objectBoundingBox"><stop stop-color="#14212c"/><stop offset="1" stop-color="#202e39"/></linearGradient>
+    <linearGradient id="metal" x2=".95" y2=".4"><stop stop-color="#384e5c"/><stop offset=".46" stop-color="#93a9ab"/><stop offset="1" stop-color="#506270"/></linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#91aabc" stroke-opacity=".13"/></pattern>
+    <g id="plate"><path d="M18 0H212L232 20V96L216 112H17L0 95V18Z"/></g>
+    <g id="bolts" fill="#263844" stroke="#c6cdc6" stroke-width="1.5"><circle cx="18" cy="18" r="5"/><circle cx="211" cy="18" r="5"/><circle cx="18" cy="93" r="5"/><circle cx="211" cy="93" r="5"/></g>
+  </defs>
+  <rect width="1120" height="248" rx="12" fill="url(#bg)"/>
+  <path d="M620 0H1120V248H568Z" fill="url(#grid)"/>
+  <g transform="translate(54 76) scale(1.4)" fill="none" stroke="#eef1ee" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 52 32 11 54 52M21 33h22M17 43h30"/><circle cx="54" cy="52" r="4.5" fill="#74b6f1" stroke="none"/></g>
+  <text x="161" y="151" font-family="system-ui, sans-serif" font-weight="650" font-size="72" letter-spacing="-3" fill="#eff4f3">Arachne</text>
+  <g transform="matrix(1.15 .22 -.8 .70 783 107)"><use href="#plate" fill="#233644" stroke="#98acb5" stroke-width="2"/><use href="#bolts"/></g>
+  <g transform="matrix(1.15 .22 -.8 .70 783 79)"><use href="#plate" fill="url(#metal)" stroke="#aac0c4" stroke-width="2"/><use href="#bolts"/></g>
+  <g transform="matrix(1.15 .22 -.8 .70 783 48)">
+    <use href="#plate" fill="#c78442" stroke="#f3c58e" stroke-width="2"/>
+    <path d="M3 34V20L20 3h45M174 109h40l14-14" fill="none" stroke="#b8c2c0" stroke-width="4"/>
+    <path d="M42 27h108M42 81h138" stroke="#6b4d39" stroke-width="2"/>
+    <text x="42" y="70" font-family="monospace" font-weight="bold" font-size="35" letter-spacing="3" fill="#253642">A–07</text>
+    <path d="m164 61 12-17h6l-12 17zm11 0 12-17h6l-12 17z" fill="#f0d2a2"/><use href="#bolts"/>
+  </g>
+</svg>
