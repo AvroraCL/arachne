@@ -11,7 +11,7 @@ import {viewportSamplingDefaults} from './cycles-viewport-sampling.mjs';
 import {renderOpticsDefaults,renderOpticsFields} from './render-optics.mjs';
 import {renderRegionPixels} from './render-region.mjs';
 import {renderAppearanceDefaults,renderAppearanceLimits,renderTransforms,renderLooks} from './render-appearance.mjs';
-import {presetRenderLights,renderLightingDefaults,renderLightingLimits,renderLightingPresets,renderLightLimit,renderLightRanges} from './render-lighting.mjs';
+import {studioGroundDefaults,presetRenderLights,renderLightingDefaults,renderLightingLimits,renderLightingPresets,renderLightLimit,renderLightRanges} from './render-lighting.mjs';
 
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 
@@ -159,6 +159,12 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     void editLighting({preset:preset.value,...(preset.value==='custom'&&!current.lights?{lights:presetRenderLights(current.preset)}:{})});
   };
   lightingOverride.onchange=()=>void editLighting(lightingOverride.checked?renderLightingDefaults:null);
+  const currentGround=()=>settings.projectLighting?.()?.ground||studioGroundDefaults;
+  const studioGround=check(lightingFields,'enabled','摄影棚地面',patch=>editLighting({ground:{...currentGround(),...patch}}));
+  studioGround.title='在模型下方放置哑光地面；透明背景出图时隐藏。';
+  const floorColor=el('input');floorColor.type='color';floorColor.setAttribute('aria-label','地面颜色');
+  row(lightingFields,'地面颜色',floorColor);
+  floorColor.onchange=()=>void editLighting({ground:{...currentGround(),color:floorColor.value}});
   const areaLights=el('div','render-area-lights');lightingFields.append(areaLights);
   const lightToolbar=el('div','render-area-light-toolbar');
   const lightSelect=el('select');lightSelect.setAttribute('aria-label','区域灯');
@@ -233,6 +239,9 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     const lighting=lightingPending?pendingLighting:settings.projectLighting?.(),value=lighting||renderLightingDefaults;
     lightingOverride.checked=!!lighting;lightingOverride.disabled=lightingPending||!project.document;
     lightingFields.hidden=!lighting;studioFields.hidden=value.preset==='source';
+    const floor=value.ground||studioGroundDefaults;
+    studioGround.disabled=lightingPending;studioGround.checked=floor.enabled;
+    floorColor.closest('label').hidden=!floor.enabled;floorColor.disabled=lightingPending;floorColor.value=floor.color;
     preset.disabled=environmentColor.disabled=lightingPending;
     preset.value=value.preset;syncSelectMenu(preset);environmentColor.value=value.environmentColor;
     for(const [key,input] of Object.entries({lightStrength,environmentStrength,rotation})){

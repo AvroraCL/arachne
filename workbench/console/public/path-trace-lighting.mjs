@@ -25,6 +25,25 @@ export function projectLightRig(settings,center,radius){
   });
 }
 
+export function createStudioGround(){
+  const ground=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshStandardMaterial({side:THREE.DoubleSide}));
+  ground.rotation.x=-Math.PI/2;
+  return ground;
+}
+
+export function studioGroundVisible(lighting,transparent){
+  return lighting?.ground?.enabled===true&&!transparent;
+}
+
+export function placeStudioGround(ground,bounds,color,roughness=.78,height=-.0002){
+  const center=bounds.getCenter(new THREE.Vector3());
+  const radius=Math.max(.001,bounds.getSize(new THREE.Vector3()).length()/2);
+  ground.material.color.set(color);
+  ground.material.roughness=roughness;
+  ground.position.set(center.x,bounds.min.y+radius*height,center.z);
+  ground.scale.set(radius*80,radius*80,1);
+}
+
 export function projectEnvironment(library,settings){
   const color=(settings||renderLightingDefaults).environmentColor;
   const environment=new library.GradientEquirectTexture(64);

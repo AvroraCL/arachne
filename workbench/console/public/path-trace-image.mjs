@@ -6,7 +6,7 @@ import {channelSpecs} from './paint-channels.mjs';
 import {createPathTracingEngine} from './path-tracing-engine.mjs';
 import {renderLightingDefaults} from './render-lighting.mjs';
 import {renderAppearanceDefaults} from './render-appearance.mjs';
-import {projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
+import {createStudioGround,placeStudioGround,studioGroundVisible,projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
 import {applyProjectLens} from './path-trace-camera.mjs';
 import {useRenderTextureAtlas} from './render-texture-atlas.mjs';
 import {completedPathTraceTarget,drawPathTrace} from './path-trace-display.mjs';
@@ -138,7 +138,7 @@ async function downloadLinearExr(renderer,target,settings,region){
 export async function renderImage(input){
   const {settings,region}=input,appearance=input.appearance||renderAppearanceDefaults;
   const renderer=new THREE.WebGLRenderer({alpha:true,preserveDrawingBuffer:true,antialias:false});
-  let engine,environment,textureAtlas;
+  let engine,environment,textureAtlas,ground;
   try{
     const gl=renderer.getContext(),limit=gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
     if(settings.width>limit||settings.height>limit)throw Error('当前图形设备不支持所选输出分辨率');
@@ -162,6 +162,11 @@ export async function renderImage(input){
     const radius=Math.max(.001,bounds.getSize(new THREE.Vector3()).length()/2);
     const {camera,view}=makeCamera(settings,center,radius,input.optics,backend.library.PhysicalCamera);
     environment=setupLighting(scene,backend.library,input.lighting,center,radius,settings.transparent);
+    if(studioGroundVisible(input.lighting,settings.transparent)){
+      ground=createStudioGround();
+      placeStudioGround(ground,bounds,input.lighting.ground.color);
+      scene.add(ground);
+    }
     textureAtlas=useRenderTextureAtlas(engine,renderer,settings);
     engine.setScene(scene,camera);
     let sample=0;
@@ -176,6 +181,7 @@ export async function renderImage(input){
     const canvas=outputCanvas(renderer.domElement,settings,region);
     return {png:canvas.toDataURL('image/png').split(',')[1],camera:view,samples:sample,textureSampling:textureAtlas.report()};
   }finally{
+    ground?.geometry.dispose();ground?.material.dispose();
     textureAtlas?.dispose();engine?.dispose();environment?.dispose();renderer.dispose();renderer.forceContextLoss();
   }
 }

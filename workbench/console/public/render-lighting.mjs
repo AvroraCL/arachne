@@ -2,6 +2,7 @@ export const renderLightingPresets={source:'源场景',studio:'摄影棚',soft:'
 export const renderLightingDefaults=Object.freeze({
   preset:'source',lightStrength:1,environmentStrength:1,rotation:0,environmentColor:'#777777'
 });
+export const studioGroundDefaults=Object.freeze({enabled:false,color:'#626467'});
 export const renderLightingLimits=Object.freeze({lightStrength:[0,4],environmentStrength:[0,4],rotation:[0,360]});
 export const renderLightLimit=8;
 export const renderLightRanges=Object.freeze({position:[-12,12],intensity:[0,20],size:[.03,8]});
@@ -40,7 +41,7 @@ function checkRenderLights(lights){
 }
 
 export function checkRenderLighting(value){
-  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>key!=='lights'&&!Object.hasOwn(renderLightingDefaults,key)))
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>key!=='lights'&&key!=='ground'&&!Object.hasOwn(renderLightingDefaults,key)))
     throw Error('渲染布光设置无效');
   const {preset,lightStrength,environmentStrength,rotation,environmentColor}=value;
   if(typeof preset!=='string'||!Object.hasOwn(renderLightingPresets,preset)||
@@ -49,6 +50,10 @@ export function checkRenderLighting(value){
     if(typeof value[key]!=='number'||!Number.isFinite(value[key])||value[key]<min||value[key]>max)
       throw Error('布光参数超出范围');
   }
+  const ground=value.ground;
+  if(ground!==undefined&&(!ground||typeof ground.enabled!=='boolean'||!hex(ground.color)||
+    Object.keys(ground).some(key=>!Object.hasOwn(studioGroundDefaults,key))))throw Error('摄影棚地面设置无效');
   return {preset,lightStrength,environmentStrength,rotation,environmentColor:environmentColor.toLowerCase(),
+    ...(ground?{ground:{enabled:ground.enabled,color:ground.color.toLowerCase()}}:{}),
     ...(preset==='custom'||value.lights!==undefined?{lights:checkRenderLights(value.lights)}:{})};
 }

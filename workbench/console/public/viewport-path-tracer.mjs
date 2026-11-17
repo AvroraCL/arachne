@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {createPathTracingEngine} from './path-tracing-engine.mjs';
-import {projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
+import {createStudioGround,placeStudioGround,studioGroundVisible,projectLightRig,projectEnvironment} from './path-trace-lighting.mjs';
 import {renderAppearanceDefaults} from './render-appearance.mjs';
 import {completedPathTraceTarget,drawPathTrace,setPathTraceDisplay} from './path-trace-display.mjs';
 import {renderLightingDefaults} from './render-lighting.mjs';
@@ -99,9 +99,7 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
         finally{quad.material=rawMaterial;}
       };
       scene=new THREE.Scene();
-      ground=new THREE.Mesh(new THREE.PlaneGeometry(1,1),
-        new THREE.MeshStandardMaterial({side:THREE.DoubleSide}));
-      ground.rotation.x=-Math.PI/2;
+      ground=createStudioGround();
     }).catch(error=>{if(!disposed&&options.enabled)fail(error);}).finally(()=>{
       loading=false;
       if(!disposed&&options.enabled)request();
@@ -148,22 +146,21 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
       });
     }
     for(const light of lights)scene.add(light);
-    ground.material.color.set(settings.groundColor);
-    ground.material.roughness=settings.groundRoughness;
-    ground.position.set(center.x,bounds.min.y+settings.groundHeight*radius-radius*.003,center.z);
-    ground.scale.set(radius*80,radius*80,1);
+    if(project){
+      if(studioGroundVisible(lighting,project.transparent))placeStudioGround(ground,bounds,lighting.ground.color);
+    }else placeStudioGround(ground,bounds,settings.groundColor,settings.groundRoughness,settings.groundHeight-.003);
   }
 
   function syncScene(root,camera,bounds,settings,sourceLights){
     const meshes=[],imported=[],project=options.project;
-    const showGround=!project&&settings.ground;
+    const showGround=project?studioGroundVisible(project.lighting,project.transparent):settings.ground;
     root.updateWorldMatrix(true,true);
     root.traverseVisible(object=>{
       if(object.isMesh)meshes.push(object);
       else if(project&&(object.isDirectionalLight||object.isSpotLight||object.isPointLight||object.isRectAreaLight))imported.push(object);
     });
     if(!meshes.length&&!showGround)return false;
-    const nextMesh=JSON.stringify([showGround?[settings.groundColor,settings.groundHeight,settings.groundRoughness,bounds.min,bounds.max]:null,meshes.map(mesh=>[
+    const nextMesh=JSON.stringify([showGround?[project?project.lighting.ground:[settings.groundColor,settings.groundHeight,settings.groundRoughness],bounds.min,bounds.max]:null,meshes.map(mesh=>[
       mesh.id,mesh.geometry.id,mesh.geometry.attributes.position.version,mesh.matrixWorld.elements,
       [mesh.material].flat().map(material=>material.id)
     ])]);
