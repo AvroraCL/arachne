@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="workbench/console/public/arachne-mark.svg" alt="阿拉克涅" width="80">
-
 # 阿拉克涅 · Arachne
 
 面向模型涂装作者的本地三维工作台  
