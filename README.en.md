@@ -4,10 +4,6 @@
 
 [简体中文](README.md) · **[Run from source](#run-from-source)** · [Desktop builds](#desktop-builds) · [Report an issue](https://github.com/AvroraCL/arachne/issues)
 
-![Arachne’s drawing workspace with a gradient stripe selected on the canvas and its layer properties open on the right](docs/drawing-workspace.png)
-
-The screenshot shows the drawing workspace in use. The number, graphic and stripe sit on separate layers. Drag the stripe’s gradient handles on the canvas or change either color in the properties panel.
-
 ## A typical texturing workflow
 
 1. **Prepare the mesh.** Import a GLB, glTF or OBJ model and select the material to paint. You can also start with a built-in plane, cube or sphere.

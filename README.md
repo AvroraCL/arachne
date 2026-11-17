@@ -11,10 +11,6 @@ Apple Silicon macOS · Windows x64 · 本机浏览器
 
 **[从源码运行](#从源码运行)** · [English README](README.en.md) · [工作台操作指南](#工作台快捷入口) · [反馈问题](https://github.com/AvroraCL/arachne/issues)
 
-![阿拉克涅绘制工作区，画布上正在调整装饰条渐变，右侧显示图层和渐变属性](docs/drawing-workspace.png)
-
-上图是绘制工作区的实际截图。编号、图案和装饰条各自保存在图层里；选中装饰条后，可以在画布上拖动渐变两端，也可以在右侧修改起止颜色。
-
 ## 阿拉克涅能做什么
 
 - **准备模型**：导入 GLB、glTF 或 OBJ，选择要涂装的材质。也可以从平面、立方体、球体等基础模型开始。
