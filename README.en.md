@@ -4,6 +4,13 @@
 
 # Arachne
 
+[![Source version 0.0.1-alpha.1](https://img.shields.io/badge/source-0.0.1--alpha.1-586575?style=flat-square&logo=github&logoColor=white)](package.json)
+[![macOS on Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-333333?style=flat-square&logo=apple&logoColor=white)](#apple-silicon-macos)
+[![Windows x64](https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square)](#windows-x64)
+[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](#run-from-source)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](#run-from-source)
+[![GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-3D638C?style=flat-square)](LICENSE)
+
 A local workspace for texturing 3D models
 
 [简体中文](README.md) · [Run from source](#run-from-source) · [Report an issue](https://github.com/AvroraCL/arachne/issues)

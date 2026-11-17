@@ -4,6 +4,13 @@
 
 # 阿拉克涅 · Arachne
 
+[![Source version 0.0.1-alpha.1](https://img.shields.io/badge/source-0.0.1--alpha.1-586575?style=flat-square&logo=github&logoColor=white)](package.json)
+[![macOS on Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-333333?style=flat-square&logo=apple&logoColor=white)](WORKBENCH.zh-CN.md#apple-silicon-macos)
+[![Windows x64](https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square)](WORKBENCH.zh-CN.md#windows-x64-开发环境)
+[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](WORKBENCH.zh-CN.md#从源码运行)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](WORKBENCH.zh-CN.md#从源码运行)
+[![GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-3D638C?style=flat-square)](LICENSE)
+
 为三维模型制作涂装的本地工作台
 
 [English](README.en.md) · [使用手册](WORKBENCH.zh-CN.md) · [反馈问题](https://github.com/AvroraCL/arachne/issues)
