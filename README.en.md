@@ -1,15 +1,28 @@
+<div align="center">
+
+<img src="workbench/console/public/arachne-icon.png" alt="Arachne" width="88" height="88">
+
 # Arachne
 
-**A local 3D texturing workbench for artists working on models and liveries.** Edit a mesh, build PBR materials, paint layered textures and render the result in one project. Available as an Apple Silicon Mac app, a Windows x64 desktop app or a workbench served locally in your browser.
+A local workspace for texturing 3D models
 
-[简体中文](README.md) · **[Run from source](#run-from-source)** · [Desktop builds](#desktop-builds) · [Report an issue](https://github.com/AvroraCL/arachne/issues)
+[简体中文](README.md) · [Run from source](#run-from-source) · [Report an issue](https://github.com/AvroraCL/arachne/issues)
 
-## A typical texturing workflow
+</div>
 
-1. **Prepare the mesh.** Import a GLB, glTF or OBJ model and select the material to paint. You can also start with a built-in plane, cube or sphere.
-2. **Build the surface.** Use fill layers for base color, metallic and roughness. Reveal the underlying material with painted masks, edge wear and surface noise. Save a layer group as a smart material to reuse it.
-3. **Paint the texture.** Combine images, shapes, gradients and adjustments in a layered 4K document. Use selections and masks to place a marking, bind the document to a material channel, and return to edit it later.
-4. **Inspect and deliver.** Check individual channels on the model, set up lights and a camera, and render a PNG or floating-point OpenEXR. Package the model, PBR maps and editable project together.
+Paint textures, edit materials and inspect the model in the same project. For an aircraft livery, for example, you can lay out numbers and stripes on the 2D canvas, then turn the model to see how the stripes wrap around the fuselage. If a number needs to move, its layer is still editable.
+
+## What you can make
+
+- **Layered textures.** Combine images, shapes and gradients on a 4K canvas. Use selections and masks to trim an edge, then bind the texture document to a material channel.
+- **Surface finishes.** Adjust color, metallic and roughness by layer so paint and bare metal catch the light differently. Reveal metal along raised edges with a wear mask, and save a layer group as a reusable smart material.
+- **Renders and editable projects.** Inspect individual channels in the viewport, set the camera and lights, and render a PNG or OpenEXR. To hand off the work, package the model, PBR textures and editable project together.
+
+## Try it
+
+Arachne runs on Apple Silicon Macs and Windows x64. You can also use a browser to access the workbench running on your computer.
+
+Drag a GLB into the workbench and choose a material to paint. If you don’t have a model handy, start a paint project from the File menu and choose the cube. Add a fill layer, adjust its roughness and rotate the view to see how the highlight changes.
 
 ## Run from source
 
@@ -42,7 +55,7 @@ Open the [local workbench](http://127.0.0.1:8766/) and choose the demo or import
 
 ## Desktop builds
 
-The project also builds an Apple Silicon Mac app and a Windows x64 installer or portable ZIP. The desktop packages bundle the runtimes used by the workbench. See the [Mac build instructions (Chinese)](README.md#构建-mac-应用) or the [Windows packaging instructions (Chinese)](README.md#windows-x64-桌面版).
+The project also builds an Apple Silicon Mac app and a Windows x64 installer or portable ZIP. The desktop packages bundle the runtimes used by the workbench. See the [Mac build instructions (Chinese)](WORKBENCH.zh-CN.md#构建-mac-应用) or the [Windows packaging instructions (Chinese)](WORKBENCH.zh-CN.md#windows-x64-桌面版).
 
 ## License
 
