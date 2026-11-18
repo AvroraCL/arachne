@@ -84,6 +84,21 @@ def register(config):
             raise ValueError('物体层级、网格或材质槽已改变。请从同一源稿导出并保持原有名称和顺序')
         if previous.uv_digest() != uv_digest:
             raise ValueError('三角形索引或原 UV 已改变。请保留拓扑与 UV 后再更新，或另建工程')
+        if config.get('positionReplay'):
+            # Use scratch models: registration must store the unedited new GLB.
+            replay = Model(incoming, registration=True)
+            for step in config['positionReplay']:
+                if step.get('type') == 'vertexPositions':
+                    for target in step['targets']:
+                        mesh, ids = target['mesh'], target['vertices']
+                        old = previous.primitives[mesh]
+                        new = replay.primitives[mesh]
+                        if not np.array_equal(old['positions'][ids], new['positions'][ids]):
+                            name = previous.nodes[old['node']]['name']
+                            raise ValueError(f'源稿与工作台同时修改了「{name}」的同一组顶点，请先协调两处顶点修改')
+                previous.edit([step])
+                replay.edit([step])
+            del replay
         del previous
     points,_,normals,uv,_,_,labels = surface(model)
     valid = ((uv>=0)&(uv<=1)).all(axis=(1,2)) & (np.linalg.norm(normals,axis=1)>.5)

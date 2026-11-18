@@ -2,7 +2,7 @@ import {blenderExecutable,blenderScriptArgs} from './blender-runtime.mjs';
 import {pythonExecutable} from './python-runtime.mjs';
 import {registeredViewportModel,viewportManifest} from './viewport.mjs';
 import {pinSurfaceInputs} from './paint-surface-bindings.mjs';
-import {modelFingerprint,validateModelState,nativeModelSteps} from './model-binding.mjs';
+import {modelFingerprint,validateModelState,verifyModelStepTargets} from './model-binding.mjs';
 export {modelFingerprint,validateModelState,nativeModelSteps} from './model-binding.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,18 +24,9 @@ export function saveProjectModel(doc,{revision,modeling}){
   if(revision!==doc.revision)throw Object.assign(Error('工程修订已变化'),{status:409,currentRevision:doc.revision});
   validateModelState(modeling);
   if(modeling.version===2&&doc.source.format!=='glb')invalid();
-  const model=registeredViewportModel(doc),folder=path.dirname(model.file);
+  const model=registeredViewportModel(doc);
   if(viewportManifest(doc).key!==modeling.binding||model.sha256!==modeling.modelSha256)invalid();
-  const bytes=fs.readFileSync(model.file),glb=JSON.parse(bytes.toString('utf8',20,20+bytes.readUInt32LE(12)));
-  let topology;
-  if(modeling.steps.some(step=>step.targets.some(target=>target.mesh!==undefined))){
-    for(const name of fs.readdirSync(folder).filter(name=>name==='topology.json'||/^topology-[a-f0-9]+\.json$/.test(name))){
-      const value=JSON.parse(fs.readFileSync(path.join(folder,name),'utf8'));
-      if(value.modelSha256===modeling.modelSha256){topology=value;break;}
-    }
-  }
-  const expected=nativeModelSteps(glb,modeling.steps,topology);
-  if(JSON.stringify(expected)!==JSON.stringify(modeling.nativeSteps))invalid();
+  verifyModelStepTargets(model.file,modeling);
   return commit(doc.id,revision,next=>{pinSurfaceInputs(next);next.modeling=structuredClone(modeling);return next;},[{op:'model',steps:modeling.steps.length}]);
 }
 function location(doc,legacyScene){

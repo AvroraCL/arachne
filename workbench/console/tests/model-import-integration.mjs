@@ -95,12 +95,36 @@ async function verifyModelUpdate(){
   const doc=await create.json();
   assert.equal(create.status,201,JSON.stringify(doc));
   const path='/api/projects/'+doc.id+'/paint';
-  const authored=await api(path+'/commands',{revision:doc.revision,operations:[
+  const painted=await api(path+'/commands',{revision:doc.revision,operations:[
     {op:'add',kind:'fill',patch:{name:'蒙版返工',maskEnabled:true,maskBase:.6}}
   ]});
   const update=(revision,body)=>fetch(origin+path+'/update-glb?revision='+revision,{method:'POST',headers,body});
+  const firstUpdate=await update(painted.revision,sampleModel(true,.26).bytes);
+  assert.equal(firstUpdate.status,200);
+  const plain=await firstUpdate.json();
+  assert.equal(plain.modeling,undefined);
+  assert.deepEqual(plain.paint,painted.paint);
+  const restored=await api(path+'/undo',{revision:plain.revision});
+  assert.deepEqual(restored.source,doc.source);
   const oldManifest=await api('/api/projects/'+doc.id+'/viewport');
+  const topology=await api((await api('/api/projects/'+doc.id+'/viewport/topology',{})).url);
+  const steps=[
+    {matrix:[1,0,0,0,0,.75,0,0,0,0,.75,0,0,0,0,1],targets:[{id:1}]},
+    {type:'vertexPositions',targets:[{mesh:0,vertices:[0],positions:[-1,.125,-1]}]}
+  ];
+  const glb=await fs.readFile(doc.source.reviewSource);
+  const registered=JSON.parse(glb.toString('utf8',20,20+glb.readUInt32LE(12)));
+  const authored=await api(path+'/model',{revision:restored.revision,modeling:{
+    version:2,binding:oldManifest.key,modelSha256:oldManifest.modelSha256,
+    steps,nativeSteps:nativeModelSteps(registered,steps,topology)
+  }});
   const revised=sampleModel(true,.16).bytes;
+  const conflict=Buffer.from(revised);
+  conflict.writeFloatLE(.5,conflict.length-model.binary.length+4);
+  const blocked=await update(authored.revision,conflict);
+  assert.equal(blocked.status,400);
+  assert.match((await blocked.json()).error,/同一组顶点/);
+  assert.equal((await api('/api/projects/'+doc.id)).revision,authored.revision);
   const reject=await update(authored.revision,sampleModel(false).bytes);
   assert.equal(reject.status,400);
   assert.match((await reject.json()).error,/UV/);
@@ -111,17 +135,21 @@ async function verifyModelUpdate(){
   assert.equal(edited.source.material,doc.source.material);
   assert.equal(edited.source.uvSha256,doc.source.uvSha256);
   assert.deepEqual(edited.paint,authored.paint);
+  const manifest=await api('/api/projects/'+doc.id+'/viewport');
+  assert.deepEqual(edited.modeling,{...authored.modeling,binding:manifest.key,modelSha256:manifest.modelSha256});
   assert.notEqual(edited.source.reviewSource,doc.source.reviewSource);
   assert.equal((await fetch(origin+oldManifest.modelUrl)).status,409);
   assert.equal((await update(authored.revision,revised)).status,409);
   const same=await update(edited.revision,revised);
   assert.match((await same.json()).error,/相同/);
   const undo=await api(path+'/undo',{revision:edited.revision});
+  assert.deepEqual(undo.modeling,authored.modeling);
   assert.deepEqual(undo.source,doc.source);
   assert.deepEqual(undo.paint,authored.paint);
   const redo=await api(path+'/redo',{revision:undo.revision});
+  assert.deepEqual(redo.modeling,edited.modeling);
   assert.deepEqual(redo.source,edited.source);
-  console.log('PASS GLB revision update, binding, rejected UV change, stale revision and undo/redo');
+  console.log('PASS GLB revision update, modeling replay, conflicting absolute vertices, rejected UV change, stale revision and undo/redo');
 }
 
 async function verifyProceduralMasks(cubeId){

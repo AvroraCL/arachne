@@ -6,6 +6,7 @@ import {promisify} from 'node:util';
 import {ROOT,DATA,atomic,forkProject,commit} from './store.mjs';
 import {pythonExecutable} from './python-runtime.mjs';
 import {sha256File} from './file-fingerprint.mjs';
+import {validateModelState,verifyModelStepTargets} from './model-binding.mjs';
 import {channelSpecs} from './public/paint-channels.mjs';
 
 const execute=promisify(execFile);
@@ -18,11 +19,11 @@ const preservedSurfaceFiles=[
 ];
 export const glbRegistrationFiles=(legacySurface=false)=>legacySurface?[...coreRegistrationFiles,...preservedSurfaceFiles]:coreRegistrationFiles;
 
-export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput,previousModel,targetMaterial}={}){
+export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput,previousModel,targetMaterial,positionReplay}={}){
   const staging=path.join(scratch,'registration');
   const config=path.join(scratch,'input.json');
   await fs.mkdir(staging);
-  atomic(config,{input,out:staging,material,textureOutput,previousModel,targetMaterial,ownerPid:process.pid});
+  atomic(config,{input,out:staging,material,textureOutput,previousModel,targetMaterial,positionReplay,ownerPid:process.pid});
   try{
     await execute(python,['-X','utf8',path.join(ROOT,'model_surface.py'),'register',config],
       {cwd:ROOT,windowsHide:true,timeout:180000});
@@ -85,18 +86,35 @@ export async function updateProjectGlb(doc,revision,input,scratch){
   if(doc.revision!==revision)throw Object.assign(Error('工程已改变，请重新选择模型'),{status:409});
   if(doc.workflowType!=='pbr_paint'||doc.source.format!=='glb'||doc.source.preservedSurface)
     throw Error('此入口适用于原生 GLB 涂装工程');
-  if(doc.modeling?.steps?.length||Object.values(doc.paint.surfaceBindings||{}).some(Boolean))
-    throw Error('当前工程含绑定旧网格的建模步骤。请在源稿版本或未建模的副本中更新');
+  if(Object.values(doc.paint.surfaceBindings||{}).some(Boolean))
+    throw Error('有投影涂装绑定到历史建模表面；请先将相关涂装修订为 UV 内容再更新模型');
+  const modeling=doc.modeling;
+  if(modeling){
+    validateModelState(modeling);
+    const originalSha=doc.source.files[doc.source.reviewSource];
+    if(modeling.modelSha256!==originalSha||modeling.binding!==originalSha.slice(0,32))
+      throw Error('建模步骤绑定的源模型与当前工程不一致');
+  }
+  // Absolute vertex edits may overwrite a concurrent source edit. Compare their
+  // inputs after all preceding transforms, up to the last absolute edit.
+  const lastPosition=modeling?.steps.findLastIndex(step=>step.type==='vertexPositions')??-1;
+  const positionReplay=lastPosition<0?undefined:modeling.steps.slice(0,lastPosition+1);
   const staging=await registerGlb(input,scratch,{
-    previousModel:doc.source.reviewSource,targetMaterial:doc.source.material
+    previousModel:doc.source.reviewSource,targetMaterial:doc.source.material,positionReplay
   });
   const metadata=JSON.parse(await fs.readFile(path.join(staging,'metadata.json'),'utf8'));
   if(metadata.source_sha256===doc.source.files[doc.source.reviewSource])throw Error('所选模型与当前工程相同');
+  let rebound;
+  if(modeling){
+    const sha=metadata.source_sha256;
+    rebound={...modeling,binding:sha.slice(0,32),modelSha256:sha};
+    verifyModelStepTargets(path.join(staging,'model.glb'),rebound);
+  }
   // The author is changing geometry. Keep the registered painting base, including imported images.
   await fs.copyFile(doc.source.baseImage,path.join(staging,'base.png'));
   return installGlbRegistration(staging,registered=>commit(doc.id,revision,next=>{
     next.source=registered.source;
-    delete next.modeling;
+    if(rebound)next.modeling=rebound;
     return next;
   },'更新工程模型'));
 }

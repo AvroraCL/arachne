@@ -11,10 +11,12 @@ npm ci --prefix workbench/console
 python3 -m http.server 8090 --bind 127.0.0.1
 ```
 
-## 三摄主镜返工
+## 侧盖和主摄凹槽返工
 
-上方主摄的镜座后移，消光内壁沿原开口延长。两枚长焦镜头用于同机位对照。新版 ZIP 与本目录源稿对应。[修改前的工程](https://github.com/AvroraCL/arachne/raw/601e48f55e0895ff35297ab88c23adbd6e0a1577/examples/mavic-4-pro-studio.zip) · [同机位对照](../../docs/images/mavic-4-pro-optics-revision.webp)
+当前工程 ZIP 有一条可编辑的工作台建模步骤，右侧云台轴盖沿直径方向缩至 78%，厚度保持原值。主摄镜座的修改保存在源稿中，内缩量从 3.2 调到 1.8 个源稿单位。三枚镜片仍分别绑定各自的玻璃材质。[原机位三步对照](../../docs/images/mavic-4-pro-modeled-update.webp)
 
-可用上面的修改前工程练习返工。打开 ZIP，生成本目录的 GLB，在原工程内更新。机壳粗糙度蒙版、自定义灯光和两个相机书签会保留。「编辑 → 撤销」可切回旧镜座；重做后可继续编辑。
+要复现这次返工，打开[上一版工程](https://raw.githubusercontent.com/AvroraCL/arachne/2f3ddcaec147b58ebaf3153696f401cd583e651d/examples/mavic-4-pro-studio.zip)，在大纲中选中 `Starboard · recessed pivot cover`，在全局坐标下以物体中心缩放，X 为 1，Y 和 Z 均为 0.78。再从本目录生成 GLB，选择「文件 → 更新工程模型…」。用「Infinity · 镜组」书签对照两处造型，用「展臂 · 整机」检查机壳和机臂字样。撤销一次即可回到侧盖已缩小、主摄仍为旧镜座的状态。
 
-此入口适用于从同一源稿导出的原生 GLB。导出时保留节点名称与层级、网格和材质槽对应关系、三角形索引与原 UV。已有工作台建模步骤或绑定过旧建模状态的涂装时，请使用建模前的副本。本例的 127 个网格均沿用原 UV。
+更新适用于从同一源稿导出的原生 GLB。请保留节点、网格、材质槽、三角形索引和原 UV 的对应关系。工作台会核对目标并在新源模型上重放建模步骤。若源稿也改了被绝对顶点编辑覆盖的位置，更新会指出冲突物体，原工程可继续编辑。使用历史建模表面投影的涂装目前仍需沿用原模型。
+
+[首次主摄凹槽返工对照](../../docs/images/mavic-4-pro-optics-revision.webp)

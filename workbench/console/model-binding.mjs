@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
 import {modelStepForSource} from './public/model-edit-steps.mjs';
 const digest=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -86,4 +88,18 @@ export function validateModelState(state){
     for(const target of native.targets)if(typeof target.object!=='string'||!target.object||target.object.length>256)invalid();
   }
   return state;
+}
+
+export function verifyModelStepTargets(file,modeling){
+  const bytes=fs.readFileSync(file),glb=JSON.parse(bytes.toString('utf8',20,20+bytes.readUInt32LE(12)));
+  const folder=path.dirname(file);
+  let topology;
+  if(modeling.steps.some(step=>step.targets.some(target=>target.mesh!==undefined))){
+    for(const name of fs.readdirSync(folder).filter(name=>name==='topology.json'||/^topology-[a-f0-9]+\.json$/.test(name))){
+      const value=JSON.parse(fs.readFileSync(path.join(folder,name),'utf8'));
+      if(value.modelSha256===modeling.modelSha256){topology=value;break;}
+    }
+  }
+  const expected=nativeModelSteps(glb,modeling.steps,topology);
+  if(JSON.stringify(expected)!==JSON.stringify(modeling.nativeSteps))throw Error('建模步骤与网格目标或共享顶点的对应关系不一致');
 }
