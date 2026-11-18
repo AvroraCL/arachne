@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {applySourceFactors,createUnlitMaterial,livePaintTextureSpaces,updateLivePaintTextures,fillLivePaintTextures} from '../public/viewport-materials.mjs';
+import {surfaceMarkMapsChanged,applySourceFactors,createUnlitMaterial,livePaintTextureSpaces,updateLivePaintTextures,fillLivePaintTextures} from '../public/viewport-materials.mjs';
+
+test('a projected mark only needs a new map when its pigment or underlying color changes', () => {
+  const cap = {mark:{coverage:'mask-a'},color:'#202020'};
+  const before = {cap,trim:{roughness:.4}};
+  assert.equal(surfaceMarkMapsChanged(before,{cap:{...cap,roughness:.8},trim:{color:'#ffcc00'}}),false);
+  assert.equal(surfaceMarkMapsChanged(before,{cap:{...cap,color:'#808080'}}),true);
+  assert.equal(surfaceMarkMapsChanged(before,{cap:{...cap,mark:{coverage:'mask-b'}}}),true);
+  assert.equal(surfaceMarkMapsChanged(before,{}),true);
+  assert.equal(surfaceMarkMapsChanged(undefined,before),true);
+});
 
 test('source PBR edits retain texture bindings and alpha when a cap has no paint UV', () => {
   const map=new THREE.Texture(),normalMap=new THREE.Texture();

@@ -21,6 +21,17 @@ export function createUnlitMaterial(source) {
   return material;
 }
 
+// Only pigment coverage and the color underneath it are baked into a mark's map.
+export function surfaceMarkMapsChanged(before = {}, after = {}) {
+  if (before === after) return false;
+  for (const name of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const old = before[name], next = after[name];
+    if (old?.mark?.coverage !== next?.mark?.coverage ||
+        (next?.mark && old?.color !== next.color)) return true;
+  }
+  return false;
+}
+
 export function applySourceFactors(material,factors){
   if(!factors)return;
   if(material.userData.markApplied)material.color.set(0xffffff);
