@@ -299,7 +299,9 @@ try{
   const third=await until(async()=>{const doc=await readDoc();return image(doc).layers.length===3&&doc;},'新建第三像素层');
   const thirdId=image(third).layers.find(item=>![baseId,secondId].includes(item.id)).id;
   const modifier=process.platform==='darwin'?'Meta':'Control';
-  await select(baseId).click();await select(secondId).click({modifiers:[modifier]});
+  await row(baseId).locator('.document-layer-name').click();
+  await row(secondId).locator('.document-layer-name').click({modifiers:[modifier]});
+  assert.equal(await panel().locator('.document-layer-row[data-selected]').count(),2);
   await select(secondId).focus();await page.keyboard.press(modifier+'+j');
   const duplicate=await until(async()=>{const doc=await readDoc();return image(doc).layers.length===5&&doc;},'复制两个选中图层');
   const copies=image(duplicate).layers.filter(item=>![baseId,secondId,thirdId].includes(item.id));
