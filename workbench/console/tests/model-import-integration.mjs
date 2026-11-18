@@ -82,8 +82,8 @@ async function start(folder){
   return origin;
 }
 let origin;
-async function api(route,body){
-  const r=await fetch(origin+route,body===undefined?{}:{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
+async function api(route,body,server=origin){
+  const r=await fetch(server+route,body===undefined?{}:{method:'POST',headers:{Origin:server,'Content-Type':'application/json'},body:JSON.stringify(body)});
   const json=await r.json();
   assert.ok(r.ok,JSON.stringify(json));
   return json;
@@ -523,6 +523,17 @@ async function verifyModelWorkflows(){
   assert.equal(Object.keys(bakedSample.paintReport.files).length,8);
   await assert.rejects(fs.stat(path.dirname(seed.source.cacheRun)),{code:'ENOENT'});
   assert.ok((await fs.readdir(path.join(clean,'model-geometry'))).length);
+  // The bundled sample has no in-place cache. Editing its cap requires the portable original UV mask.
+  const capMatrix=[1,0,0,0,0,1,0,0,0,0,1,0,.4,0,0,1];
+  await api(nativeRoute+'/paint/model',{revision:sample.revision,modeling:{
+    version:1,binding:nativeView.key,modelSha256:nativeView.modelSha256,
+    steps:[{targets:[{id:1}],matrix:capMatrix}],nativeSteps:[{matrix:capMatrix,targets:[{object:'Cover'}]}]
+  }},other);
+  const layout=await fetch(other+nativeRoute+'/paint/uv-layout');
+  assert.equal(layout.status,200);
+  assert.equal(layout.headers.get('x-uv-sha256'),seed.source.uvSha256);
+  assert.deepEqual([...new Uint8Array(await layout.arrayBuffer()).subarray(0,8)],[137,80,78,71,13,10,26,10]);
+  await assert.rejects(fs.stat(path.dirname(seed.source.cacheRun)),{code:'ENOENT'});
   console.log('PASS native example creation and eight-channel 4K bake without Blender or writes to sample sources');
 
   await reopened.locator('summary').filter({hasText:/^文件$/}).click();

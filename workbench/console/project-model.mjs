@@ -114,7 +114,12 @@ export function prepareModelGeometry(doc,{signal,frozen=false,legacyScene=false}
     return waitForGeometry(previous.promise,signal);
   }
   const state={status:'queued',stage:'等待模型表面准备',frozen,controller:new AbortController()};builds.set(ready.key,state);
-  state.promise=buildQueue.submit(async()=>{
+  // Sample registrations are read-only. Resolve their original surface in the data directory
+  // before taking the build slot so the edited worker can retain its UV protection masks.
+  const original=ready.fingerprint&&doc.source.format==='glb'
+    ?prepareModelGeometry({...doc,modeling:undefined},{frozen:true,signal:state.controller.signal})
+    :Promise.resolve(null);
+  state.promise=original.then(baseline=>buildQueue.submit(async()=>{
     if(!state.frozen&&modelFingerprint(read(doc.id))!==ready.fingerprint)
       throw Object.assign(Error('模型已经更新，跳过旧表面准备'),{status:409,cancelled:true});
     state.status='running';state.stage='保存模型副本';
@@ -124,7 +129,7 @@ export function prepareModelGeometry(doc,{signal,frozen=false,legacyScene=false}
     const cfg=path.join(requests,crypto.randomUUID()+'.json');
     const model=legacyScene?null:registeredViewportModel(doc);
     if(model&&doc.modeling&&model.sha256!==doc.modeling.modelSha256)invalid();
-    atomic(cfg,{source:doc.source,modeling:doc.modeling??null,out:ready.folder,modelFingerprint:ready.fingerprint,ownerPid:process.pid,
+    atomic(cfg,{source:baseline?.source||doc.source,modeling:ready.fingerprint?doc.modeling:null,out:ready.folder,modelFingerprint:ready.fingerprint,ownerPid:process.pid,
       ...(model?{model:model.file,modelSha256:model.sha256}:{})});
     return new Promise((resolve,reject)=>{
       const log=fs.createWriteStream(path.join(ready.folder,'build.log'));
@@ -152,7 +157,7 @@ export function prepareModelGeometry(doc,{signal,frozen=false,legacyScene=false}
         catch(error){reject(error);}
       });
     });
-  },state.controller.signal).catch(error=>{
+  },state.controller.signal)).catch(error=>{
     state.status=error.cancelled?'cancelled':'failed';state.error=error.message;throw error;
   });
   return waitForGeometry(state.promise,signal);
