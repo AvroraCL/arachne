@@ -82,9 +82,16 @@ function imageDocumentChanges(before,after){
   return result;
 }
 
+export function changedGlbSource(before,after){
+  if(before?.format!=='glb'||after?.format!=='glb')return false;
+  const from=before.files?.[before.reviewSource],to=after.files?.[after.reviewSource];
+  return Boolean(from&&to&&from!==to);
+}
+
 export function describePaintChange(before,after){
   const a=before.paint||{},b=after.paint||{},left=a.layers||[],right=b.layers||[];
   const labels=[];
+  if(changedGlbSource(before.source,after.source))labels.push('更新工程模型');
   if(json(before.modeling)!==json(after.modeling))labels.push('模型编辑');
   if(json(a.renderPreset)!==json(b.renderPreset))labels.push(b.renderPreset?'保存工程渲染预设':'移除工程渲染预设');
   if(json(a.sourceMaterials)!==json(b.sourceMaterials))labels.push('调整模型材质');
@@ -126,7 +133,7 @@ export function travelPaintHistory(current,history,direction,steps=1){
   if(steps>from.length)throw Error(`当前只能${direction==='undo'?'撤销':'重做'} ${from.length} 步`);
   const start=from.length-steps,restored=content(from[start]);
   if(restored.id!==current.id)throw Error('历史记录不属于当前工程');
-  restored.source=structuredClone(current.source);
+  if(!changedGlbSource(restored.source,current.source))restored.source=structuredClone(current.source);
   const next={undo:[...history.undo],redo:[...history.redo]};
   next[direction]=from.slice(0,start);
   next[to].push(content(current),...from.slice(start+1).reverse());

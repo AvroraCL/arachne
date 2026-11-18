@@ -2,7 +2,8 @@ import {createHash,randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {gzipSync,gunzipSync} from 'node:zlib';
-import {describePaintChange,paintHistoryEntries} from './public/paint-history-state.mjs';
+import {portableSource,resolveSource} from './workspace-paths.mjs';
+import {changedGlbSource,describePaintChange,paintHistoryEntries} from './public/paint-history-state.mjs';
 
 const limit=50;
 const directions=['undo','redo'];
@@ -31,6 +32,7 @@ function readIndex(folder){
 
 function saveSnapshot(folder,project){
   const {revision,updated,strokeSaveReceipts,...content}=project;
+  content.source=portableSource(content.source);
   const json=JSON.stringify(content),hash=digest(json),file=snapshotFile(folder,hash);
   if(fs.existsSync(file))return hash;
   fs.mkdirSync(snapshotFolder(folder),{recursive:true});
@@ -94,7 +96,7 @@ export function restoreProjectHistory(folder,current,direction,steps=1){
   const index=migrate(folder,prior,current),entries=index[direction];
   const start=entries.length-steps,target=entries[start],restored=loadSnapshot(folder,target);
   if(restored?.id!==current.id)throw invalid();
-  restored.source=structuredClone(current.source);
+  restored.source=changedGlbSource(restored.source,current.source)?resolveSource(restored.source):structuredClone(current.source);
   const reverse=direction==='undo'?'redo':'undo';
   let hash=saveSnapshot(folder,current);
   const returning=[];

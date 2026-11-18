@@ -3,7 +3,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {ROOT,DATA,atomic,forkProject} from './store.mjs';
+import {ROOT,DATA,atomic,forkProject,commit} from './store.mjs';
 import {pythonExecutable} from './python-runtime.mjs';
 import {sha256File} from './file-fingerprint.mjs';
 import {channelSpecs} from './public/paint-channels.mjs';
@@ -18,11 +18,11 @@ const preservedSurfaceFiles=[
 ];
 export const glbRegistrationFiles=(legacySurface=false)=>legacySurface?[...coreRegistrationFiles,...preservedSurfaceFiles]:coreRegistrationFiles;
 
-export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput}={}){
+export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput,previousModel,targetMaterial}={}){
   const staging=path.join(scratch,'registration');
   const config=path.join(scratch,'input.json');
   await fs.mkdir(staging);
-  atomic(config,{input,out:staging,material,textureOutput,ownerPid:process.pid});
+  atomic(config,{input,out:staging,material,textureOutput,previousModel,targetMaterial,ownerPid:process.pid});
   try{
     await execute(python,['-X','utf8',path.join(ROOT,'model_surface.py'),'register',config],
       {cwd:ROOT,windowsHide:true,timeout:180000});
@@ -80,6 +80,25 @@ export async function importGlbProject(input,scratch,name,material,{preserveText
       }
     });
   });
+}
+export async function updateProjectGlb(doc,revision,input,scratch){
+  if(doc.revision!==revision)throw Object.assign(Error('工程已改变，请重新选择模型'),{status:409});
+  if(doc.workflowType!=='pbr_paint'||doc.source.format!=='glb'||doc.source.preservedSurface)
+    throw Error('此入口适用于原生 GLB 涂装工程');
+  if(doc.modeling?.steps?.length||Object.values(doc.paint.surfaceBindings||{}).some(Boolean))
+    throw Error('当前工程含绑定旧网格的建模步骤。请在源稿版本或未建模的副本中更新');
+  const staging=await registerGlb(input,scratch,{
+    previousModel:doc.source.reviewSource,targetMaterial:doc.source.material
+  });
+  const metadata=JSON.parse(await fs.readFile(path.join(staging,'metadata.json'),'utf8'));
+  if(metadata.source_sha256===doc.source.files[doc.source.reviewSource])throw Error('所选模型与当前工程相同');
+  // The author is changing geometry. Keep the registered painting base, including imported images.
+  await fs.copyFile(doc.source.baseImage,path.join(staging,'base.png'));
+  return installGlbRegistration(staging,registered=>commit(doc.id,revision,next=>{
+    next.source=registered.source;
+    delete next.modeling;
+    return next;
+  },'更新工程模型'));
 }
 export async function describeGlbRegistration(folder,id,files=folder){
   const meta=JSON.parse(await fs.readFile(path.join(files,'metadata.json'),'utf8'));

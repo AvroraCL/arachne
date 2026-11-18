@@ -1,7 +1,7 @@
 import {createGeometryQueue} from './geometry-queue.mjs';
 import {readDesktopWorkspace,writeDesktopWorkspace} from './desktop-workspaces.mjs';
 import {readDesktopSettings,writeDesktopSettings} from './desktop-settings.mjs';
-import {importGlbProject,importObjProject} from './model-registration.mjs';
+import {importGlbProject,importObjProject,updateProjectGlb} from './model-registration.mjs';
 import {embedGltf} from './gltf-embed.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
@@ -136,13 +136,13 @@ async function readMultipart(req,parts,sizeError,formatError){
     throw Error(formatError);
   }
 }
-function receiveGlb(req,name,material,preserveTextures){
+function receiveGlb(req,register){
   return withFileImport(req,maxModel,'GLB 不能超过 128 MiB',async(scratch,parts)=>{
     const input=path.join(scratch,'incoming.glb'),upload=await fs.promises.open(input,'wx');
     try{
       for await(const part of parts)await upload.writeFile(part);
     }finally{await upload.close();}
-    return importGlbProject(input,scratch,name,material,{preserveTextures});
+    return register(input,scratch);
   });
 }
 function receiveModelFiles(req,format,name,material,upAxis,preserveTextures){
@@ -214,6 +214,14 @@ const server=http.createServer(async(req,res)=>{
     if(![`127.0.0.1:${PORT}`,`localhost:${PORT}`].includes(req.headers.host)){send(res,403,{error:'仅限本地访问'});return;}
     if(req.headers.origin&&![local,`http://localhost:${PORT}`].includes(req.headers.origin)){send(res,403,{error:'拒绝跨来源访问'});return;}
     const url=new URL(req.url,local);
+    const modelUpdate=url.pathname.match(/^\/api\/projects\/([\w-]{1,100})\/paint\/update-glb$/);
+    if(req.method==='POST'&&modelUpdate){
+      if(req.headers['content-type']!=='model/gltf-binary'){send(res,415,{error:'请选择 GLB 模型'});return;}
+      const revision=url.searchParams.get('revision');
+      if(!/^(0|[1-9]\d*)$/.test(revision)||!Number.isSafeInteger(Number(revision)))throw Error('工程修订无效');
+      const doc=read(modelUpdate[1]);
+      send(res,200,await receiveGlb(req,(input,scratch)=>updateProjectGlb(doc,Number(revision),input,scratch)));return;
+    }
     if(req.method==='POST'&&['/api/projects/model-import','/api/projects/gltf-import'].includes(url.pathname)){
       const binary=url.pathname==='/api/projects/model-import';
       if(binary?req.headers['content-type']!=='model/gltf-binary':!String(req.headers['content-type']).startsWith('multipart/form-data;')){
@@ -228,7 +236,10 @@ const server=http.createServer(async(req,res)=>{
       const textures=url.searchParams.get('textures')??'preserve';
       if(!['preserve','blank'].includes(textures))throw Error('请选择有效的源贴图导入方式');
       const preserve=textures==='preserve';
-      send(res,201,await (binary?receiveGlb(req,name,material,preserve):receiveModelFiles(req,'gltf',name,material,undefined,preserve)));return;
+      const project=binary
+        ?await receiveGlb(req,(input,scratch)=>importGlbProject(input,scratch,name,material,{preserveTextures:preserve}))
+        :await receiveModelFiles(req,'gltf',name,material,undefined,preserve);
+      send(res,201,project);return;
     }
     if(req.method==='POST'&&url.pathname==='/api/projects/obj-import'){
       if(!String(req.headers['content-type']).startsWith('multipart/form-data;')){
@@ -540,7 +551,7 @@ const server=http.createServer(async(req,res)=>{
         if(parts.length===6&&parts[5]==='file'&&req.method==='GET'){file(res,viewportTopologyFile(doc));return;}
       }
       if(parts.length===5&&parts[4]==='base'&&req.method==='GET'){file(res,doc.source.baseImage);return;}
-      if(parts.length===6&&parts[4]==='files'&&req.method==='GET'){file(res,viewportFile(doc,parts[5]));return;}
+      if(parts.length===6&&parts[4]==='files'&&req.method==='GET'){file(res,viewportFile(doc,parts[5],url.searchParams.get('key')));return;}
       send(res,404,{error:'三维接口不存在'});return;
     }
     if(action==='jobs'){

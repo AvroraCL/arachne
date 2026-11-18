@@ -25,7 +25,7 @@ const digest=value=>createHash('sha256').update(value).digest('hex');
 if(process.platform!=='win32')
   await fs.writeFile(probe,'#!/bin/sh\ntouch "$(dirname "$0")/blender-invoked"\nexit 42\n',{mode:0o700});
 
-function sampleModel(coverUv=true){
+function sampleModel(coverUv=true,coverHeight=.3){
   const parts=[
     new Float32Array([-1,0,-1,-1,0,1,1,0,1,1,0,-1]),
     new Float32Array([0,0,0,1,1,1,1,0]),
@@ -35,7 +35,7 @@ function sampleModel(coverUv=true){
   const binary=Buffer.concat(bins);
   const gltf={
     asset:{version:'2.0'},scene:0,scenes:[{nodes:[0,2]}],
-    nodes:[{name:'涂装面',mesh:0},{name:'遮挡面',mesh:1,translation:[.25,.3,0],scale:[.34,1,.42]},
+    nodes:[{name:'涂装面',mesh:0},{name:'遮挡面',mesh:1,translation:[.25,coverHeight,0],scale:[.34,1,.42]},
       {name:'缩放组',scale:[1.2,1,.85],children:[1]}],
     meshes:[{primitives:[{attributes:{POSITION:0,TEXCOORD_0:1},indices:2,material:0}]},
       {primitives:[{attributes:{POSITION:0,...(coverUv?{TEXCOORD_0:1}:{})},indices:2,material:1}]}],
@@ -89,6 +89,41 @@ async function api(route,body,server=origin){
   assert.ok(r.ok,JSON.stringify(json));
   return json;
 }
+async function verifyModelUpdate(){
+  const headers={Origin:origin,'Content-Type':'model/gltf-binary'};
+  const create=await fetch(origin+'/api/projects/model-import?material=1',{method:'POST',headers,body:model.bytes});
+  const doc=await create.json();
+  assert.equal(create.status,201,JSON.stringify(doc));
+  const path='/api/projects/'+doc.id+'/paint';
+  const authored=await api(path+'/commands',{revision:doc.revision,operations:[
+    {op:'add',kind:'fill',patch:{name:'蒙版返工',maskEnabled:true,maskBase:.6}}
+  ]});
+  const update=(revision,body)=>fetch(origin+path+'/update-glb?revision='+revision,{method:'POST',headers,body});
+  const oldManifest=await api('/api/projects/'+doc.id+'/viewport');
+  const revised=sampleModel(true,.16).bytes;
+  const reject=await update(authored.revision,sampleModel(false).bytes);
+  assert.equal(reject.status,400);
+  assert.match((await reject.json()).error,/UV/);
+  const response=await update(authored.revision,revised);
+  assert.equal(response.status,200);
+  const edited=await response.json();
+  assert.equal(edited.revision,authored.revision+1);
+  assert.equal(edited.source.material,doc.source.material);
+  assert.equal(edited.source.uvSha256,doc.source.uvSha256);
+  assert.deepEqual(edited.paint,authored.paint);
+  assert.notEqual(edited.source.reviewSource,doc.source.reviewSource);
+  assert.equal((await fetch(origin+oldManifest.modelUrl)).status,409);
+  assert.equal((await update(authored.revision,revised)).status,409);
+  const same=await update(edited.revision,revised);
+  assert.match((await same.json()).error,/相同/);
+  const undo=await api(path+'/undo',{revision:edited.revision});
+  assert.deepEqual(undo.source,doc.source);
+  assert.deepEqual(undo.paint,authored.paint);
+  const redo=await api(path+'/redo',{revision:undo.revision});
+  assert.deepEqual(redo.source,edited.source);
+  console.log('PASS GLB revision update, binding, rejected UV change, stale revision and undo/redo');
+}
+
 async function verifyProceduralMasks(cubeId){
   const wearRoute='/api/projects/'+cubeId,wearPaint=wearRoute+'/paint';
   const wearSeed=await api(wearPaint+'/commands',{revision:0,operations:[
@@ -1248,11 +1283,12 @@ async function verifyModelWorkflows(){
 
 try{
   origin=await start(data);
-  if(process.argv.includes('--mask-only')){
+  if(process.argv.includes('--model-update-only'))await verifyModelUpdate();
+  else if(process.argv.includes('--mask-only')){
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
     const cube=await api('/api/projects',{workflowType:'pbr_paint',modelTemplate:'cube'});
     await verifyProceduralMasks(cube.id);
-  }else await verifyModelWorkflows();
+  }else {await verifyModelWorkflows();await verifyModelUpdate();}
 }finally{
   await browser?.close();
   for(const service of services)if(service.exitCode===null&&service.signalCode===null){

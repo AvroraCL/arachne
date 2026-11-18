@@ -86,7 +86,12 @@ export function viewportTopologyFile(doc){
   return item.out;
 }
 export function stopViewport(){for(const state of work.values())state.child?.kill();}
-export function viewportFile(doc,name){if(!['model.glb','metadata.json'].includes(name))throw Error('三维文件不存在');return path.join(location(doc).dir,name);}
+export function viewportFile(doc,name,expectedKey){
+  if(!['model.glb','metadata.json'].includes(name))throw Error('三维文件不存在');
+  const {dir,key}=location(doc);
+  if(expectedKey&&expectedKey!==key)throw Object.assign(Error('视口模型版本已改变'),{status:409});
+  return path.join(dir,name);
+}
 
 export function registeredViewportModel(doc){
   const {dir}=location(doc);

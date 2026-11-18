@@ -245,6 +245,7 @@ function renderProjectState(){
   $('project-detail-name').textContent=doc?.name||'未打开工程';
   $('project-detail-id').textContent=doc?.id||'—';
   $('project-detail-updated').textContent=doc?.updated?new Date(doc.updated).toLocaleString():'—';
+  $('update-project-model').hidden=doc?.source.format!=='glb';
   $('open-glb-migration').hidden=!(doc?.source.bindingVersion===2&&doc.source.format!=='glb'&&/\.blend$/i.test(doc.source.reviewSource));
 }
 const renderOnlyOps=new Set(['renderCamera','renderBookmark','renderLighting','renderAppearance','renderPreset','renderOptics','renderRegion','renderVisibility']);
@@ -1842,6 +1843,31 @@ document.addEventListener('keydown',event=>{
   const opened=event.shiftKey&&key==='s'?openProjectCopy():!event.shiftKey&&key==='o'&&projectPicker();
   if(opened){event.preventDefault();event.stopPropagation();}
 },true);
+const updatedGlb=$('updated-glb-file');
+let updateOrigin=null;
+$('update-project-model').onclick=()=>{
+  if(!canOpenProjectDialog()){
+    $('status').textContent='请先完成当前编辑或待保存的笔触';return;
+  }
+  document.querySelectorAll('.paint-menu[open]').forEach(menu=>menu.open=false);
+  updateOrigin={id:doc.id,revision:doc.revision};
+  updatedGlb.value='';
+  updatedGlb.click();
+};
+updatedGlb.onchange=async()=>{
+  const file=updatedGlb.files[0],origin=updateOrigin;
+  if(!file||!origin)return;
+  if(origin.id!==doc?.id||!canOpenProjectDialog()){
+    $('status').textContent='请结束当前操作后重新选择模型';return;
+  }
+  const saved=await run(async()=>{
+    $('status').textContent='正在核对模型、材质槽和原 UV…';
+    await responseJson(await fetch('/api/projects/'+origin.id+'/paint/update-glb?revision='+origin.revision,{
+      method:'POST',headers:{'Content-Type':'model/gltf-binary'},body:file
+    }));
+  });
+  if(saved)$('status').textContent='工程模型已更新 · 可撤销';
+};
 const glbMigration=$('glb-migration-dialog'),migrationStart=$('start-glb-migration'),migrationClose=$('close-glb-migration');
 $('open-glb-migration').onclick=()=>{
   if(busy||modeler.isDragging()||surfaceTools.isEditing()||document.querySelector('dialog[open]'))return;

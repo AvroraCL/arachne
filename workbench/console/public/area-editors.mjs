@@ -66,7 +66,7 @@ export function registerAreaEditors(registry,bridge){
   const viewportControllers=new Map();
   registry.register('viewport',ctx=>{
     const {host,project,state,onChange}=ctx,lifecycle=new AbortController(),signal=lifecycle.signal;
-    let mode=state.mode||'object',disposed=false,shown=true,loading=null,projectId=null,revision=-1,frame=null,modelState=null,lastScene=null,placement=null,lastPointer=null,layerGeneration=0,modeGeneration=0;
+    let mode=state.mode||'object',disposed=false,shown=true,loading=null,projectId=null,modelSource=null,revision=-1,frame=null,modelState=null,lastScene=null,placement=null,lastPointer=null,layerGeneration=0,modeGeneration=0;
     let picking=false,sampledBrush=null,pickerMessage='',navigating=false,wheelTimer=null,display,textureMessage='';
     const projectViews=createViewportProjectViews(state,bridge.legacyCameraProject);
     let cameraFrame=false,returnCamera=null,cyclesPaused=false,projectCameraView=false,projectCameraKey='';
@@ -516,7 +516,8 @@ export function registerAreaEditors(registry,bridge){
     async function sync(reselect=false){
       const doc=project.document;if(disposed||!doc)return;
       createPaintLayer.disabled=!bridge.canAddMaterialLayer();
-      if(projectId!==doc.id){
+      if(projectId!==doc.id||modelSource!==doc.source.reviewSource){
+        modelSource=doc.source.reviewSource;
         rememberView();
         const savedView=projectViews.read(doc.id);
         cameraFrame=savedView?.cameraFrame===true;returnCamera=savedView?.returnCamera||null;

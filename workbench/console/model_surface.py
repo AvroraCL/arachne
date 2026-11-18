@@ -68,9 +68,23 @@ def surface(model):
             np.asarray(objects,dtype=np.int32),np.asarray(polygons,dtype=np.int32),np.asarray(materials))
 
 
+def binding_layout(model):
+    nodes = [(key, node['name'], node['parent']) for key, node in model.nodes.items()]
+    surfaces = [(p['node'], p['key'], p['label'], len(p['positions'])) for p in model.primitives]
+    return nodes, surfaces
+
+
 def register(config):
     incoming,out = Path(config['input']),Path(config['out'])
     model = Model(incoming,registration=True)
+    uv_digest = model.uv_digest()
+    if config.get('previousModel'):
+        previous = Model(config['previousModel'])
+        if binding_layout(previous) != binding_layout(model):
+            raise ValueError('物体层级、网格或材质槽已改变。请从同一源稿导出并保持原有名称和顺序')
+        if previous.uv_digest() != uv_digest:
+            raise ValueError('三角形索引或原 UV 已改变。请保留拓扑与 UV 后再更新，或另建工程')
+        del previous
     points,_,normals,uv,_,_,labels = surface(model)
     valid = ((uv>=0)&(uv<=1)).all(axis=(1,2)) & (np.linalg.norm(normals,axis=1)>.5)
     sides = uv[:,1:] - uv[:,:1]
@@ -79,7 +93,11 @@ def register(config):
     if not eligible:
         raise ValueError('请选择至少有一个材质使用有效 TEXCOORD_0 且 UV 位于 0–1 内的 GLB')
     chosen = config.get('material')
-    if chosen is None:
+    if config.get('previousModel'):
+        material = config['targetMaterial']
+        if material not in eligible:
+            raise ValueError('原涂装材质已无有效 UV 面，不能更新工程模型')
+    elif chosen is None:
         material = eligible[0]
     else:
         material_index = model.default_material_index if chosen == 'default' else chosen
@@ -102,7 +120,6 @@ def register(config):
     original = out/'model.glb'
     model.save(original)
     digest = checksum(original)
-    uv_digest = model.uv_digest()
     texture_output = Path(config['textureOutput']) if config.get('textureOutput') else None
     maps = extract_texture_maps(model, selected, texture_output) if texture_output else []
     save(out/'metadata.json',dict(source_sha256=digest,input_sha256=checksum(incoming),
