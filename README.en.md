@@ -23,6 +23,8 @@ Paint textures, edit materials and inspect the model in the same project. For an
 
 *R17 tide station, painted and rendered on the bundled example model. Worn paint exposes aluminum beside the latch. The side vents reveal a salt screen, and the calibration date remains editable.*
 
+Open the project from the File menu to edit the finish, calibration date and saved shots. [Download the R17 sample project (7 MB)](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/tide-station-r17.zip)
+
 ## What you can make
 
 - **Layered textures.** Combine images, shapes and gradients on a 4K canvas. Use selections and masks to trim an edge, then bind the texture document to a material channel.
