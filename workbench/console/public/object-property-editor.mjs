@@ -14,11 +14,12 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     input.addEventListener('change',()=>save({[key]:key==='color'?input.value:input.valueAsNumber}));
     inputs[key]=row(sourceControls,title,input);
   }
-  const restore=el('button','','恢复源材质'),materialMessage=el('output','editor-message');
+  const restore=el('button','','恢复材质参数'),materialMessage=el('output','editor-message');
   const markName=row(sourceControls,'投影标记',el('span','render-settings-readout'));
   const removeMark=el('button','','移除标记');removeMark.type='button';removeMark.onclick=()=>save({mark:null});
   sourceControls.append(removeMark);
-  restore.type='button';restore.onclick=()=>save(null);sourceControls.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
+  restore.type='button';restore.title='恢复模型的底色、金属度和粗糙度';
+  restore.onclick=()=>save({color:null,metallic:null,roughness:null});sourceControls.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
   let shown=null,pending=false;
   function sameTarget(a,b){
     return !!a&&!!b&&a.projectId===b.projectId&&a.binding===b.binding&&a.name===b.name;
@@ -35,7 +36,7 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     }
     markName.parentElement.hidden=removeMark.hidden=!patch?.mark;
     markName.textContent=project.document?.paint.assets[patch?.mark?.image]?.name||'';
-    removeMark.disabled=!!locked;restore.disabled=!!locked||!patch;
+    removeMark.disabled=!!locked;restore.disabled=!!locked||!Object.keys(inputs).some(key=>patch?.[key]!==undefined);
   }
   async function save(patch){
     if(pending)return;

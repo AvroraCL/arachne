@@ -544,11 +544,17 @@ async function verifyMarkedMaterialInspection(){
     const uncovered=await rgbAt(75);assert.deepEqual(uncovered,before);
     await base.fill('#3a70b4');
     await shows(75,blue);assert.deepEqual(await rgbAt(),mark);
-    await fields.getByRole('button',{name:'移除标记'}).click();await shows(0,blue);
     const travel=async direction=>{
       await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
       await page.locator('#'+direction).click();
     };
+    const markBefore=(await api('/api/projects/'+project.id)).paint.sourceMaterials['表面材料'].mark;
+    const reset=fields.getByRole('button',{name:'恢复材质参数'});
+    await reset.click();await shows(75,before);assert.deepEqual(await rgbAt(),mark);
+    assert.deepEqual((await api('/api/projects/'+project.id)).paint.sourceMaterials['表面材料'],{mark:markBefore});
+    assert.ok(await reset.isDisabled());
+    await travel('undo');await shows(75,blue);assert.deepEqual(await rgbAt(),mark);
+    await fields.getByRole('button',{name:'移除标记'}).click();await shows(0,blue);
     await travel('undo');await shows(0,mark);assert.deepEqual(await rgbAt(75),blue);
     await travel('redo');await shows(0,blue);
     assert.equal(await view.getAttribute('data-inspected-channel'),'color');

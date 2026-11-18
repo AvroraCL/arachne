@@ -496,8 +496,16 @@ function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
       }
       else{
         fields(patch,['color','metallic','roughness']);
-        checkSourceMaterials({[o.name]:patch},next.source.material,names);
-        records[o.name]={...records[o.name],...patch};
+        if(!Object.keys(patch).length)throw Error('模型材质参数无效');
+        const updated={...records[o.name]};
+        for(const [key,value] of Object.entries(patch)){
+          if(value===null)delete updated[key];
+          else updated[key]=value;
+        }
+        if(Object.keys(updated).length){
+          checkSourceMaterials({[o.name]:updated},next.source.material,names);
+          records[o.name]=updated;
+        }else delete records[o.name];
       }
       if(Object.keys(records).length)p.sourceMaterials=records;else delete p.sourceMaterials;
       continue;
