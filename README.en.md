@@ -21,7 +21,7 @@ Paint textures, edit materials and inspect the model in the same project. For an
 
 ![Mavic 4 Pro exterior study](docs/images/mavic-4-pro.webp)
 
-**DJI Mavic 4 Pro exterior study, revised.** Lofted fuselage sections, a shared three-aperture camera bezel, coated glass, matte optical wells and separate motor finishes. The project includes an editable shell roughness mask and two saved cameras. Geometry was estimated from public photographs. [Product reference](https://www.dji.com/mavic-4-pro) · [Camera close-up](docs/images/mavic-4-pro-optics.webp) · [Model source](examples/mavic-4-pro-studio) · [Editable project ZIP](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/mavic-4-pro-studio.zip)
+**DJI Mavic 4 Pro exterior study, revised.** Lofted fuselage sections, a shared three-aperture camera bezel, coated glass, matte optical wells and separate motor finishes. The project includes an editable shell roughness mask and two saved cameras. Geometry was estimated from public photographs. [Product reference](https://www.dji.com/mavic-4-pro) · [Camera close-up](docs/images/mavic-4-pro-optics.webp) · [Lens recess revision](docs/images/mavic-4-pro-optics-revision.webp) · [Model source](examples/mavic-4-pro-studio) · [Editable project ZIP](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/mavic-4-pro-studio.zip)
 
 ![Tidewing 04 coastal inspection quadcopter](docs/images/tidewing-04.webp)
 

@@ -217,24 +217,26 @@ for(const [,x,y,w,h,r] of cameras){
 }
 extrude('Optics · one-piece recessed face','bezel',face,.55,.12,[0,30,78.42]);
 for(const [n,x,y,w,h,r,rad] of cameras){
+ // Recess only the main camera seat; its front opening and lens stack stay concentric.
+ const inset=n==='Hasselblad'?3.2:0;
  const outline=rounded(w-.05,h-.05,r).getSpacedPoints(80);
  // Front shoulder flows from the squared shade into the circular lens seat.
  add(n+' · bevelled lens shade','baffle',sheet(6,80,(v,u)=>{
    const q=outline[Math.round(u*80)],a=Math.atan2(q.y,q.x),rx=Math.cos(a)*(rad+.42),ry=Math.sin(a)*(rad+.42);
-   return V(x+T.MathUtils.lerp(q.x,rx,v),y+T.MathUtils.lerp(q.y,ry,v),78.69-2.2*v);
+   return V(x+T.MathUtils.lerp(q.x,rx,v),y+T.MathUtils.lerp(q.y,ry,v),78.69-(2.2+inset)*v);
  },true,true));
  for(const [suffix,z0,z1,r0,r1,finish] of [
   ['retaining lip',76.5,76.65,rad+.46,rad+.11,'rim'],['inner barrel',76.65,74.8,rad+.11,rad-.09,'baffle'],
   ['first element seat',74.8,74.7,rad-.09,rad*.79,'deep'],['rear group',74.7,73.1,rad*.79,rad*.64,'baffle']
- ])axial(n+' · '+suffix,finish,[x,y,z0],[x,y,z1],[[0,r0],[1,r1]]);
+ ])axial(n+' · '+suffix,finish,[x,y,z0-inset],[x,y,z1-inset],[[0,r0],[1,r1]]);
  // Front glass is a real transmitting lens. A dark pupil and six overlapping
  // iris leaves behind it remain visible at direct incidence.
- sphere(n+' · coated optical glass','glass',[x,y,75.03],[rad*.978,rad*.978,1.63]);
- sphere(n+' · rear optical element','deep',[x+.08,y-.11,73.18],[rad*.77,rad*.77,.64]);
+ sphere(n+' · coated optical glass','glass',[x,y,75.03-inset],[rad*.978,rad*.978,1.63]);
+ sphere(n+' · rear optical element','deep',[x+.08,y-.11,73.18-inset],[rad*.77,rad*.77,.64]);
  for(let i=0;i<7;i++){
   const a=tau*i/7,pts=[];
   for(const [angle,radius] of [[a,rad*.78],[a+.72,rad*.78],[a+1.0,rad*.34],[a+.26,rad*.34]])pts.push(new T.Vector2(radius*Math.cos(angle),radius*Math.sin(angle)));
-  const sh=new T.Shape(pts);const g=new T.ShapeGeometry(sh);g.translate(x,y,73.91+i*.0007);add(n+' · diaphragm','baffle',g);
+  const sh=new T.Shape(pts);const g=new T.ShapeGeometry(sh);g.translate(x,y,73.91-inset+i*.0007);add(n+' · diaphragm','baffle',g);
  }
 }
 for(const s of [-1,1]){
