@@ -23,7 +23,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   let livePaint=null,paintFrame=null,axisMotion=null,liveUsageKey='';
   let inspectionMap=null,inspectionChannel='';
   let radius=1,center=new THREE.Vector3(),topUp=new THREE.Vector3(0,0,-1),frameCount=0;
- const modelBounds=new THREE.Box3(),depthForward=new THREE.Vector3();
+ const modelBounds=new THREE.Box3(),partBounds=[],depthForward=new THREE.Vector3();
  let objectOutline=null,showOverlays=true,outlineCount=0,displayMode=null,xray=false;
  const solidMaterial=new THREE.MeshStandardMaterial({color:0x9a9a9a,roughness:.74});
  const wireMaterial=new THREE.MeshBasicMaterial({color:0xababab,wireframe:true});
@@ -180,9 +180,26 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     ray.setFromCamera(pointer, camera);
     return ray.intersectObject(root, true)[0];
   }
+  function measureModelBounds(root){
+    // Cache world-space boxes on load or geometry edits, not on camera motion.
+    root.updateWorldMatrix(true,true);
+    modelBounds.makeEmpty();
+    let count=0;
+    root.traverse(object=>{
+      if(!object.isMesh)return;
+      const owner='boundingBox' in object?object:object.geometry;
+      if(!owner.boundingBox)owner.computeBoundingBox();
+      if(owner.boundingBox.isEmpty())return;
+      const box=partBounds[count]??=new THREE.Box3();
+      box.copy(owner.boundingBox).applyMatrix4(object.matrixWorld);
+      modelBounds.union(box);
+      count++;
+    });
+    partBounds.length=count;
+  }
   function updateModelBounds() {
     if (!model) return;
-    modelBounds.setFromObject(previewModel || model);
+    measureModelBounds(previewModel || model);
     request();
   }
   function showModelingPreview(preview) {
@@ -234,7 +251,17 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       setNavigation: enabled => { controls.enabled = enabled; }
     };
   }
-  function updateDepthRange(){if(!model||modelBounds.isEmpty())return;camera.updateMatrixWorld();camera.getWorldDirection(depthForward);const range=depthRangeForBounds(modelBounds,camera.position,depthForward,camera.isOrthographicCamera);if(range&&(camera.near!==range.near||camera.far!==range.far)){camera.near=range.near;camera.far=range.far;camera.updateProjectionMatrix();}}
+  function updateDepthRange(){
+    if(!model||modelBounds.isEmpty())return;
+    camera.updateMatrixWorld();
+    camera.getWorldDirection(depthForward);
+    const p=camera.projectionMatrix.elements;
+    const cornerCosine=camera.isPerspectiveCamera?1/Math.hypot(1,1/p[0],1/p[5]):0;
+    const range=depthRangeForBounds(modelBounds,camera.position,depthForward,camera.isOrthographicCamera,partBounds,cornerCosine);
+    if(range&&(camera.near!==range.near||camera.far!==range.far)){
+      camera.near=range.near;camera.far=range.far;camera.updateProjectionMatrix();
+    }
+  }
   function disposeModel() {
     if (!model) return;
     objectOutline?.clear();outlineCount=0;setOutlineStatus();
@@ -256,6 +283,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if (texture) textures.add(texture);
     for (const image of textures) image.dispose();
     model = null;
+    partBounds.length=0;
     modelBounds.makeEmpty();
     materials.clear();
     texture = null;for(const value of Object.values(scalarTextures))value.dispose();scalarTextures={};
@@ -357,7 +385,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       });
       if(doc.modeling?.steps?.length&&doc.modeling.modelSha256!==next.modelSha256)throw Error('工程建模绑定与当前模型不一致，无法重放');
       applyModelState(model,doc.modeling);
-      const box=modelBounds.setFromObject(model);box.getCenter(center);radius=Math.max(box.getSize(new THREE.Vector3()).length()*.5,.001);topUp.fromArray(next.topUp);host.dataset.meshes=String(next.metadata.mesh_count);host.dataset.uvUnchanged=String(next.metadata.uv_unchanged);selected=null;environment.sync();model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
+      measureModelBounds(model);const box=modelBounds;box.getCenter(center);radius=Math.max(box.getSize(new THREE.Vector3()).length()*.5,.001);topUp.fromArray(next.topUp);host.dataset.meshes=String(next.metadata.mesh_count);host.dataset.uvUnchanged=String(next.metadata.uv_unchanged);selected=null;environment.sync();model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
       onMaterials(next.metadata.materials);if(unlit)shade(true);await applyTexture(resolvedTexture(next),token);if(token!==sequence)return;if(previousCamera)applyCamera(previousCamera);else fit();host.dataset.state='ready';
     }catch(e){if(token!==sequence)return;host.dataset.state='error';state('三维视口：'+e.message,'error');}
   }
