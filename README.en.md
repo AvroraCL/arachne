@@ -19,6 +19,12 @@ A local workspace for texturing 3D models
 
 Paint textures, edit materials and inspect the model in the same project. For an aircraft livery, for example, you can lay out numbers and stripes on the 2D canvas, then turn the model to see how the stripes wrap around the fuselage. If a number needs to move, its layer is still editable.
 
+![Tidewing 04 coastal inspection quadcopter](docs/images/tidewing-04.webp)
+
+**Tidewing 04** started as an original SVG drawing. Arachne extruded the shell, arms, blades and guards into separate meshes. Three editable material layers add polished grips, dried salt around the service hatch and tool scratches. [Hatch detail](docs/images/tidewing-04-hatch.webp) · [Bevel shading before and after](docs/images/tidewing-04-bevel.webp)
+
+Load the SVG in the New Project dialog. Select a part to set its elevation, thickness and bevel, then rotate the assembly to inspect the fit. Save the SVG settings to revisit the profiles, or open the project ZIP to continue painting. [Modeling profiles (SVG)](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/tidewing-04.svg) · [Editable project (ZIP)](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/tidewing-04.zip)
+
 ![R17 tide station telemetry enclosure after service](docs/images/r17-tide-station.webp)
 
 *R17 tide station, painted and rendered on the bundled example model. Worn paint exposes aluminum beside the latch. The side vents reveal a salt screen, and the calibration date remains editable.*

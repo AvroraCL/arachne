@@ -19,6 +19,12 @@
 
 阿拉克涅让你在同一个工程里画贴图、调材质、看模型。比如做一套机身涂装，你可以在二维画布上摆好编号和色带，再转动模型，看看色带绕过曲面时有没有错位。要改编号，只需回到它所在的图层。
 
+![汐羽 04 海岸巡检机](docs/images/tidewing-04.webp)
+
+**汐羽 04** 从一张原创 SVG 轮廓图起步。工作台把机壳、机臂、桨叶和护框挤出成独立网格，再用三个材质层画出握持区的亮面、散热盖边的盐迹和开盖细划。[查看机盖细节](docs/images/tidewing-04-hatch.webp) · [同机位倒角修正对照（左前右后）](docs/images/tidewing-04-bevel.webp)
+
+用「文件 → 新建工程 → 选择模型」载入 SVG。选择部件，调整底部高度、厚度和倒角，转动试装预览后创建工程；「保存轮廓设置」可保留挤出参数。要继续修改涂装，请用「文件 → 打开涂装 ZIP」。[建模轮廓 SVG](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/tidewing-04.svg) · [可编辑工程 ZIP](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/tidewing-04.zip)
+
 ![检修后的 R17 潮位遥测接线盒](docs/images/r17-tide-station.webp)
 
 *R17 潮位遥测接线盒，使用工作台自带的示例模型制作。搭扣附近露出铝底，侧面均压孔后有挡盐网，校准箔上的日期仍可编辑。*

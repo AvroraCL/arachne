@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-215 -205 430 410">
+  <g id="01_搪橘检修壳" fill="#f16c32" data-base="23" data-depth="10" data-bevel="3.6" data-metalness="0.15" data-roughness="0.36">
+    <path d="M-21 -64 Q0 -74 21 -64 L34 -48 Q38 -42 36 -27 L31 28 Q30 43 19 56 L13 61 Q0 66 -13 61 L-21 55 Q-31 44 -32 27 L-37 -29 Q-38 -45 -32 -52 Z" data-base="23" data-depth="10" data-bevel="3.9" data-metalness="0.15" data-roughness="0.32"/>
+  </g>
+  <g id="02_承力壳" fill="#253345" data-base="4" data-depth="17" data-bevel="4" data-metalness="0.38" data-roughness="0.36">
+    <path d="M-22 -66 Q0 -77 22 -66 Q37 -60 42 -36 L36 32 Q35 49 18 62 Q0 73 -19 62 Q-34 49 -36 33 L-42 -36 Q-39 -54 -22 -66Z" data-base="4" data-depth="17" data-bevel="4" data-metalness="0.38" data-roughness="0.36"/>
+  </g>
+  <g id="03_舱盖密封线" fill="#202933" data-base="20" data-depth="3" data-bevel="1" data-metalness="0.04" data-roughness="0.83">
+    <path d="M-22 -66 Q0 -77 22 -66 Q37 -60 42 -36 L36 32 Q35 49 18 62 Q0 73 -19 62 Q-34 49 -36 33 L-42 -36 Q-39 -54 -22 -66Z" transform="scale(.982)" data-base="20" data-depth="3" data-bevel="1" data-metalness="0.04" data-roughness="0.83"/>
+  </g>
+  <g id="10_电机铝杯" fill="#647984" data-base="15" data-depth="12" data-bevel="1.7" data-metalness="0.78" data-roughness="0.3">
+    <circle cx="-111" cy="-94" r="11.6" data-base="15" data-depth="12" data-bevel="1.7" data-metalness="0.78" data-roughness="0.3"/>
+    <circle cx="111" cy="-94" r="11.6" data-base="15" data-depth="12" data-bevel="1.7" data-metalness="0.78" data-roughness="0.3"/>
+    <circle cx="-111" cy="94" r="11.6" data-base="15" data-depth="12" data-bevel="1.7" data-metalness="0.78" data-roughness="0.3"/>
+    <circle cx="111" cy="94" r="11.6" data-base="15" data-depth="12" data-bevel="1.7" data-metalness="0.78" data-roughness="0.3"/>
+  </g>
+  <g id="11_止动帽" fill="#88979f" data-base="37" data-depth="3.8" data-bevel="1" data-metalness="0.8" data-roughness="0.25">
+    <circle cx="-111" cy="-94" r="5.4" data-base="37" data-depth="3.8" data-bevel="1" data-metalness="0.8" data-roughness="0.25"/>
+    <circle cx="111" cy="-94" r="5.4" data-base="37" data-depth="3.8" data-bevel="1" data-metalness="0.8" data-roughness="0.25"/>
+    <circle cx="-111" cy="94" r="5.4" data-base="37" data-depth="3.8" data-bevel="1" data-metalness="0.8" data-roughness="0.25"/>
+    <circle cx="111" cy="94" r="5.4" data-base="37" data-depth="3.8" data-bevel="1" data-metalness="0.8" data-roughness="0.25"/>
+  </g>
+  <g id="12_电机减震座" fill="#202933" data-base="7" data-depth="10" data-bevel="2" data-metalness="0.02" data-roughness="0.78">
+    <circle cx="-111" cy="-94" r="13.1" data-base="7" data-depth="10" data-bevel="2" data-metalness="0.02" data-roughness="0.78"/>
+    <circle cx="111" cy="-94" r="13.1" data-base="7" data-depth="10" data-bevel="2" data-metalness="0.02" data-roughness="0.78"/>
+    <circle cx="-111" cy="94" r="13.1" data-base="7" data-depth="10" data-bevel="2" data-metalness="0.02" data-roughness="0.78"/>
+    <circle cx="111" cy="94" r="13.1" data-base="7" data-depth="10" data-bevel="2" data-metalness="0.02" data-roughness="0.78"/>
+  </g>
+  <g id="13_定子散热槽" fill="#18222d" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45">
+    <circle cx="-101.3" cy="-94.0" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-103.56936890174592" cy="-87.76496018604057" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-109.31561267663078" cy="-84.44736479578158" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-115.85" cy="-85.59955358329094" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-120.1150184216233" cy="-90.68240460974101" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-120.11501842162332" cy="-97.31759539025899" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-115.85000000000001" cy="-102.40044641670906" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-109.31561267663078" cy="-103.55263520421842" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-103.56936890174592" cy="-100.23503981395943" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="120.7" cy="-94.0" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="118.43063109825408" cy="-87.76496018604057" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="112.68438732336922" cy="-84.44736479578158" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="106.15" cy="-85.59955358329094" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="101.8849815783767" cy="-90.68240460974101" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="101.88498157837668" cy="-97.31759539025899" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="106.14999999999999" cy="-102.40044641670906" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="112.68438732336922" cy="-103.55263520421842" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="118.43063109825408" cy="-100.23503981395943" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-101.3" cy="94.0" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-103.56936890174592" cy="100.23503981395943" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-109.31561267663078" cy="103.55263520421842" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-115.85" cy="102.40044641670906" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-120.1150184216233" cy="97.31759539025899" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-120.11501842162332" cy="90.68240460974101" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-115.85000000000001" cy="85.59955358329094" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-109.31561267663078" cy="84.44736479578158" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="-103.56936890174592" cy="87.76496018604057" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="120.7" cy="94.0" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="118.43063109825408" cy="100.23503981395943" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="112.68438732336922" cy="103.55263520421842" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="106.15" cy="102.40044641670906" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="101.8849815783767" cy="97.31759539025899" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="101.88498157837668" cy="90.68240460974101" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="106.14999999999999" cy="85.59955358329094" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="112.68438732336922" cy="84.44736479578158" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+    <circle cx="118.43063109825408" cy="87.76496018604057" r="0.74" data-base="26.4" data-depth="1.1" data-bevel="0.15" data-metalness="0.34" data-roughness="0.45"/>
+  </g>
+  <g id="14_电机帽环" fill="#18222d" data-base="28" data-depth="3" data-bevel="0.85" data-metalness="0.58" data-roughness="0.38">
+    <circle cx="-111" cy="-94" r="8.7" data-base="28" data-depth="3" data-bevel="0.85" data-metalness="0.58" data-roughness="0.38"/>
+    <circle cx="111" cy="-94" r="8.7" data-base="28" data-depth="3" data-bevel="0.85" data-metalness="0.58" data-roughness="0.38"/>
+    <circle cx="-111" cy="94" r="8.7" data-base="28" data-depth="3" data-bevel="0.85" data-metalness="0.58" data-roughness="0.38"/>
+    <circle cx="111" cy="94" r="8.7" data-base="28" data-depth="3" data-bevel="0.85" data-metalness="0.58" data-roughness="0.38"/>
+  </g>
+  <g id="15_止动帽点漆" fill="#f16c32" data-base="40.8" data-depth="0.35" data-bevel="0" data-metalness="0.05" data-roughness="0.43">
+    <circle cx="-111" cy="-94" r="1.15" data-base="40.8" data-depth="0.35" data-bevel="0" data-metalness="0.05" data-roughness="0.43"/>
+    <circle cx="111" cy="-94" r="1.15" data-base="40.8" data-depth="0.35" data-bevel="0" data-metalness="0.05" data-roughness="0.43"/>
+    <circle cx="-111" cy="94" r="1.15" data-base="40.8" data-depth="0.35" data-bevel="0" data-metalness="0.05" data-roughness="0.43"/>
+    <circle cx="111" cy="94" r="1.15" data-base="40.8" data-depth="0.35" data-bevel="0" data-metalness="0.05" data-roughness="0.43"/>
+  </g>
+  <g id="20_纤维机臂" fill="#253345" data-base="8" data-depth="13" data-bevel="2.4" data-metalness="0.38" data-roughness="0.37">
+    <path d="M18 21 Q28 15 34 21 L100 78 Q106 83 115 80 Q129 82 127 96 Q126 112 110 112 Q100 112 96 102 L23 48 Q16 43 18 35 Z" transform="scale(-1 -1)" data-base="8" data-depth="13" data-bevel="2.4" data-metalness="0.38" data-roughness="0.37"/>
+    <path d="M18 21 Q28 15 34 21 L100 78 Q106 83 115 80 Q129 82 127 96 Q126 112 110 112 Q100 112 96 102 L23 48 Q16 43 18 35 Z" transform="scale(1 -1)" data-base="8" data-depth="13" data-bevel="2.4" data-metalness="0.38" data-roughness="0.37"/>
+    <path d="M18 21 Q28 15 34 21 L100 78 Q106 83 115 80 Q129 82 127 96 Q126 112 110 112 Q100 112 96 102 L23 48 Q16 43 18 35 Z" transform="scale(-1 1)" data-base="8" data-depth="13" data-bevel="2.4" data-metalness="0.38" data-roughness="0.37"/>
+    <path d="M18 21 Q28 15 34 21 L100 78 Q106 83 115 80 Q129 82 127 96 Q126 112 110 112 Q100 112 96 102 L23 48 Q16 43 18 35 Z" transform="scale(1 1)" data-base="8" data-depth="13" data-bevel="2.4" data-metalness="0.38" data-roughness="0.37"/>
+  </g>
+  <g id="21_机臂覆片" fill="#486273" data-base="20.7" data-depth="1.7" data-bevel="0.6" data-metalness="0.5" data-roughness="0.35">
+    <path d="M30 29 Q32 26 36 30 L97 83 L95 89 L31 45 Z" transform="scale(-1 -1)" data-base="20.7" data-depth="1.7" data-bevel="0.6" data-metalness="0.5" data-roughness="0.35"/>
+    <path d="M30 29 Q32 26 36 30 L97 83 L95 89 L31 45 Z" transform="scale(1 -1)" data-base="20.7" data-depth="1.7" data-bevel="0.6" data-metalness="0.5" data-roughness="0.35"/>
+    <path d="M30 29 Q32 26 36 30 L97 83 L95 89 L31 45 Z" transform="scale(-1 1)" data-base="20.7" data-depth="1.7" data-bevel="0.6" data-metalness="0.5" data-roughness="0.35"/>
+    <path d="M30 29 Q32 26 36 30 L97 83 L95 89 L31 45 Z" transform="scale(1 1)" data-base="20.7" data-depth="1.7" data-bevel="0.6" data-metalness="0.5" data-roughness="0.35"/>
+  </g>
+  <g id="22_机臂导向丝印" fill="#ece3cf" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49">
+    <path d="M52 48 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(-1 -1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M56 51 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(-1 -1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M60 54 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(-1 -1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M52 48 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(1 -1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M56 51 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(1 -1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M60 54 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(1 -1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M52 48 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(-1 1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M56 51 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(-1 1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M60 54 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(-1 1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M52 48 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(1 1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M56 51 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(1 1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+    <path d="M60 54 l1.2 -1.7 3 2.6 -1.2 1.7z" transform="scale(1 1)" data-base="22.43" data-depth="0.14" data-bevel="0" data-metalness="0.04" data-roughness="0.49"/>
+  </g>
+  <g id="23_缓冲脚垫" fill="#202933" data-base="-12" data-depth="10" data-bevel="2.8" data-metalness="0.02" data-roughness="0.83">
+    <rect x="-93.4" y="-85" width="12.8" height="20" rx="4" data-base="-12" data-depth="10" data-bevel="2.8" data-metalness="0.02" data-roughness="0.83"/>
+    <rect x="80.6" y="-85" width="12.8" height="20" rx="4" data-base="-12" data-depth="10" data-bevel="2.8" data-metalness="0.02" data-roughness="0.83"/>
+    <rect x="-93.4" y="65" width="12.8" height="20" rx="4" data-base="-12" data-depth="10" data-bevel="2.8" data-metalness="0.02" data-roughness="0.83"/>
+    <rect x="80.6" y="65" width="12.8" height="20" rx="4" data-base="-12" data-depth="10" data-bevel="2.8" data-metalness="0.02" data-roughness="0.83"/>
+  </g>
+  <g id="24_脚座桥" fill="#4f616a" data-base="-3" data-depth="12" data-bevel="2" data-metalness="0.55" data-roughness="0.42">
+    <rect x="-92" y="-83" width="10" height="16" rx="3" data-base="-3" data-depth="12" data-bevel="2" data-metalness="0.55" data-roughness="0.42"/>
+    <rect x="82" y="-83" width="10" height="16" rx="3" data-base="-3" data-depth="12" data-bevel="2" data-metalness="0.55" data-roughness="0.42"/>
+    <rect x="-92" y="67" width="10" height="16" rx="3" data-base="-3" data-depth="12" data-bevel="2" data-metalness="0.55" data-roughness="0.42"/>
+    <rect x="82" y="67" width="10" height="16" rx="3" data-base="-3" data-depth="12" data-bevel="2" data-metalness="0.55" data-roughness="0.42"/>
+  </g>
+  <g id="30_烟墨桨叶" fill="#263541" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33">
+    <path d="M-3 -3 Q10 -4 22 -7 Q42 -12 56 -6 Q62 -3 63 2 Q56 6 39 6 Q23 6 8 3 L-2 3 Z" transform="translate(-111 -94) rotate(-30)" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33"/>
+    <path d="M-3 -3 Q10 -4 22 -7 Q42 -12 56 -6 Q62 -3 63 2 Q56 6 39 6 Q23 6 8 3 L-2 3 Z" transform="translate(-111 -94) rotate(150)" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33"/>
+    <path d="M-3 -3 Q10 -4 22 -7 Q42 -12 56 -6 Q62 -3 63 2 Q56 6 39 6 Q23 6 8 3 L-2 3 Z" transform="translate(111 -94) rotate(26)" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33"/>
+    <path d="M-3 -3 Q10 -4 22 -7 Q42 -12 56 -6 Q62 -3 63 2 Q56 6 39 6 Q23 6 8 3 L-2 3 Z" transform="translate(111 -94) rotate(206)" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33"/>
+    <path d="M-3 -3 Q10 -4 22 -7 Q42 -12 56 -6 Q62 -3 63 2 Q56 6 39 6 Q23 6 8 3 L-2 3 Z" transform="translate(-111 94) rotate(58)" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33"/>
+    <path d="M-3 -3 Q10 -4 22 -7 Q42 -12 56 -6 Q62 -3 63 2 Q56 6 39 6 Q23 6 8 3 L-2 3 Z" transform="translate(-111 94) rotate(238)" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33"/>
+    <path d="M-3 -3 Q10 -4 22 -7 Q42 -12 56 -6 Q62 -3 63 2 Q56 6 39 6 Q23 6 8 3 L-2 3 Z" transform="translate(111 94) rotate(-68)" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33"/>
+    <path d="M-3 -3 Q10 -4 22 -7 Q42 -12 56 -6 Q62 -3 63 2 Q56 6 39 6 Q23 6 8 3 L-2 3 Z" transform="translate(111 94) rotate(112)" data-base="31" data-depth="5" data-bevel="0.9" data-metalness="0.26" data-roughness="0.33"/>
+  </g>
+  <g id="31_桨背消光面" fill="#354854" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52">
+    <path d="M9 -1 Q39 -7 58 -3 Q59 -2 60 0 Q39 -2 12 1 Z" transform="translate(-111 -94) rotate(-30)" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52"/>
+    <path d="M9 -1 Q39 -7 58 -3 Q59 -2 60 0 Q39 -2 12 1 Z" transform="translate(-111 -94) rotate(150)" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52"/>
+    <path d="M9 -1 Q39 -7 58 -3 Q59 -2 60 0 Q39 -2 12 1 Z" transform="translate(111 -94) rotate(26)" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52"/>
+    <path d="M9 -1 Q39 -7 58 -3 Q59 -2 60 0 Q39 -2 12 1 Z" transform="translate(111 -94) rotate(206)" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52"/>
+    <path d="M9 -1 Q39 -7 58 -3 Q59 -2 60 0 Q39 -2 12 1 Z" transform="translate(-111 94) rotate(58)" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52"/>
+    <path d="M9 -1 Q39 -7 58 -3 Q59 -2 60 0 Q39 -2 12 1 Z" transform="translate(-111 94) rotate(238)" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52"/>
+    <path d="M9 -1 Q39 -7 58 -3 Q59 -2 60 0 Q39 -2 12 1 Z" transform="translate(111 94) rotate(-68)" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52"/>
+    <path d="M9 -1 Q39 -7 58 -3 Q59 -2 60 0 Q39 -2 12 1 Z" transform="translate(111 94) rotate(112)" data-base="36.01" data-depth="0.15" data-bevel="0" data-metalness="0.28" data-roughness="0.52"/>
+  </g>
+  <g id="32_桨尖识别条" fill="#ece3cf" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42">
+    <path d="M51 -6 Q53 -5.8 54.8 -5.3 L51.5 4.8 L48.3 5.1 Z" transform="translate(-111 -94) rotate(-30)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M56 -4.8 L57.2 -4.2 L54.6 4.1 L53.4 4.4 Z" transform="translate(-111 -94) rotate(-30)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M51 -6 Q53 -5.8 54.8 -5.3 L51.5 4.8 L48.3 5.1 Z" transform="translate(-111 -94) rotate(150)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M56 -4.8 L57.2 -4.2 L54.6 4.1 L53.4 4.4 Z" transform="translate(-111 -94) rotate(150)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M51 -6 Q53 -5.8 54.8 -5.3 L51.5 4.8 L48.3 5.1 Z" transform="translate(111 -94) rotate(26)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M56 -4.8 L57.2 -4.2 L54.6 4.1 L53.4 4.4 Z" transform="translate(111 -94) rotate(26)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M51 -6 Q53 -5.8 54.8 -5.3 L51.5 4.8 L48.3 5.1 Z" transform="translate(111 -94) rotate(206)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M56 -4.8 L57.2 -4.2 L54.6 4.1 L53.4 4.4 Z" transform="translate(111 -94) rotate(206)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M51 -6 Q53 -5.8 54.8 -5.3 L51.5 4.8 L48.3 5.1 Z" transform="translate(-111 94) rotate(58)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M56 -4.8 L57.2 -4.2 L54.6 4.1 L53.4 4.4 Z" transform="translate(-111 94) rotate(58)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M51 -6 Q53 -5.8 54.8 -5.3 L51.5 4.8 L48.3 5.1 Z" transform="translate(-111 94) rotate(238)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M56 -4.8 L57.2 -4.2 L54.6 4.1 L53.4 4.4 Z" transform="translate(-111 94) rotate(238)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M51 -6 Q53 -5.8 54.8 -5.3 L51.5 4.8 L48.3 5.1 Z" transform="translate(111 94) rotate(-68)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M56 -4.8 L57.2 -4.2 L54.6 4.1 L53.4 4.4 Z" transform="translate(111 94) rotate(-68)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M51 -6 Q53 -5.8 54.8 -5.3 L51.5 4.8 L48.3 5.1 Z" transform="translate(111 94) rotate(112)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+    <path d="M56 -4.8 L57.2 -4.2 L54.6 4.1 L53.4 4.4 Z" transform="translate(111 94) rotate(112)" data-base="36.19" data-depth="0.13" data-bevel="0" data-metalness="0.02" data-roughness="0.42"/>
+  </g>
+  <g id="40_弧形护框" fill="#ece3cf" data-base="25" data-depth="6" data-bevel="1.3" data-metalness="0.13" data-roughness="0.42">
+    <path d="M26 -58 A64 64 0 0 1 26 58 L24 54 A60 60 0 0 0 24 -54Z" transform="translate(-111 -94) rotate(-139.74)" data-base="25" data-depth="6" data-bevel="1.3" data-metalness="0.13" data-roughness="0.42"/>
+    <path d="M26 -58 A64 64 0 0 1 26 58 L24 54 A60 60 0 0 0 24 -54Z" transform="translate(111 -94) rotate(-40.26)" data-base="25" data-depth="6" data-bevel="1.3" data-metalness="0.13" data-roughness="0.42"/>
+    <path d="M26 -58 A64 64 0 0 1 26 58 L24 54 A60 60 0 0 0 24 -54Z" transform="translate(-111 94) rotate(139.74)" data-base="25" data-depth="6" data-bevel="1.3" data-metalness="0.13" data-roughness="0.42"/>
+    <path d="M26 -58 A64 64 0 0 1 26 58 L24 54 A60 60 0 0 0 24 -54Z" transform="translate(111 94) rotate(40.26)" data-base="25" data-depth="6" data-bevel="1.3" data-metalness="0.13" data-roughness="0.42"/>
+  </g>
+  <g id="41_护框支叉" fill="#475c66" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42">
+    <path d="M2 -3 Q20 -7 33 -25 L40 -43 L44 -42 L37 -22 Q27 -4 7 3 Z" transform="translate(-111 -94) rotate(-139.74) scale(1 -1)" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42"/>
+    <path d="M2 -3 Q20 -7 33 -25 L40 -43 L44 -42 L37 -22 Q27 -4 7 3 Z" transform="translate(-111 -94) rotate(-139.74) scale(1 1)" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42"/>
+    <path d="M2 -3 Q20 -7 33 -25 L40 -43 L44 -42 L37 -22 Q27 -4 7 3 Z" transform="translate(111 -94) rotate(-40.26) scale(1 -1)" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42"/>
+    <path d="M2 -3 Q20 -7 33 -25 L40 -43 L44 -42 L37 -22 Q27 -4 7 3 Z" transform="translate(111 -94) rotate(-40.26) scale(1 1)" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42"/>
+    <path d="M2 -3 Q20 -7 33 -25 L40 -43 L44 -42 L37 -22 Q27 -4 7 3 Z" transform="translate(-111 94) rotate(139.74) scale(1 -1)" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42"/>
+    <path d="M2 -3 Q20 -7 33 -25 L40 -43 L44 -42 L37 -22 Q27 -4 7 3 Z" transform="translate(-111 94) rotate(139.74) scale(1 1)" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42"/>
+    <path d="M2 -3 Q20 -7 33 -25 L40 -43 L44 -42 L37 -22 Q27 -4 7 3 Z" transform="translate(111 94) rotate(40.26) scale(1 -1)" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42"/>
+    <path d="M2 -3 Q20 -7 33 -25 L40 -43 L44 -42 L37 -22 Q27 -4 7 3 Z" transform="translate(111 94) rotate(40.26) scale(1 1)" data-base="18" data-depth="5.5" data-bevel="1.15" data-metalness="0.32" data-roughness="0.42"/>
+  </g>
+  <g id="42_护框端头" fill="#f16c32" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4">
+    <path d="M27 -57 L32 -54.5 L30 -51.4 L25.6 -54Z" transform="translate(-111 -94) rotate(-139.74) scale(1 -1)" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4"/>
+    <path d="M27 -57 L32 -54.5 L30 -51.4 L25.6 -54Z" transform="translate(-111 -94) rotate(-139.74) scale(1 1)" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4"/>
+    <path d="M27 -57 L32 -54.5 L30 -51.4 L25.6 -54Z" transform="translate(111 -94) rotate(-40.26) scale(1 -1)" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4"/>
+    <path d="M27 -57 L32 -54.5 L30 -51.4 L25.6 -54Z" transform="translate(111 -94) rotate(-40.26) scale(1 1)" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4"/>
+    <path d="M27 -57 L32 -54.5 L30 -51.4 L25.6 -54Z" transform="translate(-111 94) rotate(139.74) scale(1 -1)" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4"/>
+    <path d="M27 -57 L32 -54.5 L30 -51.4 L25.6 -54Z" transform="translate(-111 94) rotate(139.74) scale(1 1)" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4"/>
+    <path d="M27 -57 L32 -54.5 L30 -51.4 L25.6 -54Z" transform="translate(111 94) rotate(40.26) scale(1 -1)" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4"/>
+    <path d="M27 -57 L32 -54.5 L30 -51.4 L25.6 -54Z" transform="translate(111 94) rotate(40.26) scale(1 1)" data-base="31" data-depth="0.5" data-bevel="0.1" data-metalness="0.08" data-roughness="0.4"/>
+  </g>
+  <g id="50_前向观测舱" fill="#18222d" data-base="7" data-depth="18" data-bevel="3" data-metalness="0.4" data-roughness="0.32">
+    <path d="M-22 -77 Q0 -86 22 -77 L26 -65 L19 -57 Q0 -53 -19 -57 L-26 -65Z" data-base="7" data-depth="18" data-bevel="3" data-metalness="0.4" data-roughness="0.32"/>
+  </g>
+  <g id="51_观测窗压圈" fill="#5e7381" data-base="24.85" data-depth="2.2" data-bevel="0.8" data-metalness="0.8" data-roughness="0.26">
+    <circle cx="-11.5" cy="-69" r="6.9" data-base="24.85" data-depth="2.2" data-bevel="0.8" data-metalness="0.8" data-roughness="0.26"/>
+    <circle cx="11.5" cy="-69" r="6.9" data-base="24.85" data-depth="2.2" data-bevel="0.8" data-metalness="0.8" data-roughness="0.26"/>
+  </g>
+  <g id="52_镀膜玻璃" fill="#194858" data-base="26.97" data-depth="1.45" data-bevel="0.6" data-metalness="0.61" data-roughness="0.14">
+    <circle cx="-11.5" cy="-69" r="5.55" data-base="26.97" data-depth="1.45" data-bevel="0.6" data-metalness="0.61" data-roughness="0.14"/>
+    <circle cx="11.5" cy="-69" r="5.55" data-base="26.97" data-depth="1.45" data-bevel="0.6" data-metalness="0.61" data-roughness="0.14"/>
+  </g>
+  <g id="53_窗口镀膜反光" fill="#7cb5ba" data-base="28.44" data-depth="0.1" data-bevel="0" data-metalness="0.55" data-roughness="0.19">
+    <path d="M-14.50 -71.4 q1 -1.8 3.3 -1.4 l.9 .5 q-2 .15 -3 1.9z" data-base="28.44" data-depth="0.1" data-bevel="0" data-metalness="0.55" data-roughness="0.19"/>
+    <path d="M8.50 -71.4 q1 -1.8 3.3 -1.4 l.9 .5 q-2 .15 -3 1.9z" data-base="28.44" data-depth="0.1" data-bevel="0" data-metalness="0.55" data-roughness="0.19"/>
+  </g>
+  <g id="60_背脊散热盖" fill="#30404a" data-base="32.9" data-depth="3.4" data-bevel="0.9" data-metalness="0.52" data-roughness="0.33">
+    <path d="M-12 7 Q-12 4 -8 4 L14 4 Q18 4 17 8 L14 37 Q13 42 9 43 L-8 43 Q-11 43 -12 39Z" data-base="32.9" data-depth="3.4" data-bevel="0.9" data-metalness="0.52" data-roughness="0.33"/>
+  </g>
+  <g id="61_散热口" fill="#18222d" data-base="36.3" data-depth="0.36" data-bevel="0.12" data-metalness="0.14" data-roughness="0.59">
+    <path d="M-8 10.0 l19 -1 -.55 1.8 -18.5 1z" data-base="36.3" data-depth="0.36" data-bevel="0.12" data-metalness="0.14" data-roughness="0.59"/>
+    <path d="M-8 14.8 l19 -1 -.55 1.8 -18.5 1z" data-base="36.3" data-depth="0.36" data-bevel="0.12" data-metalness="0.14" data-roughness="0.59"/>
+    <path d="M-8 19.6 l19 -1 -.55 1.8 -18.5 1z" data-base="36.3" data-depth="0.36" data-bevel="0.12" data-metalness="0.14" data-roughness="0.59"/>
+    <path d="M-8 24.4 l19 -1 -.55 1.8 -18.5 1z" data-base="36.3" data-depth="0.36" data-bevel="0.12" data-metalness="0.14" data-roughness="0.59"/>
+    <path d="M-8 29.2 l19 -1 -.55 1.8 -18.5 1z" data-base="36.3" data-depth="0.36" data-bevel="0.12" data-metalness="0.14" data-roughness="0.59"/>
+    <path d="M-8 34.0 l19 -1 -.55 1.8 -18.5 1z" data-base="36.3" data-depth="0.36" data-bevel="0.12" data-metalness="0.14" data-roughness="0.59"/>
+  </g>
+  <g id="62_象牙白丝印" fill="#ece3cf" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47">
+    <path d="M-28 -42 L-25.8 -46 L-21.2 -4 L-23.7 -4Z" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <path d="M20 -43 l7 2 -.25 1.1 -7 -2Z" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <path d="M20 -39 l7 2 -.25 1.1 -7 -2Z" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <path d="M20 -35 l7 2 -.25 1.1 -7 -2Z" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <path d="M-10 -32 L-6.8 -36 L1 -36 L3 -33 L1 -19 L-2 -16 L-9.7 -16 L-12 -19 Z M-6.7 -31.8 L-8.1 -20 L-3.3 -20 L-1.6 -32 Z" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <path d="M12 -36 L16 -36 L14.3 -25 L17.1 -25 L16.5 -21.7 L13.7 -21.7 L12.8 -16 L8.7 -16 L9.6 -21.7 L2.7 -21.7 L3.1 -24.8 Z M10.4 -25 L11.3 -30.3 L7.4 -25Z" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <path d="M-12 -12.5 L16 -12.5 L15.8 -11.6 L-12.1 -11.6Z" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="-11.0" y="-9.8" width="0.65" height="2" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="-9.1" y="-9.8" width="0.65" height="1" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="-7.2" y="-9.8" width="0.65" height="1" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="-5.300000000000001" y="-9.8" width="0.65" height="1.8" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="-3.4000000000000004" y="-9.8" width="0.65" height="1" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="-1.5" y="-9.8" width="0.65" height="1" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="0.3999999999999986" y="-9.8" width="0.65" height="2" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="2.299999999999999" y="-9.8" width="0.65" height="1" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="4.199999999999999" y="-9.8" width="0.65" height="1" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="6.099999999999998" y="-9.8" width="0.65" height="1.8" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="8.0" y="-9.8" width="0.65" height="1" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+    <rect x="9.899999999999999" y="-9.8" width="0.65" height="1" rx="0" data-base="33.02" data-depth="0.1" data-bevel="0" data-metalness="0.03" data-roughness="0.47"/>
+  </g>
+  <g id="63_海蓝识别漆" fill="#447782" data-base="33.01" data-depth="0.09" data-bevel="0" data-metalness="0.15" data-roughness="0.36">
+    <path d="M-29 -43 L-23 -53 L-15 -57 L-20 -46 L-17 -6 L-20 0 L-25 -1Z" data-base="33.01" data-depth="0.09" data-bevel="0" data-metalness="0.15" data-roughness="0.36"/>
+  </g>
+  <g id="70_紧固件" fill="#a5afb1" data-base="33.01" data-depth="0.9" data-bevel="0.25" data-metalness="0.84" data-roughness="0.32">
+    <circle cx="-25" cy="-41" r="1.55" data-base="33.01" data-depth="0.9" data-bevel="0.25" data-metalness="0.84" data-roughness="0.32"/>
+    <circle cx="25" cy="-41" r="1.55" data-base="33.01" data-depth="0.9" data-bevel="0.25" data-metalness="0.84" data-roughness="0.32"/>
+    <circle cx="-23" cy="19" r="1.55" data-base="33.01" data-depth="0.9" data-bevel="0.25" data-metalness="0.84" data-roughness="0.32"/>
+    <circle cx="23" cy="19" r="1.55" data-base="33.01" data-depth="0.9" data-bevel="0.25" data-metalness="0.84" data-roughness="0.32"/>
+    <circle cx="-12" cy="48" r="1.55" data-base="33.01" data-depth="0.9" data-bevel="0.25" data-metalness="0.84" data-roughness="0.32"/>
+    <circle cx="12" cy="48" r="1.55" data-base="33.01" data-depth="0.9" data-bevel="0.25" data-metalness="0.84" data-roughness="0.32"/>
+  </g>
+  <g id="71_紧固件槽" fill="#253345" data-base="33.9" data-depth="0.1" data-bevel="0" data-metalness="0.4" data-roughness="0.4">
+    <path d="M-26.04 -40.6 l1.7 -1 .22 .38 -1.7 1Z" data-base="33.9" data-depth="0.1" data-bevel="0" data-metalness="0.4" data-roughness="0.4"/>
+    <path d="M23.96 -40.6 l1.7 -1 .22 .38 -1.7 1Z" data-base="33.9" data-depth="0.1" data-bevel="0" data-metalness="0.4" data-roughness="0.4"/>
+    <path d="M-24.04 19.4 l1.7 -1 .22 .38 -1.7 1Z" data-base="33.9" data-depth="0.1" data-bevel="0" data-metalness="0.4" data-roughness="0.4"/>
+    <path d="M21.96 19.4 l1.7 -1 .22 .38 -1.7 1Z" data-base="33.9" data-depth="0.1" data-bevel="0" data-metalness="0.4" data-roughness="0.4"/>
+    <path d="M-13.04 48.4 l1.7 -1 .22 .38 -1.7 1Z" data-base="33.9" data-depth="0.1" data-bevel="0" data-metalness="0.4" data-roughness="0.4"/>
+    <path d="M10.96 48.4 l1.7 -1 .22 .38 -1.7 1Z" data-base="33.9" data-depth="0.1" data-bevel="0" data-metalness="0.4" data-roughness="0.4"/>
+  </g>
+  <g id="72_拆装擦痕" fill="#bd895f" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49">
+    <path d="M-20.82 19.72 l0.60 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M-21.34 20.97 l0.73 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M-22.57 21.83 l0.86 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M-24.22 21.89 l0.99 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M-25.78 20.99 l1.12 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M27.18 -40.28 l0.60 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M26.66 -39.03 l0.73 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M25.43 -38.17 l0.86 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M23.78 -38.11 l0.99 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+    <path d="M22.22 -39.01 l1.12 -.35 .15 .16 -.55 .4Z" data-base="33.06" data-depth="0.08" data-bevel="0" data-metalness="0.46" data-roughness="0.49"/>
+  </g>
+  <g id="73_尾部检修片" fill="#18222d" data-base="30" data-depth="3.5" data-bevel="0.7" data-metalness="0.3" data-roughness="0.38">
+    <rect x="-7" y="51" width="14" height="4" rx="0.8" data-base="30" data-depth="3.5" data-bevel="0.7" data-metalness="0.3" data-roughness="0.38"/>
+  </g>
+  <g id="74_薄荷状态灯" fill="#99dbcb" data-base="33.51" data-depth="0.55" data-bevel="0.18" data-metalness="0.24" data-roughness="0.19">
+    <rect x="-4.8" y="52" width="6.2" height="1.5" rx="0.45" data-base="33.51" data-depth="0.55" data-bevel="0.18" data-metalness="0.24" data-roughness="0.19"/>
+  </g>
+</svg>
