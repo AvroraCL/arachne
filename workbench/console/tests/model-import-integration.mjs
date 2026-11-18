@@ -557,6 +557,54 @@ async function verifyMarkedMaterialInspection(){
   }finally{await page.close();}
 }
 
+async function verifyRenderedSurfacePicking(id){
+  const page=await browser.newPage({viewport:{width:1200,height:800}});
+  try{
+    await page.addInitScript(()=>localStorage.setItem('arachne-cycles-viewport-v1',JSON.stringify({maxSamples:4,denoise:false})));
+    await page.goto(origin+'/paint.html?project='+id);
+    await page.locator('[data-area-mode=modeling]').click();
+    const view=page.locator('.editor-viewport[data-state=ready]').first();await view.waitFor();
+    const pickFront=async()=>{
+      const box=await view.boundingBox();
+      await page.mouse.click(box.x+.55*box.width,box.y+.48*box.height);
+    };
+    const shade=mode=>page.getByRole('button',{name:mode,exact:true}).click();
+    const tree=page.getByLabel('场景物体列表',{exact:true});await tree.press('Home');
+    const flags=await api('/api/projects/'+id);
+    await page.getByRole('button',{name:'从渲染排除 遮挡面',exact:true}).click();
+    await until(async()=>(await api('/api/projects/'+id)).paint.renderVisibility?.['遮挡面']===false);
+    await shade('渲染预览');
+    await view.and(page.locator('[data-render-phase=ready]')).waitFor({timeout:90000});
+    await pickFront();
+    const object=page.locator('.object-property-editor:visible');
+    await object.getByText('表面材料',{exact:true}).filter({visible:true}).waitFor();
+    await page.locator('[data-area-mode=material]').click();await view.waitFor();
+    await shade('材质预览');await pickFront();
+    await page.locator('.editor-area[data-editor=properties] .editor-properties:visible').waitFor();
+    await shade('渲染预览');
+    await view.and(page.locator('[data-render-phase=ready]')).waitFor({timeout:90000});
+    const originalSamples=await view.evaluate(el=>{
+      window.sampleCounts=[];
+      new MutationObserver(()=>window.sampleCounts.push(+el.dataset.renderSamples))
+        .observe(el,{attributes:true,attributeFilter:['data-render-samples']});
+      return +el.dataset.renderSamples;
+    });
+    assert.ok(originalSamples>1);
+    await pickFront();
+    await page.locator('.surface-properties:visible').getByText('表面材料',{exact:true}).waitFor();
+    const [phase,samples,minimum]=await view.evaluate(async el=>{
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      return [el.dataset.renderPhase,+el.dataset.renderSamples,Math.min(+el.dataset.renderSamples,...window.sampleCounts)];
+    });
+    assert.deepEqual([phase,samples,minimum],['ready',originalSamples,originalSamples]);
+    await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
+    await until(async()=>JSON.stringify((await api('/api/projects/'+id)).paint)===JSON.stringify(flags.paint));
+    await pickFront();
+    await page.locator('.editor-area[data-editor=properties] .editor-properties:visible').waitFor();
+    console.log('PASS rendered picks follow the visible surface in object and material modes, preserve accumulated samples, and follow undo');
+  }finally{await page.close();}
+}
+
 async function verifyModelWorkflows(){
   assert.deepEqual(await api('/api/projects'),[]);
   const noUv=await fetch(origin+'/api/projects/model-import?material=1',{
@@ -632,6 +680,7 @@ async function verifyModelWorkflows(){
   const id=await until(async()=>new URL(page.url()).searchParams.get('project'));
   const route='/api/projects/'+id,paint=route+'/paint';
   await verifyObjectMaterialNavigation(id);
+  await verifyRenderedSurfacePicking(id);
   const registered=await api(route),manifest=await api(route+'/viewport');
   assert.equal(registered.source.format,'glb');
   assert.equal(registered.source.material,'遮挡材料');
@@ -1525,6 +1574,7 @@ try{
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
     await verifyObjectMaterialNavigation(result.id);
     await verifyMarkedMaterialInspection();
+    await verifyRenderedSurfacePicking(result.id);
     await verifyOriginalTextureChannels(prepareTexturedModel().texturedFile);
   }else if(process.argv.includes('--mask-only')){
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});

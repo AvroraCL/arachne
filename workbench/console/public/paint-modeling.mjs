@@ -312,7 +312,7 @@ export function createPaintModeling(report, project = {}) {
     const ndc = new THREE.Vector2();
     const pickAt = (x,y) => {
       raycaster.setFromCamera(ndc.set(x/width*2-1,1-y/height*2),camera);
-      return raycaster.intersectObject(root,true).find(hit=>isVisible(hit.object)&&inLocalView(hit.object));
+      return raycaster.intersectObject(root,true).find(hit=>context.pickVisible(hit.object,root)&&inLocalView(hit.object));
     };
     let hit = pickAt(cursor.x,cursor.y);
     if (!hit && near) {

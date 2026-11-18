@@ -110,15 +110,22 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       scene.background=background;renderer.autoClear=autoClear;
     }
   }
+  function includedInRender(node,overrides=doc?.paint?.renderVisibility){
+    const source=node.userData.original||node,name=source.userData.modelingLabel||source.name;
+    return (Object.hasOwn(overrides||{},name)?overrides[name]:manifest?.metadata?.render_visibility?.[name])!==false;
+  }
+  function pickVisible(node,root,checkRender=pathTracer?.enabled(),overrides=doc?.paint?.renderVisibility){
+    for(;node;node=node.parent){
+      if(!node.visible||checkRender&&!includedInRender(node,overrides))return false;
+      if(node===root)break;
+    }
+    return true;
+  }
   function renderObserved(scanScene=true){
     if(!pathTracer?.enabled()){renderScene();drawOutline();return;}
     const root=previewModel||model,hidden=[];
-    const visibility=doc?.paint?.renderVisibility,defaults=manifest?.metadata?.render_visibility;
-    if(visibility||defaults)root?.traverseVisible(object=>{
-      const name=object.userData.modelingLabel||object.name;
-      if((Object.hasOwn(visibility||{},name)?visibility[name]:defaults?.[name])===false){
-        object.visible=false;hidden.push(object);
-      }
+    if(doc?.paint?.renderVisibility||manifest?.metadata?.render_visibility)root?.traverseVisible(object=>{
+      if(!includedInRender(object)){object.visible=false;hidden.push(object);}
     });
     try{
       const traced=pathTracer.render(root,camera,modelBounds,displaySettings,scene.children.filter(object=>object.isDirectionalLight),scanScene,!!axisMotion);
@@ -182,7 +189,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     );
     const ray = new THREE.Raycaster();
     ray.setFromCamera(pointer, camera);
-    return ray.intersectObject(root, true)[0];
+    return ray.intersectObject(root, true).find(hit=>pickVisible(hit.object,root));
   }
   function measureModelBounds(root){
     // Cache world-space boxes on load or geometry edits, not on camera motion.
@@ -245,7 +252,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if (host.dataset.state !== 'ready') return null;
     applyModelState(model,null);
     return {
-      modelSha256:manifest.modelSha256,model, scene, canvas: renderer.domElement, binding: manifest.key,
+      modelSha256:manifest.modelSha256,model, scene, canvas: renderer.domElement, binding: manifest.key, pickVisible,
       setObjectOutline:(objects,helpers,activeObject)=>{objectOutline.setObjects(objects,helpers,activeObject);outlineCount=objects.length;setOutlineStatus();request();},
       getCamera: () => camera, request, updateModelBounds, showModelingPreview, sourceMaterialForExport, inspectMaterial,
       frameBounds: bounds => fit(camera.position.clone().sub(controls.target),bounds,camera.up.clone()),
@@ -529,8 +536,9 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   function navigate(command,amount=1){if(!model)return;applyCamera(movedCamera(cameraState(),command,amount,host.clientHeight));}
 
   function select(name,label=null){
-    selected=name;pickedLabel=label;
-    if(manifest)paintMaterials();
+    const changed=selected!==name;selected=name;pickedLabel=label;
+    if(solo&&changed&&manifest)paintMaterials();
+    else scheduleFrame(false);
   }
   function pickedSurface(){
     if(!selected||pickedLabel==null||!doc)return null;
@@ -552,7 +560,8 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if(!rect.width||!rect.height)return null;
     uvPointer.set((clientX-rect.left)/rect.width*2-1,1-(clientY-rect.top)/rect.height*2);
     uvRay.setFromCamera(uvPointer,camera);
-    const hit=uvRay.intersectObject(includeSource?(previewModel||model):model,true)[0];
+    const root=includeSource?(previewModel||model):model;
+    const hit=uvRay.intersectObject(root,true).find(hit=>pickVisible(hit.object,root));
     if(!hit?.uv||!hit.face)return null;
     const material=Array.isArray(hit.object.material)?hit.object.material[hit.face.materialIndex]:hit.object.material;
     const name=material.userData.sourceMaterial||material.name;
@@ -571,14 +580,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     uvPointer.set((clientX-rect.left)/rect.width*2-1,1-(clientY-rect.top)/rect.height*2);
     camera.updateMatrixWorld();root.updateMatrixWorld(true);uvRay.setFromCamera(uvPointer,camera);
     for(const hit of uvRay.intersectObject(root,true)){
-      let visible=true;
-      for(let object=hit.object;object;object=object.parent){
-        if(!object.visible){visible=false;break;}
-        const original=object.userData.original||object,name=original.userData.modelingLabel||original.name;
-        if(Object.hasOwn(renderVisibility,name)&&renderVisibility[name]===false){visible=false;break;}
-        if(object===root)break;
-      }
-      if(!visible)continue;
+      if(!pickVisible(hit.object,root,true,renderVisibility))continue;
       const depth=-camera.worldToLocal(hit.point.clone()).z;
       if(depth>0)return depth;
     }
