@@ -139,7 +139,9 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .property-editor-drawing-tools .editor-toolbar{margin-bottom:4px;padding:3px 4px;border:0;background:transparent}
 .object-position{color:#bbb;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;line-height:1.5}
 .object-property-hint{margin:7px 0;color:#999;font-size:12px;line-height:1.45}
+.property-editor [data-property-search-miss]{display:none}
 .object-property-editor:focus{outline:none}
+.object-property-editor .render-settings-readout{min-width:0;overflow-wrap:anywhere}
 .object-property-editor button[type=submit]{min-height:26px;margin-top:5px;padding:3px 10px}
 .material-resource-properties input[type=text]{width:100%;min-width:0;min-height:26px;padding:3px 6px;border:1px solid #191919;border-radius:3px;background:#303030;color:#ddd}
 .material-resource-properties input[type=color]{width:100%;min-width:0;height:26px;padding:0;border:1px solid #444;border-radius:3px}

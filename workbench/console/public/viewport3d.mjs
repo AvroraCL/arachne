@@ -210,9 +210,11 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     else applyModelState(model,doc.modeling);
     updateModelBounds();
   }
-  function editableMaterial(material){
+  function inspectMaterial(material){
     const name=material.userData.sourceMaterial||material.name,base=materialState.get(material);
-    if(!manifest||!base||!material.isMeshStandardMaterial||name===manifest.targetMaterial||doc.source.format!=='glb')return null;
+    if(!manifest||!base)return null;
+    if(name===manifest.targetMaterial)return {name,painted:true};
+    if(!material.isMeshStandardMaterial||doc.source.format!=='glb')return null;
     return {name,color:material.userData.sourceBaseColor||'#'+base.color.getHexString(),metallic:base.metalness,roughness:base.roughness};
   }
   function sourceMaterialForExport(material) {
@@ -240,7 +242,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     return {
       modelSha256:manifest.modelSha256,model, scene, canvas: renderer.domElement, binding: manifest.key,
       setObjectOutline:(objects,helpers,activeObject)=>{objectOutline.setObjects(objects,helpers,activeObject);outlineCount=objects.length;setOutlineStatus();request();},
-      getCamera: () => camera, request, updateModelBounds, showModelingPreview, sourceMaterialForExport, editableMaterial,
+      getCamera: () => camera, request, updateModelBounds, showModelingPreview, sourceMaterialForExport, inspectMaterial,
       frameBounds: bounds => fit(camera.position.clone().sub(controls.target),bounds,camera.up.clone()),
       readCamera: () => ({camera:cameraState(),frameMode:host.dataset.frameMode}),
       restoreCamera: state => {

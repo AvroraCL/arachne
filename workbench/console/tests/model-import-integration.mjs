@@ -352,6 +352,40 @@ async function verifyProceduralMasks(cubeId){
 
 }
 
+async function verifyObjectMaterialNavigation(id){
+  const page=await browser.newPage({viewport:{width:1400,height:900}});
+  try{
+    await page.goto(origin+'/paint.html?project='+id);
+    await page.locator('[data-area-mode="modeling"]').click();
+    await page.locator('.editor-viewport[data-state=ready]').first().waitFor();
+    const tree=page.getByLabel('场景物体列表',{exact:true});
+    await tree.press('Home');
+    const pick=name=>tree.getByText(name,{exact:true}).click();
+    const inspector=page.locator('.object-property-editor');
+    await pick('涂装面');
+    const roughness=inspector.getByLabel('模型材质粗糙度',{exact:true});
+    assert.equal(await roughness.inputValue(),'0.6');
+    assert.equal(await roughness.isVisible(),true);
+    await pick('遮挡面');
+    const layer=inspector.getByRole('button',{name:'查看图层属性'});
+    await layer.waitFor();
+    assert.equal(await roughness.isVisible(),false);
+    assert.equal(await roughness.isDisabled(),true);
+    assert.ok((await inspector.innerText()).includes('遮挡材料'));
+    const search=page.getByRole('searchbox',{name:'搜索当前属性'});
+    await search.fill('模型材质粗糙度');
+    await page.getByText('没有匹配的设置',{exact:true}).waitFor();
+    await search.fill('');
+    await layer.click();
+    assert.equal(await page.getByRole('tab',{name:'材质属性',exact:true}).getAttribute('aria-selected'),'true');
+    await page.locator('.property-editor-material').getByLabel('粗糙度',{exact:true}).waitFor();
+    await pick('涂装面');
+    await roughness.waitFor();
+    assert.equal(await roughness.inputValue(),'0.6');
+    console.log('PASS object properties follow painted and original surfaces without exposing the previous material');
+  }finally{await page.close();}
+}
+
 async function verifyModelWorkflows(){
   assert.deepEqual(await api('/api/projects'),[]);
   const noUv=await fetch(origin+'/api/projects/model-import?material=1',{
@@ -429,6 +463,7 @@ async function verifyModelWorkflows(){
   const registered=await api(route),manifest=await api(route+'/viewport');
   assert.equal(registered.source.format,'glb');
   assert.equal(registered.source.material,'遮挡材料');
+  await verifyObjectMaterialNavigation(id);
   assert.equal(manifest.metadata.input_sha256,digest(model.bytes));
   assert.equal(manifest.metadata.uv_before,registered.source.uvSha256);
   const glb=Buffer.from(await (await fetch(origin+manifest.modelUrl)).arrayBuffer());
@@ -1337,7 +1372,14 @@ async function verifyModelWorkflows(){
 try{
   origin=await start(data);
   if(process.argv.includes('--model-update-only'))await verifyModelUpdate();
-  else if(process.argv.includes('--mask-only')){
+  else if(process.argv.includes('--material-inspection-only')){
+    const response=await fetch(origin+'/api/projects/model-import?material=1',{
+      method:'POST',headers:{'Content-Type':'model/gltf-binary',Origin:origin},body:model.bytes
+    });
+    const result=await response.json();assert.ok(response.ok,JSON.stringify(result));
+    browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+    await verifyObjectMaterialNavigation(result.id);
+  }else if(process.argv.includes('--mask-only')){
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
     const cube=await api('/api/projects',{workflowType:'pbr_paint',modelTemplate:'cube'});
     await verifyProceduralMasks(cube.id);

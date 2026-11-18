@@ -736,7 +736,7 @@ export function registerAreaEditors(registry,bridge){
   registry.register('scene',ctx=>createSceneEditor(ctx));
   registry.register('renderResult',ctx=>createRenderResultEditor(ctx,bridge.renderResults));
   registry.register('renderSettings',ctx=>createRenderSettingsEditor(ctx,bridge.renderSettings,{
-    propertyTarget:bridge.propertyTarget,busy:bridge.busy,
+    propertyTarget:bridge.propertyTarget,busy:bridge.busy,openMaterial:bridge.openMaterial,
     material:(host,state,scope)=>materialProperties({...ctx,host,state},scope),
     drawing:(host,tools,root,project)=>createImagePanel('properties',{...ctx,host,tools,root,project,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment,pickAdjustmentColor:bridge.pickAdjustmentColor})
   }));

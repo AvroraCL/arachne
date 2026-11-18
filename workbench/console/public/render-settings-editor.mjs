@@ -539,7 +539,15 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     unavailable[category]=el('p','property-editor-unavailable');unavailable[category].hidden=true;frame.panel(category).prepend(unavailable[category]);
   }
   const objectHost=el('div','property-editor-object');frame.panel('object').append(objectHost);
-  const objectEditor=createObjectPropertyEditor({host:objectHost,project,state:state.object,onChange,error:ctx.error,getTarget:()=>target('object')});
+  const objectEditor=createObjectPropertyEditor({host:objectHost,project,state:state.object,onChange,error:ctx.error,
+    getTarget:()=>target('object'),getPaintSelection:()=>({...adapters.propertyTarget(),openWorkspace:!!pins.material}),
+    openPaintLayers(){
+      if(pins.material){adapters.openMaterial(project.layerId);return;}
+      materialResource=null;
+      frame.search.value='';
+      frame.select('material',{focus:true});
+    }
+  });
   const materialHost=el('div','property-editor-material');frame.panel('material').append(materialHost);
   const materialEditor=adapters.material(materialHost,state.material||{},()=>status('material').available&&target('material')?.kind!=='resource'?target('material'):null);
   const resourceHost=el('div','property-editor-material-resource');frame.panel('material').append(resourceHost);
@@ -564,7 +572,17 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
       object:JSON.stringify([scene?.projectId,scene?.binding,scene?.activeId,scene?.selectedIds,scene?.selectionVersion]),
       material:JSON.stringify(capture('material')),drawing:JSON.stringify(capture('drawing'))};
   }
-  function searchText(node){return (node.textContent+' '+[...node.querySelectorAll('[aria-label]')].map(item=>item.getAttribute('aria-label')).join(' ')).toLocaleLowerCase();}
+  function searchText(node){
+    const parts=[];
+    const walker=document.createTreeWalker(node,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT,{
+      acceptNode:item=>item.hidden?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT
+    });
+    for(let item=node;item;item=walker.nextNode()){
+      const text=item.nodeValue||item.getAttribute?.('aria-label');
+      if(text)parts.push(text);
+    }
+    return parts.join(' ').toLocaleLowerCase();
+  }
   function filter(){
     const query=frame.search.value.trim().toLocaleLowerCase(),active=frame.category,activeStatus=status(active);let matched=0;
     for(const [key,group] of Object.entries(panels)){
@@ -581,8 +599,9 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     }
     const generic={object:[...objectHost.querySelectorAll('.render-settings-section')],material:target('material')?.kind==='resource'?[...resourceHost.querySelectorAll('.render-settings-section')]:[...materialHost.querySelectorAll('.property-section')],drawing:[...drawingHost.querySelectorAll('.document-panel > *')]};
     for(const [category,nodes] of Object.entries(generic))for(const node of nodes){
-      const show=!query||searchText(node).includes(query);node.hidden=!show;
-      if(category===active&&show)matched++;
+      const miss=!!query&&!searchText(node).includes(query);
+      node.toggleAttribute('data-property-search-miss',miss);
+      if(category===active&&!node.hidden&&!miss)matched++;
     }
     frame.empty.hidden=!activeStatus.available||!query||matched>0;
     frame.footer.hidden=!!query||!['render','output'].includes(active)||!activeStatus.available;

@@ -974,7 +974,7 @@ export function createPaintModeling(report, project = {}) {
     const materials=new Map();
     function collect(part){
       for(const material of part.userData.original?.userData.viewportOriginalMaterials||[]){
-        const slot=context.editableMaterial(material);
+        const slot=context.inspectMaterial(material);
         if(slot)materials.set(slot.name,slot);
       }
       for(const child of part.children)if(child.userData.modelingId===undefined)collect(child);
