@@ -19,6 +19,10 @@ A local workspace for texturing 3D models
 
 Paint textures, edit materials and inspect the model in the same project. For an aircraft livery, for example, you can lay out numbers and stripes on the 2D canvas, then turn the model to see how the stripes wrap around the fuselage. If a number needs to move, its layer is still editable.
 
+![R17 tide station telemetry enclosure after service](docs/images/r17-tide-station.webp)
+
+*R17 tide station, painted and rendered on the bundled example model. Worn paint exposes aluminum beside the latch. The side vents reveal a salt screen, and the calibration date remains editable.*
+
 ## What you can make
 
 - **Layered textures.** Combine images, shapes and gradients on a 4K canvas. Use selections and masks to trim an edge, then bind the texture document to a material channel.
