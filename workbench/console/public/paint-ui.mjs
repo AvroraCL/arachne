@@ -247,6 +247,7 @@ function renderProjectState(){
   $('project-detail-updated').textContent=doc?.updated?new Date(doc.updated).toLocaleString():'—';
   $('open-glb-migration').hidden=!(doc?.source.bindingVersion===2&&doc.source.format!=='glb'&&/\.blend$/i.test(doc.source.reviewSource));
 }
+const renderOnlyOps=new Set(['renderCamera','renderBookmark','renderLighting','renderAppearance','renderPreset','renderOptics','renderRegion','renderVisibility']);
 async function api(url,data,signal){
   const write=data!==undefined&&url.match(/^\/api\/projects\/([^/]+)\/paint\/(?:commands|model|undo|redo|assets|text|library-import|image-layer-bake|mesh-bake|mesh-mask)$/);
   const id=write?.[1];
@@ -254,7 +255,14 @@ async function api(url,data,signal){
   try{
     const response=await fetch(url,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal,
       ...(data?.strokeRequestId?{signal:AbortSignal.timeout(15000)}:{})});
-    const result=await responseJson(response);if(id)projectSaveErrors.delete(id);return result;
+    const result=await responseJson(response);
+    if(id){
+      projectSaveErrors.delete(id);
+      if(url.endsWith('/commands')&&result.id===id&&result.revision===data.revision+1&&
+         data.operations?.length&&data.operations.every(({op})=>renderOnlyOps.has(op)))
+        areaSystem?.retainMaterialForRenderEdit(id,data.revision,result.revision);
+    }
+    return result;
   }catch(error){if(id&&!signal?.aborted)projectSaveErrors.set(id,error.message);throw error;}
   finally{if(id){projectWrites.set(id,projectWrites.get(id)-1);renderProjectState();}}
 }

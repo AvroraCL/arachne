@@ -257,13 +257,14 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     const window=rgba&&frame?.request.size===detailSize&&frame.request.key===state.key&&
       strokes.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke.stamps)?strokeWindow(strokes,state.visiblePixels,state.strokeBleed):undefined;
     intent={...state,operation,size,window,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
-    if(!operation&&baseFrame?.request.key===state.key&&baseFrame.request.size>=size){
+    if(!operation&&baseFrame&&baseFrame.request.size>=size&&
+       (baseFrame.request.key===state.key||baseFrame.request.key===state.reuseKey)){
       queued=null;
       intent={...intent,size:baseFrame.request.size};
       const restored={...baseFrame,request:intent},previousFrame=frame,previousDrawn=drawn;
       try{
         onFrame(restored);if(context()?.key!==state.key||intent!==restored.request)return;
-        frame=restored;draw();
+        frame=restored;draw();baseFrame=restored;
       }catch(error){
         frame=previousFrame;drawn=previousDrawn;if(context()?.key!==state.key||intent!==restored.request)return;
         fastFailure={key:state.key,request:intent,message:error.message};status('error',error.message,restored.request.size,true);return;

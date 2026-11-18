@@ -507,9 +507,10 @@ export function registerAreaEditors(registry,bridge){
       }
       if(current.request.id!==projectId)return;
       const shadeChanged=!!frame?.request.inspectMask!==!!current.request.inspectMask;
-      viewport.showLivePaint(current.pixels,current.request.size,null,{revision:current.request.revision,draft:!!current.request.operation});
+      const samePixels=current.pixels===frame?.pixels;
+      viewport.showLivePaint(current.pixels,current.request.size,null,{revision:current.request.revision,draft:!!current.request.operation,samePixels});
       frame=current;
-      if(shadeChanged||display.channel)display.refresh();
+      if(shadeChanged||display.channel&&!samePixels)display.refresh();
       view.dataset.materialInspection=current.request.inspectMask?'mask':current.request.isolatedLayer?'layer':'';
     }
     async function sync(reselect=false){

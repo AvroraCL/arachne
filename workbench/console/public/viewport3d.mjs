@@ -535,6 +535,10 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       return;
     }
     if(!model)return;
+    if(metadata.samePixels&&livePaint&&paintFrame?.size===size){
+      paintFrame={revision:metadata.revision,size,draft:metadata.draft===true};
+      request();return;
+    }
     const create=colorSpace=>{
       const map=new THREE.DataTexture(new Uint8Array(size*size*4),size,size,THREE.RGBAFormat);
       map.colorSpace=colorSpace;

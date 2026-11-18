@@ -71,6 +71,25 @@ test('polling preserves the latest draft and cancel restores the committed frame
   assert.equal(requests.length,3);
 });
 
+test('camera edits retain the committed texture across revisions and never promote a draft',async t=>{
+  const {view,requests,revise,configure,finish}=fixture(t,false,{renderCanvas:false});
+  view.refresh();await finish(0,23);
+  const pixels=view.getFrame().pixels;
+  view.update({op:'shader',graph:{}});await finish(1,95);
+  assert.equal(view.getFrame().pixels[0],95);
+  for(const revision of [2,3]){
+    revise(revision);configure({reuseKey:'fixture:'+(revision-1)});view.refresh();
+    assert.equal(view.getFrame().pixels,pixels);
+    assert.equal(view.getFrame().request.revision,revision);
+    assert.equal(requests.length,2);
+  }
+  revise(4);configure({reuseKey:undefined});view.refresh();await finish(2,43);
+  assert.equal(view.getFrame().pixels[0],43);
+  revise(5);configure({key:'fixture:5:mask',reuseKey:'fixture:4:mask',inspectMask:'mask'});view.refresh();
+  assert.equal(requests[3].data.inspectMask,'mask');await finish(3,50);
+  assert.equal(view.getFrame().pixels[0],50);
+});
+
 test('restoring a cached committed frame republishes it to independent viewports',async t=>{
   const frames=[],{view,requests,finish}=fixture(t,false,{renderCanvas:false,onFrame:frame=>frames.push(frame)});
   view.refresh();await finish(0,1);view.update({op:'shader',graph:{}});await finish(1,9);assert.ok(frames.at(-1).request.operation);
