@@ -23,6 +23,8 @@
 
 *R17 潮位遥测接线盒，使用工作台自带的示例模型制作。搭扣附近露出铝底，侧面均压孔后有挡盐网，校准箔上的日期仍可编辑。*
 
+细节图　[搭扣与开盖磨损](docs/images/r17-latch.webp) · [校准箔与自检键](docs/images/r17-calibration.webp) · [探头与数据接线口](docs/images/r17-connectors.webp)
+
 用「文件 → 打开涂装 ZIP」可继续编辑这件作品。[下载 R17 示例工程（7 MB）](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/tide-station-r17.zip)
 
 ## 可以用它做什么
