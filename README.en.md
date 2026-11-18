@@ -19,6 +19,10 @@ A local workspace for texturing 3D models
 
 Paint textures, edit materials and inspect the model in the same project. For an aircraft livery, for example, you can lay out numbers and stripes on the 2D canvas, then turn the model to see how the stripes wrap around the fuselage. If a number needs to move, its layer is still editable.
 
+![Mavic 4 Pro exterior study](docs/images/mavic-4-pro.webp)
+
+**DJI Mavic 4 Pro exterior study.** Modeled from original SVG profiles. Rounded profiles form the fuselage and gimbal. The three lens assemblies use pitched profiles, and the shell finish has an editable roughness mask. Proportions and internal details are approximate. [Product reference](https://www.dji.com/mavic-4-pro) · [Camera close-up](docs/images/mavic-4-pro-optics.webp) · [Modeling profiles](examples/mavic-4-pro.svg) · [Editable project ZIP](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/mavic-4-pro.zip)
+
 ![Tidewing 04 coastal inspection quadcopter](docs/images/tidewing-04.webp)
 
 **Tidewing 04** started as an original SVG drawing. Arachne extruded the shell, arms, blades and guards into separate meshes. Three editable material layers add polished grips, dried salt around the service hatch and tool scratches. [Hatch detail](docs/images/tidewing-04-hatch.webp) · [Bevel shading before and after](docs/images/tidewing-04-bevel.webp)

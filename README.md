@@ -19,6 +19,10 @@
 
 阿拉克涅让你在同一个工程里画贴图、调材质、看模型。比如做一套机身涂装，你可以在二维画布上摆好编号和色带，再转动模型，看看色带绕过曲面时有没有错位。要改编号，只需回到它所在的图层。
 
+![Mavic 4 Pro 整机外观习作](docs/images/mavic-4-pro.webp)
+
+**DJI Mavic 4 Pro 外观习作**。从原创 SVG 轮廓起形，机壳和云台使用圆壳，镜圈和镜片沿俯仰轴转向机头。机壳的细哑纹可在材质工作区单独调整。比例和内部结构经过简化。[官方外观参考](https://www.dji.com/mavic-4-pro) · [镜组特写](docs/images/mavic-4-pro-optics.webp) · [建模源稿](examples/mavic-4-pro.svg) · [可编辑工程 ZIP](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/mavic-4-pro.zip)
+
 ![汐羽 04 海岸巡检机](docs/images/tidewing-04.webp)
 
 **汐羽 04** 从一张原创 SVG 轮廓图起步。工作台把机壳、机臂、桨叶和护框挤出成独立网格，再用三个材质层画出握持区的亮面、散热盖边的盐迹和开盖细划。[查看机盖细节](docs/images/tidewing-04-hatch.webp) · [同机位倒角修正对照（左前右后）](docs/images/tidewing-04-bevel.webp)
