@@ -292,7 +292,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   function projectorAt(hit){
     const view=viewport.viewFrame();
     const normal=vec(view.normal).normalize(),up=vec(view.up).normalize();
-    const size=clamp(view.radius*.16,.1,4);
+    const size=hit.extent?clamp(hit.extent*.31,.02,4):clamp(view.radius*.16,.1,4);
     return {center:hit.point,normal:normal.toArray(),up:up.toArray(),size,depth:size*.32,rotation:0};
   }
   function stamp(x,y,pressure){

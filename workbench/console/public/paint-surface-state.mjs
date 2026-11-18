@@ -10,7 +10,8 @@ export function projectionIsCurrent(doc,layer){
   if(!cached.has(key)){
     const current=doc.modeling?.steps?.length?doc.modeling:null;
     const original=doc.paint.surfaceBindings?.[key];
-    cached.set(key,original!==undefined&&JSON.stringify(original)===JSON.stringify(current));
+    const sameSource=original!==null||key==='original'||key===doc.source?.files?.[doc.source.reviewSource];
+    cached.set(key,sameSource&&original!==undefined&&JSON.stringify(original)===JSON.stringify(current));
   }
   return cached.get(key);
 }

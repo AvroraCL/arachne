@@ -221,6 +221,15 @@ def main(config):
             rgb = [int(override['color'][i:i+2], 16) / 255 for i in (1, 3, 5)]
             linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in rgb]
             pbr['baseColorFactor'] = linear + [pbr.get('baseColorFactor', [1, 1, 1, 1])[3]]
+        if override.get('mark'):
+            key = override['mark']['coverage']
+            overlay = Image.open(io.BytesIO(checked(config['marks'][key],key))).convert('RGBA')
+            rgb = pbr.get('baseColorFactor',[1,1,1,1])
+            color = tuple(round(255*(12.92*v if v<=.0031308 else 1.055*v**(1/2.4)-.055)) for v in rgb[:3])
+            base = Image.new('RGB',overlay.size,color)
+            base.paste(overlay,mask=overlay.getchannel('A'))
+            pbr['baseColorTexture'] = append_texture(scene,binary,png_bytes(base),'Projected mark')
+            pbr['baseColorFactor'] = [1,1,1,rgb[3]]
         for key in ('metallic', 'roughness'):
             if key in override:
                 pbr[key + 'Factor'] = override[key]

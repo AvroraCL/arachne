@@ -6,7 +6,7 @@ import {embedGltf} from './gltf-embed.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
-import {PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,meshMapOperation,livePaintInput,savePaintText,previewImageText,importPaintFont,paintFontFile,restorePaint,imageDocumentInput,imageEdgeViewInput,imageClipboardInput,imageExportInput,imageLayoutProbeInput,bakeImageLayers,captureImageCloneSource,sampleImageSelection,checkPaintPreview,validateProjectPaint} from './paint.mjs';
+import {placeSourceMark,PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,meshMapOperation,livePaintInput,savePaintText,previewImageText,importPaintFont,paintFontFile,restorePaint,imageDocumentInput,imageEdgeViewInput,imageClipboardInput,imageExportInput,imageLayoutProbeInput,bakeImageLayers,captureImageCloneSource,sampleImageSelection,checkPaintPreview,validateProjectPaint} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {assetPreview} from './asset-preview.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
@@ -397,6 +397,12 @@ const server=http.createServer(async(req,res)=>{
       if(req.method!=='POST'){send(res,405,{error:'方法不支持'});return;}
       const b=await body(req);
       doc=read(id);
+      if(operation==='source-mark'){
+        const controller=new AbortController();
+        res.on('close',()=>{if(!res.writableEnded)controller.abort();});
+        const result=await placeSourceMark(doc,b,{signal:controller.signal});
+        if(!res.destroyed)send(res,200,result);return;
+      }
       if(operation==='commands'){
         const changesRenderVisibility=b.revision===doc.revision&&Array.isArray(b.operations)&&b.operations.length<=128&&b.operations.some(op=>op?.op==='renderVisibility');
         const sourceVisibility=changesRenderVisibility?(renderSceneObjects(doc)).visibility:undefined;

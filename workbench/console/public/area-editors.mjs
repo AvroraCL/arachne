@@ -87,8 +87,11 @@ export function registerAreaEditors(registry,bridge){
       if(!hasAssetDrag(event.dataTransfer))return;event.preventDefault();
       const dragged=readAssetDrag(event.dataTransfer,project.document);if(!dragged){ctx.error(Error('素材所属工程或修订已变化，请重新拖动'));return;}
       if(modeler.isDragging()||painter.isEditing()){ctx.error(Error('请先结束当前操作'));return;}
-      const hit=viewport.pickTargetUV(event.clientX,event.clientY);if(!hit){ctx.error(Error('请把贴花放在目标材质的可见表面'));return;}
+      const hit=viewport.pickTargetUV(event.clientX,event.clientY,true);if(!hit){ctx.error(Error('请把贴花放在目标材质的可见表面'));return;}
       const origin=project.origin(),selected=project.layerId,name=project.document.paint.assets[dragged.id].name,projector=painter.projectorAt(hit);setMode('view');
+      if(hit.sourceMaterial){
+        void bridge.placeSourceMark(origin,hit.sourceMaterial,dragged.id,projector).catch(ctx.error);return;
+      }
       void bridge.validateSurface(hit,origin).then(()=>project.commands([{op:'add',kind:'decal',patch:{image:dragged.id,name,projector}}],origin)).then(doc=>{
         const added=doc.paint.layers.at(-1);if(!disposed&&project.document?.id===origin.id&&project.layerId===selected&&project.document.paint.layers.some(l=>l.id===added?.id))project.selectLayer(added.id);
       }).catch(ctx.error);

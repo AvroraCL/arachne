@@ -37,6 +37,8 @@ ZIP_END = struct.Struct('<4s4H2LH')
 ZIP_END_MARKER = b'PK\x05\x06'
 ZIP64_LOCATOR = b'PK\x06\x07'
 MAX_ENTRIES = 32768
+# Historical registrations share the existing 1 GiB project import budget.
+MAX_HISTORY_BYTES = 1024 * MIB
 
 
 def require(condition, message='涂装 ZIP 的可编辑清单无效'):
@@ -136,11 +138,23 @@ def unpack_registration(archive, report, output, entries, uv_digest):
 
     hashes = report['fileSha256']
     geometry = report['editable']['geometry']
+    meta = json.loads(read_checked(archive, 'registration/metadata.json', MIB, entries['registration/metadata.json']),
+                      object_pairs_hook=unique_object)
+    history = meta.get('history', [])
+    require(isinstance(history, list) and all(isinstance(s, str) and re.fullmatch('[a-f0-9]{64}', s) for s in history)
+            and len(set(history)) == len(history), '历史投影模型清单无效')
+    historical = {f'registration/history/{s}/{name.split("/")[-1]}': limit
+                  for s in history for name, limit in REGISTRATION_LIMITS.items()}
+    require(all(entries.get(f'registration/history/{s}/model.glb') == s for s in history), '历史投影模型指纹不一致')
     preserved = set(entries) == set(REGISTRATION_LIMITS) | set(PRESERVED_SURFACE_LIMITS)
     limits = {**REGISTRATION_LIMITS,**PRESERVED_SURFACE_LIMITS} if preserved else REGISTRATION_LIMITS
+    limits = {**limits, **historical}
     require(set(entries) == set(limits) and
             entries['registration/model.glb'] == geometry['modelSha256'],
             '原生交付包的登记文件不一致')
+    require(set(historical) <= set(archive.namelist()), '工程副本缺少历史投影登记文件')
+    require(sum(archive.getinfo(member).file_size for member in historical) <= MAX_HISTORY_BYTES,
+            '工程副本的历史投影登记文件超过 1 GiB')
     folder = output / 'registration'
     folder.mkdir()
     for member, limit in limits.items():
@@ -152,6 +166,15 @@ def unpack_registration(archive, report, output, entries, uv_digest):
         destination.write_bytes(read_checked(archive, member, limit*MIB, digest))
     meta = json.loads((folder/'metadata.json').read_bytes(), object_pairs_hook=unique_object)
     require((meta.get('legacySurface') is True) == preserved, '迁移后的原绘制表面缺失')
+    for sha in history:
+        historical_folder = folder/'history'/sha
+        old = json.loads((historical_folder/'metadata.json').read_bytes(), object_pairs_hook=unique_object)
+        frame = json.loads((historical_folder/'registration.json').read_bytes(), object_pairs_hook=unique_object)
+        require(old['source_sha256'] == sha and old['material'] == geometry['material'] and
+                old['uv_before'] == old['uv_after'] == uv_digest and
+                Model(historical_folder/'model.glb').uv_digest() == uv_digest and
+                set(frame['settings']['designs']) == set(frame['cameras']['views']) == {'top'},
+                '历史投影表面的模型、材质、原 UV 或投影机位不一致')
     if preserved:
         record = json.loads((folder/'surface/cache/geometry_report.json').read_bytes(),object_pairs_hook=unique_object)
         require(record['legacy_uv_sha256'] == meta['legacyUvSha256'] and
@@ -225,6 +248,9 @@ def pack_project(config):
     expected = {**config.get('expected',{}),
                 **{name: item['sha256'] for name,item in report.get('textureOutput',{}).get('files',{}).items()}}
     total_assets = 0
+    require(sum(Path(source).stat().st_size for name, source in config['files'].items()
+                if name.startswith('registration/history/')) <= MAX_HISTORY_BYTES,
+            '工程副本的历史投影登记文件超过 1 GiB')
     output = Path(config['out']) / 'project.zip'
     with ZipFile(output, 'x', ZIP_DEFLATED, compresslevel=3) as archive:
         for name, source in config['files'].items():

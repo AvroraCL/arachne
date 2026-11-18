@@ -1,6 +1,7 @@
 import {blenderExecutable,blenderScriptArgs} from './blender-runtime.mjs';
 import {pythonExecutable} from './python-runtime.mjs';
 import {registeredViewportModel,viewportManifest} from './viewport.mjs';
+import {historicalSource} from './model-registration.mjs';
 import {pinSurfaceInputs} from './paint-surface-bindings.mjs';
 import {modelFingerprint,validateModelState,verifyModelStepTargets} from './model-binding.mjs';
 export {modelFingerprint,validateModelState,nativeModelSteps} from './model-binding.mjs';
@@ -61,8 +62,9 @@ export function modelGeometry(doc,{legacyScene=false}={}){
   }catch(error){return {...item,status:'failed',error:error.message,invalid:true};}
 }
 function referenceDocuments(doc){
-  return Object.entries(doc.paint?.surfaceBindings||{}).filter(([,state])=>state!==null)
-    .map(([key,state])=>[key,{...doc,modeling:state}]);
+  return Object.entries(doc.paint?.surfaceBindings||{}).filter(([key])=>key!=='original')
+    .map(([key,state])=>[key,{...doc,modeling:state,source:doc.source.format==='glb'
+      ?historicalSource(doc.source,state?.modelSha256??key):doc.source}]);
 }
 export function modelGeometryStatus(doc){
   const current=modelGeometry(doc);
@@ -86,7 +88,7 @@ export async function preparePaintGeometry(doc,options={}){
   if(options.legacyScene&&doc.source.format==='glb')throw Error('GLB 工程支持路径追踪出图、GLB 和贴图导出');
   const baseline=doc.source.format==='glb'?await prepareModelGeometry({...doc,modeling:undefined},{...options,frozen:true}):null;
   const current=baseline&&!modelFingerprint(doc)?baseline:await prepareModelGeometry(doc,options),surfaceSources={};
-  const entry=(key,source)=>({source,bindingFingerprint:digest([doc.source.files,key])});
+  const entry=(key,source)=>({source,bindingFingerprint:digest([source.files,key])});
   surfaceSources.original=entry('original',baseline?.source||doc.source);
   if(modelFingerprint(doc))surfaceSources[modelFingerprint(doc)]=entry(modelFingerprint(doc),current.source);
   await Promise.all(referenceDocuments(doc).map(async([key,snapshot])=>{

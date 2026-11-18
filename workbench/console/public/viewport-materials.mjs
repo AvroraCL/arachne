@@ -23,7 +23,8 @@ export function createUnlitMaterial(source) {
 
 export function applySourceFactors(material,factors){
   if(!factors)return;
-  if(factors.color!==undefined)material.color.set(factors.color);
+  if(material.userData.markApplied)material.color.set(0xffffff);
+  else if(factors.color!==undefined)material.color.set(factors.color);
   if('metalness' in material){
     if(factors.metallic!==undefined)material.metalness=factors.metallic;
     if(factors.roughness!==undefined)material.roughness=factors.roughness;
@@ -89,4 +90,24 @@ export function fillLivePaintTextures(pixels, size, maps, solo = null) {
       emission[j+3] = 255;
     }
   }
+}
+
+// A source-material mark uses a transparent, original-UV pigment map. Preserve
+// the source roughness, metalness and optical settings on the same material.
+export async function applySurfaceMarks(root,records,urlFor){
+  const byName=new Map();
+  root.traverse(node=>{if(node.isMesh)for(const material of [node.material].flat()){
+    if(records?.[material.name]?.mark){if(!byName.has(material.name))byName.set(material.name,new Set());byName.get(material.name).add(material);}
+  }});
+  await Promise.all([...byName].map(async([name,materials])=>{
+    const factors=records[name],image=await new THREE.ImageLoader().loadAsync(urlFor(factors.mark.coverage));
+    for(const material of materials){
+      if(material.map)throw Error('附属材质标记当前支持纯色底材：'+name);
+      material.userData.sourceBaseColor='#'+material.color.getHexString();
+      const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+      const ctx=canvas.getContext('2d');ctx.fillStyle=factors.color||'#'+material.color.getHexString();ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(image,0,0);material.map=new THREE.CanvasTexture(canvas);material.map.flipY=false;
+      material.map.colorSpace=THREE.SRGBColorSpace;material.color.set(0xffffff);material.userData.markApplied=true;
+    }
+  }));
 }

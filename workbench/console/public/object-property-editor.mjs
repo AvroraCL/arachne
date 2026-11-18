@@ -36,6 +36,9 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
     inputs[key]=row(surfaceBody,title,input);
   }
   const restore=el('button','','恢复源材质'),materialMessage=el('output','editor-message');
+  const markName=row(surfaceBody,'投影标记',el('span','render-settings-readout'));
+  const removeMark=el('button','','移除标记');removeMark.type='button';removeMark.onclick=()=>saveMaterial({mark:null});
+  surfaceBody.append(removeMark);
   restore.type='button';restore.onclick=()=>saveMaterial(null);surfaceBody.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
   let targetKey='',pending=false,lastStatus=null,materialPending=false;
   slot.addEventListener('change',()=>refresh());
@@ -81,6 +84,8 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
         if(!materialPending&&(updateInputs||document.activeElement!==input))input.value=patch?.[key]??base[key];
         input.disabled=!!locked;
       }
+      markName.parentElement.hidden=!patch?.mark;removeMark.hidden=!patch?.mark;removeMark.disabled=!!locked;
+      markName.textContent=project.document.paint.assets[patch?.mark?.image]?.name||'';
       restore.disabled=!!locked||!patch;slot.disabled=!!locked||slots.length===1;
     }
     const disabled=!current||pending||scene?.dragging||scene?.mode!=='object';

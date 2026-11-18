@@ -114,10 +114,34 @@ async function verifyModelUpdate(){
   ];
   const glb=await fs.readFile(doc.source.reviewSource);
   const registered=JSON.parse(glb.toString('utf8',20,20+glb.readUInt32LE(12)));
-  const authored=await api(path+'/model',{revision:restored.revision,modeling:{
+  const modeled=await api(path+'/model',{revision:restored.revision,modeling:{
     version:2,binding:oldManifest.key,modelSha256:oldManifest.modelSha256,
     steps,nativeSteps:nativeModelSteps(registered,steps,topology)
   }});
+  const authored=await api(path+'/commands',{revision:modeled.revision,operations:[
+    {op:'update',id:painted.paint.layers[0].id,patch:{maskBase:0,values:{...painted.paint.base,color:'#dec04a'}}},
+    {op:'stroke',target:'mask',id:painted.paint.layers[0].id,stroke:{
+      radius:.12,opacity:1,hardness:.9,value:1,stamps:[[.30,0,.225,0,0,1]]
+    }}
+  ]});
+  const mark=authored.paint.layers[0].maskStrokes[0];
+  assert.deepEqual(authored.paint.surfaceBindings[mark.surfaceBinding],modeled.modeling);
+  async function projectedPixels(doc){
+    const job=await api(path+'/preview',{revision:doc.revision,requestId:'surface-'+doc.revision});
+    const bake=await until(async()=>{
+      const result=await api('/api/projects/'+doc.id+'/jobs/'+job.id);
+      if(result.status==='failed')throw Error(result.error);
+      return result.status==='completed'&&result;
+    });
+    const pixels=Buffer.from(await (await fetch(origin+bake.colorUrl)).arrayBuffer());
+    await fs.writeFile(pathToBake,pixels);
+    const sample=JSON.parse(execFileSync(pythonExecutable(),['-c',
+      "from PIL import Image;import json,sys;im=Image.open(sys.argv[1]);print(json.dumps([im.getpixel((2048,2048)),im.getpixel((320,320))]))",pathToBake],{encoding:'utf8'}));
+    assert.notDeepEqual(sample[0],sample[1]);
+    return digest(pixels);
+  }
+  const pathToBake=fixture+'.png';
+  const beforePixels=await projectedPixels(authored);
   const revised=sampleModel(true,.16).bytes;
   const conflict=Buffer.from(revised);
   conflict.writeFloatLE(.5,conflict.length-model.binary.length+4);
@@ -131,6 +155,7 @@ async function verifyModelUpdate(){
   const response=await update(authored.revision,revised);
   assert.equal(response.status,200);
   const edited=await response.json();
+  assert.equal(await projectedPixels(edited),beforePixels);
   assert.equal(edited.revision,authored.revision+1);
   assert.equal(edited.source.material,doc.source.material);
   assert.equal(edited.source.uvSha256,doc.source.uvSha256);

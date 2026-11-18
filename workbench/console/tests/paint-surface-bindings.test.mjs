@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {projectionIsCurrent} from '../public/paint-surface-state.mjs';
-import {pinSurfaceInputs,surfaceBindingKey,validateSurfaceBindings} from '../paint-surface-bindings.mjs';
+import {encodeStrokeBlock,unpackStrokeBlock} from '../stroke-compaction.mjs';
+import {freezeOriginalBinding,pinSurfaceInputs,surfaceBindingKey,validateSurfaceBindings} from '../paint-surface-bindings.mjs';
 
 const modeling=distance=>{
   const matrix=[1,0,0,0,0,1,0,0,0,0,1,0,distance,0,0,1];
@@ -53,4 +54,20 @@ test('a retained decal hides its old world-space gizmo until repositioned on cur
   pinSurfaceInputs(moved,{reproject:['number']});
   const committed=structuredClone(moved);
   assert.equal(projectionIsCurrent(committed,committed.paint.layers[0]),true);
+});
+
+test('replacing a GLB separates old original-space marks and compact brush blocks from new placements',()=>{
+  const oldSha='c'.repeat(64),layer={kind:'decal',id:'old'},mark={image:'calibration'};
+  const stroke={radius:.12,hardness:1,opacity:1,value:1,stamps:[[0,0,0,0,0,1]],surfaceBinding:'original'};
+  const masks={kind:'paint',maskStrokes:[encodeStrokeBlock([stroke])]};
+  const doc={paint:{layers:[layer,masks],sourceMaterials:{cover:{mark}}}};
+  pinSurfaceInputs(doc);
+  freezeOriginalBinding(doc.paint,oldSha);
+  const fresh={kind:'decal',id:'new'};doc.paint.layers.push(fresh);
+  pinSurfaceInputs(doc);validateSurfaceBindings(doc.paint);
+  assert.equal(fresh.surfaceBinding,'original');
+  assert.equal(mark.surfaceBinding,oldSha);
+  assert.equal(layer.surfaceBinding,oldSha);
+  assert.equal(projectionIsCurrent(doc,layer),false);
+  assert.deepEqual(unpackStrokeBlock(masks.maskStrokes[0],{mask:true,spatial:true}),[{...stroke,surfaceBinding:oldSha}]);
 });

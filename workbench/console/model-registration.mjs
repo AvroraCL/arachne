@@ -7,6 +7,7 @@ import {ROOT,DATA,atomic,forkProject,commit} from './store.mjs';
 import {pythonExecutable} from './python-runtime.mjs';
 import {sha256File} from './file-fingerprint.mjs';
 import {validateModelState,verifyModelStepTargets} from './model-binding.mjs';
+import {freezeOriginalBinding} from './paint-surface-bindings.mjs';
 import {channelSpecs} from './public/paint-channels.mjs';
 
 const execute=promisify(execFile);
@@ -17,13 +18,30 @@ const preservedSurfaceFiles=[
   'surface/guides/cameras.json','surface/guides/surfaces.npz',
   ...['receiver','protected','silhouette'].map(name=>'surface/guides/top/'+name+'.png')
 ];
-export const glbRegistrationFiles=(legacySurface=false)=>legacySurface?[...coreRegistrationFiles,...preservedSurfaceFiles]:coreRegistrationFiles;
+export function glbRegistrationFiles(legacySurface=false,history=[]){
+  if(!Array.isArray(history)||history.some(sha=>typeof sha!=='string'||!/^[a-f0-9]{64}$/.test(sha))||
+     new Set(history).size!==history.length)throw Error('历史投影模型清单无效');
+  return [...coreRegistrationFiles,...(legacySurface?preservedSurfaceFiles:[]),
+    ...history.flatMap(sha=>coreRegistrationFiles.map(file=>'history/'+sha+'/'+file))];
+}
 
-export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput,previousModel,targetMaterial,positionReplay}={}){
+// A frozen projection owns its registration cameras as well as its mesh. Rebuild
+// its derived UV caches from these same inputs after a portable project restore.
+export function historicalSource(source,sha){
+  if(sha===source.files[source.reviewSource])return source;
+  if(!source.history?.includes(sha))throw Error('缺少投放时的历史 GLB');
+  const folder=path.join(path.dirname(source.reviewSource),'history',sha);
+  const file=name=>path.join(folder,name);
+  return {...source,history:undefined,reviewSource:file('model.glb'),baseImage:file('base.png'),
+    cacheRun:file('surface/cache'),bundle:file('surface/guides'),
+    files:Object.fromEntries(coreRegistrationFiles.map(name=>[file(name),source.files[file(name)]]))};
+}
+
+export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput,previousModel,targetMaterial,positionReplay,markedMaterials}={}){
   const staging=path.join(scratch,'registration');
   const config=path.join(scratch,'input.json');
   await fs.mkdir(staging);
-  atomic(config,{input,out:staging,material,textureOutput,previousModel,targetMaterial,positionReplay,ownerPid:process.pid});
+  atomic(config,{input,out:staging,material,textureOutput,previousModel,targetMaterial,positionReplay,markedMaterials,ownerPid:process.pid});
   try{
     await execute(python,['-X','utf8',path.join(ROOT,'model_surface.py'),'register',config],
       {cwd:ROOT,windowsHide:true,timeout:180000});
@@ -86,8 +104,7 @@ export async function updateProjectGlb(doc,revision,input,scratch){
   if(doc.revision!==revision)throw Object.assign(Error('工程已改变，请重新选择模型'),{status:409});
   if(doc.workflowType!=='pbr_paint'||doc.source.format!=='glb'||doc.source.preservedSurface)
     throw Error('此入口适用于原生 GLB 涂装工程');
-  if(Object.values(doc.paint.surfaceBindings||{}).some(Boolean))
-    throw Error('有投影涂装绑定到历史建模表面；请先将相关涂装修订为 UV 内容再更新模型');
+  const oldSha=doc.source.files[doc.source.reviewSource];
   const modeling=doc.modeling;
   if(modeling){
     validateModelState(modeling);
@@ -100,10 +117,27 @@ export async function updateProjectGlb(doc,revision,input,scratch){
   const lastPosition=modeling?.steps.findLastIndex(step=>step.type==='vertexPositions')??-1;
   const positionReplay=lastPosition<0?undefined:modeling.steps.slice(0,lastPosition+1);
   const staging=await registerGlb(input,scratch,{
-    previousModel:doc.source.reviewSource,targetMaterial:doc.source.material,positionReplay
+    previousModel:doc.source.reviewSource,targetMaterial:doc.source.material,positionReplay,
+    markedMaterials:Object.entries(doc.paint.sourceMaterials||{}).filter(([,m])=>m.mark).map(([name])=>name)
   });
   const metadata=JSON.parse(await fs.readFile(path.join(staging,'metadata.json'),'utf8'));
   if(metadata.source_sha256===doc.source.files[doc.source.reviewSource])throw Error('所选模型与当前工程相同');
+  const history=new Set(Object.entries(doc.paint.surfaceBindings||{}).map(([key,state])=>
+    state?.modelSha256??(key==='original'?oldSha:key)));
+  history.delete(metadata.source_sha256);
+  if(history.size){
+    metadata.history=[...history].sort();
+    for(const sha of metadata.history){
+      const frozen=historicalSource(doc.source,sha),dest=path.join(staging,'history',sha);
+      await fs.mkdir(dest,{recursive:true});
+      for(const name of coreRegistrationFiles){
+        const from=path.join(path.dirname(frozen.reviewSource),name),to=path.join(dest,name);
+        await fs.copyFile(from,to,fs.constants.COPYFILE_FICLONE);
+        if(await sha256File(to)!==frozen.files[from])throw Error('历史投影模型的登记文件已改变');
+      }
+    }
+    atomic(path.join(staging,'metadata.json'),metadata);
+  }
   let rebound;
   if(modeling){
     const sha=metadata.source_sha256;
@@ -113,6 +147,7 @@ export async function updateProjectGlb(doc,revision,input,scratch){
   // The author is changing geometry. Keep the registered painting base, including imported images.
   await fs.copyFile(doc.source.baseImage,path.join(staging,'base.png'));
   return installGlbRegistration(staging,registered=>commit(doc.id,revision,next=>{
+    freezeOriginalBinding(next.paint,oldSha);
     next.source=registered.source;
     if(rebound)next.modeling=rebound;
     return next;
@@ -124,8 +159,8 @@ export async function describeGlbRegistration(folder,id,files=folder){
   const source={format:'glb',bindingVersion:2,reviewSource:path.join(folder,'model.glb'),baseImage:path.join(folder,'base.png'),
     bundle:path.join(cache,'guides'),cacheRun:path.join(cache,'cache'),material:meta.material,uvSha256:meta.uv_before,
     ...(meta.legacySurface===true?{preservedSurface:true}:{}),
-    files:{}};
-  for(const file of glbRegistrationFiles(meta.legacySurface===true))
+    ...(meta.history?.length?{history:meta.history}:{}),files:{}};
+  for(const file of glbRegistrationFiles(meta.legacySurface===true,meta.history))
     source.files[path.join(folder,file)]=await sha256File(path.join(files,file));
   return {id,schemaVersion:1,workflowType:'pbr_paint',canvas:{width:4096,height:4096},source,
     layers:[],assets:{},fonts:{},guides:{},basecoat:{color:meta.base.color},paint:{base:meta.base,layers:[],assets:{}}};

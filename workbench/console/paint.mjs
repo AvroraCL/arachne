@@ -66,8 +66,13 @@ function checkSourceMaterials(records,target,registered){
   if(!records||typeof records!=='object'||Array.isArray(records))throw Error('模型材质记录无效');
   for(const [name,factors] of Object.entries(records)){
     if(!name||['__proto__','constructor','prototype',target].includes(name)||registered&&!registered.includes(name))throw Error('无法编辑该模型材质');
-    fields(factors,['color','metallic','roughness']);
-    if(!Object.keys(factors).length||Object.entries(factors).some(([key,value])=>key==='color'?!color(value):!unit(value)))throw Error('模型材质参数无效');
+    fields(factors,['color','metallic','roughness','mark']);
+    if(factors.mark){
+      fields(factors.mark,['image','coverage','projector','surfaceBinding']);
+      if(typeof factors.mark.surfaceBinding!=='string'||!sha256(factors.mark.image)||!sha256(factors.mark.coverage))throw Error('投影标记素材无效');
+      checkProjector(factors.mark.projector);
+    }
+    if(!Object.keys(factors).length||Object.entries(factors).some(([key,value])=>key==='mark'?!value:key==='color'?!color(value):!unit(value)))throw Error('模型材质参数无效');
   }
 }
 const supportsBlend=(channel,blend)=>channelBlendChoices(channel).some(([mode])=>mode===blend);
@@ -328,6 +333,7 @@ function checkedSceneCursor(position){
 function validate(doc,{unpackBlocks=false,checkPending=true}={}){
   if(doc.paint.sceneCursor!==undefined)checkedSceneCursor(doc.paint.sceneCursor);
   validateObjectNames(doc.paint.objectNames);
+  for(const {mark} of Object.values(doc.paint.sourceMaterials||{}))if(mark&&(!asset(doc,mark.image)||!asset(doc,mark.coverage)))throw Error('缺少投影标记素材');
   if(doc.paint.sourceMaterials!==undefined)checkSourceMaterials(doc.paint.sourceMaterials,doc.source?.material);
   if(doc.paint.renderVisibility!==undefined)checkRenderVisibility(doc.paint.renderVisibility);
   if(doc.paint.renderCamera!==undefined)checkedRenderCamera(doc.paint.renderCamera);
@@ -482,7 +488,14 @@ function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
       if(next.source.format!=='glb'||!names.includes(o.name)||o.name===next.source.material)throw Error('无法编辑该模型材质');
       const records={...p.sourceMaterials};
       if(patch===null)delete records[o.name];
+      else if(patch?.mark===null){
+        fields(patch,['mark']);
+        if(!records[o.name]?.mark)throw Error('该材质没有投影标记');
+        records[o.name]={...records[o.name]};delete records[o.name].mark;
+        if(!Object.keys(records[o.name]).length)delete records[o.name];
+      }
       else{
+        fields(patch,['color','metallic','roughness']);
         checkSourceMaterials({[o.name]:patch},next.source.material,names);
         records[o.name]={...records[o.name],...patch};
       }
@@ -1393,6 +1406,10 @@ function registrationFingerprint(source){
       if(relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep))
         return prefix+'/'+relative.split(path.sep).join('/');
     }
+    if(source.format==='glb'){
+      const relative=path.relative(path.dirname(source.reviewSource),file).split(path.sep).join('/');
+      if(relative.startsWith('history/'))return relative;
+    }
     return 'registered/'+path.basename(file);
   };
   const files=Object.entries(source.files).map(([file,digest])=>[role(file),digest]);
@@ -1493,6 +1510,10 @@ export async function restorePaint(archive,scratch){
   }
   const restore=async source=>{
     if(sourceMaterials)checkSourceMaterials(sourceMaterials,source.source.material,renderSceneObjects(source).materials);
+    if(source.source.format==='glb')for(const [key,state] of Object.entries(paint.surfaceBindings||{})){
+      const sha=state?.modelSha256??(key==='original'?geometry.modelSha256:key);
+      if(sha!==geometry.modelSha256&&!source.source.history?.includes(sha))throw Error('工程副本缺少投放时的历史模型');
+    }
     const doc=paintTemplate(source,paint);
     if(manifest.modeling){
       validateModelState(manifest.modeling);
@@ -1550,7 +1571,7 @@ async function prepareEditableFiles(doc,out,files){
 function prepareRegistrationFiles(source,files){
   if(source.format!=='glb')return null;
   const registration={};
-  for(const name of glbRegistrationFiles(source.preservedSurface)){
+  for(const name of glbRegistrationFiles(source.preservedSurface,source.history)){
     const file=path.join(path.dirname(source.reviewSource),name),member='registration/'+name;
     const digest=source.files[file];
     if(!sha256(digest))throw Error('缺少可恢复的 GLB 登记文件');
@@ -1647,7 +1668,7 @@ async function writePaintGlb(doc,{bake,input,model,out,stage,j,run,python,signal
   }));
   const activeChannels=(bake.activeChannels||Object.keys(maps)).filter(channel=>Object.hasOwn(maps,channel));
   await run('glb-input',{model,maps,activeChannels,out,material:doc.source.material,revision:doc.revision,
-    modeling:doc.modeling,sourceMaterials:doc.paint.sourceMaterials,verifyNativeUV:doc.source.format==='glb'},python,['-X','utf8',path.join(ROOT,'paint_glb.py')]);
+    modeling:doc.modeling,sourceMaterials:doc.paint.sourceMaterials,marks:Object.fromEntries(Object.values(doc.paint.sourceMaterials||{}).filter(m=>m.mark).map(({mark})=>[mark.coverage,assetPath(doc,mark.coverage)])),verifyNativeUV:doc.source.format==='glb'},python,['-X','utf8',path.join(ROOT,'paint_glb.py')]);
   return {sha256:await sha256File(out,{signal}),activeChannels};
 }
 
@@ -1661,6 +1682,7 @@ async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,upda
   const active=report.activeChannels||legacyChannels;
   const applied=['color','metallic','roughness','normal','emission','alpha'].filter(name=>active.includes(name));
   const files=Object.fromEntries(applied.map(name=>['/input/'+name+'.png',path.join(input,channelSpecs[name].file)]));
+  for(const {mark} of Object.values(doc.paint.sourceMaterials||{}))if(mark)files['/input/mark-'+mark.coverage+'.png']=assetPath(doc,mark.coverage);
   files['/input/model.glb']=model.file;
   stage(j,'路径追踪渲染冻结修订');
   const result=await renderPathTrace({
@@ -1883,4 +1905,27 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
       renderUrl:url('delivery/frame/render.png'),materialUrl:url('delivery/materials.json'),validationUrl:url('delivery/project-report.json'),
       ...(render.exrSha256?{outputUrl:url('delivery/frame/render.exr'),outputSha256:render.exrSha256}:{})});
   }finally{await fsp.rm(pending,{recursive:true,force:true});}
+}
+
+// A mark on a secondary material uses the same surface projector, then keeps
+// its alpha in that material's own UV space. Its mesh and source PNG stay editable.
+export async function placeSourceMark(doc,{revision,name,image,projector},{signal}={}){
+  if(revision!==doc.revision)throw revisionError(doc);
+  if(doc.source.format!=='glb'||doc.source.material===name||!renderSceneObjects(doc).materials.includes(name)||!asset(doc,image))
+    throw Error('请选择原生 GLB 的附属材质和工程中的 PNG');
+  checkProjector(projector);
+  const scratch=await fsp.mkdtemp(path.join(projectDir(doc.id),'mark-'));
+  try{
+    const input=path.join(scratch,'input.json'),output=path.join(scratch,'mark.png');
+    atomic(input,{model:doc.source.reviewSource,steps:doc.modeling?.steps||[],name,projector,image:assetPath(doc,image),output});
+    try{await renderTextFile(pythonExecutable(),['-X','utf8',path.join(ROOT,'source_material_mark.py'),input],{signal,windowsHide:true});}
+    catch(error){signal?.throwIfAborted();throw Error(error.stderr?.trim()||'投影标记计算失败');}
+    const png=describePng(doc,await fsp.readFile(output),name+' · 标记覆盖',64);
+    return commit(doc.id,revision,next=>{
+      ensurePaintAsset(next,png);next.paint.assets[png.entry.id]=png.entry;
+      next.paint.sourceMaterials??={};
+      next.paint.sourceMaterials[name]={...next.paint.sourceMaterials[name],mark:{image,coverage:png.entry.id,projector}};
+      pinSurfaceInputs(next);validate(next);return next;
+    },'投放材质标记');
+  }finally{await fsp.rm(scratch,{recursive:true,force:true});}
 }

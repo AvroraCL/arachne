@@ -84,6 +84,10 @@ def register(config):
             raise ValueError('物体层级、网格或材质槽已改变。请从同一源稿导出并保持原有名称和顺序')
         if previous.uv_digest() != uv_digest:
             raise ValueError('三角形索引或原 UV 已改变。请保留拓扑与 UV 后再更新，或另建工程')
+        marked = set(config.get('markedMaterials') or [])
+        for material in model.scene['materials']:
+            if material['name'] in marked and 'baseColorTexture' in material.get('pbrMetallicRoughness', {}):
+                raise ValueError(f'「{material["name"]}」已使用附属材质标记，请保留纯色底材或先移除标记')
         if config.get('positionReplay'):
             # Use scratch models: registration must store the unedited new GLB.
             replay = Model(incoming, registration=True)
@@ -184,7 +188,7 @@ def adjacency(points, uv, normals, objects, labels):
     return neighbors,np.asarray(pairs,dtype=np.int32).reshape(-1,2),np.asarray(seams,dtype=np.uint8)
 
 
-def map_material(file, points, uv, protected_faces, selection, baseline):
+def material_atlas(points, uv, protected_faces, selection, baseline=None):
     res = 4096
     owner = np.full((res,res),-1,dtype=np.int32)
     xyz_map = np.zeros((res,res,3),dtype=np.float32)
@@ -218,7 +222,11 @@ def map_material(file, points, uv, protected_faces, selection, baseline):
             np.maximum(collision,original['collision'],out=collision)
     if not (owner>=0).any():
         raise ValueError('目标材质没有可烘焙的 UV 像素')
-    np.savez_compressed(file,owner=owner,xyz=xyz_map,collision=collision,protected=protected)
+    return dict(owner=owner,xyz=xyz_map,collision=collision,protected=protected)
+
+
+def map_material(file, points, uv, protected_faces, selection, baseline):
+    np.savez_compressed(file, **material_atlas(points, uv, protected_faces, selection, baseline))
 
 
 def build(config, out, model):

@@ -21,7 +21,7 @@
 
 ![Mavic 4 Pro 整机外观习作](docs/images/mavic-4-pro.webp)
 
-**DJI Mavic 4 Pro 外观习作（精修版）**。机身按纵向截面放样，三摄共用开孔面框，镜片、消光内壁和金属电机罩分别赋材质。工程带有可编辑的机壳粗糙度蒙版、整机和云台两个机位。几何依据公开照片估形。 [官方外观参考](https://www.dji.com/mavic-4-pro) · [镜组特写](docs/images/mavic-4-pro-optics.webp) · [侧盖与主摄凹槽返工对照](docs/images/mavic-4-pro-modeled-update.webp) · [建模源稿](examples/mavic-4-pro-studio) · [可编辑工程 ZIP](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/mavic-4-pro-studio.zip)
+**DJI Mavic 4 Pro 外观习作（精修版）**。机身按纵向截面放样，三摄共用开孔面框，镜片、消光内壁和金属电机罩分别赋材质。工程带有可编辑的机壳粗糙度蒙版、整机和云台两个机位。几何依据公开照片估形。 [官方外观参考](https://www.dji.com/mavic-4-pro) · [镜组特写](docs/images/mavic-4-pro-optics.webp) · [侧盖投影标记与镜座返工对照](docs/images/mavic-4-pro-projection-update.webp) · [建模源稿](examples/mavic-4-pro-studio) · [可编辑工程 ZIP](https://raw.githubusercontent.com/AvroraCL/arachne/main/examples/mavic-4-pro-studio.zip)
 
 ![汐羽 04 海岸巡检机](docs/images/tidewing-04.webp)
 

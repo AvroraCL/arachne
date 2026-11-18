@@ -218,7 +218,7 @@ for(const [,x,y,w,h,r] of cameras){
 extrude('Optics · one-piece recessed face','bezel',face,.55,.12,[0,30,78.42]);
 for(const [n,x,y,w,h,r,rad] of cameras){
  // Recess only the main camera seat; its front opening and lens stack stay concentric.
- const inset=n==='Hasselblad'?1.8:0;
+ const inset=n==='Hasselblad'?2.5:0;
  const outline=rounded(w-.05,h-.05,r).getSpacedPoints(80);
  // Front shoulder flows from the squared shade into the circular lens seat.
  add(n+' · bevelled lens shade','baffle',sheet(6,80,(v,u)=>{
