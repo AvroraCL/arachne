@@ -100,6 +100,12 @@ export function setupPaintAreas(hooks){
     colorKey:(key,target)=>changeImageColors(()=>key==='x'?imagePalette.swap(target):imagePalette.reset(target))};
   const registry=createEditorRegistry({decorate:ctx=>{ctx.root.querySelectorAll('select').forEach(select=>{enhanceSelectMenu(select);if(select.hidden)select.closest('.custom-select').hidden=true;});for(const input of ctx.root.querySelectorAll('input[type=number]')){input.dataset.scrubNumber='';input.dataset.scrubSpeed??=input.max==='1'?'.01':'1';}}});
   const bridge={imageColors,materialStrokes,readStrokeProject:hooks.readStrokeProject,strokeSaveSettled:hooks.strokeSaveSettled,
+    pickedSurface:()=>preferredViewport?.pickedSurface()||null,
+    inspectSource:target=>{
+      const view=visibleEditors.includes(preferredViewport)&&preferredViewport.isReady()?preferredViewport:
+        visibleEditors.find(editor=>editor.kind==='viewport'&&editor.isReady());
+      return view?.viewport.sourceMaterial(target)||null;
+    },
     saveStateChanged:hooks.saveStateChanged,legacyCameraProject:hooks.legacyCameraProject,renderSettings:hooks.renderSettings,renderResults:hooks.renderResults,openMaterial:layerId=>{if(areas.switchWorkspace('material')){project.selectLayer(layerId);project.setEditorDomain('material');}},renderProperties:hooks.renderProperties,propertyKey:hooks.propertyKey,propertyTarget:hooks.propertyTarget,parking,busy:hooks.busy,foreground:hooks.foreground,setForeground:hooks.setForeground,maskInk:hooks.maskInk,setMaskInk:hooks.setMaskInk,colorKey:hooks.colorKey,colorPair:hooks.colorPair,setColor:hooks.setColor,preferences:hooks.preferences,viewAsset:hooks.viewAsset,
     importPersonal:async(item,libraryRevision)=>{const origin=project.origin();if(!origin)throw Error('请先打开工程');const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id}));if(project.document?.id!==origin.id)throw Error('资源已导入原工程，请打开原工程查看');project.publish(result.document);return result;},
     createSelection:createUVSelection,openImageText:hooks.openImageText,
@@ -186,12 +192,15 @@ export function setupPaintAreas(hooks){
       }
     }
   };
+  project.subscribe(event=>{
+    if(event.kind==='selection'||event.kind==='resource')preferredViewport?.clearSurfacePick();
+  });
   registerAreaEditors(registry,bridge);
   const areas=createAreaWorkspace({host:workspace,registry,project,initial:hooks.initial,restoreActive:hooks.restoreActive!==false,desktopWorkspace:hooks.desktopWorkspace,
     onSaveState:hooks.saveStateChanged,
     canChange:()=>!hooks.busy()&&!materialStrokes.size&&!document.querySelector('dialog[open]')&&!hooks.imageEditing(),
     onVisibleEditors:editors=>{visibleEditors=editors;updateMaterialDemand();},
-    onActivate:instance=>{if(instance?.domain)project.setEditorDomain(instance.domain);if(instance?.kind==='viewport'){preferredViewport=instance;project.setEditorDomain('material');}if(['viewport','image','uv'].includes(instance?.kind))preferredCanvas=instance;syncWorkspaceButtons();hooks.cameraChanged?.();},onWorkspace:()=>{project.setEditorDomain(areas.name==='drawing'?'image':'material');syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name);hooks.remember();}
+    onActivate:instance=>{if(instance?.domain)project.setEditorDomain(instance.domain);if(instance?.kind==='viewport'){const changed=preferredViewport!==instance;preferredViewport=instance;project.setEditorDomain('material');if(changed)project.notifyView('surfacePick');}if(['viewport','image','uv'].includes(instance?.kind))preferredCanvas=instance;syncWorkspaceButtons();hooks.cameraChanged?.();},onWorkspace:()=>{project.setEditorDomain(areas.name==='drawing'?'image':'material');syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name);hooks.remember();}
   });
   function syncWorkspaceButtons(){for(const b of document.querySelectorAll('[data-area-mode]'))b.setAttribute('aria-pressed',String(b.dataset.areaMode===areas.name));}
   for(const b of document.querySelectorAll('[data-area-mode]'))b.onclick=()=>{if(areas.switchWorkspace(b.dataset.areaMode)){syncWorkspaceButtons();hooks.remember();}};

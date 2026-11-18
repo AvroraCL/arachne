@@ -2,12 +2,60 @@ import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 
+function row(parent,label,control){const item=el('label','render-settings-row');item.dataset.search=label;item.append(el('span','',label),control);parent.append(item);return control;}
+
+// Both the object inspector and the viewport pick edit the same GLB material.
+export function createSourceMaterialFields(sourceControls,project,readTarget,error){
+  const inputs={};
+  for(const [key,title] of [['color','底色'],['metallic','金属度'],['roughness','粗糙度']]){
+    const input=el('input');input.type=key==='color'?'color':'number';
+    if(key!=='color'){input.min='0';input.max='1';input.step='any';}
+    input.setAttribute('aria-label','模型材质'+title);
+    input.addEventListener('change',()=>save({[key]:key==='color'?input.value:input.valueAsNumber}));
+    inputs[key]=row(sourceControls,title,input);
+  }
+  const restore=el('button','','恢复源材质'),materialMessage=el('output','editor-message');
+  const markName=row(sourceControls,'投影标记',el('span','render-settings-readout'));
+  const removeMark=el('button','','移除标记');removeMark.type='button';removeMark.onclick=()=>save({mark:null});
+  sourceControls.append(removeMark);
+  restore.type='button';restore.onclick=()=>save(null);sourceControls.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
+  let shown=null,pending=false;
+  function sameTarget(a,b){
+    return !!a&&!!b&&a.projectId===b.projectId&&a.binding===b.binding&&a.name===b.name;
+  }
+  function sync(force=false){
+    const target=readTarget(),changed=!sameTarget(target,shown);
+    if(changed)materialMessage.textContent='';
+    shown=target;
+    const patch=project.document?.paint.sourceMaterials?.[target?.name];
+    const locked=pending||!target||target.locked;
+    for(const [key,input] of Object.entries(inputs)){
+      if(target&&(force||changed||document.activeElement!==input))input.value=patch?.[key]??target[key];
+      input.disabled=!!locked;
+    }
+    markName.parentElement.hidden=removeMark.hidden=!patch?.mark;
+    markName.textContent=project.document?.paint.assets[patch?.mark?.image]?.name||'';
+    removeMark.disabled=!!locked;restore.disabled=!!locked||!patch;
+  }
+  async function save(patch){
+    if(pending)return;
+    const target=readTarget(),origin=project.origin();
+    if(!sameTarget(target,shown)||target.locked||target.projectId!==origin?.id){
+      sync(true);error(Error('材质目标已变化，请重新选择'));return;
+    }
+    pending=true;sync();materialMessage.textContent='正在保存…';
+    try{await project.commands([{op:'sourceMaterial',name:target.name,patch}],origin);materialMessage.textContent='';}
+    catch(failure){materialMessage.textContent=failure.message;error(failure);}
+    finally{pending=false;sync(true);}
+  }
+  return {sync};
+}
+
 // Object edits use the same modeler and project revision as the 3D viewport.
 export function createObjectPropertyEditor({host,project,state={},onChange,error,getTarget,getPaintSelection,openPaintLayers}){
   const root=el('div','object-property-editor'),info=el('details','render-settings-section');root.tabIndex=-1;info.open=true;
   info.append(el('summary','','物体'));const infoBody=el('div','render-settings-body');info.append(infoBody);
   const name=el('span','render-settings-readout'),position=el('span','object-position');
-  function row(parent,label,control){const item=el('label','render-settings-row');item.dataset.search=label;item.append(el('span','',label),control);parent.append(item);return control;}
   row(infoBody,'名称',name);row(infoBody,'世界位置',position);
   const transform=el('details','render-settings-section');transform.open=state.transformOpen!==false;
   transform.addEventListener('toggle',()=>onChange());transform.append(el('summary','','变换增量'));
@@ -33,33 +81,14 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
   const paintLayer=row(paintControls,'当前图层',el('span','render-settings-readout'));
   const editLayer=el('button','','查看图层属性');editLayer.type='button';editLayer.onclick=openPaintLayers;
   paintControls.append(editLayer);surfaceBody.append(paintControls,sourceControls);
-  const inputs={};
-  for(const [key,title] of [['color','底色'],['metallic','金属度'],['roughness','粗糙度']]){
-    const input=el('input');input.type=key==='color'?'color':'number';
-    if(key!=='color'){input.min='0';input.max='1';input.step='any';}
-    input.setAttribute('aria-label','模型材质'+title);
-    input.addEventListener('change',()=>saveMaterial({[key]:key==='color'?input.value:input.valueAsNumber}));
-    inputs[key]=row(sourceControls,title,input);
-  }
-  const restore=el('button','','恢复源材质'),materialMessage=el('output','editor-message');
-  const markName=row(sourceControls,'投影标记',el('span','render-settings-readout'));
-  const removeMark=el('button','','移除标记');removeMark.type='button';removeMark.onclick=()=>saveMaterial({mark:null});
-  sourceControls.append(removeMark);
-  restore.type='button';restore.onclick=()=>saveMaterial(null);sourceControls.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
-  let targetKey='',pending=false,lastStatus=null,materialPending=false;
+  let targetKey='',pending=false,lastStatus=null;
   slot.addEventListener('change',()=>refresh());
-  async function saveMaterial(patch){
-    if(materialPending)return;
-    const target=getTarget(),origin=project.origin(),scene=project.scene;
-    if(!origin||target?.projectId!==origin.id||target.binding!==scene?.binding||
-      !scene.inspectObject(target.id)?.materials?.some(item=>!item.painted&&item.name===slot.value)){
-      refresh();error(Error('物体材质目标已变化，请重新选择'));return;
-    }
-    const name=slot.value;materialPending=true;refresh();materialMessage.textContent='正在保存…';
-    try{await project.commands([{op:'sourceMaterial',name,patch}],origin);materialMessage.textContent='';}
-    catch(failure){materialMessage.textContent=failure.message;error(failure);}
-    finally{materialPending=false;refresh(undefined,true);}
-  }
+  const sourceEditor=createSourceMaterialFields(sourceControls,project,()=>{
+    const target=getTarget(),scene=project.scene;
+    if(!target||target.projectId!==project.document?.id||target.binding!==scene?.binding)return null;
+    const base=scene.inspectObject(target.id)?.materials.find(item=>item.name===slot.value&&!item.painted);
+    return base&&{...base,projectId:target.projectId,binding:target.binding,locked:scene.dragging||scene.mode!=='object'};
+  },error);
   body.addEventListener('submit',event=>{
     event.preventDefault();if(pending)return;
     const target=getTarget(),origin=project.document,scene=project.scene,values=fields.map(input=>input.valueAsNumber);
@@ -70,11 +99,11 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
       if(restoreFocus&&!root.closest('[hidden]')&&(document.activeElement===document.body||root.contains(document.activeElement)))root.focus({preventScroll:true});
     }).catch(failure=>{message.textContent=failure.message;error(failure);}).finally(()=>{pending=false;refresh();});
   });
-  function refresh(status,updateInputs=false){
+  function refresh(status){
     if(status!==undefined)lastStatus=status;
     const target=getTarget(),key=JSON.stringify(target),scene=project.scene;
     const targetChanged=key!==targetKey;
-    if(targetChanged){targetKey=key;reset();message.textContent='';materialMessage.textContent='';}
+    if(targetChanged){targetKey=key;reset();message.textContent='';}
     const current=lastStatus?.info||null;name.textContent=current?.label||'—';
     position.textContent=current?current.position.map((value,index)=>'XYZ'[index]+' '+Number(value.toFixed(4))).join('  '):'—';
     const slots=current?.materials||[];
@@ -85,7 +114,7 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
         const previous=slot.value;slot.replaceChildren(...names.map(name=>new Option(name,name)));
         if(names.includes(previous))slot.value=previous;
       }
-      const base=slots.find(item=>item.name===slot.value),patch=project.document.paint.sourceMaterials?.[slot.value];
+      const base=slots.find(item=>item.name===slot.value);
       const painted=!!base.painted;
       surfaceTitle.textContent=painted?'涂装材质':'原模型材质';
       slot.closest('label').hidden=slots.length===1;
@@ -97,15 +126,9 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
         paintLayer.textContent=(layer?.name||'全 UV 底层')+(selected.target==='mask'?' · 蒙版':'');
         editLayer.textContent=selected.openWorkspace?'打开材质工作区':'查看图层属性';
       }
-      const locked=materialPending||scene?.dragging||scene?.mode!=='object';
-      for(const [key,input] of Object.entries(inputs)){
-        if(!painted&&(targetChanged||updateInputs||document.activeElement!==input))input.value=patch?.[key]??base[key];
-        input.disabled=painted||!!locked;
-      }
-      markName.parentElement.hidden=!patch?.mark;removeMark.hidden=!patch?.mark;removeMark.disabled=!!locked;
-      markName.textContent=project.document.paint.assets[patch?.mark?.image]?.name||'';
-      restore.disabled=!!locked||!patch;slot.disabled=!!locked||slots.length===1;
+      slot.disabled=scene?.dragging||scene?.mode!=='object'||slots.length===1;
     }
+    sourceEditor.sync();
     const disabled=!current||pending||scene?.dragging||scene?.mode!=='object';
     apply.disabled=!!disabled;apply.title=scene?.mode==='edit'?'请先切换到物体模式':'';
     for(const input of fields)input.disabled=!!disabled;tool.disabled=space.disabled=!!disabled;syncSelectMenu(tool);syncSelectMenu(space);

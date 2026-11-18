@@ -479,6 +479,30 @@ async function verifyObjectMaterialNavigation(id){
     await until(async()=>await roughness.inputValue()==='0.6');
     console.log('PASS source roughness edit changes the picked surface pixel, full material and undo restore');
     console.log('PASS object properties follow painted and original surfaces without exposing the previous material');
+    await page.locator('[data-area-mode=material]').click();
+    await viewport.waitFor();
+    const materialBox=await viewport.boundingBox(),properties=page.locator('.editor-area[data-editor=properties]');
+    const pickSurface=(u,v)=>page.mouse.click(materialBox.x+u*materialBox.width,materialBox.y+v*materialBox.height);
+    const original=properties.locator('.surface-properties');
+    const before=await api('/api/projects/'+id);
+    await pickSurface(.5,.74);
+    const sourceRough=original.getByRole('spinbutton',{name:'模型材质粗糙度'});
+    await sourceRough.waitFor();
+    assert.ok((await original.innerText()).includes('表面材料'));
+    assert.equal(await properties.locator('.editor-properties').isVisible(),false);
+    await sourceRough.fill('0.22');await sourceRough.press('Enter');
+    await until(async()=>(await api('/api/projects/'+id)).paint.sourceMaterials?.['表面材料']?.roughness===.22);
+    assert.deepEqual((await api('/api/projects/'+id)).paint.base,before.paint.base);
+    await pickSurface(.55,.48);
+    await properties.locator('.editor-properties').waitFor();
+    await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
+    await until(async()=>JSON.stringify((await api('/api/projects/'+id)).paint)===JSON.stringify(before.paint));
+    await pickSurface(.5,.74);await sourceRough.waitFor();
+    await until(async()=>await sourceRough.inputValue()==='0.6',5000);
+    await page.getByRole('button',{name:'全 UV 底层',exact:true}).click();
+    await properties.locator('.editor-properties').waitFor();
+    assert.equal(await original.isVisible(),false);
+    console.log('PASS clicking a source in the material workspace edits that material and preserves the paint-layer target on undo');
   }finally{await page.close();}
 }
 

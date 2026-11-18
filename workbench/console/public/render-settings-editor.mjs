@@ -30,9 +30,13 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     const target=state.pins[key];if(target&&typeof target==='object'&&!Array.isArray(target))pins[key]=structuredClone(target);
   }
   let materialResource=null;
-  const capture=category=>capturePropertyTarget(category,project,()=>materialResource?{kind:'resource',resourceId:materialResource}:adapters.propertyTarget());
+  const capture=category=>capturePropertyTarget(category,project,()=>{
+    if(materialResource)return {kind:'resource',resourceId:materialResource};
+    const picked=adapters.pickedSurface();
+    return picked&&!picked.painted&&picked.projectId===project.document?.id?{...picked,kind:'source'}:adapters.propertyTarget();
+  });
   const target=category=>pins[category]||capture(category);
-  const status=category=>propertyTargetStatus(category,project,target(category));
+  const status=category=>propertyTargetStatus(category,project,target(category),adapters.inspectSource);
   const panels={},openSections={};
   function section(category,key,title,defaultOpen=true){
     const group=el('details','render-settings-section');group.dataset.category=category;group.dataset.searchTitle=title;
@@ -601,7 +605,7 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     for(const [category,nodes] of Object.entries(generic))for(const node of nodes){
       const miss=!!query&&!searchText(node).includes(query);
       node.toggleAttribute('data-property-search-miss',miss);
-      if(category===active&&!node.hidden&&!miss)matched++;
+      if(category===active&&!node.closest('[hidden]')&&!miss)matched++;
     }
     frame.empty.hidden=!activeStatus.available||!query||matched>0;
     frame.footer.hidden=!!query||!['render','output'].includes(active)||!activeStatus.available;
@@ -615,13 +619,15 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   });
   function observe(event){
     if(observed&&observed.project!==(project.document?.id||null))materialResource=null;
-    if(event?.kind==='selection')materialResource=null;
+    const surfacePick=event?.kind==='view'&&event.source==='surfacePick';
+    if(event?.kind==='selection'||surfacePick)materialResource=null;
     else if(event?.kind==='resource'&&project.resource?.library==='materials')materialResource=project.resource.id;
     else if(event?.kind==='resource'&&!project.resource)materialResource=null;
     const next=selectionKeys(),previous=observed;observed=next;
     if(previous&&next.project===previous.project){
       let changed=null;
-      if(event?.kind==='scene'&&next.object!==previous.object&&capture('object'))changed='object';
+      if(surfacePick&&adapters.pickedSurface())changed='material';
+      else if(event?.kind==='scene'&&next.object!==previous.object&&capture('object'))changed='object';
       else if(event?.kind==='imageSelection'&&(event.force||next.drawing!==previous.drawing)&&capture('drawing'))changed='drawing';
       else if(event?.kind==='resource'&&materialResource&&(event.force||next.material!==previous.material))changed='material';
       else if((event?.kind==='selection'||event?.kind==='sync')&&(event.force||next.material!==previous.material))changed='material';

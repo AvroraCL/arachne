@@ -1,3 +1,4 @@
+import {createSourceMaterialFields} from './object-property-editor.mjs';
 import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
@@ -181,7 +182,8 @@ export function registerAreaEditors(registry,bridge){
       textureMessage=text;
       if(kind==='error'||view.dataset.state!=='ready')status.textContent=text;
       else if(!inModeling()&&!placement)status.textContent=frame?'实时材质':text;
-    },onModelingPick:event=>{if(mode==='object'||mode==='edit'){modeler.pick(event);return true;}return false;}});
+    },onSelect:()=>project.notifyView('surfacePick'),
+    onModelingPick:event=>{if(inModeling()){modeler.pick(event);return true;}return mode!=='view';}});
     const regionGesture=createRenderRegionGesture({host:view,signal,read:()=>project.document?.paint.renderRegion,
       origin:project.origin,commit:(region,origin)=>project.commands([{op:'renderRegion',region}],origin),
       changed:syncCameraFrame,error:ctx.error});
@@ -484,6 +486,7 @@ export function registerAreaEditors(registry,bridge){
       if(next!==mode)setMode(next);
     }
     function setMode(next){
+      if(next!==mode&&mode==='view'&&viewport.pickedSurface()){viewport.select(null);project.notifyView('surfacePick');}
       if(modeler.isDragging()||painter.isEditing()){modes.value=mode;syncSelectMenu(modes);return;}
       marquee.cancel();cursorMenu.close();selectionMenu.close();meshMenu.close();
       modeGeneration++;mode=next;modes.value=next;picking=false;pickerMessage='';syncSelectMenu(modes);painter.setMode(['paint','mask','fill','place'].includes(mode)?mode:'orbit');
@@ -651,7 +654,9 @@ export function registerAreaEditors(registry,bridge){
     });
     setMode(mode);viewportControllers.set(ctx.areaId,publishScene);
     viewport.setActive(true);void sync().catch(ctx.error);
-    return {kind:'viewport',viewport,showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
+    return {kind:'viewport',viewport,pickedSurface:()=>!disposed&&shown&&mode==='view'?viewport.pickedSurface():null,
+      clearSurfacePick(){if(!disposed&&viewport.pickedSurface())viewport.select(null);},
+      showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
       editCommand(name){if(name==='undo'&&painter.isEditing())return painter.cancel({preserveMode:true});},
       getState(){rememberView();return {mode,element:component.value,tool:tool.value,orientation:orientation.value,pivot:transformPivot.value,
         ...display.getState(),projectViews:projectViews.snapshot()};},
@@ -709,9 +714,32 @@ export function registerAreaEditors(registry,bridge){
       void ctx.project.travel(event.shiftKey?'redo':'undo').catch(ctx.error);
     });
     form.addEventListener('property-section-change',ctx.onChange);
-    ctx.host.append(form);let key='',first=true;
+    const sourcePanel=el('div','surface-properties editor-scroll'),section=el('details','render-settings-section property-section');
+    section.open=true;section.append(el('summary','','原模型材质'));
+    const sourceBody=el('div','render-settings-body'),fields=el('div');
+    function nameRow(label){
+      const row=el('div','render-settings-row'),value=el('span','render-settings-readout');
+      row.append(el('span','',label),value);sourceBody.append(row);return value;
+    }
+    const objectName=nameRow('物体'),materialName=nameRow('材质'),unavailable=el('p','object-property-hint','原模型材质参数当前不可用');
+    sourceBody.append(fields,unavailable);section.append(sourceBody);sourcePanel.append(section);sourcePanel.hidden=true;
+    function picked(){
+      if(scopeTarget){const target=scopeTarget();return target?.kind==='source'?target:null;}
+      const target=bridge.pickedSurface();return target&&!target.painted&&target.projectId===ctx.project.document?.id?target:null;
+    }
+    const sourceEditor=createSourceMaterialFields(fields,ctx.project,()=>{
+      const target=picked();return target&&bridge.inspectSource(target);
+    },ctx.error);
+    ctx.host.append(form,sourcePanel);let key='',first=true;
     const sync=()=>{
       if(!ctx.project.document)return;
+      const surface=picked();form.hidden=!!surface;sourcePanel.hidden=!surface;
+      if(surface){
+        objectName.textContent=surface.objectName;objectName.parentElement.hidden=!surface.objectName||surface.objectName===surface.name;
+        materialName.parentElement.firstChild.textContent=surface.name===surface.objectName?'物体 / 材质':'材质';
+        materialName.textContent=surface.name;unavailable.hidden=!!bridge.inspectSource(surface);fields.hidden=!unavailable.hidden;
+        sourceEditor.sync();return;
+      }
       const scope=scopeTarget?.();if(scopeTarget&&!scope){if(key){form.replaceChildren();key='';}return;}
       const next=JSON.stringify(scopeTarget?[ctx.project.document.id,ctx.project.document.revision,scope]:bridge.propertyKey());if(next===key)return;key=next;
       const scroll=first?ctx.state.scroll||0:form.scrollTop,focused=form.contains(document.activeElement);first=false;
@@ -736,7 +764,7 @@ export function registerAreaEditors(registry,bridge){
   registry.register('scene',ctx=>createSceneEditor(ctx));
   registry.register('renderResult',ctx=>createRenderResultEditor(ctx,bridge.renderResults));
   registry.register('renderSettings',ctx=>createRenderSettingsEditor(ctx,bridge.renderSettings,{
-    propertyTarget:bridge.propertyTarget,busy:bridge.busy,openMaterial:bridge.openMaterial,
+    propertyTarget:bridge.propertyTarget,pickedSurface:bridge.pickedSurface,inspectSource:bridge.inspectSource,busy:bridge.busy,openMaterial:bridge.openMaterial,
     material:(host,state,scope)=>materialProperties({...ctx,host,state},scope),
     drawing:(host,tools,root,project)=>createImagePanel('properties',{...ctx,host,tools,root,project,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment,pickAdjustmentColor:bridge.pickAdjustmentColor})
   }));

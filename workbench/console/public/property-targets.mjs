@@ -4,6 +4,7 @@ export function validPropertyTarget(category,target){
   if(category==='render'||category==='output')return true;
   if(category==='object')return (typeof target.id==='number'&&Number.isFinite(target.id)||typeof target.id==='string'&&!!target.id)&&typeof target.binding==='string'&&!!target.binding;
   const hasLayer=Object.hasOwn(target,'layerId')&&(target.layerId===null||typeof target.layerId==='string'&&!!target.layerId);
+  if(category==='material'&&target.kind==='source')return typeof target.name==='string'&&!!target.name&&typeof target.binding==='string'&&!!target.binding;
   if(category==='material')return target.kind==='resource'?typeof target.resourceId==='string'&&!!target.resourceId:hasLayer&&['material','mask'].includes(target.target);
   if(category==='drawing')return hasLayer&&typeof target.documentId==='string'&&!!target.documentId&&['pixels','mask'].includes(target.target);
   return false;
@@ -18,6 +19,7 @@ export function capturePropertyTarget(category,project,materialSelection){
   }
   if(category==='material'){
     const selected=materialSelection?.()||{layerId:project.layerId};
+    if(selected.kind==='source')return {kind:'source',projectId:doc.id,binding:selected.binding,name:selected.name,objectName:selected.objectName};
     if(selected.kind==='resource'&&selected.resourceId)return {projectId:doc.id,kind:'resource',resourceId:selected.resourceId};
     return {projectId:doc.id,layerId:selected.layerId??null,target:selected.target==='mask'?'mask':'material'};
   }
@@ -28,7 +30,7 @@ export function capturePropertyTarget(category,project,materialSelection){
   return null;
 }
 
-export function propertyTargetStatus(category,project,target){
+export function propertyTargetStatus(category,project,target,inspectSource){
   const doc=project.document;
   if(!doc)return {available:false,reason:'请先打开工程'};
   if(!target)return {available:false,reason:category==='object'?'请在物体模式中选择物体':category==='drawing'?'请选择图像文档或绘制图层':'没有可用的属性目标'};
@@ -44,6 +46,10 @@ export function propertyTargetStatus(category,project,target){
     return {available:false,reason:scene.sceneItems?.some(item=>item.id===target.id)?'请切换到物体模式以查看此物体':'固定的物体已不存在'};
   }
   if(category==='material'){
+    if(target.kind==='source'){
+      if(doc.source?.files?.[doc.source.reviewSource]!==target.binding)return {available:false,reason:'原模型已更新，请重新选择材质'};
+      return inspectSource?.(target)?{available:true,type:'原模型材质',name:target.name}:{available:false,reason:'请在就绪的三维视口中查看原模型材质'};
+    }
     if(target.kind==='resource'){
       const resource=doc.paint.materials?.[target.resourceId];
       return resource?{available:true,type:'材质资源',name:resource.name,resource}:{available:false,reason:'固定的材质资源已不存在'};

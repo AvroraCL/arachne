@@ -25,3 +25,13 @@ test('base and image-document targets remain distinct from selected layers',()=>
   delete project.document.paint.materials.coat;assert.match(propertyTargetStatus('material',project,material).reason,/不存在/);
   assert.match(propertyTargetStatus('material',project,{projectId:'p',target:'material'}).reason,/无效/,'an invalid pin cannot fall back to the base');
 });
+
+test('pinned original materials resolve by project, GLB and name after a different surface is picked', () => {
+  const project={document:{id:'project',source:{reviewSource:'mesh',files:{mesh:'model-a'}},paint:{layers:[]}}};
+  const target=capturePropertyTarget('material',project,()=>({kind:'source',name:'Ring',binding:'model-a',objectName:'Front'}));
+  const lookup=t=>t.name==='Ring'&&t.binding==='model-a';
+  assert.equal(propertyTargetStatus('material',project,target,lookup).name,'Ring');
+  assert.equal(propertyTargetStatus('material',project,target,()=>null).available,false);
+  project.document.source.files.mesh='replacement';
+  assert.equal(propertyTargetStatus('material',project,target,lookup).available,false);
+});
