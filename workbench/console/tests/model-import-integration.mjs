@@ -597,6 +597,15 @@ async function verifyRenderedSurfacePicking(id){
       return [el.dataset.renderPhase,+el.dataset.renderSamples,Math.min(+el.dataset.renderSamples,...window.sampleCounts)];
     });
     assert.deepEqual([phase,samples,minimum],['ready',originalSamples,originalSamples]);
+    const screen=view.locator('canvas').first();
+    for(let i=0;i<3;i++)await screen.press('c');
+    await view.and(page.locator('[data-inspected-channel=roughness]')).waitFor();
+    const box=await view.boundingBox();
+    assert.deepEqual(await pixelAt(page,Math.floor(box.x+box.width*.55),Math.floor(box.y+box.height*.48)),[153,153,153]);
+    await pickFront();
+    await page.locator('.surface-properties:visible').getByText('表面材料',{exact:true}).waitFor();
+    await screen.press('m');
+    await view.and(page.locator('[data-shading=cycles][data-render-phase=ready]:not([data-inspected-channel])')).waitFor({timeout:90000});
     await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
     await until(async()=>JSON.stringify((await api('/api/projects/'+id)).paint)===JSON.stringify(flags.paint));
     await pickFront();

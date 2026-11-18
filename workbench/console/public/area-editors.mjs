@@ -160,7 +160,7 @@ export function registerAreaEditors(registry,bridge){
     for(const axis of ['X','Y','Z']){const i=el('input');Object.assign(i,{type:'number',step:'any',value:state.tool==='scale'?'1':'0'});i.setAttribute('aria-label','变换 '+axis);axes.push(i);const l=el('label','',axis);l.append(i);numeric.append(l);}
     const apply=button('应用',()=>{});apply.type='submit';numeric.append(apply);numeric.onsubmit=e=>{e.preventDefault();try{modeler.applyNumeric(axes.map(i=>i.valueAsNumber));view.querySelector('canvas')?.focus({preventScroll:true});}catch(error){ctx.error(error);}};
     const previewBar=el('div','editor-preview-status'),resolution=el('output'),retry=button('重试预览',()=>{
-      if(display.mode==='cycles')syncRenderPreview(true);else void bridge.retryPreview().catch(ctx.error);
+      if(display.mode==='cycles'&&!display.channel)syncRenderPreview(true);else void bridge.retryPreview().catch(ctx.error);
     });
     const pauseCycles=button('暂停路径追踪',()=>{
       cyclesPaused=!cyclesPaused;
@@ -170,7 +170,7 @@ export function registerAreaEditors(registry,bridge){
     function syncCyclesControl(){
       const icon=cyclesPaused?'play':'pause',label=cyclesPaused?'继续路径追踪':'暂停路径追踪';
       if(pauseCycles.getAttribute('aria-label')!==label){chromeButton(pauseCycles,icon,label);pauseCycles.title=label;}
-      pauseCycles.hidden=display.mode!=='cycles';
+      pauseCycles.hidden=display.mode!=='cycles'||!!display.channel;
       pauseCycles.disabled=view.dataset.state!=='ready';
     }
     const exitInspection=button('',bridge.clearMaterialInspection),pickerStatus=el('span','material-picker-status');
@@ -387,7 +387,7 @@ export function registerAreaEditors(registry,bridge){
       const doc=project.document;
       const enabled=shown&&display?.mode==='cycles'&&doc?.id===projectId&&view.dataset.state==='ready';
       const sampling=bridge.renderSettings?.readViewportSampling?.()||viewportSamplingDefaults;
-      const suspended=enabled&&(!!bridge.materialPreview().inspection||modeler.isDragging()||painter.isEditing()||marquee.isDragging());
+      const suspended=enabled&&(!!display.channel||!!bridge.materialPreview().inspection||modeler.isDragging()||painter.isEditing()||marquee.isDragging());
       const rig=enabled&&display.projectLighting?{
         lighting:doc.paint.renderLighting||null,appearance:doc.paint.renderAppearance||null,
         transparent:bridge.renderSettings?.read().transparent===true,
@@ -402,7 +402,7 @@ export function registerAreaEditors(registry,bridge){
     function syncPreviewStatus(){
       syncCyclesControl();
       const {inspection,status:preview}=bridge.materialPreview(),cycles=viewport.renderPreviewState();
-      const rendered=display.mode==='cycles'&&cycles?.phase!=='off'&&cycles;
+      const rendered=display.mode==='cycles'&&!display.channel&&cycles?.phase!=='off'&&cycles;
       const textured=!['solid','wire'].includes(display.mode);
       const label=rendered?cycles.text:textured?materialPreviewText(frame,inspection,preview,project.document?.revision):'';
       resolution.textContent=bridge.materialStrokes.size?`${label}${label?' · ':''}${bridge.materialStrokes.size} 笔待保存`:label;

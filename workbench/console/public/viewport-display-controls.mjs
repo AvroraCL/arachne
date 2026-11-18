@@ -53,7 +53,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     root.append(container);return container;
   };
   let mode=Object.hasOwn(modes,state.display)?state.display:'material',xray=state.xray===true,projectLighting=state.projectLighting!==false;
-  let channel=Object.hasOwn(channelSpecs,state.channelDisplay)?state.channelDisplay:'',channels=[];
+  let channel=(mode==='material'||mode==='cycles')&&Object.hasOwn(channelSpecs,state.channelDisplay)?state.channelDisplay:'',channels=[];
   let overlays=state.overlays!==false,gizmos=state.gizmos!==false,axis=state.axis!==false,transform=state.transformGizmo!==false;
   const gizmoGroup=group('操纵器');
   const gizmoButton=toggle('显示操纵器',icons.gizmos,()=>{gizmos=!gizmos;update();});
@@ -105,16 +105,18 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     pressed(gizmoButton,gizmos);pressed(overlayButton,overlays);pressed(xrayButton,canXray&&xray);
     xrayButton.disabled=!canXray;
     for(const [value,button] of buttons)pressed(button,mode===value);
-    channelSelect.value=mode==='material'?channel:'';syncSelectMenu(channelSelect);
+    channelSelect.value=channel;syncSelectMenu(channelSelect);
     renderSettings.hidden=useProject.hidden=mode!=='cycles';
     fields.hidden=mode==='cycles'&&projectLighting;
     view.dataset.shading=mode;
-    change({mode,channel:mode==='material'?channel:'',xray:canXray&&xray,overlays,axis:gizmos&&axis,transform:gizmos&&transform});
+    change({mode,channel,xray:canXray&&xray,overlays,axis:gizmos&&axis,transform:gizmos&&transform});
   }
   function update(){refresh();ctx.onChange();}
   function setChannel(next){
-    if(next&&!channels.includes(next)||mode==='material'&&channel===next)return;
-    mode='material';channel=next;update();onMode();
+    if(next&&!channels.includes(next))return;
+    const shading=mode==='cycles'?'cycles':'material';
+    if(mode===shading&&channel===next)return;
+    mode=shading;channel=next;update();onMode();
   }
   function setChannels(next){
     if(next.join(',')===channels.join(','))return;
@@ -128,7 +130,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     if(!['n','c','m'].includes(key)||event.defaultPrevented||event.repeat||event.isComposing||event.keyCode===229||event.altKey||event.metaKey||event.ctrlKey||
        event.target.closest('input,select,textarea,[contenteditable]')||document.querySelector('dialog[open],.custom-select-menu')||isEditing())return;
     if(key==='c'&&channels.length){
-      const at=mode==='material'?channels.indexOf(channel):-1;
+      const at=channels.indexOf(channel);
       const index=at<0?(event.shiftKey?channels.length-1:0):(at+(event.shiftKey?-1:1)+channels.length)%channels.length;
       event.preventDefault();event.stopPropagation();setChannel(channels[index]);return;
     }
@@ -138,7 +140,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     if(shadingMenu.details.open)shadingMenu.details.open=false;
     else openChromeMenu(shadingMenu.details);
   },{signal});
-  return {get mode(){return mode;},get channel(){return mode==='material'?channel:'';},get projectLighting(){return projectLighting;},refresh,setChannels,
+  return {get mode(){return mode;},get channel(){return channel;},get projectLighting(){return projectLighting;},refresh,setChannels,
     getState:()=>({display:mode,channelDisplay:channel,xray,overlays,gizmos,axis,transformGizmo:transform,projectLighting,scene:scene.getSettings()}),
     close(){for(const details of root.querySelectorAll('details[open]'))details.open=false;},
     dispose(){lifecycle.abort();scene.dispose();root.remove();}};
