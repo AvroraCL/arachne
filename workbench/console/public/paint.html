@@ -625,11 +625,13 @@
         <button id="clear-new-paint-model" type="button" hidden>使用模板</button>
         <input id="new-paint-model" type="file" accept=".svg,.glb,.gltf,.obj,.bin,.mtl,.png,.jpg,.jpeg,.webp" aria-label="选择模型与配套文件" multiple hidden>
       </div>
-      <fieldset id="new-profile-options" hidden><legend>轮廓挤出</legend>
+      <fieldset id="new-profile-options" hidden><legend>轮廓建模</legend>
         <label>部件<select id="new-profile-part" aria-label="挤出部件"></select></label>
         <canvas id="profile-preview" aria-label="轮廓试装预览"></canvas>
         <div class="profile-source"><label><input id="profile-isolate" type="checkbox">仅看当前部件</label><small>拖动旋转 · 滚轮缩放</small></div>
         <div class="profile-values">
+          <label>造型<select id="new-profile-form" aria-label="轮廓造型"><option value="extrude">平顶挤出</option><option value="dome">圆壳</option></select></label>
+          <label>俯仰角 °<input type="number" data-profile="pitch" step="any" aria-label="俯仰角"></label>
           <label>底部高度<input type="number" data-profile="base" step="any" aria-label="底部高度"></label>
           <label>厚度<input type="number" data-profile="depth" step="any" aria-label="厚度"></label>
           <label>倒角<input type="number" data-profile="bevel" step="any" aria-label="倒角"></label>

@@ -233,10 +233,20 @@ export function setupProjectFiles({canOpen,create,restore,notice}){
   syncSelectMenu(template);
   const profileOptions=byId('new-profile-options'),partPicker=byId('new-profile-part');
   const profileFields=[...profileOptions.querySelectorAll('[data-profile]')];
-  const isolate=byId('profile-isolate'),previewCanvas=byId('profile-preview');
+  const isolate=byId('profile-isolate');
+  let previewCanvas=byId('profile-preview');
   let profile=null,preview=null;
   function clearProfile(){
-    profile=null;preview?.dispose();preview=null;
+    profile=null;
+    if(preview){
+      preview.dispose();preview=null;
+      // dispose() releases the WebGL context. A second file needs a fresh canvas.
+      const next=previewCanvas.cloneNode(false);
+      next.removeAttribute('width');
+      next.removeAttribute('height');
+      previewCanvas.replaceWith(next);
+      previewCanvas=next;
+    }
   }
   function redraw(fit=false){
     if(!preview)return;
@@ -246,10 +256,21 @@ export function setupProjectFiles({canOpen,create,restore,notice}){
   }
   byId('new-paint-dialog').addEventListener('close',clearProfile);
   isolate.onchange=()=>redraw(true);
+  const formPicker=byId('new-profile-form');
   function showPart(){
     const part=profile?.parts[Number(partPicker.value)];
-    if(part)for(const input of profileFields)input.value=part[input.dataset.profile];
+    if(!part)return;
+    formPicker.value=part.form;
+    syncSelectMenu(formPicker);
+    for(const input of profileFields){
+      input.value=part[input.dataset.profile];
+      input.disabled=input.dataset.profile==='bevel'&&part.form==='dome';
+    }
   }
+  formPicker.onchange=()=>{
+    profile.parts[Number(partPicker.value)].form=formPicker.value;
+    showPart();redraw();
+  };
   partPicker.onchange=()=>{showPart();redraw(isolate.checked);};
   for(const input of profileFields)input.onchange=()=>redraw();
   for(const input of profileFields)input.oninput=()=>{

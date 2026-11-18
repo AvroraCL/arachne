@@ -302,6 +302,13 @@ async function verifyModelWorkflows(){
   await profileOptions.waitFor({state:'visible'});
   assert.equal(await profileOptions.getByLabel('厚度',{exact:true}).inputValue(),'6');
   assert.equal(Number(await profileOptions.getByLabel('倒角',{exact:true}).inputValue()),.7);
+  // A replacement SVG must also render on-screen after disposing the first context.
+  await page.waitForFunction(()=>{
+    const canvas=document.querySelector('#profile-preview');
+    return canvas.width===Math.floor(canvas.clientWidth*Math.min(devicePixelRatio,2))&&
+      !!canvas.getContext('webgl2')&&!canvas.getContext('webgl2').isContextLost()&&
+      !document.querySelector('#new-paint-error').textContent;
+  });
   await newDialog.getByRole('button',{name:'使用模板'}).click();
   await modelInput.setInputFiles({name:'not-a-model.glb',mimeType:'model/gltf-binary',buffer:Buffer.from('invalid')});
   await newDialog.getByText('请选择有效的 GLB 2.0 模型').waitFor();

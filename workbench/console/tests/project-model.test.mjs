@@ -157,3 +157,31 @@ test('a curved profile shares shading normals across the UV cuts while the cap s
   }
   assert.ok(flat>0&&seams>3);
 });
+
+test('a pitched round housing has a curved face, outward normals and a continuous meridian',()=>{
+  const outline=new Shape();
+  outline.absellipse(0,0,6,3,0,Math.PI*2,false,0);
+  const finish={name:'Lens',color:new Color('#304552'),base:12,depth:2,metalness:.4,roughness:.18,bevel:0,form:'dome',pitch:90};
+  const model=profileScene([{...finish,shapes:[outline]}]);
+  model.updateMatrixWorld(true);
+  const [lens]=model.children;
+  function frontAt(x){
+    return new Raycaster(new Vector3(x,.037,3),new Vector3(0,0,-1)).intersectObject(lens)[0];
+  }
+  const centre=frontAt(.04),rim=frontAt(1.6);
+  assert.ok(centre.point.z>rim.point.z+.1);
+  assert.ok(centre.normal.z>.98&&rim.normal.x>.12);
+  const {position,normal,uv}=lens.geometry.attributes;
+  const seam=new Map();
+  let pairs=0;
+  for(let i=0;i<position.count;i++){
+    if(Math.abs(uv.getX(i)-.01)>1e-5&&Math.abs(uv.getX(i)-.99)>1e-5)continue;
+    const point=new Vector3().fromBufferAttribute(position,i).toArray().map(v=>v.toFixed(5)).join(',');
+    const direction=new Vector3().fromBufferAttribute(normal,i);
+    if(seam.has(point)){assert.ok(direction.distanceTo(seam.get(point))<1e-5);pairs++;}
+    seam.set(point,direction);
+  }
+  assert.ok(pairs>=20);
+  outline.holes.push(new Path());
+  assert.throws(()=>profileScene([{...finish,shapes:[outline]}]),/无孔/);
+});
