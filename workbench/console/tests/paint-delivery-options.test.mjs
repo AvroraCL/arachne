@@ -2,9 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {normalizeDeliveryOptions,deliveryEditorValues,updateDeliveryOptions,captureDeliverySettings,captureRenderPreset,checkRenderPreset,createRenderPreferences,sameDeliveryCamera} from '../public/paint-delivery-options.mjs';
 import {cyclesOptions,resolvePaintRenderSettings} from '../cycles-options.mjs';
+import {pendingRenderFor} from '../public/paint-render-results.mjs';
 
 const camera={projection:'perspective',eye:[12,6,12],target:[0,0,0],up:[0,1,0],fov:38,orthoHeight:20};
 const advancedDefaults={device:'auto',adaptive:true,noiseThreshold:.01,maxBounces:12,transparent:false};
+test('a pending shot only covers the same revision, viewpoint and output settings',()=>{
+  const settings={width:1024,height:768,samples:96,maxBounces:8,transparent:false,device:'cpu',fileFormat:'PNG',bitDepth:8,camera};
+  const job={type:'paint-render',revision:8,status:'running',paintSettings:settings};
+  assert.equal(pendingRenderFor([job],8,structuredClone(settings)),job);
+  assert.equal(pendingRenderFor([job],9,settings),undefined);
+  for(const patch of [{camera:{...camera,eye:[12,4,12]}},{device:'auto'},{samples:32},{fileFormat:'OPEN_EXR',bitDepth:16}]){
+    assert.equal(pendingRenderFor([job],8,{...settings,...patch}),undefined);
+  }
+  assert.equal(pendingRenderFor([{...job,status:'completed'}],8,settings),undefined);
+});
 test('invalid persisted render preferences use supported defaults',()=>{
   assert.deepEqual(normalizeDeliveryOptions(null),{framing:'auto',size:'960x720',quality:'standard'});
   assert.deepEqual(normalizeDeliveryOptions({framing:'source',size:'4096x4096',quality:999}),normalizeDeliveryOptions({}));

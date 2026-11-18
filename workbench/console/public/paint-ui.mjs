@@ -2330,8 +2330,8 @@ async function pickProjectFocus(){
 const paintRenderResults=createPaintRenderResults({
   read:()=>({doc,jobs,busy}),run,post,settings:()=>deliveryEditorValues(effectiveDeliveryPreferences()),
   camera:()=>{
-    const {width,height,samples,camera,maxBounces,transparent}=captureRenderSettings();
-    return {width,height,samples,camera,maxBounces,transparent};
+    const {width,height,samples,camera,maxBounces,transparent,device}=captureRenderSettings();
+    return {width,height,samples,camera,maxBounces,transparent,device};
   },
   openSettings:()=>$('open-render-settings').click(),openExport:()=>$('open-delivery').click()
 });

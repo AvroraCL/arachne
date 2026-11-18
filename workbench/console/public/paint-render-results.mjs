@@ -2,11 +2,19 @@ import {cyclesProgressLabel} from './cycles-progress-ui.mjs';
 import {cyclesFormatLabel,showRenderDownload,showRenderPassDownload} from './render-output-ui.mjs';
 import {renderRegionPixels} from './render-region.mjs';
 import {setSelectValue} from './paint-select.mjs';
+import {sameDeliveryCamera} from './paint-delivery-options.mjs';
 
 const active=job=>['queued','running'].includes(job?.status);
 const canRetry=job=>['failed','cancelled','interrupted'].includes(job?.status);
 const statusLabels={queued:'排队中',running:'渲染中',completed:'已完成',cancelled:'已取消',failed:'失败',interrupted:'已中断'};
 const framingLabel={auto:'完整模型',viewport:'当前视口',saved:'工程渲染相机'};
+
+export function pendingRenderFor(jobs,revision,settings){
+  return jobs.find(job=>job.type==='paint-render'&&job.revision===revision&&active(job)&&
+    job.paintSettings&&sameDeliveryCamera(job.paintSettings.camera,settings.camera)&&
+    ['width','height','samples','maxBounces','transparent','device','fileFormat','bitDepth']
+      .every(key=>job.paintSettings[key]===settings[key]));
+}
 
 export function createPaintRenderResults({read,run,post,settings,camera,openSettings,openExport}){
   const $=id=>document.getElementById(id),dialog=$('paint-render-dialog'),error=$('paint-render-error');
@@ -48,7 +56,8 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     const region=renderRegionPixels(doc?.paint.renderRegion,values.width,values.height);
     $('paint-render-summary').textContent=`${values.width} × ${values.height} · ${values.samples} 次采样 · ${framing}`+
       (region?` · ${region.crop?'裁切':'区域渲染'} ${region.output.join(' × ')}`:'');
-    start.disabled=format.disabled=!doc||blocked||!!running;
+    start.disabled=format.disabled=!doc||blocked;
+    start.textContent=running?'加入渲染队列':'渲染当前修订';
     cancel.hidden=!active(selected);cancel.disabled=blocked;
     retry.hidden=!canRetry(selected);retry.disabled=blocked||!!running;
     const progress=active(selected)?selected.progress:null;
@@ -104,10 +113,12 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     try{await run(action,error);}finally{pending=false;sync();}
   }
   start.onclick=()=>act(async()=>{
-    const {doc}=read();
+    const {doc,jobs}=read();
     const output=format.value==='png'?{fileFormat:'PNG',bitDepth:8}:
       {fileFormat:'OPEN_EXR',bitDepth:format.value==='exr32'?32:16};
-    const job=await post('render',{requestId:crypto.randomUUID(),settings:{...camera(),...output}});
+    const requested={...camera(),...output};
+    const existing=pendingRenderFor(jobs,doc.revision,requested);
+    const job=existing||await post('render',{requestId:crypto.randomUUID(),settings:requested});
     if(doc.id===read().doc?.id)selectedId=job.id;
   });
   cancel.onclick=()=>act(()=>post('render-cancel',{jobId:current().id}));
