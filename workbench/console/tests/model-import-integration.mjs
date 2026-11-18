@@ -506,6 +506,57 @@ async function verifyObjectMaterialNavigation(id){
   }finally{await page.close();}
 }
 
+async function verifyMarkedMaterialInspection(){
+  const response=await fetch(origin+'/api/projects/model-import?material=1',{
+    method:'POST',headers:{'Content-Type':'model/gltf-binary',Origin:origin},body:model.bytes
+  });
+  const project=await response.json();assert.ok(response.ok,JSON.stringify(project));
+  const page=await browser.newPage({viewport:{width:1400,height:900}});
+  try{
+    const png=await page.evaluate(()=>{
+      const canvas=document.createElement('canvas');canvas.width=canvas.height=16;
+      const brush=canvas.getContext('2d');brush.fillStyle='#fac040';brush.fillRect(6,6,4,4);
+      return canvas.toDataURL().split(',')[1];
+    });
+    const path='/api/projects/'+project.id+'/paint';
+    const {asset,document}=await api(path+'/assets',{revision:project.revision,name:'校准块.png',data:png});
+    await page.goto(origin+'/paint.html?project='+project.id);
+    await page.locator('[data-area-mode=material]').click();
+    const view=page.locator('.editor-viewport[data-state=ready]').first();await view.waitFor();
+    const box=await view.boundingBox(),x=Math.floor(box.x+box.width*.5),y=Math.floor(box.y+box.height*.74);
+    await page.mouse.click(x,y);
+    const fields=page.locator('.surface-properties:visible'),base=fields.getByLabel('模型材质底色');
+    await base.waitFor();
+    await view.locator('canvas').first().press('c');
+    await view.and(page.locator('[data-inspected-channel=color]')).waitFor();
+    const before=await pixelAt(page,x,y);
+    let reloads=0;page.on('request',request=>{if(new URL(request.url()).pathname.endsWith('/model.glb'))reloads++;});
+    const added=page.waitForResponse(r=>r.url().endsWith('/paint/source-mark'));
+    await view.evaluate((el,{id,revision,image,x,y})=>{
+      const transfer=new DataTransfer();transfer.setData('application/x-arachne-asset',image);
+      transfer.setData('application/x-arachne-asset-origin',JSON.stringify({projectId:id,revision}));
+      el.dispatchEvent(new DragEvent('drop',{clientX:x,clientY:y,dataTransfer:transfer,bubbles:true,cancelable:true}));
+    },{id:project.id,revision:document.revision,image:asset.id,x,y});
+    const result=await added;assert.ok(result.ok(),await result.text());
+    const mark=[250,192,64],blue=[58,112,180],rgbAt=(dx=0)=>pixelAt(page,x+dx,y);
+    const shows=(dx,color)=>until(async()=>JSON.stringify(await rgbAt(dx))===JSON.stringify(color),10000);
+    await shows(0,mark);
+    const uncovered=await rgbAt(75);assert.deepEqual(uncovered,before);
+    await base.fill('#3a70b4');
+    await shows(75,blue);assert.deepEqual(await rgbAt(),mark);
+    await fields.getByRole('button',{name:'移除标记'}).click();await shows(0,blue);
+    const travel=async direction=>{
+      await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
+      await page.locator('#'+direction).click();
+    };
+    await travel('undo');await shows(0,mark);assert.deepEqual(await rgbAt(75),blue);
+    await travel('redo');await shows(0,blue);
+    assert.equal(await view.getAttribute('data-inspected-channel'),'color');
+    assert.equal(reloads,0);
+    console.log('PASS original-UV mark, background color, removal and undo/redo update the actual inspected pixels without reloading the GLB');
+  }finally{await page.close();}
+}
+
 async function verifyModelWorkflows(){
   assert.deepEqual(await api('/api/projects'),[]);
   const noUv=await fetch(origin+'/api/projects/model-import?material=1',{
@@ -1457,6 +1508,7 @@ async function verifyModelWorkflows(){
   console.log('PASS OBJ with Chinese sidecar paths, concave face, original UV orientation, model edit, reopen and 4K bake');
 
   await verifyProceduralMasks(templates[0].id);
+  await verifyMarkedMaterialInspection();
 
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
   console.log('PASS GLB import, cache rebuild, original UV, edited model, native PNG/EXR/4K ZIP, and clean restore without Blender');
@@ -1472,6 +1524,7 @@ try{
     const result=await response.json();assert.ok(response.ok,JSON.stringify(result));
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
     await verifyObjectMaterialNavigation(result.id);
+    await verifyMarkedMaterialInspection();
     await verifyOriginalTextureChannels(prepareTexturedModel().texturedFile);
   }else if(process.argv.includes('--mask-only')){
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});

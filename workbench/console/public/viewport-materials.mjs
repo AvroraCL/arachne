@@ -99,19 +99,13 @@ export function inspectSourceChannel(display,base,patch,channel) {
 }
 
 // Only pigment coverage and the color underneath it are baked into a mark's map.
-export function surfaceMarkMapsChanged(before = {}, after = {}) {
-  if (before === after) return false;
-  for (const name of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    const old = before[name], next = after[name];
-    if (old?.mark?.coverage !== next?.mark?.coverage ||
-        (next?.mark && old?.color !== next.color)) return true;
-  }
-  return false;
+export function sameSurfaceMarkPixels(a,b) {
+  return a?.mark?.coverage === b?.mark?.coverage && (!a?.mark || a.color === b.color);
 }
 
-export function applySourceFactors(material,factors){
+export function applySourceFactors(material,factors,marked=material.userData.markApplied){
   if(!factors)return;
-  if(material.userData.markApplied)material.color.set(0xffffff);
+  if(marked)material.color.set(0xffffff);
   else if(factors.color!==undefined)material.color.set(factors.color);
   if('metalness' in material){
     if(factors.metallic!==undefined)material.metalness=factors.metallic;
@@ -182,6 +176,14 @@ export function fillLivePaintTextures(pixels, size, maps, solo = null) {
 
 // A source-material mark uses a transparent, original-UV pigment map. Preserve
 // the source roughness, metalness and optical settings on the same material.
+export function compositeSurfaceMark(image,color){
+  const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+  const ctx=canvas.getContext('2d');ctx.fillStyle=color;ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(image,0,0);
+  const map=new THREE.CanvasTexture(canvas);map.flipY=false;map.colorSpace=THREE.SRGBColorSpace;
+  return map;
+}
+
 export async function applySurfaceMarks(root,records,urlFor){
   const byName=new Map();
   root.traverse(node=>{if(node.isMesh)for(const material of [node.material].flat()){
@@ -191,11 +193,8 @@ export async function applySurfaceMarks(root,records,urlFor){
     const factors=records[name],image=await new THREE.ImageLoader().loadAsync(urlFor(factors.mark.coverage));
     for(const material of materials){
       if(material.map)throw Error('附属材质标记当前支持纯色底材：'+name);
-      material.userData.sourceBaseColor='#'+material.color.getHexString();
-      const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
-      const ctx=canvas.getContext('2d');ctx.fillStyle=factors.color||'#'+material.color.getHexString();ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(image,0,0);material.map=new THREE.CanvasTexture(canvas);material.map.flipY=false;
-      material.map.colorSpace=THREE.SRGBColorSpace;material.color.set(0xffffff);material.userData.markApplied=true;
+      material.map=compositeSurfaceMark(image,factors.color||'#'+material.color.getHexString());
+      material.color.set(0xffffff);material.userData.markApplied=true;
     }
   }));
 }
