@@ -53,7 +53,7 @@ async function checkArchive(file){
     throw Error('请选择有效的涂装 ZIP');
 }
 
-const modelExtension=/\.(glb|gltf|obj)$/i;
+const modelExtension=/\.(glb|gltf|obj|svg)$/i;
 const fileNameKey=name=>name.normalize('NFC').toLowerCase();
 function withoutObjComment(line){
   if(!line.includes('#'))return line;
@@ -99,8 +99,14 @@ async function objMaterials(file){
 
 async function checkModel(files){
   const models=files.filter(file=>modelExtension.test(file.name));
-  if(models.length!==1)throw Error('请选择一个 GLB、glTF 或 OBJ 模型');
+  if(models.length!==1)throw Error('请选择一个 GLB、glTF、OBJ 模型或 SVG 轮廓');
   const [file]=models;
+  if(/\.svg$/i.test(file.name)){
+    if(files.length!==1)throw Error('SVG 轮廓请单独选择');
+    const {readProfiles}=await import('./profile-model.mjs');
+    const parts=readProfiles(await file.text());
+    return {file,format:'svg',parts,entries:parts.map((part,i)=>[String(i),part.name]),attachments:[],size:file.size};
+  }
   if(/\.glb$/i.test(file.name)){
     if(files.length!==1)throw Error('GLB 请单独选择，模型已包含配套文件');
     return {file,format:'glb',entries:await checkGlb(file),attachments:[],size:file.size};
@@ -159,7 +165,7 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
     const file=selected?.file||(!validating&&staged.find(item=>modelExtension.test(item.name)));
     label.textContent=file?.name||defaultLabel;
     label.title=file?.name||'';
-    if(optional)choose.textContent=file&&!/\.glb$/i.test(file.name)?'添加文件…':chooseLabel;
+    if(optional)choose.textContent=file&&!/\.(glb|svg)$/i.test(file.name)?'添加文件…':chooseLabel;
     size.textContent=validating?'正在检查文件…':selected?
       [fileSize(selected.size),selected.attachments?.length?selected.attachments.length+' 个配套文件':''].filter(Boolean).join(' · '):defaultHint;
     size.title=selected?.attachments?.map(file=>file.name).join('\n')||'';
@@ -176,7 +182,7 @@ function fileDialog({dialog,input,drop,label,size,choose,clear,close,submit,erro
     if(!files.length||working||!dialog.open)return;
     const token=++request;
     if(optional){
-      const adding=staged.some(file=>modelExtension.test(file.name)&&!/\.glb$/i.test(file.name))&&
+      const adding=staged.some(file=>modelExtension.test(file.name)&&!/\.(glb|svg)$/i.test(file.name))&&
         !files.some(file=>modelExtension.test(file.name));
       const keys=new Set(files.map(file=>fileNameKey(file.name)));
       staged=adding?[...staged.filter(file=>!keys.has(fileNameKey(file.name))),...files]:files;
@@ -225,6 +231,39 @@ export function setupProjectFiles({canOpen,create,restore,notice}){
   const upAxis=byId('new-paint-up-axis'),upAxisRow=upAxis.closest('label'),modelHint=byId('new-paint-sidecar-hint');
   template.replaceChildren(new Option('示例模型','demo'),...Object.entries(modelTemplates).map(([id,title])=>new Option(title,id)));
   syncSelectMenu(template);
+  const profileOptions=byId('new-profile-options'),partPicker=byId('new-profile-part');
+  const profileFields=[...profileOptions.querySelectorAll('[data-profile]')];
+  const isolate=byId('profile-isolate'),previewCanvas=byId('profile-preview');
+  let profile=null,preview=null;
+  function clearProfile(){
+    profile=null;preview?.dispose();preview=null;
+  }
+  function redraw(fit=false){
+    if(!preview)return;
+    const error=byId('new-paint-error');
+    try{preview.update(Number(partPicker.value),isolate.checked,fit);error.textContent='';}
+    catch(failure){error.textContent=failure.message;}
+  }
+  byId('new-paint-dialog').addEventListener('close',clearProfile);
+  isolate.onchange=()=>redraw(true);
+  function showPart(){
+    const part=profile?.parts[Number(partPicker.value)];
+    if(part)for(const input of profileFields)input.value=part[input.dataset.profile];
+  }
+  partPicker.onchange=()=>{showPart();redraw(isolate.checked);};
+  for(const input of profileFields)input.onchange=()=>redraw();
+  for(const input of profileFields)input.oninput=()=>{
+    profile.parts[Number(partPicker.value)][input.dataset.profile]=input.valueAsNumber;
+  };
+  byId('save-profile-source').onclick=async()=>{
+    const error=byId('new-paint-error');
+    try{
+      const {profileSource}=await import('./profile-model.mjs');
+      const url=URL.createObjectURL(new Blob([profileSource(profile.parts)],{type:'image/svg+xml'}));
+      const link=document.createElement('a');link.href=url;link.download=profile.file.name;link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);error.textContent='';
+    }catch(failure){error.textContent=failure.message;}
+  };
   let suggested=defaultProjectName;
   function suggest(next){
     if(!name.value.trim()||name.value===suggested)name.value=next;
@@ -239,13 +278,27 @@ export function setupProjectFiles({canOpen,create,restore,notice}){
     label:byId('new-paint-model-label'),size:byId('new-paint-model-size'),
     choose:byId('choose-new-paint-model'),clear:byId('clear-new-paint-model'),
     close:byId('new-paint-close'),submit:byId('new-paint-submit'),error:byId('new-paint-error'),
-    check:checkModel,defaultLabel:'导入自有模型',defaultHint:'拖入 GLB、glTF 或 OBJ 及配套文件',optional:true,
+    check:checkModel,defaultLabel:'导入自有模型',defaultHint:'拖入 GLB、glTF、OBJ 或 SVG 轮廓',optional:true,
     onFile(model){
+      clearProfile();
+      profile=model?.format==='svg'?model:null;
+      profileOptions.hidden=!profile;
+      if(profile){
+        partPicker.replaceChildren(...profile.parts.map((part,i)=>new Option(part.name,i)));
+        syncSelectMenu(partPicker);showPart();isolate.checked=false;
+        const current=profile;
+        import('./profile-preview.mjs').then(({profilePreview})=>{
+          if(profile!==current||!byId('new-paint-dialog').open)return;
+          preview=profilePreview(previewCanvas,current.parts);redraw(true);
+        }).catch(failure=>{
+          if(profile===current)byId('new-paint-error').textContent='无法显示试装预览：'+failure.message;
+        });
+      }
       materialRow.hidden=!model;
       upAxisRow.hidden=model?.format!=='obj';
-      modelHint.hidden=!model||model.format==='glb';
+      modelHint.hidden=!model||['glb','svg'].includes(model.format);
       modelHint.textContent=model?.format==='obj'?'可同时选择 OBJ、MTL 和引用的图片。':'请一并选择 glTF 引用的 BIN 和图片。';
-      sourceTextures.closest('label').hidden=!model;
+      sourceTextures.closest('label').hidden=!model||!!profile;
       sourceTextures.checked=true;
       upAxis.value='y';syncSelectMenu(upAxis);
       templateRow.hidden=!!model;
@@ -260,8 +313,16 @@ export function setupProjectFiles({canOpen,create,restore,notice}){
       const modelTemplate=!model&&template.value!=='demo'?template.value:undefined;
       name.disabled=material.disabled=template.disabled=sourceTextures.disabled=upAxis.disabled=true;
       syncSelectMenu(material);syncSelectMenu(template);syncSelectMenu(upAxis);
-      try{return await create(value,model,error,chosen,modelTemplate,sourceTextures.checked,upAxis.value);}
+      profileOptions.disabled=true;
+      try{
+        if(profile){
+          const {profileFile}=await import('./profile-model.mjs');
+          model={format:'glb',file:await profileFile(profile.parts,profile.file.name)};
+        }
+        return await create(value,model,error,chosen,modelTemplate,sourceTextures.checked,upAxis.value);
+      }catch(failure){error.textContent=failure.message;return false;}
       finally{
+        profileOptions.disabled=false;
         name.disabled=material.disabled=template.disabled=sourceTextures.disabled=upAxis.disabled=false;
         syncSelectMenu(material);syncSelectMenu(template);syncSelectMenu(upAxis);
       }
@@ -298,7 +359,7 @@ export function setupProjectFiles({canOpen,create,restore,notice}){
     files.some(file=>/\.zip$/i.test(file.name))?'zip':'';
   acceptFileDrop(welcome,canOpen,files=>{
     const type=importType(files);
-    if(!type){error.textContent='请拖入 GLB、glTF、OBJ 或涂装 ZIP';return;}
+    if(!type){error.textContent='请拖入 GLB、glTF、OBJ、SVG 轮廓或涂装 ZIP';return;}
     error.textContent='';show(type,files);
   });
   workspace.addEventListener('dragover',event=>{

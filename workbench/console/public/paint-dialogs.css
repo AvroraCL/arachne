@@ -270,3 +270,12 @@
 .mesh-smoothing-dialog .paint-form-footer{height:auto;min-height:42px;background:transparent}
 .mesh-smoothing-dialog .paint-form-footer button{flex:none}
 .mesh-smoothing-dialog .paint-form-footer [role=alert]{flex:1;font-size:12px;overflow-wrap:anywhere}
+
+#new-profile-options { margin: 0; padding: 6px 0; border: 0; min-width: 0; }
+#new-profile-options legend { font-weight: 600; }
+.profile-values { display: grid; grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); gap: 6px; margin-block: 6px; }
+#new-profile-options .profile-values label { display: grid; grid-template-columns: minmax(0,1fr); gap: 3px; }
+#new-profile-options .profile-source label { display: flex; gap: 5px; }
+.profile-values input { width: 100%; min-width: 0; box-sizing: border-box; }
+.profile-source { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#profile-preview { display: block; width: 100%; height: clamp(100px, 21vh, 185px); background: #23282b; border-radius: 3px; touch-action: none; }

@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Group,Mesh,BufferGeometry,Float32BufferAttribute,Matrix4,Vector3} from 'three';
+import {Group,Mesh,BufferGeometry,Float32BufferAttribute,Matrix4,Vector3,Box3,Color,Path,Shape,Raycaster} from 'three';
 import {applyModelState} from '../public/paint-model-state.mjs';
 import {nativeModelSteps,validateModelState,modelFingerprint} from '../project-model.mjs';
 import {primitiveTopology} from '../public/paint-model-topology.mjs';
 import {smoothSelectedVertices} from '../public/mesh-smoothing.mjs';
+
+import {profileScene} from '../public/profile-model.mjs';
 
 const matrix=new Matrix4().makeTranslation(2,3,4).toArray();
 test('material geometry replays object then vertex commands without accumulating on polling',()=>{
@@ -107,4 +109,51 @@ test('native smoothing positions cannot separate UV seam aliases and replay from
   }
   applyModelState(root,null);
   assert.deepEqual(new Vector3().fromBufferAttribute(root.children[0].geometry.attributes.position,1).toArray(),[1,0,0]);
+});
+
+test('extruded plates keep a true hole, distinct UV islands and a selectable local pivot',()=>{
+  function square(Type,x,y,half){
+    const shape=new Type();
+    shape.moveTo(x-half,y-half);shape.lineTo(x+half,y-half);
+    shape.lineTo(x+half,y+half);shape.lineTo(x-half,y+half);shape.closePath();
+    return shape;
+  }
+  const plate=square(Shape,0,0,10);plate.holes.push(square(Path,0,0,3));
+  const post=square(Shape,14,0,2);
+  const finish={color:new Color('#f16c32'),metalness:.25,roughness:.35,bevel:0,depth:2,base:0};
+  const model=profileScene([{...finish,name:'Plate',shapes:[plate]},{...finish,name:'Post',shapes:[post],base:3}]);
+  model.updateMatrixWorld(true);
+  const [mesh,riser]=model.children;
+  const top=new Box3().setFromObject(mesh).max.y;
+  assert.ok(new Box3().setFromObject(riser).min.y>top);
+  assert.equal(mesh.material.roughness,.35);
+  const hit=(x,from,dy)=>new Raycaster(new Vector3(mesh.position.x+x,from,mesh.position.z),
+    new Vector3(0,dy,0)).intersectObject(mesh)[0];
+  assert.equal(hit(0,3,-1),undefined);
+  const front=hit(1,3,-1),back=hit(1,-3,1);
+  assert.ok(front.uv.x<.70&&back.uv.x>=.70);
+  assert.ok(Math.abs(mesh.geometry.boundingBox.getCenter(new Vector3()).length())<1e-6);
+  for(const part of model.children){
+    const uv=part.geometry.attributes.uv;
+    assert.ok(uv.array.every(v=>v>0&&v<1));
+  }
+  assert.throws(()=>profileScene([{...finish,shapes:[post],bevel:1}]),/倒角/);
+});
+
+test('a curved profile shares shading normals across the UV cuts while the cap stays flat',()=>{
+  const disc=new Shape();
+  disc.absarc(0,0,10,0,Math.PI*2,false);
+  const [part]=profileScene([{name:'Round cap',color:new Color('white'),base:0,depth:4,
+    bevel:0,metalness:.75,roughness:.25,shapes:[disc]}]).children;
+  const {position,normal}=part.geometry.attributes;
+  const sideNormals=new Map();
+  let seams=0,flat=0;
+  for(let i=0;i<position.count;i++){
+    const n=new Vector3().fromBufferAttribute(normal,i);
+    if(Math.abs(n.y)>.9){assert.equal(Math.abs(n.y),1);flat++;continue;}
+    const key=new Vector3().fromBufferAttribute(position,i).toArray().map(v=>v.toFixed(5)).join(',');
+    if(sideNormals.has(key)){assert.ok(n.distanceTo(sideNormals.get(key))<1e-5);seams++;}
+    sideNormals.set(key,n);
+  }
+  assert.ok(flat>0&&seams>3);
 });

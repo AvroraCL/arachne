@@ -282,6 +282,27 @@ async function verifyModelWorkflows(){
   const newDialog=page.locator('#new-paint-dialog');
   const modelInput=newDialog.locator('#new-paint-model');
   const modelName=newDialog.locator('#new-paint-name');
+  const profileOptions=page.locator('#new-profile-options');
+  const profileUpload=text=>({name:'双色检修片.svg',mimeType:'image/svg+xml',buffer:Buffer.from(text)});
+  await modelInput.setInputFiles(profileUpload('<svg xmlns="http://www.w3.org/2000/svg"><g id="壳"><rect width="12" height="8" fill="#ce673d"/></g><circle id="帽" cx="6" cy="4" r="1"/></svg>'));
+  await profileOptions.waitFor({state:'visible'});
+  await profileOptions.getByLabel('厚度',{exact:true}).fill('6');
+  await profileOptions.getByLabel('倒角',{exact:true}).fill('3');
+  await profileOptions.getByLabel('倒角',{exact:true}).press('Tab');
+  await newDialog.locator('#new-paint-submit').click();
+  await newDialog.getByRole('alert').filter({hasText:'倒角'}).waitFor();
+  await profileOptions.getByLabel('倒角',{exact:true}).fill('.7');
+  await profileOptions.getByLabel('仅看当前部件').check();
+  const profileDownload=page.waitForEvent('download');
+  await profileOptions.getByRole('button',{name:'保存轮廓设置…'}).click();
+  const sourceFile=await (await profileDownload).path();
+  const savedProfile=await fs.readFile(sourceFile,'utf8');
+  await newDialog.getByRole('button',{name:'使用模板'}).click();
+  await modelInput.setInputFiles(profileUpload(savedProfile));
+  await profileOptions.waitFor({state:'visible'});
+  assert.equal(await profileOptions.getByLabel('厚度',{exact:true}).inputValue(),'6');
+  assert.equal(Number(await profileOptions.getByLabel('倒角',{exact:true}).inputValue()),.7);
+  await newDialog.getByRole('button',{name:'使用模板'}).click();
   await modelInput.setInputFiles({name:'not-a-model.glb',mimeType:'model/gltf-binary',buffer:Buffer.from('invalid')});
   await newDialog.getByText('请选择有效的 GLB 2.0 模型').waitFor();
   assert.equal(await newDialog.locator('#new-paint-submit').isDisabled(),true);
@@ -595,8 +616,10 @@ async function verifyModelWorkflows(){
   assert.equal(cubeEdited.source.uvSha256,cube.source.uvSha256);
   console.log('PASS connected and inverse face selection, hover shortcuts and seam-safe movement across split vertices');
 
-  await cubeCanvas.focus();
-  await reopened.keyboard.press('a');
+  // The server can already expose the new revision while the editing viewport
+  // is still applying it and ignores selection shortcuts.
+  await until(()=>cubeEditor.getByRole('button',{name:'建模选择',exact:true}).isEnabled());
+  await cubeCanvas.press('a');
   await selectionStatus.filter({hasText:'已选 6 面'}).waitFor();
   const smoothDialog=reopened.getByRole('dialog',{name:'平滑顶点',exact:true});
   async function openSmooth(){
