@@ -53,7 +53,7 @@ import {enhanceSelectMenu,setSelectValue,syncSelectMenu} from './paint-select.mj
 import {scrubNumber} from './studio-fields.mjs';
 import {decorateWorkspaceButtons,workspaceIcons} from './workspace-icons.mjs';
 import {layerParent,layerChildren,layerIsVisible,layerLockOwner,materialLayerRows,paintAnchorSources,hasMaterialMask as hasLayerMask} from './paint-layer-tree.mjs';
-import {createMaterialLayerDrag} from './material-layer-drag.mjs';
+import {createMaterialLayerDrag,materialLayerDrop} from './material-layer-drag.mjs';
 import {navigationCommand,projectionCamera} from './viewport-navigation.mjs';
 import {canvasZoomPercent,canvasScale,zoomCanvas,resizeCanvas} from './paint-canvas-navigation.mjs';
 import {createPaintColors,maskGray} from './paint-colors.mjs';
@@ -862,7 +862,11 @@ function renderProperties(form=$('properties'),scope=null){
   const commandTarget=scoped?operations=>{checkTarget();return api('/api/projects/'+projectId+'/paint/commands',{revision,operations});}:command;
   const editTarget=scoped?patch=>commandTarget([l?{op:'update',id:l.id,patch}:{op:'base',patch}]):edit;
   const liveField=(text,type,value,makePatch,options)=>livePropertyField(text,type,value,makePatch,options,l||null);
-  const actionBar=()=>layerActions(l,{issue:commandTarget,add:scoped?(...operations)=>{checkTarget();return addAndSelect(...operations);}:addAndSelect});
+  const showActions=()=>{
+    const section=propertySection(form,'actions','图层操作',{open:false});
+    appendLayerFolderPicker(section,[l],commandTarget);
+    section.append(layerActions(l,{issue:commandTarget,add:scoped?(...operations)=>{checkTarget();return addAndSelect(...operations);}:addAndSelect}));
+  };
   const ensureSelected=()=>{if(scoped&&l&&(selected!==l.id||selection.size!==1)){setSelection([l.id]);render();}};
   const values=effectiveValues(l?.values||doc.paint.base);
   const choices=Object.values(doc.paint.assets).filter(asset=>!isSelectionAsset(asset)).map(a=>[a.id,a.name]);
@@ -878,7 +882,9 @@ function renderProperties(form=$('properties'),scope=null){
     group.disabled=items.some(lockOwner);
     duplicate.disabled=items.some(item=>{const owner=lockOwner(item);return !!owner&&owner!==item;});
     actions.append(group,duplicate);
-    propertySection(form,'selection','图层操作').append(actions);return;
+    const section=propertySection(form,'selection','图层操作');
+    appendLayerFolderPicker(section,items,commandTarget);
+    section.append(actions);return;
   }
   const maskTarget=(scoped?scope.target:paintTarget)==='mask'&&!!l;
   propertyHeading(form,{name:l?.name||'全 UV 底层',
@@ -909,7 +915,7 @@ function renderProperties(form=$('properties'),scope=null){
         liveField('文件夹不透明度','number',l.opacity??1,opacity=>({opacity}),{min:0,max:1}));
     }
     addMaskProperties();
-    propertySection(form,'actions','图层操作',{open:false}).append(actionBar());
+    showActions();
     renderPropertyLock(form,l||null,scoped?1:selection.size);
     return;
   }
@@ -1056,7 +1062,7 @@ function renderProperties(form=$('properties'),scope=null){
     }
   }
   addMaskProperties();
-  propertySection(form,'actions','图层操作',{open:false}).append(actionBar());
+  showActions();
   renderPropertyLock(form,l||null,scoped?1:selection.size);
 }
 function renderPropertyLock(form=$('properties'),active=layer(),count=selection.size){
@@ -1069,6 +1075,28 @@ function renderPropertyLock(form=$('properties'),active=layer(),count=selection.
     const action=control.closest('[data-lock-action]')?.dataset.lockAction;
     if(!['view','visibility'].includes(action)&&(action!=='duplicate'||owner!==active))control.disabled=true;
   }
+}
+function appendLayerFolderPicker(section,items,issue){
+  const layers=doc.paint.layers,parent=layerParent(items[0]),ids=items.map(item=>item.id);
+  if(items.some(item=>layerParent(item)!==parent||lockOwner(item)))return;
+  const choices=[['','顶层']],byId=new Map(layers.map(item=>[item.id,item])),paths=new Map();
+  for(const folder of layers.filter(item=>item.kind==='group')){
+    const prefix=paths.get(layerParent(folder));
+    const path=prefix?prefix+' / '+folder.name:folder.name;
+    paths.set(folder.id,path);
+    if(folder.id===parent||materialLayerDrop(layers,ids,folder.id,'inside'))choices.push([folder.id,path]);
+  }
+  if(choices.length===1)return;
+  section.append(field('所属文件夹','select',parent||'',async value=>{
+    const op=value?materialLayerDrop(layers,ids,value,'inside'):{op:'arrange',ids,parentId:null,placement:'above'};
+    if(!op||value===(parent||''))return;
+    await issue([op]);
+    let expanded=false;
+    for(let folder=byId.get(value);folder;folder=byId.get(layerParent(folder))){
+      if(collapsedFolders.delete(folder.id))expanded=true;
+    }
+    if(expanded){saveCollapsedFolders();renderLayers();}
+  },{choices}));
 }
 function layerActions(l,{issue=command,add=addAndSelect}={}){
   const siblings=layerChildren(doc.paint.layers,layerParent(l)),index=siblings.indexOf(l),bar=element('div');

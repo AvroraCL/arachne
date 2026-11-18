@@ -337,7 +337,21 @@ try{
   assert.equal(nested.name,smartName);
   assert.equal(dropped.paint.layers.filter(layer=>layer.parentId===nested.id).length,2);
   assert.equal(dropped.revision,parentFolder.revision+1);
-  const locked=await api(newRoute+'/paint/commands',{revision:dropped.revision,operations:[
+  await packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select').click();
+  const actions=packedPage.locator('details[data-property-section=actions]').filter({visible:true}).first();
+  if(!await actions.evaluate(node=>node.open))await actions.locator('summary').click();
+  await actions.getByRole('button',{name:'所属文件夹'}).click();
+  await packedPage.getByRole('option',{name:'顶层',exact:true}).click();
+  const ungrouped=await until(async()=>{
+    const project=await api(newRoute);
+    return project.revision>dropped.revision&&project;
+  },'moving a nested smart material to the root with its folder selector');
+  assert.equal(ungrouped.paint.layers.find(layer=>layer.id===nested.id).parentId,null);
+  assert.deepEqual(ungrouped.paint.layers.filter(layer=>layer.parentId===nested.id),
+    dropped.paint.layers.filter(layer=>layer.parentId===nested.id));
+  const restoredPlacement=await api(newRoute+'/paint/undo',{revision:ungrouped.revision});
+  assert.deepEqual(restoredPlacement.paint,dropped.paint);
+  const locked=await api(newRoute+'/paint/commands',{revision:restoredPlacement.revision,operations:[
     {op:'update',id:parent.id,patch:{locked:true}}
   ]});
   const rejected=await fetch(origin+newRoute+'/paint/library-import',{
