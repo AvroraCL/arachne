@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>Mavic 4 Pro · 外观习作模型源稿</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "../../workbench/console/node_modules/three/build/three.module.js",
+    "three/addons/": "../../workbench/console/node_modules/three/examples/jsm/"
+  }
+}
+</script>
+<h1>Mavic 4 Pro · 外观习作模型源稿</h1>
+<p>修改 model.mjs 中的截面、镜组或材质后，刷新页面即可重新生成 GLB。</p>
+<button id="save" type="button">生成 GLB</button>
+<output id="status" aria-live="polite"></output>
+<script type="module">
+const save = document.querySelector('#save');
+const status = document.querySelector('#status');
+save.addEventListener('click', async () => {
+  save.disabled = true;
+  status.textContent = '正在生成模型…';
+  try {
+    const {buildMavic} = await import('./model.mjs');
+    const response = await fetch('./lettering.json');
+    if (!response.ok) throw Error(`读取字样失败 (${response.status})`);
+    const bytes = await buildMavic(await response.json());
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([bytes], {type: 'model/gltf-binary'}));
+    link.download = 'mavic-studio.glb';
+    link.textContent = '下载 GLB';
+    status.replaceChildren(link);
+    link.click();
+  } catch (error) {
+    status.textContent = error.message;
+  }
+});
+</script>
+</html>
