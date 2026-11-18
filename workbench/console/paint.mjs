@@ -299,21 +299,21 @@ function checkedRenderBookmarks(entries){
   if(!Array.isArray(entries)||entries.length>renderBookmarkLimit)throw Error('工程最多保存 '+renderBookmarkLimit+' 个相机书签');
   const ids=new Set();
   return entries.map(entry=>{
-    const {id,name,camera}=fields(entry,['id','name','camera']);
+    const {id,name,camera,lighting}=fields(entry,['id','name','camera','lighting']);
     if(typeof id!=='string'||!/^[-\w]{1,80}$/.test(id)||ids.has(id))throw Error('相机书签编号无效');
     ids.add(id);
-    return {id,name:renderBookmarkName(name),camera:checkedRenderCamera(camera)};
+    return {id,name:renderBookmarkName(name),camera:checkedRenderCamera(camera),
+      ...(lighting==null?{}:{lighting:checkRenderLighting(lighting)})};
   });
 }
 function editRenderBookmark(paint,operation){
   const {action,id,patch}=fields(operation,['op','action','id','patch']);
   const bookmarks=paint.renderBookmarks??[],index=bookmarks.findIndex(entry=>entry.id===id);
   if(action==='add'){
-    const {name,camera}=fields(patch,['name','camera']);
-    bookmarks.push({id,name,camera});
+    bookmarks.push({id,...fields(patch,['name','camera','lighting'])});
   }else{
     if(index<0)throw Error('相机书签不存在');
-    if(action==='update')bookmarks[index]={...bookmarks[index],...fields(patch,['name','camera'])};
+    if(action==='update')bookmarks[index]={...bookmarks[index],...fields(patch,['name','camera','lighting'])};
     else if(action==='remove')bookmarks.splice(index,1);
     else throw Error('相机书签操作无效');
   }
@@ -1651,7 +1651,9 @@ async function writePaintGlb(doc,{bake,input,model,out,stage,j,run,python,signal
 }
 
 async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,update,signal,registerBrowser}){
-  const renderAppearance=doc.paint.renderAppearance||null,renderLighting=doc.paint.renderLighting||null,renderOptics=doc.paint.renderOptics||null;
+  const bookmark=j.renderBookmark&&doc.paint.renderBookmarks?.find(item=>item.id===j.renderBookmark.id);
+  const renderLighting=bookmark?.lighting??doc.paint.renderLighting??null;
+  const renderAppearance=doc.paint.renderAppearance||null,renderOptics=doc.paint.renderOptics||null;
   const renderVisibility=Object.keys(doc.paint.renderVisibility||{}).length?doc.paint.renderVisibility:null;
   const settings=j.paintSettings,region=renderRegionPixels(doc.paint.renderRegion,settings.width,settings.height);
   const active=report.activeChannels||legacyChannels;

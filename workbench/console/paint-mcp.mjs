@@ -119,7 +119,7 @@ const tools=[
   },['projectId','revision','text'],true],
   ['edit',[
     'renderCamera 用 camera 保存工程相机；renderAppearance 用 appearance 保存色彩管理；renderLighting 用 lighting 保存布光；renderPreset 用 preset 保存输出和采样。对应字段传 null 可清除。设置与其他工程命令共用修订与撤销。',
-    'renderBookmark 用 id、action:add/update/remove 和 patch:{name,camera} 管理相机书签，可用 paint_render_batch 按书签出图。',
+    'renderBookmark 用 id、action:add/update/remove 和 patch:{name,camera,lighting} 管理相机书签。可选 lighting 保存镜头的独立布光，传 null 恢复跟随工程。paint_render_batch 按书签的相机与布光出图。',
     'renderVisibility 用 visibility:{源物体名称:boolean} 修改对象渲染显隐，false 从渲染排除；用 paint_render_objects 读取已登记源物体。修改随工程保存，不影响视口小眼睛。',
     'renderOptics 用 optics 修改工程相机景深，target 对焦相机目标点，distance 使用手动距离。null 恢复源相机。',
     'renderRegion 用 region 设定相机取景框从左上角起的归一化矩形；crop 为 true 时裁切成品，null 清除。',

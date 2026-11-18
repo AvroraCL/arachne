@@ -15,6 +15,7 @@ import {nativeDemoProjectId} from '../demo-source.mjs';
 import {nativeModelSteps} from '../model-binding.mjs';
 import {captureRenderPreset,updateDeliveryOptions} from '../public/paint-delivery-options.mjs';
 import {renderOpticsDefaults} from '../public/render-optics.mjs';
+import {renderLightingDefaults} from '../public/render-lighting.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const data=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-glb-import-'));
@@ -770,11 +771,12 @@ async function verifyModelWorkflows(){
   assert.equal(cubeBake.paintReport.modelFingerprint,(await api(cubeRoute+'/paint/model-state')).fingerprint);
   const cubePaint=cubeRoute+'/paint';
   const shots=[
-    {id:'top',name:'顶视验收',camera:{projection:'orthographic',eye:[0,5,0],target:[0,0,0],up:[0,0,-1],fov:38,orthoHeight:3.2}},
+    {id:'top',name:'顶视验收',lighting:{...renderLightingDefaults,preset:'daylight',environmentColor:'#ecce90'},
+      camera:{projection:'orthographic',eye:[0,5,0],target:[0,0,0],up:[0,0,-1],fov:38,orthoHeight:3.2}},
     {id:'perspective',name:'透视验收',camera:{projection:'perspective',eye:[3,2,3],target:[0,0,0],up:[0,1,0],fov:38,orthoHeight:4}}
   ];
   const batchDoc=await api(cubePaint+'/commands',{revision:maskedDoc.revision,operations:[
-    ...shots.map(({id,name,camera})=>({op:'renderBookmark',action:'add',id,patch:{name,camera}})),
+    ...shots.map(({id,...patch})=>({op:'renderBookmark',action:'add',id,patch})),
     {op:'renderPreset',preset:captureRenderPreset(updateDeliveryOptions({},{width:192,height:144,samples:3,maxBounces:3}))}
   ]});
   const badBatch=await fetch(origin+cubePaint+'/render-batch',{method:'POST',
@@ -816,6 +818,7 @@ async function verifyModelWorkflows(){
   for(const [index,job] of outputs.entries()){
     assert.deepEqual(job.render.resolution,[192,144]);
     assert.deepEqual(job.render.camera,shots[index].camera);
+    assert.deepEqual(job.render.lighting,shots[index].lighting??batchDoc.paint.renderLighting??null);
     assert.deepEqual(job.render.cameraBookmark,{id:shots[index].id,name:shots[index].name});
     assert.equal(job.render.revision,batchDoc.revision);
     assert.deepEqual(job.paintReport.files,cubeBake.paintReport.files);

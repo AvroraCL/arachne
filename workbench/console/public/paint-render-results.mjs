@@ -10,7 +10,8 @@ const statusLabels={queued:'排队中',running:'渲染中',completed:'已完成'
 const framingLabel={auto:'完整模型',viewport:'当前视口',saved:'工程渲染相机'};
 
 export function pendingRenderFor(jobs,revision,settings){
-  return jobs.find(job=>job.type==='paint-render'&&job.revision===revision&&active(job)&&
+  // A batch entry may render this camera with its own bookmarked lighting.
+  return jobs.find(job=>job.type==='paint-render'&&!job.renderBookmark&&job.revision===revision&&active(job)&&
     job.paintSettings&&sameDeliveryCamera(job.paintSettings.camera,settings.camera)&&
     ['width','height','samples','maxBounces','transparent','device','fileFormat','bitDepth']
       .every(key=>job.paintSettings[key]===settings[key]));

@@ -43,6 +43,7 @@ export function setupRenderCameraBatch({read,settings,canOpen,submit:queue,onSub
       input.type='checkbox';input.value=camera.id;input.setAttribute('aria-label',camera.name);
       name.textContent=name.title=camera.name;
       projection.textContent=camera.camera.projection==='orthographic'?'正交':'透视';
+      if(camera.lighting)projection.textContent+=' · 独立布光';
       input.onchange=()=>{if(input.checked)selected.add(camera.id);else selected.delete(camera.id);changed();};
       row.append(input,name,projection);return row;
     }));

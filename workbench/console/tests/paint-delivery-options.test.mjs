@@ -11,6 +11,7 @@ test('a pending shot only covers the same revision, viewpoint and output setting
   const job={type:'paint-render',revision:8,status:'running',paintSettings:settings};
   assert.equal(pendingRenderFor([job],8,structuredClone(settings)),job);
   assert.equal(pendingRenderFor([job],9,settings),undefined);
+  assert.equal(pendingRenderFor([{...job,renderBookmark:{id:'rear',name:'Rear'}}],8,settings),undefined);
   for(const patch of [{camera:{...camera,eye:[12,4,12]}},{device:'auto'},{samples:32},{fileFormat:'OPEN_EXR',bitDepth:16}]){
     assert.equal(pendingRenderFor([job],8,{...settings,...patch}),undefined);
   }
