@@ -352,6 +352,85 @@ async function verifyProceduralMasks(cubeId){
 
 }
 
+function prepareTexturedModel(){
+  const texturedFile=path.join(data,'贴图 模型.glb'),differentUV=path.join(data,'其他 UV.glb');
+  execFileSync(pythonExecutable(),['-X','utf8','-c',[
+    'import sys',
+    'from pathlib import Path',
+    'from PIL import Image',
+    'from paint_glb import read_glb, append_texture, png_bytes, write_glb',
+    'scene, binary = read_glb(Path(sys.argv[1]).read_bytes())',
+    'def texture(colors, name):',
+    ' image = Image.new("RGBA",(2,2))',
+    ' image.putdata(colors)',
+    ' return append_texture(scene,binary,png_bytes(image),name)',
+    'material = scene["materials"][0]',
+    'pbr = material["pbrMetallicRoughness"]',
+    'pbr.update(baseColorFactor=[.5,.25,1,.5],metallicFactor=.5,roughnessFactor=.25)',
+    'pbr["baseColorTexture"] = texture([(255,0,0,128),(0,255,0,255),(0,0,255,255),(255,255,255,0)],"color")',
+    'pbr["metallicRoughnessTexture"] = texture([(16,40,200,255),(64,160,60,255)]*2,"orm")',
+    'pbr["metallicRoughnessTexture"]["extensions"] = {"KHR_texture_transform":{"offset":[.5,0]}}',
+    'scene["extensionsUsed"] = ["KHR_texture_transform"]',
+    'scene["samplers"] = [{"magFilter":9728,"minFilter":9728}]',
+    'scene["textures"][1]["sampler"] = 0',
+    'material.update(alphaMode="MASK",alphaCutoff=.35,emissiveFactor=[.25,.5,1])',
+    'material["normalTexture"] = {**texture([(191,128,238,255)]*4,"normal"),"scale":.5}',
+    'material["occlusionTexture"] = {"index":1,"strength":.5}',
+    'material["emissiveTexture"] = texture([(255,0,0,255)]*4,"emission")',
+    'write_glb(sys.argv[2],scene,binary)',
+    'pbr["baseColorTexture"]["texCoord"] = 1',
+    'scene["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_1"] = 1',
+    'write_glb(sys.argv[3],scene,binary)',
+  ].join('\n'),fixture,texturedFile,differentUV],{cwd:root});
+  return {texturedFile,differentUV};
+}
+
+async function pixelAt(page,x,y){
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  const png=await page.screenshot({clip:{x,y,width:1,height:1}});
+  return [...execFileSync(pythonExecutable(),['-c','import sys,io;from PIL import Image;sys.stdout.buffer.write(Image.open(io.BytesIO(sys.stdin.buffer.read())).convert("RGB").tobytes())'],{input:png})];
+}
+
+async function verifyOriginalTextureChannels(texturedFile){
+  const created=await fetch(origin+'/api/projects/model-import?material=1',{
+    method:'POST',headers:{'Content-Type':'model/gltf-binary',Origin:origin},body:await fs.readFile(texturedFile)
+  });
+  const doc=await created.json();assert.ok(created.ok,JSON.stringify(doc));
+  const page=await browser.newPage({viewport:{width:1400,height:900}});
+  try{
+    await page.goto(origin+'/paint.html?project='+doc.id);
+    await page.locator('[data-area-mode="modeling"]').click();
+    const viewport=page.locator('.editor-viewport[data-state=ready]').first();
+    await viewport.waitFor();
+    const box=await viewport.boundingBox(),x=Math.floor(box.x+box.width*.5),y=Math.floor(box.y+box.height*.74);
+    await page.mouse.click(x,y);
+    await page.locator('.object-property-editor').getByText('表面材料',{exact:true}).filter({visible:true}).waitFor();
+    const canvas=viewport.locator('canvas').first();
+    const channels=await page.locator('select[aria-label="视口材质通道"]').locator('option').evaluateAll(options=>options.map(o=>o.value));
+    assert.ok(channels.includes('normal')&&channels.includes('ao')&&channels.includes('alpha')&&channels.includes('emission'),JSON.stringify(channels));
+    const result={};
+    for(const channel of channels.filter(Boolean)){
+      await canvas.press('c');
+      await viewport.and(page.locator('[data-inspected-channel="'+channel+'"]')).waitFor();
+      result[channel]=await pixelAt(page,x,y);
+    }
+    assert.ok(Math.max(...result.color)>Math.min(...result.color),JSON.stringify(result));
+    const rough=result.roughness[0];
+    assert.ok(rough===10||rough===40,JSON.stringify(result));
+    const gray=value=>[value,value,value];
+    assert.deepEqual(result.roughness,gray(rough));
+    // The ORM transform offsets metal/roughness by half a texture. AO is unshifted.
+    assert.deepEqual(result.metallic,gray(rough===10?100:30));
+    assert.deepEqual(result.ao,gray(rough===10?160:136));
+    assert.deepEqual(result.emission,[137,0,0]);
+    assert.ok(result.normal.every((v,i)=>Math.abs(v-[163,128,250][i])<=1),JSON.stringify(result));
+    assert.ok(result.alpha[0]>0&&result.alpha[0]<128,JSON.stringify(result));
+    assert.deepEqual(result.alpha,gray(result.alpha[0]));
+    await canvas.press('m');
+    console.log('PASS original material textures, UV transform, PBR factors and data-channel display',JSON.stringify(result));
+  }finally{await page.close();}
+}
+
 async function verifyObjectMaterialNavigation(id){
   const page=await browser.newPage({viewport:{width:1400,height:900}});
   try{
@@ -382,6 +461,23 @@ async function verifyObjectMaterialNavigation(id){
     await pick('涂装面');
     await roughness.waitFor();
     assert.equal(await roughness.inputValue(),'0.6');
+    const viewport=page.locator('.editor-viewport[data-state=ready]').first();
+    const box=await viewport.boundingBox(),x=Math.floor(box.x+box.width*.5),y=Math.floor(box.y+box.height*.74);
+    await page.mouse.click(x,y);
+    assert.equal(await inspector.getByLabel('模型材质粗糙度').inputValue(),'0.6');
+    const canvas=viewport.locator('canvas').first();
+    await canvas.press('c');await canvas.press('c');await canvas.press('c');
+    await viewport.and(page.locator('[data-inspected-channel=roughness]')).waitFor();
+    assert.deepEqual(await pixelAt(page,x,y),[153,153,153]);
+    await roughness.fill('0.2');await roughness.press('Enter');
+    await until(async()=>(await api('/api/projects/'+id)).paint.sourceMaterials?.['表面材料']?.roughness===.2);
+    assert.deepEqual(await pixelAt(page,x,y),[51,51,51]);
+    await canvas.press('m');
+    await viewport.and(page.locator('[data-inspected-channel]')).waitFor({state:'hidden'});
+    await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
+    await page.locator('#undo').click();
+    await until(async()=>await roughness.inputValue()==='0.6');
+    console.log('PASS source roughness edit changes the picked surface pixel, full material and undo restore');
     console.log('PASS object properties follow painted and original surfaces without exposing the previous material');
   }finally{await page.close();}
 }
@@ -460,10 +556,10 @@ async function verifyModelWorkflows(){
   await newDialog.locator('#new-paint-submit').click();
   const id=await until(async()=>new URL(page.url()).searchParams.get('project'));
   const route='/api/projects/'+id,paint=route+'/paint';
+  await verifyObjectMaterialNavigation(id);
   const registered=await api(route),manifest=await api(route+'/viewport');
   assert.equal(registered.source.format,'glb');
   assert.equal(registered.source.material,'遮挡材料');
-  await verifyObjectMaterialNavigation(id);
   assert.equal(manifest.metadata.input_sha256,digest(model.bytes));
   assert.equal(manifest.metadata.uv_before,registered.source.uvSha256);
   const glb=Buffer.from(await (await fetch(origin+manifest.modelUrl)).arrayBuffer());
@@ -1006,35 +1102,8 @@ async function verifyModelWorkflows(){
   console.log('PASS gradient draw, cancel, angle snapping, endpoint editing, material binding, reload and 4K RGBA PNG');
   console.log('PASS editable gradient mask, brush touch-up, inversion, undo and verified 4K alpha');
 
-  const texturedFile=path.join(data,'贴图 模型.glb'),differentUV=path.join(data,'其他 UV.glb');
-  execFileSync(pythonExecutable(),['-X','utf8','-c',[
-    'import sys',
-    'from pathlib import Path',
-    'from PIL import Image',
-    'from paint_glb import read_glb, append_texture, png_bytes, write_glb',
-    'scene, binary = read_glb(Path(sys.argv[1]).read_bytes())',
-    'def texture(colors, name):',
-    ' image = Image.new("RGBA",(2,2))',
-    ' image.putdata(colors)',
-    ' return append_texture(scene,binary,png_bytes(image),name)',
-    'material = scene["materials"][0]',
-    'pbr = material["pbrMetallicRoughness"]',
-    'pbr.update(baseColorFactor=[.5,.25,1,.5],metallicFactor=.5,roughnessFactor=.25)',
-    'pbr["baseColorTexture"] = texture([(255,0,0,128),(0,255,0,255),(0,0,255,255),(255,255,255,0)],"color")',
-    'pbr["metallicRoughnessTexture"] = texture([(16,40,200,255),(64,160,60,255)]*2,"orm")',
-    'pbr["metallicRoughnessTexture"]["extensions"] = {"KHR_texture_transform":{"offset":[.5,0]}}',
-    'scene["extensionsUsed"] = ["KHR_texture_transform"]',
-    'scene["samplers"] = [{"magFilter":9728,"minFilter":9728}]',
-    'scene["textures"][1]["sampler"] = 0',
-    'material.update(alphaMode="MASK",alphaCutoff=.35,emissiveFactor=[.25,.5,1])',
-    'material["normalTexture"] = {**texture([(191,128,238,255)]*4,"normal"),"scale":.5}',
-    'material["occlusionTexture"] = {"index":1,"strength":.5}',
-    'material["emissiveTexture"] = texture([(255,0,0,255)]*4,"emission")',
-    'write_glb(sys.argv[2],scene,binary)',
-    'pbr["baseColorTexture"]["texCoord"] = 1',
-    'scene["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_1"] = 1',
-    'write_glb(sys.argv[3],scene,binary)',
-  ].join('\n'),fixture,texturedFile,differentUV],{cwd:root});
+  const {texturedFile,differentUV}=prepareTexturedModel();
+  await verifyOriginalTextureChannels(texturedFile);
   async function chooseTextured(file){
     await reopened.getByText('文件',{exact:true}).filter({visible:true}).first().click();
     await reopened.locator('#new').click();
@@ -1379,6 +1448,7 @@ try{
     const result=await response.json();assert.ok(response.ok,JSON.stringify(result));
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
     await verifyObjectMaterialNavigation(result.id);
+    await verifyOriginalTextureChannels(prepareTexturedModel().texturedFile);
   }else if(process.argv.includes('--mask-only')){
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
     const cube=await api('/api/projects',{workflowType:'pbr_paint',modelTemplate:'cube'});

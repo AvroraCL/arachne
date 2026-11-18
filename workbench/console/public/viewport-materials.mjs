@@ -21,6 +21,83 @@ export function createUnlitMaterial(source) {
   return material;
 }
 
+// Match the painted channel readout: scalar and tangent-space values are display
+// bytes; emissive textures and factors already multiply in linear light.
+const sourceSamples = {
+  color:'diffuse * texel.rgb',
+  roughness:'vec3(diffuse.r * texel.g)',
+  metallic:'vec3(diffuse.r * texel.b)',
+  ao:'vec3(mix(1.0, texel.r, diffuse.r))',
+  alpha:'vec3(diffuse.r * texel.a)',
+  height:'vec3(diffuse.r * texel.r)',
+  normal:'normalSample',
+  emission:'diffuse * texel.rgb'
+};
+
+function compileSourceChannel(shader) {
+  const channel=this.defines?.ARACHNE_SOURCE_CHANNEL;
+  if (!channel) return;
+  const readNormal=channel==='normal' ? `
+    vec3 normalSample = vec3(0.5, 0.5, 1.0);
+    #ifdef USE_MAP
+      vec3 tangentNormal = (texel.rgb * 2.0 - 1.0) * vec3(diffuse.rr, 1.0);
+      if (dot(tangentNormal, tangentNormal) > 0.0)
+        normalSample = normalize(tangentNormal) * 0.5 + 0.5;
+    #endif` : '';
+  const vertexFactor=channel==='color' ? `
+    #if defined(USE_COLOR) || defined(USE_COLOR_ALPHA)
+      value *= vColor.rgb;
+    #endif` : channel==='alpha' ? `
+    #ifdef USE_COLOR_ALPHA
+      value *= vColor.a;
+    #endif` : '';
+  shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
+    vec4 texel = vec4(1.0);
+    #ifdef USE_MAP
+      texel = texture2D(map, vMapUv);
+    #endif
+    ${readNormal}
+    vec3 value = ${sourceSamples[channel]};
+    ${vertexFactor}
+    diffuseColor.rgb = ${channel==='emission'||channel==='color'?'value':'sRGBTransferEOTF(vec4(value, 1.0)).rgb'};
+  `).replace('#include <color_fragment>','');
+}
+
+export function inspectSourceChannel(display,base,patch,channel) {
+  // The caller has restored the ordinary display factors, maps and alpha first.
+  const inspect=Object.hasOwn(sourceSamples,channel);
+  display.vertexColors=base.vertexColors && (!inspect || channel==='alpha' || channel==='color');
+  if (!inspect) {
+    if (display.defines) delete display.defines.ARACHNE_SOURCE_CHANNEL;
+    return;
+  }
+  display.onBeforeCompile=compileSourceChannel;
+  display.defines??={};
+  display.defines.ARACHNE_SOURCE_CHANNEL=channel;
+  display.alphaMap=null;
+  switch (channel) {
+    case 'roughness':
+      display.map=base.roughnessMap;display.color.setScalar(patch?.roughness??base.roughness??1);break;
+    case 'metallic':
+      display.map=base.metalnessMap;display.color.setScalar(patch?.metallic??base.metalness??0);break;
+    case 'ao':
+      display.map=base.aoMap;display.color.setScalar(base.aoMapIntensity??1);break;
+    case 'alpha': {
+      const usesAlpha=base.transparent||display.alphaTest>0||display.alphaHash;
+      display.map=usesAlpha?base.map:null;display.color.setScalar(usesAlpha?base.opacity:1);
+      display.vertexColors&&=usesAlpha;break;
+    }
+    case 'height':
+      display.map=base.bumpMap;display.color.setScalar(base.bumpMap?1:.5);break;
+    case 'normal':
+      display.map=base.normalMap;display.color.setScalar(base.normalScale?.x??1);break;
+    case 'emission':
+      display.map=base.emissiveMap;
+      if(base.emissive)display.color.copy(base.emissive).multiplyScalar(base.emissiveIntensity);
+      else display.color.setScalar(0);
+  }
+}
+
 // Only pigment coverage and the color underneath it are baked into a mark's map.
 export function surfaceMarkMapsChanged(before = {}, after = {}) {
   if (before === after) return false;

@@ -4,7 +4,7 @@ import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
 import {isSelectionAsset} from './uv-selection-region.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
-import {paintChannels,channelSpecs,activePaintChannels,renderChannel,liveStride} from './paint-channels.mjs';
+import {paintChannels,channelSpecs,renderChannel,liveStride} from './paint-channels.mjs';
 import {headerControls,chromeButton,areaIcons,createContextActions} from './area-chrome.mjs';
 import {projectionIsCurrent} from './paint-surface-state.mjs';
 import {createViewport} from './viewport3d.mjs';
@@ -546,7 +546,7 @@ export function registerAreaEditors(registry,bridge){
       }
       if(view.dataset.state!=='ready')return;
       reconcilePaintTarget();
-      display.setChannels(activePaintChannels(doc.paint));
+      display.setChannels(viewport.inspectionChannels(doc.paint));
       syncSceneCursor();
       frameButton.disabled=false;
       if(doc.revision!==revision&&!modeler.isDragging()&&!painter.isEditing()){marquee.cancel();revision=doc.revision;viewport.syncDocument(doc);modeler.syncDocument();}
