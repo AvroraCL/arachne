@@ -360,19 +360,20 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   const bookmarkDetails=el('div','render-bookmark-details');bookmarks.append(bookmarkDetails);
   const bookmarkName=el('input');bookmarkName.type='text';bookmarkName.maxLength=80;bookmarkName.setAttribute('aria-label','镜头名称');
   row(bookmarkDetails,'镜头名称',bookmarkName);
-  const pinLighting=el('input');pinLighting.type='checkbox';
-  pinLighting.setAttribute('aria-label','镜头独立布光');
-  pinLighting.title='用作出图相机或批量出图时，使用此镜头保存的灯光和摄影棚地面';
-  row(bookmarkDetails,'镜头独立布光',pinLighting).closest('label').classList.add('render-settings-check');
+  function bookmarkCheck(label,tip){
+    const input=el('input');input.type='checkbox';input.setAttribute('aria-label',label);input.title=tip;
+    row(bookmarkDetails,label,input).closest('label').classList.add('render-settings-check');
+    return input;
+  }
+  const pinLighting=bookmarkCheck('镜头独立布光','保存此镜头的灯光和摄影棚地面');
+  const pinOptics=bookmarkCheck('镜头独立景深','保存此镜头的光圈、对焦方式及距离，用于切换镜头和批量出图');
   const currentLighting=()=>settings.projectLighting?.()||renderLightingDefaults;
+  const currentOptics=()=>settings.projectOptics?.()??'source';
   const lightingDiffers=entry=>!!entry?.lighting&&JSON.stringify(entry.lighting)!==JSON.stringify(currentLighting());
-  const saveBookmarkLighting=(origin,lighting)=>project.commands([
-    {op:'renderBookmark',action:'update',id:bookmarkId,patch:{lighting}}
-  ],origin);
-  pinLighting.onchange=()=>{
-    const lighting=pinLighting.checked?currentLighting():null;
-    void editBookmark(origin=>saveBookmarkLighting(origin,lighting));
-  };
+  const opticsDiffer=entry=>!!entry?.optics&&JSON.stringify(entry.optics)!==JSON.stringify(currentOptics());
+  const updateSnapshot=(origin,patch)=>project.commands([{op:'renderBookmark',action:'update',id:bookmarkId,patch}],origin);
+  pinLighting.onchange=()=>void editBookmark(origin=>updateSnapshot(origin,{lighting:pinLighting.checked?currentLighting():null}));
+  pinOptics.onchange=()=>void editBookmark(origin=>updateSnapshot(origin,{optics:pinOptics.checked?currentOptics():null}));
   const bookmarkActions=el('div','render-settings-camera-actions');
   bookmarkActions.dataset.search='用作出图相机 更新镜头 删除镜头';
   bookmarkDetails.append(bookmarkActions);
@@ -384,6 +385,7 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     const entry=selectedBookmark(),commands=[];
     if(!sameDeliveryCamera(entry.camera,settings.projectCamera?.()))commands.push({op:'renderCamera',camera:entry.camera});
     if(lightingDiffers(entry))commands.push({op:'renderLighting',lighting:entry.lighting});
+    if(opticsDiffer(entry))commands.push({op:'renderOptics',optics:entry.optics==='source'?null:entry.optics});
     if(commands.length)await project.commands(commands,origin);
     if(project.document?.id===origin.id)settings.set({framing:'saved'});
   });
@@ -392,7 +394,8 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     if(!camera)throw Error('请先打开三维视口');
     return project.commands([{op:'renderBookmark',action:'update',id:bookmarkId,patch:{camera}}],origin);
   });
-  const updateBookmarkLighting=bookmarkButton('更新镜头布光',origin=>saveBookmarkLighting(origin,currentLighting()));
+  const updateBookmarkLighting=bookmarkButton('更新镜头布光',origin=>updateSnapshot(origin,{lighting:currentLighting()}));
+  const updateBookmarkOptics=bookmarkButton('更新镜头景深',origin=>updateSnapshot(origin,{optics:currentOptics()}));
   const deleteBookmark=bookmarkButton('删除',origin=>project.commands([{op:'renderBookmark',action:'remove',id:bookmarkId}],origin));
   deleteBookmark.setAttribute('aria-label','删除镜头');
   const batchBookmarks=el('button','','相机批量出图…');
@@ -446,12 +449,14 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     addBookmark.disabled=bookmarkPending||entries.length>=renderBookmarkLimit||!settings.canUseViewport();
     replaceBookmark.disabled=bookmarkPending||!settings.canUseViewport();
     const different=lightingDiffers(entry);
-    if(!bookmarkPending)pinLighting.checked=!!entry?.lighting;
-    pinLighting.disabled=bookmarkPending;
+    const changedOptics=opticsDiffer(entry);
+    if(!bookmarkPending){pinLighting.checked=!!entry?.lighting;pinOptics.checked=!!entry?.optics;}
+    pinLighting.disabled=pinOptics.disabled=bookmarkPending;
+    updateBookmarkOptics.hidden=!changedOptics;updateBookmarkOptics.disabled=bookmarkPending;
     updateBookmarkLighting.hidden=!different;updateBookmarkLighting.disabled=bookmarkPending;
-    const active=!!entry&&!different&&sameDeliveryCamera(entry.camera,settings.projectCamera?.())&&settings.read().framing==='saved';
+    const active=!!entry&&!different&&!changedOptics&&sameDeliveryCamera(entry.camera,settings.projectCamera?.())&&settings.read().framing==='saved';
     activateBookmark.disabled=bookmarkPending||active;
-    activateBookmark.textContent=active?'当前出图相机':entry?.lighting?'应用镜头与布光':'用作出图相机';
+    activateBookmark.textContent=active?'当前出图相机':entry?.optics?'应用镜头设置':entry?.lighting?'应用镜头与布光':'用作出图相机';
     syncSelectMenu(bookmarkPicker);
   }
 
