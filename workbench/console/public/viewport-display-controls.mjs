@@ -141,10 +141,10 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     else openChromeMenu(shadingMenu.details);
   }
   view.addEventListener('keydown',viewportKey,{signal});
-  // Saving an inspector value can leave focus on the document. The hovered
-  // viewport can still inspect channels without picking another surface.
+  // A committed value leaves focus on its property group or on the page.
+  // Hovering the viewport can inspect channels without picking another surface.
   document.addEventListener('keydown',event=>{
-    if(event.target===document.body&&['c','m'].includes(event.key.toLowerCase())&&view.matches(':hover'))viewportKey(event);
+    if((event.target===document.body||event.target.classList?.contains('source-material-fields'))&&['c','m'].includes(event.key.toLowerCase())&&view.matches(':hover'))viewportKey(event);
   },{signal});
   return {get mode(){return mode;},get channel(){return channel;},get projectLighting(){return projectLighting;},refresh,setChannels,
     getState:()=>({display:mode,channelDisplay:channel,xray,overlays,gizmos,axis,transformGizmo:transform,projectLighting,scene:scene.getSettings()}),

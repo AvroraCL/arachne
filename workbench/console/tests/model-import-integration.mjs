@@ -529,6 +529,12 @@ async function verifyObjectMaterialNavigation(id){
     await until(async()=>(await api('/api/projects/'+id)).paint.sourceMaterials?.['表面材料']?.roughness===.2);
     assert.deepEqual(await pixelAt(page,x,y),[51,51,51]);
     assert.equal((await api('/api/projects/'+id)).revision,revision+1);
+    await page.keyboard.press('Control+z');
+    await until(async()=>await roughness.inputValue()==='0.6',5000);
+    assert.deepEqual(await pixelAt(page,x,y),[153,153,153]);
+    await page.keyboard.press('Control+Shift+z');
+    await until(async()=>await roughness.inputValue()==='0.2',5000);
+    assert.deepEqual(await pixelAt(page,x,y),[51,51,51]);
     await canvas.press('m');
     await viewport.and(page.locator('[data-inspected-channel]')).waitFor({state:'hidden'});
     await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();

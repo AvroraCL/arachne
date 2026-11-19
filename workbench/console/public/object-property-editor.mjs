@@ -6,6 +6,10 @@ function row(parent,label,control){const item=el('label','render-settings-row');
 
 // Both the object inspector and the viewport pick edit the same GLB material.
 export function createSourceMaterialFields(sourceControls,project,readTarget,error,beginSourcePreview){
+  sourceControls.classList.add('source-material-fields');
+  sourceControls.tabIndex=-1;
+  sourceControls.setAttribute('role','group');
+  sourceControls.setAttribute('aria-label','原模型材质参数');
   const inputs={},labels={};
   for(const [key,title,channel] of [['color','底色','RGB'],['metallic','金属度','B'],['roughness','粗糙度','G'],['transmission','透射','R']]){
     const input=el('input');input.type=key==='color'?'color':'number';
@@ -83,7 +87,11 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     if(!sameTarget(target,shown)||target.locked||target.projectId!==origin?.id||(scrub&&!currentScrub(target))){
       endScrub();sync(true);error(Error('材质目标已变化，请重新选择'));return;
     }
-    pending=true;sync();materialMessage.textContent='正在保存…';
+    pending=true;
+    // Disabling the edited control otherwise sends focus outside the workspace
+    // and the very next undo shortcut never reaches the project history.
+    if(sourceControls.contains(document.activeElement))sourceControls.focus({preventScroll:true});
+    sync();materialMessage.textContent='正在保存…';
     try{await project.commands([{op:'sourceMaterial',name:target.name,patch}],origin);materialMessage.textContent='';}
     catch(failure){materialMessage.textContent=failure.message;error(failure);}
     finally{endScrub();pending=false;sync(true);}
