@@ -401,10 +401,9 @@ function field(text,type,value,change,options={}){
   };
   const snapshot=previewOperation?{projectId:doc.id,revision:doc.revision}:null;
   const isCurrent=()=>doc?.id===snapshot.projectId&&doc.revision===snapshot.revision&&input.isConnected;
-  function draft(){
+  function previewValue(next){
     const context=areaSystem?.materialDraftContext()??liveContext();
     if(!isCurrent()||!context||context.inspectMask&&!previewMask||busy||surfaceTools.isEditing()||uvSelection.isTransforming())return;
-    const next=currentValue();
     if(!input.validity.valid||next===value||type==='number'&&!Number.isFinite(next)){
       if(propertyDraft===input)clearPropertyDraft();
       return;
@@ -412,6 +411,7 @@ function field(text,type,value,change,options={}){
     propertyDraft=input;
     updatePaintDraft(previewOperation(next));
   }
+  const draft=()=>previewValue(currentValue());
   input.onchange=()=>{
     if(snapshot&&(!isCurrent()||uvSelection.isTransforming())){
       restoreValue();
@@ -436,6 +436,12 @@ function field(text,type,value,change,options={}){
     });
   };
   if(snapshot){
+    if(type==='color'){
+      input.beginColorPreview=()=>next=>{
+        if(next!==null)previewValue(next);
+        else if(propertyDraft===input)clearPropertyDraft();
+      };
+    }
     input.oninput=draft;
     input.onblur=()=>{if(propertyDraft===input&&!busy)clearPropertyDraft();};
     input.onkeydown=event=>{
@@ -1722,6 +1728,7 @@ async function run(action,errorOutput=null){
   if(busy)return;
   if(surfaceTools.isEditing()||modelMarquee||modeler.isDragging()||uvSelection.isDragging())return false;
   if(maskEditor.isOpen()){ $('mask-status').textContent='请先保存或取消当前蒙版';return; }
+  const focusedProperties=document.activeElement?.closest('form[data-material-properties]');
   busy=true;$('status').textContent='';$('delivery-error').textContent='';
   syncBusyControls();
   try{await action();await refresh();return true;}
@@ -1734,6 +1741,7 @@ async function run(action,errorOutput=null){
     busy=false;
     syncBusyControls();
     surfaceTools.render();uvSelection.sync();areaSystem?.sync();
+    if(document.activeElement===document.body&&focusedProperties?.getClientRects().length)focusedProperties.focus({preventScroll:true});
   }
 }
 async function projects(){

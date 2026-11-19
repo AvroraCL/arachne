@@ -570,6 +570,36 @@ async function verifyObjectMaterialNavigation(id){
     await pickSurface(.55,.48);
     await properties.locator('.editor-properties').waitFor();
     assert.ok(await owner.isHidden());
+    await canvas.press('c');
+    await viewport.and(page.locator('[data-inspected-channel=color]')).waitFor();
+    const pigmentPixel=()=>pixelAt(page,Math.floor(materialBox.x+.55*materialBox.width),Math.floor(materialBox.y+.48*materialBox.height));
+    const originalPixel=await pigmentPixel();
+    const colorState=await api('/api/projects/'+id);
+    await properties.locator('.editor-properties').getByLabel('颜色',{exact:true}).click();
+    const hex=page.getByRole('textbox',{name:'HEX 颜色',exact:true});
+    await hex.fill('#e12462');
+    await until(async()=>{const [r,g,b]=await pigmentPixel();return r>180&&g<80&&b>70&&b<130;},12000);
+    assert.equal((await api('/api/projects/'+id)).revision,colorState.revision);
+    await hex.press('Escape');
+    await until(async()=>String(await pigmentPixel())===String(originalPixel),12000);
+    assert.deepEqual((await api('/api/projects/'+id)).paint,colorState.paint);
+    await properties.locator('.editor-properties').getByLabel('颜色',{exact:true}).click();
+    await hex.fill('#e12462');await hex.press('Enter');
+    const readyPigment=properties.locator('form:focus[aria-busy=false]').getByLabel('颜色',{exact:true});
+    async function colorSettled(color){
+      await until(async()=>await readyPigment.count()&&await readyPigment.inputValue()===color,5000);
+      assert.equal((await api('/api/projects/'+id)).paint.base.color,color);
+    }
+    await colorSettled('#e12462');
+    await page.keyboard.press('Control+z');
+    await colorSettled(colorState.paint.base.color);
+    await until(async()=>String(await pigmentPixel())===String(originalPixel),12000);
+    await page.keyboard.press('Control+Shift+z');
+    await colorSettled('#e12462');
+    await page.keyboard.press('Control+z');
+    await colorSettled(colorState.paint.base.color);
+    console.log('PASS painted color preview, cancel and keyboard undo/redo from the property that committed it');
+    await canvas.press('m');
     await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
     await until(async()=>JSON.stringify((await api('/api/projects/'+id)).paint)===JSON.stringify(before.paint));
     await pickSurface(.5,.74);await sourceRough.waitFor();
