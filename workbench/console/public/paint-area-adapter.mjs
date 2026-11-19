@@ -214,7 +214,7 @@ export function setupPaintAreas(hooks){
     let material=null;
     if(areas.name==='modeling'&&next==='material'&&scene?.mode==='object'&&scene.selectedIds.length===1){
       const slots=scene.inspectObject(scene.activeId)?.materials;
-      if(slots?.length===1&&!slots[0].painted)material=slots[0].name;
+      if(slots?.length===1)material=slots[0].name;
     }
     if(!areas.switchWorkspace(next))return;
     const view=areas.active?.kind==='viewport'?areas.active:visibleEditors.find(editor=>editor.kind==='viewport');

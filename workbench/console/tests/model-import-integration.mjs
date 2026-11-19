@@ -563,6 +563,11 @@ async function verifyObjectMaterialNavigation(id){
     await viewport.waitFor();
     await inspector.getByText('遮挡材料',{exact:true}).filter({visible:true}).waitFor();
     assert.ok(await inspector.getByRole('button',{name:'查看图层属性'}).isVisible());
+    await page.locator('[data-area-mode=material]').click();
+    await viewport.waitFor();
+    await properties.locator('.editor-properties').waitFor();
+    await page.locator('[data-area-mode=modeling]').click();
+    await inspector.getByText('遮挡材料',{exact:true}).filter({visible:true}).waitFor();
     assert.deepEqual((await api('/api/projects/'+id)).paint,before.paint);
     console.log('PASS switching workspaces follows the single object into its material and back to the newly picked object');
     console.log('PASS clicking a source in the material workspace edits that material and preserves the paint-layer target on undo');
