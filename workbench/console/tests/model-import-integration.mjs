@@ -510,6 +510,13 @@ async function verifyObjectMaterialNavigation(id){
     await sourceRough.fill('0.22');await sourceRough.press('Enter');
     await until(async()=>(await api('/api/projects/'+id)).paint.sourceMaterials?.['表面材料']?.roughness===.22);
     assert.deepEqual((await api('/api/projects/'+id)).paint.base,before.paint.base);
+    // Hover over a different object after the edit; inspection must not pick it.
+    await page.mouse.move(materialBox.x+.55*materialBox.width,materialBox.y+.48*materialBox.height);
+    await page.keyboard.press('c');
+    await viewport.and(page.locator('[data-inspected-channel=color]')).waitFor();
+    assert.equal(await sourceRough.inputValue(),'0.22');
+    await page.keyboard.press('m');
+    await viewport.and(page.locator('[data-inspected-channel]')).waitFor({state:'hidden'});
     await pickSurface(.55,.48);
     await properties.locator('.editor-properties').waitFor();
     await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();

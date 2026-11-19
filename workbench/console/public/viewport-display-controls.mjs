@@ -125,7 +125,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     channelSelect.replaceChildren(new Option('完整材质',''),...channels.map(key=>new Option(channelSpecs[key].name,key)));
     channelSelect.disabled=!channels.length;refresh();
   }
-  view.addEventListener('keydown',event=>{
+  function viewportKey(event){
     const key=event.key.toLowerCase();
     if(!['n','c','m'].includes(key)||event.defaultPrevented||event.repeat||event.isComposing||event.keyCode===229||event.altKey||event.metaKey||event.ctrlKey||
        event.target.closest('input,select,textarea,[contenteditable]')||document.querySelector('dialog[open],.custom-select-menu')||isEditing())return;
@@ -139,6 +139,12 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     event.preventDefault();
     if(shadingMenu.details.open)shadingMenu.details.open=false;
     else openChromeMenu(shadingMenu.details);
+  }
+  view.addEventListener('keydown',viewportKey,{signal});
+  // Saving an inspector value can leave focus on the document. The hovered
+  // viewport can still inspect channels without picking another surface.
+  document.addEventListener('keydown',event=>{
+    if(event.target===document.body&&['c','m'].includes(event.key.toLowerCase())&&view.matches(':hover'))viewportKey(event);
   },{signal});
   return {get mode(){return mode;},get channel(){return channel;},get projectLighting(){return projectLighting;},refresh,setChannels,
     getState:()=>({display:mode,channelDisplay:channel,xray,overlays,gizmos,axis,transformGizmo:transform,projectLighting,scene:scene.getSettings()}),
