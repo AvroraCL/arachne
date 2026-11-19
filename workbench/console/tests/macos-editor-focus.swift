@@ -38,6 +38,27 @@ import WebKit
             guard workbench.window.isKeyWindow else { return false }
             return (try? await js("return !!window.arachneNativeHost && !!document.querySelector('.editor-viewport[data-state=ready]')")) as? Bool == true
         }
+        // Exercise the workbench GLB decoder on WebKit itself: its ImageBitmap
+        // path can return black even though the transparent texel stores white.
+        let sourceTexels = try await js("""
+            const {createViewportModelLoader}=await import('/viewport-model-loader.mjs');
+            const bytes='iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR4nGP4z8DQ8P//fwYAE3gEfWMlr0IAAAAASUVORK5CYII=',length=atob(bytes).length;
+            const {parser}=await createViewportModelLoader().parseAsync({asset:{version:'2.0'},scene:0,scenes:[{}],
+              buffers:[{uri:'data:application/octet-stream;base64,'+bytes,byteLength:length}],
+              bufferViews:[{buffer:0,byteLength:length}],images:[{bufferView:0,mimeType:'image/png'}],
+              textures:[{source:0}]},'');
+            const map=await parser.getDependency('texture',0),gl=document.createElement('canvas').getContext('webgl2');
+            const texture=gl.createTexture(),buffer=gl.createFramebuffer();
+            gl.bindTexture(gl.TEXTURE_2D,texture);
+            gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,map.image);
+            gl.bindFramebuffer(gl.FRAMEBUFFER,buffer);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texture,0);
+            const pixels=new Uint8Array(8);gl.readPixels(0,0,2,1,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+            gl.deleteFramebuffer(buffer);gl.deleteTexture(texture);map.dispose();
+            return Array.from(pixels);
+            """) as? [Int]
+        precondition(sourceTexels == [255,0,0,128,255,255,255,0], "Embedded GLB pigment and alpha should both survive native decoding")
+        print("PASS native WebKit embedded GLB color under transparent texels")
         _ = try await js("""
             document.querySelector('[data-area-mode=modeling]').click();
             """)

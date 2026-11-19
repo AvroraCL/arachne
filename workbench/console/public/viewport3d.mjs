@@ -13,7 +13,7 @@ import {createViewportPathTracer} from './viewport-path-tracer.mjs';
 import {watchViewportScale} from './viewport-display-scale.mjs';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {createViewportModelLoader} from './viewport-model-loader.mjs';
 
 // This module displays registered UV color only; it never pretends the 2D board is already baked.
 export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect=()=>{},onRenderPreviewStatus=()=>{},onModelingPick,animateAxes=false,localUI=false}){
@@ -61,7 +61,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   const materialState=new WeakMap(), contactMaterials=new WeakSet(),sourceChannels=new Set();
   const markedMaps=new Map();
   let sourcePreview=null;
-  const materials=new Map(),loader=new GLTFLoader(),gizmoState={instance:null};
+  const materials=new Map(),loader=createViewportModelLoader(),gizmoState={instance:null};
   const state=(text,kind='info')=>onStatus(text,kind);
   function drawAxis(){const root=host.querySelector('.vp-axis');if(!root||!camera)return;gizmoState.instance??=createAxisGizmo({root,getCamera:()=>camera,frameAxis,isMoving:()=>!!axisMotion});gizmoState.instance.draw();}
   function updateViewLabel(){
