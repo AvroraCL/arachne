@@ -396,6 +396,10 @@ async function verifyOriginalTextureChannels(texturedFile){
     method:'POST',headers:{'Content-Type':'model/gltf-binary',Origin:origin},body:await fs.readFile(texturedFile)
   });
   const doc=await created.json();assert.ok(created.ok,JSON.stringify(doc));
+  await api('/api/projects/'+doc.id+'/paint/commands',{revision:doc.revision,operations:[
+    {op:'base',patch:{metallic:.2,roughness:.8,ao:.4}},
+    {op:'baseChannels',patch:{ao:true}}
+  ]});
   const page=await browser.newPage({viewport:{width:1400,height:900}});
   try{
     await page.goto(origin+'/paint.html?project='+doc.id);
@@ -408,16 +412,19 @@ async function verifyOriginalTextureChannels(texturedFile){
     const canvas=viewport.locator('canvas').first();
     const channels=await page.locator('select[aria-label="视口材质通道"]').locator('option').evaluateAll(options=>options.map(o=>o.value));
     assert.ok(channels.includes('normal')&&channels.includes('ao')&&channels.includes('alpha')&&channels.includes('emission'),JSON.stringify(channels));
-    const result={};
+    const result={},primary={};
+    const frontX=Math.floor(box.x+box.width*.55),frontY=Math.floor(box.y+box.height*.48);
     for(const channel of channels.filter(Boolean)){
       await canvas.press('c');
       await viewport.and(page.locator('[data-inspected-channel="'+channel+'"]')).waitFor();
       result[channel]=await pixelAt(page,x,y);
+      if(['metallic','roughness','ao'].includes(channel))primary[channel]=await pixelAt(page,frontX,frontY);
     }
     assert.ok(Math.max(...result.color)>Math.min(...result.color),JSON.stringify(result));
     const rough=result.roughness[0];
     assert.ok(rough===10||rough===40,JSON.stringify(result));
     const gray=value=>[value,value,value];
+    assert.deepEqual(primary,{metallic:gray(51),roughness:gray(204),ao:gray(102)});
     assert.deepEqual(result.roughness,gray(rough));
     // The ORM transform offsets metal/roughness by half a texture. AO is unshifted.
     assert.deepEqual(result.metallic,gray(rough===10?100:30));
@@ -426,6 +433,17 @@ async function verifyOriginalTextureChannels(texturedFile){
     assert.ok(result.normal.every((v,i)=>Math.abs(v-[163,128,250][i])<=1),JSON.stringify(result));
     assert.ok(result.alpha[0]>0&&result.alpha[0]<128,JSON.stringify(result));
     assert.deepEqual(result.alpha,gray(result.alpha[0]));
+    await page.mouse.click(frontX,frontY);
+    await page.locator('.object-property-editor').getByRole('button',{name:'查看图层属性'}).click();
+    const ao=page.locator('.property-editor-material').getByLabel('环境遮蔽',{exact:true});
+    await ao.fill('0.8');await ao.press('Enter');
+    // Selection has moved the transform gizmo over the original sample.
+    const insideFace=Math.floor(box.x+box.width*.5);
+    const primaryShows=byte=>until(async()=>(await pixelAt(page,insideFace,frontY)).every(v=>v===byte),20000);
+    await primaryShows(204);
+    assert.deepEqual(await pixelAt(page,x,y),result.ao);
+    await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
+    await primaryShows(102);
     await canvas.press('m');
     console.log('PASS original material textures, UV transform, PBR factors and data-channel display',JSON.stringify(result));
   }finally{await page.close();}

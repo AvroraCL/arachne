@@ -113,6 +113,19 @@ export function applySourceFactors(material,factors,marked=material.userData.mar
   }
 }
 
+// The inspection texture uses the same sRGB decoding and linear filtering as
+// the expanded grayscale display. Select the component before vertex colors.
+export const scalarInspectionComponent={metallic:'bbb',roughness:'ggg',ao:'rrr'};
+export function installScalarInspection(material){
+  const compile=material.onBeforeCompile;
+  material.onBeforeCompile=function(shader,renderer){
+    compile.call(this,shader,renderer);
+    const component=this.defines?.PAINT_INSPECT_COMPONENT;
+    if(component)shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',
+      'diffuseColor.rgb = diffuseColor.'+component+';\n#include <color_fragment>');
+  };
+}
+
 export function livePaintTextureSpaces(channels) {
   const spaces = {color: THREE.SRGBColorSpace, scalar: THREE.NoColorSpace};
   if (channels.includes('normal')) spaces.normal = THREE.NoColorSpace;

@@ -1,7 +1,7 @@
 import {channelSpecs,activePaintChannels,renderChannel} from './paint-channels.mjs';
 import {applyModelState} from './paint-model-state.mjs';
 import {configureNavigation,attachOrbitInput,alignedCamera,projectionCamera,movedCamera} from './viewport-navigation.mjs';
-import {compositeSurfaceMark,sameSurfaceMarkPixels,inspectSourceChannel,applySourceFactors,createUnlitMaterial,updateLivePaintTextures,fillLivePaintTextures} from './viewport-materials.mjs';
+import {compositeSurfaceMark,sameSurfaceMarkPixels,inspectSourceChannel,applySourceFactors,scalarInspectionComponent,installScalarInspection,createUnlitMaterial,updateLivePaintTextures,fillLivePaintTextures} from './viewport-materials.mjs';
 import {layerIsVisible} from './paint-layer-tree.mjs';
 import {touchingPaintBounds,installPaintContactFilter} from './viewport-uv-contact.mjs';
 import {createViewportEnvironment} from './viewport-environment.mjs';
@@ -366,6 +366,12 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
         const paintedBlend=Boolean(alpha&&!material.alphaTest);
         material.transparent = dimmed||!inspecting&&(original.transparent||paintedBlend);
         material.depthWrite = !dimmed&&(inspecting||!paintedBlend&&original.depthWrite);
+        if(isTarget&&material.isMeshBasicMaterial){
+          material.defines??={};
+          if(material.map===inspectionMap&&inspectionMap?.userData.scalarVersion!==undefined)
+            material.defines.PAINT_INSPECT_COMPONENT=scalarInspectionComponent[inspectionChannel];
+          else delete material.defines.PAINT_INSPECT_COMPONENT;
+        }
         if(sourcePbr)inspectSourceChannel(material,sourcePbr,factors,inspectionChannel);
         material.needsUpdate = true;
       }
@@ -421,7 +427,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
         object.userData.viewportUnlitMaterials.forEach((display,index)=>{
           const source=original[index];
           materialState.get(display).sourcePbr=materialState.get(source);
-          if(source.userData.sourceMaterial===next.targetMaterial)return;
+          if(source.userData.sourceMaterial===next.targetMaterial){installScalarInspection(display);return;}
           if(source.normalMap)sourceChannels.add('normal');
           if(source.bumpMap)sourceChannels.add('height');
           if(source.emissiveMap||source.emissive?.getHex())sourceChannels.add('emission');
@@ -708,14 +714,24 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     const {pixels,request:{size}}=frame;
     if(channel==='color')clearChannelPreview();
     else{
-      if(inspectionMap?.image.width!==size){
+      const scalar=scalarInspectionComponent[channel]&&livePaint?.scalar;
+      const packed=inspectionMap?.userData.scalarVersion!==undefined;
+      if(inspectionMap?.image.width!==size||(scalar?inspectionMap.image.data!==scalar.image.data:packed)){
         inspectionMap?.dispose();
-        inspectionMap=new THREE.DataTexture(new Uint8Array(size*size*4),size,size,THREE.RGBAFormat);
+        const data=scalar?scalar.image.data:new Uint8Array(size*size*4);
+        inspectionMap=new THREE.DataTexture(data,size,size,THREE.RGBAFormat);
         inspectionMap.colorSpace=THREE.SRGBColorSpace;
         inspectionMap.magFilter=THREE.LinearFilter;inspectionMap.minFilter=THREE.LinearFilter;
       }
-      renderChannel(pixels,size,channel,inspectionMap.image.data);
-      inspectionMap.needsUpdate=true;
+      if(scalar){
+        if(inspectionMap.userData.scalarVersion!==scalar.version){
+          inspectionMap.userData.scalarVersion=scalar.version;
+          inspectionMap.needsUpdate=true;
+        }
+      }else{
+        renderChannel(pixels,size,channel,inspectionMap.image.data);
+        inspectionMap.needsUpdate=true;
+      }
     }
     inspectionChannel=channel;
     paintMaterials();return true;
