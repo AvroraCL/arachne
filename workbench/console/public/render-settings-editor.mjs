@@ -379,12 +379,16 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   pinLighting.onchange=()=>void editBookmark(origin=>updateSnapshot(origin,{lighting:pinLighting.checked?currentLighting():null}));
   pinOptics.onchange=()=>void editBookmark(origin=>updateSnapshot(origin,{optics:pinOptics.checked?currentOptics():null}));
   const bookmarkActions=el('div','render-settings-camera-actions');
-  bookmarkActions.dataset.search='用作出图相机 更新镜头 删除镜头';
+  bookmarkActions.dataset.search='在视口查看 用作出图相机 更新镜头 删除镜头';
   bookmarkDetails.append(bookmarkActions);
   function bookmarkButton(label,action){
     const control=el('button','',label);control.type='button';control.onclick=()=>void editBookmark(action);
     bookmarkActions.append(control);return control;
   }
+  const viewBookmark=bookmarkButton('在视口查看',()=>{
+    if(!settings.viewBookmark(selectedBookmark().camera))throw Error('请先结束当前视口操作');
+  });
+  viewBookmark.title='仅切换三维视口的观察机位';
   const activateBookmark=bookmarkButton('用作出图相机',async origin=>{
     const entry=selectedBookmark(),commands=[];
     if(!sameDeliveryCamera(entry.camera,settings.projectCamera?.()))commands.push({op:'renderCamera',camera:entry.camera});
@@ -452,6 +456,7 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
     batchBookmarks.disabled=bookmarkPending||!entries.length;
     addBookmark.disabled=bookmarkPending||entries.length>=renderBookmarkLimit||!settings.canUseViewport();
     replaceBookmark.disabled=bookmarkPending||!settings.canUseViewport();
+    viewBookmark.disabled=replaceBookmark.disabled;
     const different=lightingDiffers(entry);
     const changedOptics=opticsDiffer(entry);
     if(!bookmarkPending){pinLighting.checked=!!entry?.lighting;pinOptics.checked=!!entry?.optics;}

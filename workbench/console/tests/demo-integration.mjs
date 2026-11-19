@@ -288,6 +288,17 @@ try{
   assert.notDeepEqual(secondShot.camera,firstShot.camera);
   await bookmarkPanel.getByRole('button',{name:'相机书签',exact:true}).click();
   await page.getByRole('option',{name:'透视构图',exact:true}).click();
+  const beforeLook=await api(project(doc.id));
+  const inspectView=page.locator('.editor-area[data-editor=viewport]').first();
+  await bookmarkPanel.getByRole('button',{name:'在视口查看',exact:true}).click();
+  await inspectView.locator('[data-camera-frame]').waitFor();
+  const seen=inspectView.locator('.editor-viewport canvas').first();
+  const firstView=await seen.screenshot();
+  await inspectView.getByRole('button',{name:'查看已存机位'}).click();
+  await page.getByRole('menuitem',{name:secondShot.name,exact:true}).click();
+  await waitFor(async()=>!(await seen.screenshot()).equals(firstView),'从视口切换已存机位');
+  const afterLook=await api(project(doc.id));
+  assert.equal(afterLook.revision,beforeLook.revision);assert.deepEqual(afterLook.paint,beforeLook.paint);
   await bookmarkPanel.getByRole('button',{name:'用作出图相机',exact:true}).click();
   doc=await waitFor(async()=>{
     const state=await api(project(doc.id));

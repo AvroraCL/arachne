@@ -2437,6 +2437,7 @@ const renderSettingsBridge={
     if(areaSystem)areaSystem.showRenderCamera(camera);
     else deliveryViewport().applyCamera(camera);
   },
+  viewBookmark:camera=>areaSystem?.showRenderCamera(camera,false)??false,
   subscribe:listener=>{renderSettingsListeners.add(listener);return ()=>renderSettingsListeners.delete(listener);},
   canUseViewport:visibleDeliveryCamera,openExport:()=>$('open-delivery').click(),openRender:paintRenderResults.open,
   openBatch:cameraBatch.open

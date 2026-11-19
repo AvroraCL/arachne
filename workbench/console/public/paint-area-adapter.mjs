@@ -300,7 +300,7 @@ export function setupPaintAreas(hooks){
     strokeSaveStatus:()=>[materialStrokes.status(),...areas.editors().flatMap(editor=>editor.strokeSaveStatus?[editor.strokeSaveStatus()]:[])],
     async retryStrokeSaves(){if(materialStrokes.status().failure)await materialStrokes.retrySave();for(const editor of areas.editors())if(editor.strokeSaveStatus?.().failure)await editor.retryStrokeSave();},
     deliveryViewport:()=>targetViewport()?.viewport,
-    showRenderCamera:camera=>targetViewport()?.showRenderCamera(camera)??false,
+    showRenderCamera:(camera,followProject=true)=>targetViewport()?.showRenderCamera(camera,followProject)??false,
     drawRenderRegion:camera=>targetViewport()?.drawRenderRegion(camera)??false,
     pickRenderFocus:camera=>targetViewport()?.pickRenderFocus(camera)??false,
     get workspace(){return areas.name;},

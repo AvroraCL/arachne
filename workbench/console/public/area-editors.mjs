@@ -151,9 +151,23 @@ export function registerAreaEditors(registry,bridge){
     chromeButton(boxSelect,'marquee','框选');boxSelect.setAttribute('aria-keyshortcuts','B');boxSelect.setAttribute('aria-pressed','false');
     const frameButton=button('相机取景框',()=>toggleCameraFrame(),'相机取景框 · 小键盘 0');
     chromeButton(frameButton,'renderSettings');frameButton.setAttribute('aria-pressed','false');
+    const cameraGroup=el('span','viewport-camera-buttons'),bookmarkMenu=createContextActions('查看已存机位',ctx.error);
+    const bookmarks=button('查看已存机位',()=>{
+      const doc=project.document,rect=bookmarks.getBoundingClientRect();
+      bookmarkMenu.open({clientX:rect.left,clientY:rect.bottom},'查看已存机位',(doc?.paint.renderBookmarks||[]).map(entry=>({
+        label:entry.name,icon:'renderSettings',run:()=>{
+          const camera=project.document?.id===doc.id&&project.document.paint.renderBookmarks?.find(b=>b.id===entry.id)?.camera;
+          if(!camera)throw Error('该机位已不可用');
+          if(!toggleCameraFrame(camera,true,false))throw Error('请先结束当前视口操作');
+          view.querySelector('canvas')?.focus({preventScroll:true});
+        }
+      })));
+    });
+    chromeButton(bookmarks,'chevron');bookmarks.classList.add('viewport-camera-bookmarks');bookmarks.setAttribute('aria-haspopup','menu');
+    cameraGroup.append(frameButton,bookmarks);
     toolbar.append(modes,component,selectButton,meshButton,tool,orientation,transformPivot,cursorButton,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
       button('适应',()=>{markCameraFree();viewport.fit();}),
-      button('正交',()=>{markCameraFree();viewport.projection(!viewport.getState().orthographic);onChange();}),frameButton);
+      button('正交',()=>{markCameraFree();viewport.projection(!viewport.getState().orthographic);onChange();}),cameraGroup);
     transformPivot.dataset.searchable='false';
     enhanceSelectMenu(transformPivot,{iconOnly:true,triggerIcon:workspaceIcons.pivot});
     const numeric=el('form','editor-toolbar');numeric.setAttribute('aria-label','物体变换');const axes=[];
@@ -196,6 +210,8 @@ export function registerAreaEditors(registry,bridge){
       stage.toggleAttribute('data-camera-frame',cameraFrame);
       frameButton.setAttribute('aria-pressed',String(cameraFrame));
       frameButton.disabled=view.dataset.state!=='ready';
+      bookmarks.disabled=frameButton.disabled;
+      bookmarks.hidden=!project.document?.paint.renderBookmarks?.length;
       frameCaption.hidden=!cameraFrame;
       if(cameraFrame){
         const {width=1200,height=900}=bridge.renderSettings?.read()||{};
@@ -211,11 +227,11 @@ export function registerAreaEditors(registry,bridge){
       regionGesture.sync(cameraFrame);
       syncRenderPreview();
     }
-    function toggleCameraFrame(camera,enabled=!cameraFrame){
+    function toggleCameraFrame(camera,enabled=!cameraFrame,followProject=true){
       if(view.dataset.state!=='ready'||modeler.isDragging()||painter.isEditing()||marquee.isDragging()||regionGesture.editing()||focusGesture.editing())return false;
       if(enabled&&camera){
         if(!returnCamera)returnCamera=viewport.readCamera();
-        projectCameraView=true;projectCameraKey=JSON.stringify(camera);viewport.applyCamera(camera);
+        projectCameraView=followProject;projectCameraKey=followProject?JSON.stringify(camera):'';viewport.applyCamera(camera);
       }
       if(!enabled&&returnCamera){viewport.applyCamera(returnCamera);returnCamera=null;}
       if(!enabled){projectCameraView=false;projectCameraKey='';}
@@ -674,7 +690,7 @@ export function registerAreaEditors(registry,bridge){
         }
       },
       clearSurfacePick(){if(!disposed&&viewport.pickedSurface())viewport.select(null);},
-      showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
+      showRenderCamera:(camera,followProject=true)=>toggleCameraFrame(camera,true,followProject),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
       editCommand(name){if(name==='undo'&&painter.isEditing())return painter.cancel({preserveMode:true});},
       getState(){rememberView();return {mode,element:component.value,tool:tool.value,orientation:orientation.value,pivot:transformPivot.value,
         ...display.getState(),projectViews:projectViews.snapshot()};},
@@ -685,7 +701,7 @@ export function registerAreaEditors(registry,bridge){
         if(visible)void sync().catch(ctx.error);
         else{display.close();navigating=false;marquee.cancel();regionGesture.cancel();focusGesture.cancel();setPicking(false);releaseFrame();syncRenderPreview();}
       },
-      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();selectionMenu.dispose();meshMenu.dispose();smoothing.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();bridge.materialStrokes.release(ctx.areaId);modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
+      dispose(){disposed=true;clearTimeout(wheelTimer);cursorMenu.dispose();selectionMenu.dispose();meshMenu.dispose();bookmarkMenu.dispose();smoothing.dispose();marquee.cancel();subscription();lifecycle.abort();regionGesture.dispose();focusGesture.dispose();cameraFrameObserver.disconnect();unsubscribeCyclesSettings?.();display.dispose();painter.dispose();bridge.materialStrokes.release(ctx.areaId);modeler.close();viewport.dispose();viewportControllers.delete(ctx.areaId);if(project.scene?.owner===ctx.areaId){project.publishScene(null);viewportControllers.values().next().value?.();}}};
   });
 
   registry.register('shader',ctx=>{
