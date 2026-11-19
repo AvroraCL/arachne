@@ -18,7 +18,6 @@
   #workspace #drawing-layer-settings{flex-wrap:nowrap;gap:5px;padding:4px 0}
   #workspace #drawing-layer-settings>.custom-select{min-width:42px}
   #workspace #drawing-layer-settings .workspace-range-field{width:47px;min-width:47px}
-  #workspace #drawing-opacity-label{display:none}
   #workspace #layers .layer-row{
     grid-template-columns:21px minmax(0,1fr) 18px 27px;gap:2px
   }
@@ -33,7 +32,7 @@
   }
   #workspace #layers .layer-row:not([data-has-mask])>.layer-mask{display:none}
   #workspace #layers .layer-select{gap:4px;padding-inline:3px}
-  #workspace #layers .layer-select>small:empty{display:none}
+  #workspace #layers .layer-select>small{display:none}
   #workspace #layers .layer-thumb{width:21px;height:21px}
 
   #workspace .property-target-type{display:none}
@@ -57,3 +56,7 @@
   mask-image:linear-gradient(to right,transparent,#000 11px,#000 calc(100% - 13px),transparent)
 }
 .material-stroke-recovery{inset:auto 12px 12px;max-width:760px;z-index:30}
+
+@container (max-width:175px){
+  #workspace #drawing-opacity-label{display:none}
+}
