@@ -624,7 +624,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   function pickedSurface(){
     if(!selected||!pickedObject||!doc)return null;
     return {projectId:doc.id,binding:doc.source.files?.[doc.source.reviewSource],name:selected,
-      objectId:pickedObject.id,objectName:doc.paint?.objectNames?.[pickedObject.label]||pickedObject.label,painted:selected===doc.source.material};
+      objectId:pickedObject.id,sourceLabel:pickedObject.label,objectName:doc.paint?.objectNames?.[pickedObject.label]||pickedObject.label,painted:selected===doc.source.material};
   }
   function sourceMaterial(target){
     if(!manifest||target.projectId!==doc.id||target.binding!==manifest.modelSha256)return null;

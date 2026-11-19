@@ -550,6 +550,10 @@ export function registerAreaEditors(registry,bridge){
         rememberView();
         const savedView=projectViews.read(doc.id);
         surfaceToRestore=savedView?.surface;
+        // A compatible GLB update keeps node and material-slot identities. Carry
+        // the live pick through update/undo, and verify its source label on load.
+        if(picked&&picked.projectId===doc.id&&doc.source.format==='glb')
+          surfaceToRestore={...picked,binding:doc.source.files[doc.source.reviewSource]};
         cameraFrame=savedView?.cameraFrame===true;returnCamera=savedView?.returnCamera||null;
         projectCameraView=cameraFrame&&savedView?.projectCameraView===true;
         projectCameraKey='';cyclesPaused=savedView?.cyclesPaused===true;
@@ -570,7 +574,7 @@ export function registerAreaEditors(registry,bridge){
           const surface=surfaceToRestore;surfaceToRestore=null;
           if(mode==='view'&&!viewport.pickedSurface()&&surface&&surface.binding===doc.source.files?.[doc.source.reviewSource]){
             const object=modeler.inspectObject(surface.objectId);
-            if(object?.visible&&object.materials.some(slot=>slot.name===surface.name)){
+            if(object?.visible&&(surface.sourceLabel===undefined||surface.sourceLabel===object.label)&&object.materials.some(slot=>slot.name===surface.name)){
               viewport.select(surface.name,object.label,object.id);
               project.notifyView('surfacePick');
             }

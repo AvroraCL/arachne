@@ -812,6 +812,26 @@ async function verifyMarkedMaterialInspection(){
     assert.ok(await page.locator('.editor-area[data-editor=properties] .editor-properties').isVisible());
     assert.equal((await api('/api/projects/'+project.id)).revision,restored.revision);
     console.log('PASS reopening restores the marked surface and honors a newer layer selection made while loading the GLB');
+    await page.mouse.click(x,y);
+    const filename=fields.getByText('校准块.png',{exact:true});
+    await filename.waitFor();
+    async function reloadPickedSurface(action){
+      const geometry=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/model.glb'));
+      await action();assert.ok((await geometry).ok());await view.waitFor();await filename.waitFor();
+      assert.deepEqual(await fields.locator('.render-settings-readout').allTextContents(),['涂装面','表面材料']);
+      await shows(0,mark);
+      return (await api('/api/projects/'+project.id)).source.reviewSource;
+    }
+    const updatedSource=await reloadPickedSurface(async()=>{
+      const choosing=page.waitForEvent('filechooser');
+      await page.locator('.paint-menu summary').getByText('文件',{exact:true}).click();
+      await page.locator('#update-project-model').click();
+      await (await choosing).setFiles({name:'调整遮挡面.glb',mimeType:'model/gltf-binary',buffer:sampleModel(true,.26).bytes});
+    });
+    assert.notEqual(updatedSource,restored.source.reviewSource);
+    assert.equal(await reloadPickedSurface(()=>travel('undo')),restored.source.reviewSource);
+    assert.equal(await reloadPickedSurface(()=>travel('redo')),updatedSource);
+    console.log('PASS updating the GLB and traveling its history keep the marked surface editable at the original view');
   }finally{await page.close();}
 }
 
