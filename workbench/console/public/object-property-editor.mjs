@@ -10,6 +10,8 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
   sourceControls.tabIndex=-1;
   sourceControls.setAttribute('role','group');
   sourceControls.setAttribute('aria-label','原模型材质参数');
+  const users=el('details','source-material-users'),count=el('summary'),names=el('ul');
+  users.hidden=true;users.append(count,names);sourceControls.append(users);
   const inputs={},labels={};
   for(const [key,title,channel] of [['color','底色','RGB'],['metallic','金属度','B'],['roughness','粗糙度','G'],['transmission','透射','R']]){
     const input=el('input');input.type=key==='color'?'color':'number';
@@ -45,8 +47,12 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
   const removeMark=el('button','','移除标记');removeMark.type='button';removeMark.onclick=()=>save({mark:null});
   sourceControls.append(removeMark);
   restore.type='button';restore.title='恢复模型原始材质参数';
-  restore.onclick=()=>save(Object.fromEntries(Object.keys(inputs).filter(key=>shown?.[key]!==undefined).map(key=>[key,null])));sourceControls.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
-  let shown=null,pending=false,scrub=null;
+  restore.onclick=()=>save(Object.fromEntries(Object.keys(inputs).filter(key=>shown?.[key]!==undefined).map(key=>[key,null])));sourceControls.append(restore,materialMessage);
+  let shown=null,pending=false,scrub=null,aliases;
+  function listUsers(){
+    names.replaceChildren(...(shown?.users||[]).map(name=>el('li','',aliases?.[name]||name)));
+  }
+  users.ontoggle=()=>{if(users.open)listUsers();};
   function currentScrub(target){return sameTarget(target,scrub?.target)&&project.document?.revision===scrub.revision;}
   function endScrub(){scrub?.preview(null);scrub=null;}
   function sameTarget(a,b){
@@ -59,6 +65,15 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     }
     if(changed)materialMessage.textContent='';
     shown=target;
+    const nextAliases=project.document?.paint.objectNames;
+    if(changed||aliases!==nextAliases){
+      aliases=nextAliases;
+      if(changed)users.open=false;
+      const total=target?.users?.length||0;
+      users.hidden=total<2;
+      if(!users.hidden)count.textContent=total+' 个物体共用此材质';
+      if(users.open)listUsers();
+    }
     const patch=project.document?.paint.sourceMaterials?.[target?.name];
     const locked=pending||!target||target.locked;
     for(const [key,input] of Object.entries(inputs)){

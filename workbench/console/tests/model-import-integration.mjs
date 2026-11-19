@@ -626,6 +626,10 @@ async function verifyMultiMaterialPick(){
     await hit(.775);await until(async()=>await slot.innerText()==='遮挡材料',10000);
     const rough=inspector.getByLabel('模型材质粗糙度');
     assert.equal(Number(await rough.inputValue()),.7);
+    const users=inspector.locator('.source-material-users');
+    await users.getByText('2 个物体共用此材质').click();
+    await users.getByText('饰片',{exact:true}).waitFor();
+    assert.deepEqual((await users.locator('li').allTextContents()).sort(),['双色试片','饰片'].sort());
     const shader=page.locator('.editor-area[data-editor=shader]');
     assert.equal(await shader.locator('.shader-material').innerText(),'主材质 · 表面材料');
     assert.equal(await shader.getByRole('button',{name:'启用节点材质'}).getAttribute('title'),'为「表面材料」启用节点');
@@ -638,6 +642,7 @@ async function verifyMultiMaterialPick(){
     await hit(.775);await workspace('material');await view.waitFor();
     const picked=page.locator('.surface-properties:visible').getByLabel('模型材质粗糙度');
     await picked.waitFor();assert.equal(Number(await picked.inputValue()),.24);
+    assert.equal(await page.locator('.surface-properties:visible .source-material-users summary').innerText(),'2 个物体共用此材质');
     const screen=view.locator('canvas').first();
     for(let i=0;i<3;i++)await screen.press('c');
     await view.and(page.locator('[data-inspected-channel=roughness]')).waitFor();

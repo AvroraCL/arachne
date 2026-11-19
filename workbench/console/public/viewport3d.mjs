@@ -61,7 +61,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   const materialState=new WeakMap(), contactMaterials=new WeakSet(),sourceChannels=new Set();
   const markedMaps=new Map();
   let sourcePreview=null;
-  const materials=new Map(),loader=createViewportModelLoader(),gizmoState={instance:null};
+  const materials=new Map(),materialUsers=new Map(),loader=createViewportModelLoader(),gizmoState={instance:null};
   const state=(text,kind='info')=>onStatus(text,kind);
   function drawAxis(){const root=host.querySelector('.vp-axis');if(!root||!camera)return;gizmoState.instance??=createAxisGizmo({root,getCamera:()=>camera,frameAxis,isMoving:()=>!!axisMotion});gizmoState.instance.draw();}
   function updateViewLabel(){
@@ -228,7 +228,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if(name===manifest.targetMaterial)return {name,painted:true};
     if(!material.isMeshStandardMaterial||doc.source.format!=='glb')return null;
     const textureName=texture=>texture&&(texture.name||'内嵌贴图');
-    return {name,color:'#'+base.color.getHexString(),metallic:base.metalness,roughness:base.roughness,transmission:base.transmission,
+    return {name,users:materialUsers.get(name),color:'#'+base.color.getHexString(),metallic:base.metalness,roughness:base.roughness,transmission:base.transmission,
       maps:{color:textureName(base.map),metallic:textureName(base.metalnessMap),roughness:textureName(base.roughnessMap),transmission:textureName(material.transmissionMap)}};
   }
   function sourceMaterialForExport(material) {
@@ -306,7 +306,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     model = null;
     partBounds.length=0;
     modelBounds.makeEmpty();
-    materials.clear();sourceChannels.clear();
+    materials.clear();materialUsers.clear();sourceChannels.clear();
     texture = null;for(const value of Object.values(scalarTextures))value.dispose();scalarTextures={};
   }
   function hasProjectedFill(){
@@ -423,8 +423,20 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       const contactBounds=touchingPaintBounds(model,next.targetMaterial);
       const transmissionMaterials=new Set((gltf.parser.json.materials||[]).filter(m=>m.extensions?.KHR_materials_transmission).map(m=>m.name));
       model.traverse(object => {
+        const mapping=gltf.parser.associations.get(object);
+        const node=gltf.parser.json.nodes?.[mapping?.nodes];
+        if(doc.source.format==='glb'&&node?.mesh!==undefined){
+          // Count scene objects, including instances, once per material even
+          // when several primitives of the same mesh use it.
+          const slots=new Set(gltf.parser.json.meshes[node.mesh].primitives.map(p=>p.material));
+          for(const index of slots){
+            const name=gltf.parser.json.materials?.[index]?.name;
+            if(!name||name===next.targetMaterial)continue;
+            if(!materialUsers.has(name))materialUsers.set(name,[]);
+            materialUsers.get(name).push(node.name||object.name);
+          }
+        }
         if (onModelingPick) {
-          const mapping = gltf.parser.associations.get(object);
           if (object.isMesh && mapping?.meshes !== undefined) {
             object.userData.modelingPrimitive = mapping.meshes+':'+(mapping.primitives??0);
           }
