@@ -505,6 +505,10 @@ async function verifyObjectMaterialNavigation(id){
     await pickSurface(.5,.74);
     const sourceRough=original.getByRole('spinbutton',{name:'模型材质粗糙度'});
     await sourceRough.waitFor();
+    const owner=page.locator('.editor-area[data-editor=layers]:visible .layer-stack-owner');
+    assert.equal(await owner.innerText(),'主材质\n'+before.source.material);
+    const addToPrimary=page.getByRole('button',{name:'＋ 主材质绘制层',exact:true});
+    assert.ok((await addToPrimary.getAttribute('title')).includes(before.source.material));
     assert.ok((await original.innerText()).includes('表面材料'));
     assert.equal(await properties.locator('.editor-properties').isVisible(),false);
     await sourceRough.fill('0.22');await sourceRough.press('Enter');
@@ -519,10 +523,17 @@ async function verifyObjectMaterialNavigation(id){
     await viewport.and(page.locator('[data-inspected-channel]')).waitFor({state:'hidden'});
     await pickSurface(.55,.48);
     await properties.locator('.editor-properties').waitFor();
+    assert.ok(await owner.isHidden());
     await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
     await until(async()=>JSON.stringify((await api('/api/projects/'+id)).paint)===JSON.stringify(before.paint));
     await pickSurface(.5,.74);await sourceRough.waitFor();
     await until(async()=>await sourceRough.inputValue()==='0.6',5000);
+    await addToPrimary.click();
+    await until(async()=>(await api('/api/projects/'+id)).paint.layers.length===before.paint.layers.length+1);
+    assert.deepEqual((await api('/api/projects/'+id)).paint.sourceMaterials,before.paint.sourceMaterials);
+    await properties.locator('.editor-properties').waitFor();
+    await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
+    await until(async()=>JSON.stringify((await api('/api/projects/'+id)).paint)===JSON.stringify(before.paint));
     await page.getByRole('button',{name:'全 UV 底层',exact:true}).click();
     await properties.locator('.editor-properties').waitFor();
     assert.equal(await original.isVisible(),false);

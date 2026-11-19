@@ -522,6 +522,10 @@ export function registerAreaEditors(registry,bridge){
     async function sync(reselect=false){
       const doc=project.document;if(disposed||!doc)return;
       createPaintLayer.disabled=!bridge.canAddMaterialLayer();
+      const picked=mode==='view'&&viewport.pickedSurface();
+      const label=picked&&!picked.painted?'＋ 主材质绘制层':'＋ 材质绘制层';
+      if(createPaintLayer.textContent!==label)createPaintLayer.textContent=label;
+      createPaintLayer.title='为「'+doc.source.material+'」新建绘制层';
       if(projectId!==doc.id||modelSource!==doc.source.reviewSource){
         modelSource=doc.source.reviewSource;
         rememberView();
@@ -757,7 +761,18 @@ export function registerAreaEditors(registry,bridge){
     const editor=factory({...ctx,host});return {...editor,domain:'material',activate(){ctx.project.setEditorDomain('material');}};
   }
   registry.register('properties',ctx=>materialPanel(ctx,materialProperties));
-  registry.register('layers',ctx=>materialPanel(ctx,inner=>legacy('layers',inner)||createMaterialLayerEditor(inner,bridge)));
+  registry.register('layers',ctx=>materialPanel(ctx,inner=>{
+    const panel=legacy('layers',inner)||createMaterialLayerEditor(inner,bridge);
+    const owner=el('div','layer-stack-owner'),name=el('span');
+    owner.append(el('span','','主材质'),name);inner.host.prepend(owner);
+    function syncOwner(){
+      const picked=bridge.pickedSurface(),doc=ctx.project.document;
+      owner.hidden=!picked||picked.painted||picked.projectId!==doc?.id;
+      if(!owner.hidden&&name.textContent!==doc.source.material)name.textContent=name.title=doc.source.material;
+    }
+    const unsubscribe=ctx.project.subscribe(syncOwner);syncOwner();
+    return {...panel,dispose(){unsubscribe();panel.dispose?.();}};
+  }));
   registry.register('imageLayers',ctx=>createImagePanel('layers',{...ctx,busy:bridge.busy,openImageText:bridge.openImageText,
     imageSelection:bridge.imageSelection,sampleLayerSelection:bridge.sampleLayerSelection}));
   registry.register('imageProperties',ctx=>createImagePanel('properties',{...ctx,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment,pickAdjustmentColor:bridge.pickAdjustmentColor}));
