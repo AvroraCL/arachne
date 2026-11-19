@@ -715,10 +715,14 @@ async function verifyMultiMaterialPick(){
     await workspace('material');await view.waitFor();
     const focusedObject=page.locator('.surface-properties:visible .render-settings-readout').filter({hasText:/^饰片$/});
     await focusedObject.waitFor();
-    await screen.press('f');
-    await view.and(page.locator('[data-frame-mode=selection]')).waitFor();
+    // Deliver F immediately before pointerup reaches the canvas pick handler,
+    // so a repaint cannot mask a stale camera matrix between these two actions.
+    await screen.evaluate(canvas=>canvas.addEventListener('pointerup',()=>{
+      canvas.dispatchEvent(new KeyboardEvent('keydown',{key:'f',code:'KeyF',bubbles:true,cancelable:true}));
+    },{once:true,capture:true}));
     const framed=await screen.boundingBox();
     await page.mouse.click(framed.x+framed.width/2,framed.y+framed.height/2);
+    await view.and(page.locator('[data-frame-mode=selection]')).waitFor();
     await focusedObject.waitFor();
     assert.equal((await api('/api/projects/'+doc.id)).revision,beforeFocus.revision);
     console.log('PASS material focus centers the picked object when another visible object shares its material');

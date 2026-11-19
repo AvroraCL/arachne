@@ -552,6 +552,8 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     camera.zoom=1;
     camera.userData.half=Math.max(half,.001);
     bindControls();
+    // Picking may follow the focus command before the next render updates the camera.
+    camera.updateMatrixWorld();
     size();
     request();
   }
