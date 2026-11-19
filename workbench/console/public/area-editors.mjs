@@ -71,9 +71,11 @@ export function registerAreaEditors(registry,bridge){
     let picking=false,sampledBrush=null,pickerMessage='',navigating=false,wheelTimer=null,display,textureMessage='';
     const projectViews=createViewportProjectViews(state,bridge.legacyCameraProject);
     let cameraFrame=false,returnCamera=null,cyclesPaused=false,projectCameraView=false,projectCameraKey='';
+    let surfaceToRestore=null;
     function rememberView(){
       if(projectId&&view.dataset.state==='ready')projectViews.remember(projectId,{
-        camera:viewport.readCamera(),cameraFrame,returnCamera,projectCameraView,cyclesPaused
+        camera:viewport.readCamera(),cameraFrame,returnCamera,projectCameraView,cyclesPaused,
+        surface:mode==='view'?viewport.pickedSurface():null
       });
     }
     const inModeling=()=>mode==='object'||mode==='edit';
@@ -196,7 +198,7 @@ export function registerAreaEditors(registry,bridge){
       textureMessage=text;
       if(kind==='error'||view.dataset.state!=='ready')status.textContent=text;
       else if(!inModeling()&&!placement)status.textContent=frame?'实时材质':text;
-    },onSelect:()=>project.notifyView('surfacePick'),
+    },onSelect:()=>{project.notifyView('surfacePick');onChange();},
     onModelingPick:event=>{if(inModeling()){modeler.pick(event);return true;}return mode!=='view';}});
     const regionGesture=createRenderRegionGesture({host:view,signal,read:()=>project.document?.paint.renderRegion,
       origin:project.origin,commit:(region,origin)=>project.commands([{op:'renderRegion',region}],origin),
@@ -547,6 +549,7 @@ export function registerAreaEditors(registry,bridge){
         modelSource=doc.source.reviewSource;
         rememberView();
         const savedView=projectViews.read(doc.id);
+        surfaceToRestore=savedView?.surface;
         cameraFrame=savedView?.cameraFrame===true;returnCamera=savedView?.returnCamera||null;
         projectCameraView=cameraFrame&&savedView?.projectCameraView===true;
         projectCameraKey='';cyclesPaused=savedView?.cyclesPaused===true;
@@ -563,7 +566,16 @@ export function registerAreaEditors(registry,bridge){
           syncProjectCamera();
           syncCameraFrame();
           display.refresh();displayModeChanged();revision=doc.revision;
-          modeler.open(viewport.modelingContext(),doc.id);setMode(mode);
+          modeler.open(viewport.modelingContext(),doc.id);
+          const surface=surfaceToRestore;surfaceToRestore=null;
+          if(mode==='view'&&!viewport.pickedSurface()&&surface&&surface.binding===doc.source.files?.[doc.source.reviewSource]){
+            const object=modeler.inspectObject(surface.objectId);
+            if(object?.visible&&object.materials.some(slot=>slot.name===surface.name)){
+              viewport.select(surface.name,object.label,object.id);
+              project.notifyView('surfacePick');
+            }
+          }
+          setMode(mode);
           await sync(reselect);
         }catch(error){ctx.error(error);}
         return;
@@ -678,7 +690,7 @@ export function registerAreaEditors(registry,bridge){
     return {kind:'viewport',viewport,pickedSurface:()=>!disposed&&shown&&mode==='view'?viewport.pickedSurface():null,
       inspectModelSurface(name,label,id){
         if(mode!=='view')return false;
-        viewport.select(name,label,id);return true;
+        surfaceToRestore=null;viewport.select(name,label,id);return true;
       },
       async selectPickedObject(surface){
         const task=loading;
@@ -689,7 +701,10 @@ export function registerAreaEditors(registry,bridge){
           modeler.setObjectSelection([surface.objectId],surface.objectId,surface.name);
         }
       },
-      clearSurfacePick(){if(!disposed&&viewport.pickedSurface())viewport.select(null);},
+      clearSurfacePick(explicit){
+        if(explicit)surfaceToRestore=null;
+        if(!disposed&&viewport.pickedSurface())viewport.select(null);
+      },
       showRenderCamera:(camera,followProject=true)=>toggleCameraFrame(camera,true,followProject),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
       editCommand(name){if(name==='undo'&&painter.isEditing())return painter.cancel({preserveMode:true});},
       getState(){rememberView();return {mode,element:component.value,tool:tool.value,orientation:orientation.value,pivot:transformPivot.value,

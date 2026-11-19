@@ -198,7 +198,7 @@ export function setupPaintAreas(hooks){
     }
   };
   project.subscribe(event=>{
-    if(event.kind==='selection'||event.kind==='resource')preferredViewport?.clearSurfacePick();
+    if(event.kind==='selection'||event.kind==='resource')preferredViewport?.clearSurfacePick(event.force);
   });
   registerAreaEditors(registry,bridge);
   const areas=createAreaWorkspace({host:workspace,registry,project,initial:hooks.initial,restoreActive:hooks.restoreActive!==false,desktopWorkspace:hooks.desktopWorkspace,

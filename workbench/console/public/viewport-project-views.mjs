@@ -8,9 +8,12 @@ export function createViewportProjectViews(state, legacyProject) {
   const views=new Map();
   function remember(id, view) {
     if(!projectId(id)||!validCamera(view?.camera))return;
+    const surface=view.surface;
     views.delete(id);
     views.set(id,{
       camera:view.camera,
+      ...(typeof surface?.binding==='string'&&Number.isInteger(surface.objectId)&&typeof surface.name==='string'
+        ?{surface:{binding:surface.binding,objectId:surface.objectId,name:surface.name}}:{}),
       ...(view.cameraFrame?{cameraFrame:true}:{}),
       ...(view.projectCameraView?{projectCameraView:true}:{}),
       ...(validCamera(view.returnCamera)?{returnCamera:view.returnCamera}:{}),

@@ -726,9 +726,11 @@ async function verifyMarkedMaterialInspection(){
       return canvas.toDataURL().split(',')[1];
     });
     const path='/api/projects/'+project.id+'/paint';
-    const {asset,document}=await api(path+'/assets',{revision:project.revision,name:'校准块.png',data:png});
+    const painted=await api(path+'/commands',{revision:project.revision,operations:[{op:'add',kind:'fill',patch:{name:'机壳罩漆'}}]});
+    const {asset,document}=await api(path+'/assets',{revision:painted.revision,name:'校准块.png',data:png});
     await page.goto(origin+'/paint.html?project='+project.id);
     await page.locator('[data-area-mode=material]').click();
+    await page.getByRole('button',{name:'机壳罩漆',exact:true}).click();
     const view=page.locator('.editor-viewport[data-state=ready]').first();await view.waitFor();
     const box=await view.boundingBox(),x=Math.floor(box.x+box.width*.5),y=Math.floor(box.y+box.height*.74);
     await page.mouse.click(x,y);
@@ -774,6 +776,23 @@ async function verifyMarkedMaterialInspection(){
     assert.equal(await view.getAttribute('data-inspected-channel'),'color');
     assert.equal(reloads,0);
     console.log('PASS original-UV mark, background color, removal and undo/redo update the actual inspected pixels without reloading the GLB');
+    await travel('undo');await shows(0,mark);
+    const restored=await api('/api/projects/'+project.id);
+    await page.reload();await fields.getByText('校准块.png',{exact:true}).waitFor();
+    await shows(0,mark);await shows(75,blue);
+    const gate=Promise.withResolvers();
+    await page.route('**/model.glb*',async route=>{await gate.promise;await route.continue();},{times:1});
+    try{
+      const loading=page.waitForRequest('**/model.glb*');
+      await page.reload({waitUntil:'domcontentloaded'});await loading;
+      await page.getByRole('button',{name:'全 UV 底层',exact:true}).click();
+    }finally{gate.resolve();}
+    await view.waitFor();await view.and(page.locator('[data-inspected-channel=color]')).waitFor();
+    await shows(0,mark);
+    assert.ok(await fields.isHidden());
+    assert.ok(await page.locator('.editor-area[data-editor=properties] .editor-properties').isVisible());
+    assert.equal((await api('/api/projects/'+project.id)).revision,restored.revision);
+    console.log('PASS reopening restores the marked surface and honors a newer layer selection made while loading the GLB');
   }finally{await page.close();}
 }
 

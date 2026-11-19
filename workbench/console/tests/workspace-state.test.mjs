@@ -106,10 +106,12 @@ test('viewports restore a camera only for its project and keep recent views acro
   assert.deepEqual(views.read('legacy-project'),{camera,cameraFrame:true,projectCameraView:true});
   assert.equal(views.read('new-project'),undefined);
   const second={...camera,projection:'orthographic',eye:[0,5,0]};
-  views.remember('new-project',{camera:second,cyclesPaused:true});
-  assert.deepEqual(views.read('new-project'),{camera:second,cyclesPaused:true});
+  const surface={binding:'model-B',objectId:7,name:'外盖'};
+  views.remember('new-project',{camera:second,cyclesPaused:true,surface});
+  assert.deepEqual(views.read('new-project'),{camera:second,cyclesPaused:true,surface});
   const reopened=createViewportProjectViews({projectViews:views.snapshot()},'legacy-project');
   assert.deepEqual(reopened.read('legacy-project'),views.read('legacy-project'));
+  assert.deepEqual(reopened.read('new-project').surface,surface);
   for(let i=0;i<9;i++)reopened.remember('project-'+i,{camera});
   assert.equal(Object.keys(reopened.snapshot()).length,8);
   assert.equal(reopened.read('legacy-project'),undefined);
