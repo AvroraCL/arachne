@@ -710,6 +710,18 @@ async function verifyMultiMaterialPick(){
     await workspace('modeling');await inspector.getByRole('button',{name:'查看图层属性'}).waitFor();
     assert.equal(await slot.innerText(),'表面材料');
     console.log('PASS face picking and manual slot choice edit the correct material on a multi-material object across both workspaces');
+    await page.locator('[data-scene-object-id] .editor-layer-name').getByText('饰片',{exact:true}).click();
+    const beforeFocus=await api('/api/projects/'+doc.id);
+    await workspace('material');await view.waitFor();
+    const focusedObject=page.locator('.surface-properties:visible .render-settings-readout').filter({hasText:/^饰片$/});
+    await focusedObject.waitFor();
+    await screen.press('f');
+    await view.and(page.locator('[data-frame-mode=selection]')).waitFor();
+    const framed=await screen.boundingBox();
+    await page.mouse.click(framed.x+framed.width/2,framed.y+framed.height/2);
+    await focusedObject.waitFor();
+    assert.equal((await api('/api/projects/'+doc.id)).revision,beforeFocus.revision);
+    console.log('PASS material focus centers the picked object when another visible object shares its material');
   }finally{await page.close();}
 }
 

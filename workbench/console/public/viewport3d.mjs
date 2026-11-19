@@ -171,16 +171,19 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     camera.updateProjectionMatrix();request();
   }
   function bindControls(target=center){controls?.dispose();controls=new OrbitControls(camera,renderer.domElement);configureNavigation(controls);controls.dampingFactor=.08;controls.target.copy(target);controls.minDistance=radius*.05;controls.maxDistance=radius*40;controls.addEventListener('change',()=>scheduleFrame(false));controls.addEventListener('start',()=>host.dispatchEvent(new CustomEvent('viewport-interaction',{detail:{active:true}})));controls.addEventListener('end',()=>host.dispatchEvent(new CustomEvent('viewport-interaction',{detail:{active:false}})));controls.update();}
-  function init(){if(renderer)return;renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1;renderer.domElement.tabIndex=0;renderer.domElement.setAttribute('aria-label','三维模型视口，中键旋转，Shift中键平移，滚轮缩放，F聚焦材质');host.append(renderer.domElement);scene=new THREE.Scene();objectOutline=createObjectOutline({renderer,scene});scene.add(new THREE.HemisphereLight(0xffffff,0x444444,2));for(const [pos,power] of [[[4,6,3],2.8],[[-3,2,-4],1.2]]){const light=new THREE.DirectionalLight(0xffffff,power);light.position.set(...pos);scene.add(light);}environment=createViewportEnvironment({renderer,scene,host,bounds:modelBounds,request});syncEnvironment();camera=new THREE.PerspectiveCamera(38,1,.001,100000);camera.position.set(2,1.5,2);bindControls();resizeObserver=new ResizeObserver(size);resizeObserver.observe(host);stopWatchingScale=watchViewportScale(window,next=>{pixelRatio=next;size();});attachOrbitInput(renderer.domElement,()=>controls);let down;renderer.domElement.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY,e.altKey?-1:e.button];});renderer.domElement.addEventListener('pointerup',e=>{if(!model||!down||down[2]!==0||Math.hypot(e.clientX-down[0],e.clientY-down[1])>4)return;if(!onModelingPick?.(e))selectMaterialAt(e);});renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();state('三维上下文丢失，请刷新视口','error');});size();}
+  function init(){if(renderer)return;renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1;renderer.domElement.tabIndex=0;renderer.domElement.setAttribute('aria-label','三维模型视口，中键旋转，Shift中键平移，滚轮缩放，F 聚焦选择');host.append(renderer.domElement);scene=new THREE.Scene();objectOutline=createObjectOutline({renderer,scene});scene.add(new THREE.HemisphereLight(0xffffff,0x444444,2));for(const [pos,power] of [[[4,6,3],2.8],[[-3,2,-4],1.2]]){const light=new THREE.DirectionalLight(0xffffff,power);light.position.set(...pos);scene.add(light);}environment=createViewportEnvironment({renderer,scene,host,bounds:modelBounds,request});syncEnvironment();camera=new THREE.PerspectiveCamera(38,1,.001,100000);camera.position.set(2,1.5,2);bindControls();resizeObserver=new ResizeObserver(size);resizeObserver.observe(host);stopWatchingScale=watchViewportScale(window,next=>{pixelRatio=next;size();});attachOrbitInput(renderer.domElement,()=>controls);let down;renderer.domElement.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY,e.altKey?-1:e.button];});renderer.domElement.addEventListener('pointerup',e=>{if(!model||!down||down[2]!==0||Math.hypot(e.clientX-down[0],e.clientY-down[1])>4)return;if(!onModelingPick?.(e))selectMaterialAt(e);});renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();state('三维上下文丢失，请刷新视口','error');});size();}
   function selectMaterialAt(event) {
     if(!manifest||host.dataset.state!=='ready')return;
     const hit = pickModel(event, model);
-    let node=hit?.object;
-    while(node&&node.userData.modelingObject===undefined)node=node.parent;
+    const node=modelingOwner(hit?.object);
     const material = hit && (Array.isArray(hit.object.material)
       ? hit.object.material[hit.face.materialIndex] : hit.object.material);
     select(material ? material.userData.sourceMaterial || material.name : null,node?.userData.modelingLabel||hit?.object.name,node?.userData.modelingObject);
     onSelect(selected);
+  }
+  function modelingOwner(node){
+    while(node&&node.userData.modelingObject===undefined)node=node.parent;
+    return node;
   }
   function pickModel(event, root) {
     const rect = renderer.domElement.getBoundingClientRect();
@@ -192,6 +195,11 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     ray.setFromCamera(pointer, camera);
     return ray.intersectObject(root, true).find(hit=>pickVisible(hit.object,root));
   }
+  function meshWorldBounds(object,box){
+    const owner='boundingBox' in object?object:object.geometry;
+    if(!owner.boundingBox)owner.computeBoundingBox();
+    return box.copy(owner.boundingBox).applyMatrix4(object.matrixWorld);
+  }
   function measureModelBounds(root){
     // Cache world-space boxes on load or geometry edits, not on camera motion.
     root.updateWorldMatrix(true,true);
@@ -199,11 +207,8 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     let count=0;
     root.traverse(object=>{
       if(!object.isMesh)return;
-      const owner='boundingBox' in object?object:object.geometry;
-      if(!owner.boundingBox)owner.computeBoundingBox();
-      if(owner.boundingBox.isEmpty())return;
       const box=partBounds[count]??=new THREE.Box3();
-      box.copy(owner.boundingBox).applyMatrix4(object.matrixWorld);
+      if(meshWorldBounds(object,box).isEmpty())return;
       modelBounds.union(box);
       count++;
     });
@@ -551,7 +556,20 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     request();
   }
   function frameAll(){if(camera&&model)fit(camera.position.clone().sub(controls.target),null,camera.up.clone());}
-  function focusSelected(){if(!model||!selected)return frameAll();const box=new THREE.Box3();let found=false;model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.userData.sourceMaterial===selected)){box.expandByObject(o);found=true;}});if(found)fit(camera.position.clone().sub(controls.target),box,camera.up.clone());else frameAll();}
+  function focusSelected(){
+    if(!model||!selected)return frameAll();
+    const bounds=new THREE.Box3(),part=new THREE.Box3();
+    model.updateWorldMatrix(true,true);
+    model.traverseVisible(object=>{
+      if(!object.isMesh||!pickVisible(object,model))return;
+      if(pickedObject?.id!=null&&modelingOwner(object)?.userData.modelingObject!==pickedObject.id)return;
+      const materials=Array.isArray(object.material)?object.material:[object.material];
+      if(materials.some(material=>(material.userData.sourceMaterial||material.name)===selected))
+        bounds.union(meshWorldBounds(object,part));
+    });
+    if(bounds.isEmpty())return frameAll();
+    fit(camera.position.clone().sub(controls.target),bounds,camera.up.clone());
+  }
   function direction(view){
     if(!model)return;
     const up=topUp.toArray(),opposite=topUp.clone().negate().toArray(),vertical=[0,1,0];
