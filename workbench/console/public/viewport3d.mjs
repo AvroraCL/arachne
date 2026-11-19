@@ -227,7 +227,9 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if(!manifest||!base)return null;
     if(name===manifest.targetMaterial)return {name,painted:true};
     if(!material.isMeshStandardMaterial||doc.source.format!=='glb')return null;
-    return {name,color:'#'+base.color.getHexString(),metallic:base.metalness,roughness:base.roughness};
+    const textureName=texture=>texture&&(texture.name||'内嵌贴图');
+    return {name,color:'#'+base.color.getHexString(),metallic:base.metalness,roughness:base.roughness,
+      maps:{color:textureName(base.map),metallic:textureName(base.metalnessMap),roughness:textureName(base.roughnessMap)}};
   }
   function sourceMaterialForExport(material) {
     const copy = material.clone();

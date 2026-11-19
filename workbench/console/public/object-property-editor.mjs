@@ -6,8 +6,8 @@ function row(parent,label,control){const item=el('label','render-settings-row');
 
 // Both the object inspector and the viewport pick edit the same GLB material.
 export function createSourceMaterialFields(sourceControls,project,readTarget,error,beginSourcePreview){
-  const inputs={};
-  for(const [key,title] of [['color','底色'],['metallic','金属度'],['roughness','粗糙度']]){
+  const inputs={},labels={};
+  for(const [key,title,channel] of [['color','底色','RGB'],['metallic','金属度','B'],['roughness','粗糙度','G']]){
     const input=el('input');input.type=key==='color'?'color':'number';
     if(key!=='color'){input.min='0';input.max='1';input.step='any';}
     input.setAttribute('aria-label','模型材质'+title);
@@ -23,6 +23,8 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     }
     input.addEventListener('change',()=>save({[key]:key==='color'?input.value:input.valueAsNumber}));
     inputs[key]=row(sourceControls,title,input);
+    const item=input.parentElement,caption=item.firstElementChild,detail=el('small','source-texture-channel');
+    labels[key]={title,channel,item,caption,detail};
   }
   const restore=el('button','','恢复材质参数'),materialMessage=el('output','editor-message');
   const markName=row(sourceControls,'投影标记',el('span','render-settings-readout'));
@@ -44,6 +46,17 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     const patch=project.document?.paint.sourceMaterials?.[target?.name];
     const locked=pending||!target||target.locked;
     for(const [key,input] of Object.entries(inputs)){
+      if(changed){
+        const {title,channel,item,caption,detail}=labels[key],map=target?.maps?.[key];
+        caption.textContent=title;
+        if(map){
+          detail.replaceChildren('× ',el('span','',map),'.'+channel);
+          detail.title=map+' 的 '+channel+' 通道 × '+title+'系数';
+          caption.append(detail);
+          input.setAttribute('aria-description',detail.title);
+        }else input.removeAttribute('aria-description');
+        item.dataset.search=map?detail.title:title;
+      }
       if(target&&(force||changed||document.activeElement!==input))input.value=patch?.[key]??target[key];
       input.disabled=!!locked;
     }

@@ -409,6 +409,8 @@ async function verifyOriginalTextureChannels(texturedFile){
     const box=await viewport.boundingBox(),x=Math.floor(box.x+box.width*.5),y=Math.floor(box.y+box.height*.74);
     await page.mouse.click(x,y);
     await page.locator('.object-property-editor').getByText('表面材料',{exact:true}).filter({visible:true}).waitFor();
+    const maps=page.locator('.object-property-editor .source-texture-channel:visible');
+    assert.deepEqual(await maps.allTextContents(),['× color.RGB','× orm.B','× orm.G']);
     const canvas=viewport.locator('canvas').first();
     const channels=await page.locator('select[aria-label="视口材质通道"]').locator('option').evaluateAll(options=>options.map(o=>o.value));
     assert.ok(channels.includes('normal')&&channels.includes('ao')&&channels.includes('alpha')&&channels.includes('emission'),JSON.stringify(channels));
@@ -462,6 +464,7 @@ async function verifyObjectMaterialNavigation(id){
     await pick('涂装面');
     const roughness=inspector.getByLabel('模型材质粗糙度',{exact:true});
     assert.equal(await roughness.inputValue(),'0.6');
+    assert.equal(await inspector.locator('.source-texture-channel:visible').count(),0);
     assert.equal(await roughness.isVisible(),true);
     await pick('遮挡面');
     const layer=inspector.getByRole('button',{name:'查看图层属性'});
