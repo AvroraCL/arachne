@@ -164,7 +164,17 @@ try{
   await packedPage.mouse.up();
   assert.equal(await blueRow.getAttribute('data-layer-drop'),null);
   assert.equal((await api(packRoute)).revision,packedMaterial.revision);
+  const layerSearch=packedPage.locator('#layer-search');
+  await packedPage.locator('#toggle-layer-search').click();
+  await layerSearch.fill('蓝钢');
   const placed=await dropBelow(otherTile);
+  assert.equal(await layerSearch.inputValue(),'蓝钢');
+  const placedRow=packedPage.locator('[data-layer-id="'+placed.layer.id+'"]');
+  await layerSearch.fill('蓝钢 2');
+  await placedRow.waitFor({state:'detached'});
+  await layerSearch.fill('蓝钢');
+  assert.equal(await placedRow.count(),0);
+  await layerSearch.press('Escape');
   assert.equal(placed.layer.materialId,otherId);
   assert.equal(placed.next.revision,packedMaterial.revision+1);
   packedMaterial=await undoDrop();

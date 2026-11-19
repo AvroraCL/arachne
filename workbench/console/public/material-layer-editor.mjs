@@ -60,12 +60,14 @@ export function createMaterialLayerEditor(ctx,bridge){
     sync();
     ctx.onChange();
   }
-  search.oninput=changed;
+  let revealedDrop=null;
+  search.oninput=()=>{revealedDrop=null;changed();};
   search.onkeydown=event=>{
     if(event.key!=='Escape'||!search.value)return;
     event.preventDefault();
     event.stopPropagation();
     search.value='';
+    revealedDrop=null;
     changed();
   };
   add.onchange=()=>{
@@ -158,8 +160,17 @@ export function createMaterialLayerEditor(ctx,bridge){
     lock.setAttribute('role','img');
     row.dataset.materialLayerId=id;
     row.append(eye,indent,fold,spacer,label,lock);
-    bridge.bindMaterialLayerDrag?.(label,row,id,folderId=>{
-      if(collapsedByProject.get(activeProject).delete(folderId))changed();
+    bridge.bindMaterialLayerDrag?.(label,row,id,{
+      filterText:()=>search.value,
+      openFolder:folderId=>{if(!disposed&&collapsedByProject.get(activeProject).delete(folderId))changed();},
+      revealPlaced:placed=>{
+        if(disposed)return;
+        if(!views.has(placed)&&search.value.trim()){
+          revealedDrop=placed;
+          sync();
+        }
+        views.get(placed)?.row.scrollIntoView({block:'nearest',inline:'nearest'});
+      }
     });
     return Object.assign(view,{eye,fold,spacer,icon,name,label,lock});
   }
@@ -190,7 +201,7 @@ export function createMaterialLayerEditor(ctx,bridge){
     if(icon.dataset.icon!==kind){icon.dataset.icon=kind;icon.innerHTML=workspaceIcons[kind];}
   }
   function syncRows(doc,collapsed,filtering){
-    const nextRows=materialLayerRows(doc.paint.layers,{query:search.value,collapsed});
+    const nextRows=materialLayerRows(doc.paint.layers,{query:search.value,collapsed,revealId:revealedDrop});
     const visibleIds=new Set(nextRows.map(({layer})=>layer.id));
     for(const [id,view] of views){
       if(visibleIds.has(id))continue;
@@ -214,6 +225,7 @@ export function createMaterialLayerEditor(ctx,bridge){
     const doc=project.document;
     if(disposed||!doc)return;
     if(activeProject!==doc.id){
+      revealedDrop=null;
       finishRename(false);
       for(const view of views.values())view.row.remove();
       views.clear();
@@ -222,7 +234,8 @@ export function createMaterialLayerEditor(ctx,bridge){
       structureKey='';
     }
     const collapsed=collapsedByProject.get(doc.id),filtering=!!search.value.trim();
-    const structure=JSON.stringify([doc.revision,search.value,[...collapsed]]);
+    if(revealedDrop!==project.layerId)revealedDrop=null;
+    const structure=JSON.stringify([doc.revision,search.value,[...collapsed],revealedDrop]);
     const rebuilt=structure!==structureKey;
     if(rebuilt){structureKey=structure;syncRows(doc,collapsed,filtering);}
     const active=project.layerId,selected=new Set(bridge.layerSelection?.()||[active]),busy=bridge.busy();

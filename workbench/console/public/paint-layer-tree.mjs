@@ -20,7 +20,7 @@ export function layerTreeOrder(layers,parentId=null){
   ]);
 }
 
-export function layerTreeRows(layers,{query='',collapsed=new Set(),filter=null}={}){
+export function layerTreeRows(layers,{query='',collapsed=new Set(),filter=null,revealId=null}={}){
   const normalize=name=>name.trim().normalize('NFKC').toLocaleLowerCase();
   const needle=normalize(query),children=new Map();
   for(const layer of layers){
@@ -35,7 +35,7 @@ export function layerTreeRows(layers,{query='',collapsed=new Set(),filter=null}=
       const open=layer.kind==='group'&&(!!needle||!!filter||!collapsed.has(layer.id));
       const visible=parentVisible&&layer.visible,lockOwner=lockedBy||(layer.locked?layer:null);
       const descendants=open?walk(layer.id,depth+1,matches,visible,lockOwner):[];
-      if(!matches&&!descendants.length)continue;
+      if(!matches&&!descendants.length&&layer.id!==revealId)continue;
       rows.push({layer,depth,open,visible,lockOwner},...descendants);
     }
     return rows;

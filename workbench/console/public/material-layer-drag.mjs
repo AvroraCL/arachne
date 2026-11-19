@@ -73,7 +73,7 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
     if(!target||!hasMaterialMask(source)||layerLockOwner(layers,target)||!copy&&layerLockOwner(layers,source))return null;
     return {zone:'mask',operation:{op:'transferMask',id,sourceId,copy}};
   }
-  function bind(handle,row,id,openFolder,mask){
+  function bind(handle,row,id,{openFolder,mask,filterText,revealPlaced}){
     handle.ondragstart=event=>{
       const doc=read();
       if(!doc||!handle.draggable||!canDrag()){event.preventDefault();return;}
@@ -126,9 +126,12 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
         clearMarker();
         if(!placement||!resource||!doc)return;
         event.preventDefault();
-        const origin={id:doc.id,revision:doc.revision};
+        const origin={id:doc.id,revision:doc.revision},query=filterText();
         void applyShelfMaterial(type,resource,placement,origin).then(saved=>{
-          if(saved&&placement.zone==='inside'&&read()?.id===origin.id)openFolder?.(id);
+          if(!saved||read()?.id!==origin.id||filterText()!==query)return;
+          if(placement.zone==='inside')openFolder?.(id);
+          const [placed]=selection();
+          if(placed&&!doc.paint.layers.some(layer=>layer.id===placed))revealPlaced(placed);
         });
         return;
       }

@@ -85,7 +85,7 @@ let selection=new Set(),selectionAnchor=null,layerRename=null;
 let assetGridKey='';
 const canvasAssetSizes=new Map();
 let approvedPreviewId=null,approvedRenderSettings=null,propertyDraft=null,pendingBackupId=null;
-let collapsedFolders=new Set();
+let collapsedFolders=new Set(),revealedDrop=null;
 const areaButtons=[...document.querySelectorAll('[data-area-mode]')];
 const addLayerControls=['fill','paint-layer','add-folder','decal','uv-text-tool'].map($);
 const lockOwner=layer=>doc&&layerLockOwner(doc.paint.layers,layer);
@@ -1295,14 +1295,23 @@ function startLayerRename(id){
   input.select();
   return true;
 }
+function revealPlacedLayer(id){
+  const stack=$('layers'),selector='[data-layer-id="'+CSS.escape(id)+'"]';
+  if(!stack.querySelector(selector)&&layerSearch.value.trim()){
+    revealedDrop=id;
+    renderLayers();
+  }
+  stack.querySelector(selector)?.scrollIntoView({block:'nearest',inline:'nearest'});
+}
 function renderLayers(){
+  if(revealedDrop!==selected)revealedDrop=null;
   const pending=endLayerRename();
   if(pending&&pending.input.value.trim()!==pending.initial){
     $('status').textContent='图层列表已更新，请重新命名';
   }
   const channel=$('layer-channel').value;
   const query=layerSearch.value.trim(),filtering=!!query;
-  const rows=materialLayerRows(doc.paint.layers,{query,collapsed:collapsedFolders});
+  const rows=materialLayerRows(doc.paint.layers,{query,collapsed:collapsedFolders,revealId:revealedDrop});
   const stack=$('layers');
   const previous=stack.dataset.projectId===doc.id?new Map([...stack.children].map(row=>[row.dataset.layerId,row])):new Map();
   stack.dataset.projectId=doc.id;
@@ -1387,7 +1396,7 @@ function renderLayer(l,depth,channel,filtering){
     }
     const hasMask=hasLayerMask(l);
     row.toggleAttribute('data-has-mask',hasMask);
-    if(folder&&!hasMask){materialLayerDrag.bind(node,row,l.id,expand);return row;}
+    if(folder&&!hasMask){materialLayerDrag.bind(node,row,l.id,{openFolder:expand,filterText:()=>layerSearch.value,revealPlaced:revealPlacedLayer});return row;}
     const maskButton=localButton(hasMask?'':'＋',event=>{
       if(busy||maskEditor.isOpen()||surfaceTools.isEditing())return;
       if(hasMask&&event.shiftKey){
@@ -1410,7 +1419,7 @@ function renderLayer(l,depth,channel,filtering){
     }
     if(hasMask)maskButton.setAttribute('aria-pressed',String(paintTarget==='mask'&&selected===l.id));
     row.append(maskButton);
-    materialLayerDrag.bind(node,row,l.id,expand,maskButton);
+    materialLayerDrag.bind(node,row,l.id,{openFolder:expand,filterText:()=>layerSearch.value,revealPlaced:revealPlacedLayer,mask:maskButton});
     return row;
 }
 function isLayerUnder(layer,folder){
@@ -1463,6 +1472,7 @@ function setLayerSearch(open,interactive=true){
   layerSearch.hidden=!open;
   layerSearchToggle.setAttribute('aria-expanded',String(open));
   if(open){layerSearch.focus({preventScroll:true});return;}
+  revealedDrop=null;
   const hadQuery=!!layerSearch.value;
   layerSearch.value='';
   if(interactive){
@@ -1471,7 +1481,7 @@ function setLayerSearch(open,interactive=true){
   }
 }
 layerSearchToggle.onclick=()=>setLayerSearch(layerSearch.hidden);
-layerSearch.oninput=renderLayers;
+layerSearch.oninput=()=>{revealedDrop=null;renderLayers();};
 layerSearch.onkeydown=event=>{
   if(event.key==='Escape'&&!compositionKey(event)){event.preventDefault();setLayerSearch(false);}
 };
@@ -1491,7 +1501,7 @@ function render(keepLayerRows=false){
   if(isolatedLayerId&&!doc.paint.layers.some(l=>l.id===isolatedLayerId))isolatedLayerId=null;
   if(!inspectedMask())inspectMask=false;
   $('exit-mask-inspection').hidden=!inspectMask;
-  if(keepLayerRows)syncLayerSelection();
+  if(keepLayerRows&&(!revealedDrop||revealedDrop===selected))syncLayerSelection();
   else renderLayers();
   renderProjection();
   renderAssets();renderAssetRoles();renderProperties();uvSelection.sync();renderJobs();
