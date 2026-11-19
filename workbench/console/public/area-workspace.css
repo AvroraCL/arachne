@@ -142,6 +142,9 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .source-material-users{margin:0 0 4px;color:#aaa;font-size:12px}
 .source-material-users summary{width:fit-content;cursor:pointer}
 .source-material-users ul{margin:3px 0;padding-inline-start:20px;list-style:none;overflow-wrap:anywhere}
+.source-mark-preview{display:flex;align-items:center;gap:5px;min-width:0;text-align:left}
+.source-mark-preview svg{flex:none;width:14px;height:14px}
+.source-mark-preview span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .viewport-camera-buttons{display:inline-flex;align-items:center;flex:none}
 .editor-toolbar .viewport-camera-bookmarks{width:16px;min-width:16px;padding:0}
 .viewport-camera-bookmarks svg{width:10px;height:10px;transform:rotate(90deg)}

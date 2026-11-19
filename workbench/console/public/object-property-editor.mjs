@@ -1,11 +1,12 @@
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
+import {workspaceIcons} from './workspace-icons.mjs';
 
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 
 function row(parent,label,control){const item=el('label','render-settings-row');item.dataset.search=label;item.append(el('span','',label),control);parent.append(item);return control;}
 
 // Both the object inspector and the viewport pick edit the same GLB material.
-export function createSourceMaterialFields(sourceControls,project,readTarget,error,beginSourcePreview){
+export function createSourceMaterialFields(sourceControls,project,readTarget,error,beginSourcePreview,viewAsset){
   sourceControls.classList.add('source-material-fields');
   sourceControls.tabIndex=-1;
   sourceControls.setAttribute('role','group');
@@ -43,7 +44,12 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     labels[key]={title,channel,item,caption,detail};
   }
   const restore=el('button','','恢复材质参数'),materialMessage=el('output','editor-message');
-  const markName=row(sourceControls,'投影标记',el('span','render-settings-readout'));
+  const markButton=row(sourceControls,'投影标记',el('button','source-mark-preview')),markName=el('span');
+  markButton.type='button';markButton.innerHTML=workspaceIcons.image;markButton.append(markName);
+  markButton.onclick=()=>{
+    const target=readTarget(),id=project.document?.paint.sourceMaterials?.[target?.name]?.mark?.image;
+    if(id&&sameTarget(target,shown))viewAsset(id,markButton,[id]);
+  };
   const removeMark=el('button','','移除标记');removeMark.type='button';removeMark.onclick=()=>save({mark:null});
   sourceControls.append(removeMark);
   restore.type='button';restore.title='恢复模型原始材质参数';
@@ -92,8 +98,9 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
       if(target?.[key]!==undefined&&(force||changed||document.activeElement!==input))input.value=patch?.[key]??target[key];
       input.disabled=!!locked||target?.[key]===undefined;
     }
-    markName.parentElement.hidden=removeMark.hidden=!patch?.mark;
+    markButton.parentElement.hidden=removeMark.hidden=!patch?.mark;
     markName.textContent=project.document?.paint.assets[patch?.mark?.image]?.name||'';
+    markButton.title='查看原图 · '+markName.textContent;
     removeMark.disabled=!!locked;restore.disabled=!!locked||!Object.keys(inputs).some(key=>patch?.[key]!==undefined);
   }
   async function save(patch){
@@ -115,7 +122,7 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
 }
 
 // Object edits use the same modeler and project revision as the 3D viewport.
-export function createObjectPropertyEditor({host,project,state={},onChange,error,beginSourcePreview,getTarget,getPaintSelection,openPaintLayers}){
+export function createObjectPropertyEditor({host,project,state={},onChange,error,beginSourcePreview,viewAsset,getTarget,getPaintSelection,openPaintLayers}){
   const root=el('div','object-property-editor'),info=el('details','render-settings-section');root.tabIndex=-1;info.open=true;
   info.append(el('summary','','物体'));const infoBody=el('div','render-settings-body');info.append(infoBody);
   const name=el('span','render-settings-readout'),position=el('span','object-position');
@@ -154,7 +161,7 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
     if(!target||target.projectId!==project.document?.id||target.binding!==scene?.binding)return null;
     const base=scene.inspectObject(target.id)?.materials.find(item=>item.name===slot.value&&!item.painted);
     return base&&{...base,projectId:target.projectId,binding:target.binding,locked:scene.dragging||scene.mode!=='object'};
-  },error,beginSourcePreview);
+  },error,beginSourcePreview,viewAsset);
   body.addEventListener('submit',event=>{
     event.preventDefault();if(pending)return;
     const target=getTarget(),origin=project.document,scene=project.scene,values=fields.map(input=>input.valueAsNumber);

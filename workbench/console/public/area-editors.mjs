@@ -778,7 +778,7 @@ export function registerAreaEditors(registry,bridge){
     }
     const sourceEditor=createSourceMaterialFields(fields,ctx.project,()=>{
       const target=picked();return target&&bridge.inspectSource(target);
-    },ctx.error,bridge.beginSourcePreview);
+    },ctx.error,bridge.beginSourcePreview,bridge.viewAsset);
     ctx.host.append(form,sourcePanel);let key='',first=true;
     const sync=()=>{
       if(!ctx.project.document)return;
@@ -825,7 +825,7 @@ export function registerAreaEditors(registry,bridge){
   registry.register('scene',ctx=>createSceneEditor(ctx));
   registry.register('renderResult',ctx=>createRenderResultEditor(ctx,bridge.renderResults));
   registry.register('renderSettings',ctx=>createRenderSettingsEditor(ctx,bridge.renderSettings,{
-    propertyTarget:bridge.propertyTarget,pickedSurface:bridge.pickedSurface,inspectSource:bridge.inspectSource,beginSourcePreview:bridge.beginSourcePreview,busy:bridge.busy,openMaterial:bridge.openMaterial,
+    propertyTarget:bridge.propertyTarget,pickedSurface:bridge.pickedSurface,inspectSource:bridge.inspectSource,beginSourcePreview:bridge.beginSourcePreview,viewAsset:bridge.viewAsset,busy:bridge.busy,openMaterial:bridge.openMaterial,
     material:(host,state,scope)=>materialProperties({...ctx,host,state},scope),
     drawing:(host,tools,root,project)=>createImagePanel('properties',{...ctx,host,tools,root,project,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment,pickAdjustmentColor:bridge.pickAdjustmentColor})
   }));

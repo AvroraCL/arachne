@@ -778,7 +778,14 @@ async function verifyMarkedMaterialInspection(){
     console.log('PASS original-UV mark, background color, removal and undo/redo update the actual inspected pixels without reloading the GLB');
     await travel('undo');await shows(0,mark);
     const restored=await api('/api/projects/'+project.id);
-    await page.reload();await fields.getByText('校准块.png',{exact:true}).waitFor();
+    await page.reload();await fields.getByText('校准块.png',{exact:true}).click();
+    const viewer=page.locator('.image-viewer[open]');
+    await viewer.getByRole('heading',{name:'校准块.png · 16×16'}).waitFor();
+    const sourceImage=viewer.locator('img').first();
+    await until(()=>sourceImage.evaluate(img=>img.naturalWidth===16));
+    assert.equal(new URL(await sourceImage.getAttribute('src'),origin).pathname,path+'/assets/'+asset.id);
+    await page.keyboard.press('Escape');await viewer.waitFor({state:'hidden'});
+    assert.equal(await fields.locator('.source-mark-preview:focus').count(),1);
     await shows(0,mark);await shows(75,blue);
     const gate=Promise.withResolvers();
     await page.route('**/model.glb*',async route=>{await gate.promise;await route.continue();},{times:1});
