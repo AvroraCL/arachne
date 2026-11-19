@@ -654,6 +654,26 @@ async function verifyMultiMaterialPick(){
     const inspector=page.locator('.object-property-editor:visible'),slot=inspector.getByRole('button',{name:'物体材质槽'});
     const box=await view.boundingBox(),hit=x=>page.mouse.click(box.x+box.width*x,box.y+box.height*.55);
     await hit(.775);await until(async()=>await slot.innerText()==='遮挡材料',10000);
+    // The Z handle covers the blue half of the already selected two-material mesh.
+    const handleX=box.x+box.width*.494,handleY=box.y+box.height*.424;
+    await page.mouse.click(handleX,handleY);
+    await until(async()=>await slot.innerText()==='表面材料',5000);
+    assert.equal((await api('/api/projects/'+doc.id)).revision,doc.revision);
+    await hit(.775);
+    await page.mouse.move(handleX,handleY);await page.mouse.down();
+    await page.mouse.move(handleX,handleY-22,{steps:4});
+    await page.mouse.move(handleX,handleY,{steps:4});await page.mouse.up();
+    assert.equal(await slot.innerText(),'遮挡材料');
+    assert.equal((await api('/api/projects/'+doc.id)).revision,doc.revision);
+    await page.mouse.move(handleX,handleY);await page.mouse.down();
+    await page.mouse.move(handleX,handleY-22,{steps:5});await page.mouse.up();
+    const moved=await until(async()=>{const d=await api('/api/projects/'+doc.id);return d.modeling?.steps?.length&&d;});
+    assert.equal(moved.modeling.steps.length,1);
+    assert.equal(await slot.innerText(),'遮挡材料');
+    const menuUndo=page.locator('#undo');
+    await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await menuUndo.click();
+    await until(async()=>!(await api('/api/projects/'+doc.id)).modeling?.steps?.length);
+    console.log('PASS tapping a transform handle picks the surface beneath it and dragging still transforms the selected object once');
     const rough=inspector.getByLabel('模型材质粗糙度');
     assert.equal(Number(await rough.inputValue()),.7);
     const users=inspector.locator('.source-material-users');

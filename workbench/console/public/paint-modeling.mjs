@@ -320,8 +320,15 @@ export function createPaintModeling(report, project = {}) {
     return {hit,cursor,camera,width,height};
   }
   function pick(event) {
-    if (!active || gesture || saving || gizmo.dragging || (mode==='edit'&&topologyState==='loading')) return;
+    if (!active || saving || (mode==='edit'&&topologyState==='loading')) return;
+    // TransformControls can grab a tap over a nearby part before its handle moves.
+    const handleTap=mode==='object'&&gizmo.dragging&&gesture&&!gesture.keyboard&&!gesture.moved;
+    if ((gesture||gizmo.dragging)&&!handleTap) return;
     const {hit,cursor,camera,width,height}=hitAt(event,mode==='edit'&&element!=='face');
+    if (handleTap) {
+      if (!hit?.face) return;
+      gizmo.pointerUp(null);
+    }
     error = '';
     if (!hit?.face) {
       if (mode === 'object' && !event.shiftKey) {
@@ -868,6 +875,7 @@ export function createPaintModeling(report, project = {}) {
     pivot.updateMatrixWorld(true);
     const delta = new THREE.Matrix4().multiplyMatrices(pivot.matrixWorld,gesture.inverse);
     if (!delta.elements.every(Number.isFinite) || Math.abs(delta.determinant()) < 1e-8) return;
+    gesture.moved ||= delta.elements.some((n,i)=>Math.abs(n-identity.elements[i])>1e-7);
     gesture.delta = delta;
     apply(gesture.captured,delta);
     context.updateModelBounds();
