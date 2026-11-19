@@ -179,7 +179,6 @@ const modelOutliner=createModelOutliner({
 const modeler=createPaintModeling(state=>{
   const {mode,element,tool,dragging,summary,hasDraft,activeId,topologyState,localActive}=state;
   modelOutliner.update(state);
-  shaderEditor?.setScope(state.materialScope);
   setSelectValue($('model-mode'),mode);
   $('model-mode').disabled=dragging;
   syncSelectMenu($('model-mode'));

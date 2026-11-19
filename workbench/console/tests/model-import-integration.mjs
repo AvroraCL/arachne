@@ -616,6 +616,9 @@ async function verifyMultiMaterialPick(){
     await hit(.775);await until(async()=>await slot.innerText()==='遮挡材料',10000);
     const rough=inspector.getByLabel('模型材质粗糙度');
     assert.equal(Number(await rough.inputValue()),.7);
+    const shader=page.locator('.editor-area[data-editor=shader]');
+    assert.equal(await shader.locator('.shader-material').innerText(),'主材质 · 表面材料');
+    assert.equal(await shader.getByRole('button',{name:'启用节点材质'}).getAttribute('title'),'为「表面材料」启用节点');
     const saved=page.waitForResponse(r=>r.url().endsWith('/paint/commands')&&r.request().method()==='POST');
     await rough.fill('.24');await rough.press('Enter');assert.ok((await saved).ok());
     const changed=await api('/api/projects/'+doc.id);

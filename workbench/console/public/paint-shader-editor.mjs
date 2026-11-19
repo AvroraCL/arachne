@@ -23,10 +23,10 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
   const makeNode=(type,x,y)=>makeGraphNode(graph,type,x,y);
   const currentOrigin=()=>{const doc=read(),t=readTarget();return doc?{id:doc.id,revision:doc.revision,...(t?{target:{library:t.library,id:t.id}}:{})}:null;};
   const originCurrent=value=>JSON.stringify(currentOrigin())===JSON.stringify(value);
-  let origin=null,graph=null,key='',selected=null,selection=new Set(),gesture=null,writing=false,cursor=null,scope='示例模型 · 共用材质';
+  let origin=null,graph=null,key='',selected=null,selection=new Set(),gesture=null,writing=false,cursor=null;
   const toolbar=el('div','shader-toolbar'),toggle=el('button','shader-collapse','▾'),title=el('strong','shader-editor-title','着色器编辑器');
   toggle.type='button';toggle.title='折叠着色器编辑器';
-  const material=el('span','shader-material',scope),enable=el('button','','启用节点材质'),add=el('select'),frame=el('button','','全部显示'),actions=el('select');
+  const material=el('span','shader-material'),enable=el('button','','启用节点材质'),add=el('select'),frame=el('button','','全部显示'),actions=el('select');
   function iconButton(button,icon,label){button.type='button';button.classList.add('shader-icon-button');button.innerHTML=workspaceIcons[icon];button.setAttribute('aria-label',label);button.title=label;return button;}
   iconButton(frame,'fit','全部显示');
   const focus=iconButton(el('button'),'focus','聚焦所选节点'),maximize=iconButton(el('button'),'orthographic','最大化着色器编辑器');
@@ -264,11 +264,19 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
     if(next===key||gesture||writing){controls();return;}
     const previousOrigin=origin;
     key=next;target=resource;nodeTypes=target?libraryNodeTypes(target.library):materialNodeTypes;
-    emptyTitle.textContent=target?.missing?'资源不可用':'从涂装结果开始';emptyHelp.textContent=target?.missing?'资源已删除，请撤销删除或选择其他节点目标。':'启用节点，将当前图层接入 PBR 材质。';
+    const original=doc?.source?.material;
+    const owner=target?.name||(original==='f_16xl'&&doc.source.format!=='glb'?'示例模型':original)||'';
+    const brush=target?.library==='brushes';
+    const scope=target?(brush?'笔刷资源':'材质资源'):'主材质';
+    material.textContent=owner?scope+' · '+owner:'工程输出';material.title=material.textContent;
+    enable.title=owner?'为「'+owner+'」启用节点':'启用节点';
+    enable.setAttribute('aria-description',material.textContent);
+    emptyTitle.textContent=target?.missing?'资源不可用':target?(brush?'笔刷节点':'材质节点'):'从涂装结果开始';
+    emptyHelp.textContent=target?.missing?'资源已删除，请撤销删除或选择其他节点目标。':
+      target?'启用节点，编辑'+scope+'「'+owner+'」。':owner?'将「'+owner+'」的涂装图层接入 PBR 材质。':'打开工程以编辑材质节点。';
     add.setAttribute('aria-label',target?.library==='brushes'?'添加笔刷节点':'添加材质节点');
     add.replaceChildren(new Option('添加',''),...Object.entries(nodeTypes).filter(([type])=>type!=='output').map(([type,spec])=>new Option(spec.name,type)));syncSelectMenu(add);
     title.textContent=target?.library==='brushes'?'笔刷节点编辑器':'着色器编辑器';
-    material.textContent=target?target.name:scope;material.title=material.textContent;
     actions.options[3].textContent=target?'重置节点':'还原涂装连接';
     host.dataset.resource=target?.library||'output';
     stage.setAttribute('aria-label',target?.library==='brushes'?'笔刷节点画布':'材质节点画布');
@@ -523,5 +531,5 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
     if(target===undefined)return;e.preventDefault();e.stopPropagation();resizeHeight(target);rememberHeight();
   };
   const observer=new ResizeObserver(()=>lines());observer.observe(stage);
-  return {sync,editCommand,frameAll:()=>frameNodes(),getViewState:()=>({pose:{...pose},collapsed}),dispose(){rememberPose();cancelGesture();cancelResize();disposed=true;lifecycle.abort();clearTimeout(poseTimer);observer.disconnect();host.replaceChildren();},setScope(text){scope=text;if(!target){material.textContent=text;material.title=text;}controls();},isEditing:()=>!!gesture||writing};
+  return {sync,editCommand,frameAll:()=>frameNodes(),getViewState:()=>({pose:{...pose},collapsed}),dispose(){rememberPose();cancelGesture();cancelResize();disposed=true;lifecycle.abort();clearTimeout(poseTimer);observer.disconnect();host.replaceChildren();},isEditing:()=>!!gesture||writing};
 }

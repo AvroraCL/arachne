@@ -39,12 +39,8 @@ export function createPaintModeling(report, project = {}) {
 
   function notify() {
     const objectLabel = selectedObjects.size>1 ? '已选 '+selectedObjects.size+' 个物体' : object?.name;
-    const materialNames = new Set();
-    object?.traverse(node=>{if(node.isMesh)for(const material of [node.material].flat())materialNames.add(material?.userData.sourceMaterial||material?.name);});
-    let uses=0;context?.model?.traverse(node=>{if(node.isMesh&&[node.material].flat().some(m=>(m.userData.sourceMaterial||m.name)==='f_16xl'))uses++;});
-    const materialScope = materialNames.size&&!materialNames.has('f_16xl')?'所选物体使用原生材质 · 当前编辑示例材质':`示例材质 · ${uses} 个网格共用${objectLabel?' · '+objectLabel:''}`;
     const modal=gesture?.keyboard?.describe();
-    report({materialScope,mode,element,tool,orientation,pivotMode,modal,dragging:!!gesture||saving||!!pendingOperation,hasDraft:!!undo.length,sceneItems,binding:context?.binding,projectId:currentProject,selectionVersion,
+    report({mode,element,tool,orientation,pivotMode,modal,dragging:!!gesture||saving||!!pendingOperation,hasDraft:!!undo.length,sceneItems,binding:context?.binding,projectId:currentProject,selectionVersion,
       activeId:object?.userData.modelingId,selectedIds:[...selectedObjects].map(node=>node.userData.modelingId),elementCount:selected.size,
       hasTransformTarget:!!object&&(mode==='object'||selected.size>0),topologyState,localActive:!!localObjects,
       selectionKey:mode==='edit'?[...selected.keys()].join(','):[...selectedObjects].map(node=>node.id).join(',')+'|active:'+object?.id,
