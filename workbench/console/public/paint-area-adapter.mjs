@@ -154,7 +154,7 @@ export function setupPaintAreas(hooks){
     clearMaterialInspection:hooks.clearMaterialInspection,toggleMaterialIsolation:hooks.toggleMaterialIsolation,
     clearLayerIsolation:hooks.clearLayerIsolation,
     retryPreview:async()=>{const doc=project.document;if(doc.modeling?.steps?.length)await write(()=>hooks.api('/api/projects/'+doc.id+'/paint/model-prepare',{revision:doc.revision}));activePreview().retryDetail();},
-    materialLayerOperation:hooks.materialLayerOperation,canAddMaterialLayer:hooks.canAddMaterialLayer,
+    applyLibraryFill:hooks.applyLibraryFill,materialLayerOperation:hooks.materialLayerOperation,canAddMaterialLayer:hooks.canAddMaterialLayer,
     placeSourceMark:(origin,name,image,projector)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/source-mark',{revision:origin.revision,name,image,projector})),
     validateSurface:async(hit,origin)=>{const r=await fetch('/api/projects/'+origin.id+'/paint/live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:origin.revision,pickUv:[hit.u,hit.v]})});if(!r.ok)throw Error('工程表面已变化，请重新放置贴花');const [code]=new Uint8Array(await r.arrayBuffer());if(code!==0)throw Error('此落点属于保护区、共享 UV 或不可写区域');},
     saveModel:(modeling,origin)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/model',{revision:origin.revision,modeling})),

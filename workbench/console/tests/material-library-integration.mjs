@@ -123,10 +123,68 @@ try{
   assert.equal(await createFill.isDisabled(),true);
   await packedShelf.getByRole('button',{name:'蓝钢',exact:true}).dblclick();
   await searchResource.fill('');
-  const packedMaterial=await until(async()=>{
+  let packedMaterial=await until(async()=>{
     const doc=await api(packRoute);
     return doc.paint.layers.some(layer=>layer.materialId)&&doc;
   });
+  const beforeDrop=packedMaterial.paint;
+  const blueRow=packedPage.locator('[data-layer-id="'+beforeDrop.layers.at(-1).id+'"]');
+  const otherTile=packedShelf.getByRole('button',{name:'新材质',exact:true});
+  const otherId=await otherTile.getAttribute('data-resource-id');
+  async function dropBelow(tile){
+    const {width,height}=await blueRow.boundingBox();
+    const commit=packedPage.waitForResponse(r=>r.request().method()==='POST'&&
+      (r.url().endsWith('/paint/commands')||r.url().endsWith('/paint/library-import')));
+    await tile.dragTo(blueRow,{targetPosition:{x:width/2,y:height-3}});
+    const result=await commit;
+    assert.equal(result.ok(),true,await result.text());
+    const next=await api(packRoute),layer=next.paint.layers[0];
+    assert.equal(next.paint.layers[1].id,beforeDrop.layers[0].id);
+    assert.equal(layer.name,'新材质');
+    await packedPage.locator('[data-layer-id="'+layer.id+'"] .layer-select[aria-pressed=true]').waitFor();
+    return {next,layer};
+  }
+  async function undoDrop(){
+    await packedPage.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
+    const update=packedPage.waitForResponse(r=>r.url().endsWith('/paint/undo')&&r.request().method()==='POST');
+    await packedPage.locator('#undo').click();
+    assert.ok((await update).ok());
+    const next=await api(packRoute);
+    assert.deepEqual(next.paint,beforeDrop);
+    return next;
+  }
+  const swatch=await otherTile.boundingBox(),targetBounds=await blueRow.boundingBox();
+  const dropX=targetBounds.x+targetBounds.width/2,dropY=targetBounds.y+3;
+  await packedPage.mouse.move(swatch.x+swatch.width/2,swatch.y+swatch.height/2);
+  await packedPage.mouse.down();
+  await packedPage.mouse.move(dropX,dropY,{steps:12});
+  await packedPage.mouse.move(dropX+1,dropY);
+  assert.equal(await blueRow.getAttribute('data-layer-drop'),'above');
+  await packedPage.keyboard.press('Escape');
+  await packedPage.mouse.up();
+  assert.equal(await blueRow.getAttribute('data-layer-drop'),null);
+  assert.equal((await api(packRoute)).revision,packedMaterial.revision);
+  const placed=await dropBelow(otherTile);
+  assert.equal(placed.layer.materialId,otherId);
+  assert.equal(placed.next.revision,packedMaterial.revision+1);
+  packedMaterial=await undoDrop();
+  await otherTile.click();
+  await packedShelf.getByRole('button',{name:'保存到个人库'}).click();
+  const personalItem=await until(async()=>Object.values((await api('/api/personal-library')).items).find(item=>item.name==='新材质'));
+  await packedShelf.getByRole('button',{name:'资源库范围'}).click();
+  await packedPage.getByRole('option',{name:'个人',exact:true}).click();
+  const personalTile=packedShelf.locator('[data-resource-id="'+personalItem.id+'"]:visible');
+  await personalTile.waitFor();
+  const importedDrop=await dropBelow(personalTile);
+  assert.equal(importedDrop.next.revision,packedMaterial.revision+1);
+  assert.notEqual(importedDrop.layer.materialId,otherId);
+  assert.deepEqual(importedDrop.next.paint.materials[importedDrop.layer.materialId].graph,beforeDrop.materials[otherId].graph);
+  packedMaterial=await undoDrop();
+  assert.deepEqual((await api('/api/personal-library')).items[personalItem.id],personalItem);
+  assert.equal(await packedShelf.locator('select[aria-label="资源库范围"]').inputValue(),'personal');
+  await packedShelf.getByRole('button',{name:'资源库范围'}).click();
+  await packedPage.getByRole('option',{name:'当前项目',exact:true}).click();
+  console.log('PASS project and personal materials drop below the selected layer, select the new fill, and undo in one step');
   const packJob=await api(packPaint+'/preview',{revision:packedMaterial.revision,requestId:'packed-import-bake'});
   const packBake=await until(async()=>{
     const job=await api(packRoute+'/jobs/'+packJob.id);
@@ -247,7 +305,7 @@ try{
   await packedShelf.getByRole('tab',{name:'智能材质',exact:true}).waitFor();
   const smartTile=packedShelf.getByRole('button',{name:smartName,exact:true});
   await smartTile.waitFor();
-  const saved=(await api('/api/personal-library')).items;
+  const {items:saved,revision:recipeRevision}=await api('/api/personal-library');
   const recipe=Object.values(saved).find(item=>item.name===smartName);
   assert.equal(recipe.kind,'smartMaterials');
   assert.equal(recipe.layerCount,2);
@@ -370,7 +428,7 @@ try{
   ]});
   const rejected=await fetch(origin+newRoute+'/paint/library-import',{
     method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
-    body:JSON.stringify({revision:locked.revision,id:recipe.id,libraryRevision:1,placement:{targetId:parent.id,zone:'inside'}})
+    body:JSON.stringify({revision:locked.revision,id:recipe.id,libraryRevision:recipeRevision,placement:{targetId:parent.id,zone:'inside'}})
   });
   assert.equal(rejected.status,400);
   assert.deepEqual((await api(newRoute)).paint,locked.paint);

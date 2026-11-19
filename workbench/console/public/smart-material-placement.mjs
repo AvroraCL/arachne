@@ -1,4 +1,24 @@
+import {paintChannels} from './paint-channels.mjs';
 import {layerParent,layerLockOwner} from './paint-layer-tree.mjs';
+
+export const materialDragType='application/x-arachne-library-material';
+
+export function libraryFill(paint,id,position){
+  if(!Object.hasOwn(paint.materials??{},id))throw Error('工程材质不存在');
+  return {op:'add',kind:'fill',...position,patch:{
+    name:paint.materials[id].name,materialId:id,channels:Object.fromEntries(paintChannels.map(k=>[k,true]))
+  }};
+}
+
+export function bindMaterialTile(tile,id,read,canEdit){
+  tile.draggable=true;
+  tile.ondragstart=event=>{
+    const doc=read();
+    if(!doc||!canEdit()||!Object.hasOwn(doc.paint.materials,id)){event.preventDefault();return;}
+    event.dataTransfer.setData(materialDragType,JSON.stringify({id,projectId:doc.id,revision:doc.revision}));
+    event.dataTransfer.effectAllowed='copy';
+  };
+}
 
 export const smartMaterialDragType='application/x-arachne-smart-material';
 
@@ -10,9 +30,18 @@ export function smartMaterialPlacement(layers,targetId,zone){
   return {targetId,zone,parentId};
 }
 
-export function draggedSmartMaterial(transfer){
+export function insertMaterialLayers(layers,copies,placement){
+  const target=smartMaterialPlacement(layers,placement?.targetId,placement?.zone);
+  if(!target)throw Error('材质的放置位置已变化或被锁定');
+  copies[0].parentId=target.parentId;
+  const index=target.zone==='inside'?layers.length:
+    layers.findIndex(layer=>layer.id===target.targetId)+(target.zone==='above'?1:0);
+  layers.splice(index,0,...copies);
+}
+
+export function draggedMaterial(transfer,type){
   let value;
-  try{value=JSON.parse(transfer.getData(smartMaterialDragType));}catch{return null;}
+  try{value=JSON.parse(transfer.getData(type));}catch{return null;}
   return value&&typeof value.id==='string'&&/^[\w-]{1,100}$/.test(value.id)&&
     Number.isSafeInteger(value.revision)&&value.revision>=0?value:null;
 }

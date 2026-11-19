@@ -5,6 +5,7 @@ import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
 import {isSelectionAsset} from './uv-selection-region.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
+import {bindMaterialTile} from './smart-material-placement.mjs';
 import {paintChannels,channelSpecs,renderChannel,liveStride} from './paint-channels.mjs';
 import {headerControls,chromeButton,areaIcons,createContextActions} from './area-chrome.mjs';
 import {projectionIsCurrent} from './paint-surface-state.mjs';
@@ -1001,7 +1002,7 @@ function createLibraryEditor(ctx,bridge){
   function applyMaterial(id){
     const material=project.document?.paint.materials?.[id];
     if(!material||bridge.busy())return;
-    void execute([{op:'add',kind:'fill',patch:{materialId:id,name:material.name,channels:Object.fromEntries(paintChannels.map(key=>[key,true]))}}]);
+    void bridge.applyLibraryFill(id);
   }
   const fill=button('创建填充层',()=>applyMaterial(selectedMaterial()));
   const preview=button('查看大图',()=>viewAsset(pickedAsset,preview));
@@ -1056,7 +1057,10 @@ function createLibraryEditor(ctx,bridge){
             startAssetDrag(event.dataTransfer,{id,projectId:current.id,revision:current.revision});
           };
           card.ondragend=endAssetDrag;
-        }else if(kind==='materials')card.ondblclick=()=>applyMaterial(id);
+        }else if(kind==='materials'){
+          bindMaterialTile(card,id,()=>project.document,()=>!bridge.busy());
+          card.ondblclick=()=>applyMaterial(id);
+        }
         return card;
       }));
       if(!entries.length)body.append(el('p','library-empty',searchTerms(query).length?'没有匹配的资源':'当前项目还没有这类资源'));

@@ -1,3 +1,4 @@
+import {libraryFill,insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
 import {textDefaults,textFonts,textEffects,checkStyleFields,hasImageStyle,paragraphOrigin} from './public/image-text-style.mjs';
 import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
@@ -580,10 +581,12 @@ function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
     if(op==='add'){
       requireUnlocked(p.layers,p.layers.find(item=>item.id===o.parentId));
       if(o.kind==='group'){p.layers.push(makeFolder(patch,o.parentId??null));continue;}
-      p.layers.push({name:{fill:'填充层',decal:'贴花层',paint:'绘制层'}[o.kind],visible:true,opacity:1,blend:'normal',
+      const added={name:{fill:'填充层',decal:'贴花层',paint:'绘制层'}[o.kind],visible:true,opacity:1,blend:'normal',
         channels:{color:true,metallic:o.kind==='paint',roughness:o.kind==='paint'},values:{...values},
         x:.5,y:.5,scale:1,rotation:0,mask:null,...fields(patch??{},layerFields),kind:o.kind,id:crypto.randomUUID(),
-        ...(o.parentId!=null?{parentId:o.parentId}:{})});
+        ...(o.parentId!=null?{parentId:o.parentId}:{})};
+      if(o.placement===undefined)p.layers.push(added);
+      else insertMaterialLayers(p.layers,[added],o.placement);
       continue;
     }
     if(op==='group'){
@@ -675,6 +678,11 @@ function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
   if(compact)compactPaintStrokes(p);
   p.layers=layerTreeOrder(p.layers);
   return next;
+}
+export function applyPlacedMaterial(doc,materialId,placement){
+  const existing=new Set(doc.paint.layers.map(layer=>layer.id));
+  applyOperations(doc,[libraryFill(doc.paint,materialId,{placement})]);
+  return doc.paint.layers.find(layer=>!existing.has(layer.id)).id;
 }
 export function editPaint(doc,{revision,operations,strokeRequestId},sourceVisibility){
   let receipt;

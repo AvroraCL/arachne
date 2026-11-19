@@ -154,9 +154,20 @@
 #workspace .editor-material-tree .layer-inline-name{flex:1;min-height:26px;padding:2px 4px}
 #workspace .editor-material-tree .editor-layer-base{min-height:28px;padding-inline:8px;text-align:left;justify-content:flex-start}
 #workspace :is(#layers,.editor-material-tree) [data-dragging]{opacity:.55}
-#workspace .editor-material-tree .editor-layer-row[data-layer-drop=above]{box-shadow:0 -2px #bdbdbd}
-#workspace .editor-material-tree .editor-layer-row[data-layer-drop=below]{box-shadow:0 2px #bdbdbd}
-#workspace .editor-material-tree .editor-layer-row[data-layer-drop=inside]{outline:1px solid #aaa;outline-offset:-1px}
+#workspace :is(#layers,.editor-material-tree) [data-layer-drop]{position:relative}
+#workspace :is(#layers,.editor-material-tree) [data-layer-drop]::after{
+  content:"";position:absolute;pointer-events:none;z-index:1;
+  inset-inline:calc(4px + var(--layer-depth,var(--material-depth,0))*9px) 3px;
+}
+#workspace :is(#layers,.editor-material-tree) [data-layer-drop=above]::after,
+#workspace :is(#layers,.editor-material-tree) [data-layer-drop=below]::after{
+  height:2px;background:#9ab9e1;border-radius:1px;
+}
+#workspace :is(#layers,.editor-material-tree) [data-layer-drop=above]::after{top:0}
+#workspace :is(#layers,.editor-material-tree) [data-layer-drop=below]::after{bottom:0}
+#workspace :is(#layers,.editor-material-tree) [data-layer-drop=inside]::after{
+  inset-block:1px;border:1px solid #9ab9e1;border-radius:3px;
+}
 #workspace .editor-material-tree .editor-layer-row[data-isolated-away]{opacity:.42}
 #workspace .editor-material-tree .editor-layer-row[data-isolated-layer]>.editor-visibility{box-shadow:inset 0 -1px #b8b8b8}
 #workspace .area-header .editor-scene-tools{flex:1 1 100%;min-width:0;gap:2px}
@@ -272,6 +283,17 @@
 #workspace #layers .layer-mask[aria-pressed=true] :is(canvas,img){outline:1px solid #aaa;outline-offset:1px}
 
 /* Resource previews keep their artwork; only the caption carries UI state. */
+/* A shallow shelf keeps the swatch and its name on the same line. */
+.editor-area[data-editor=library]{container:resource-shelf / size}
+@container resource-shelf (max-height:180px){
+  #workspace .library-grid{padding:5px 8px;gap:3px 8px}
+  #workspace .library-tile{
+    flex-direction:row;align-items:center;width:210px;max-width:100%;height:42px;
+  }
+  #workspace .library-tile>.library-preview{width:49px;height:40px;flex:none}
+  #workspace .library-sphere{width:32px;height:32px;box-shadow:2px 3px 3px #1118,inset -2px -2px 5px #0006}
+  #workspace .library-tile>.library-name{align-self:center;flex:1;min-width:0;text-align:start}
+}
 #workspace :is(.library-tile,#assets button){background:transparent;border-color:transparent;border-radius:3px;box-shadow:none}
 #workspace :is(.library-tile,#assets button):is(:hover,[aria-pressed=true]){background:transparent;border-color:transparent;box-shadow:none}
 #workspace .library-preview{background:transparent}

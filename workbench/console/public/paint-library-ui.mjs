@@ -1,3 +1,4 @@
+import {bindMaterialTile} from './smart-material-placement.mjs';
 import {createMaterialMapDialog} from './material-map-dialog.mjs';
 import {chromeButton} from './area-chrome.mjs';
 import {defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph} from './paint-library.mjs';
@@ -144,8 +145,11 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
       grid.replaceChildren(...entries.map(([id,item])=>{
         const tile=button('',()=>{if(canEdit())select(kind,id);},item.name);
         tile.className='library-tile';tile.dataset.resourceId=id;
-        if(kind==='materials')tile.ondblclick=()=>{if(canEdit())applyMaterial(id);};
-        tile.title=item.name+(kind==='materials'?' · 双击创建填充层':' · 应用于后续笔触');
+        if(kind==='materials'){
+          bindMaterialTile(tile,id,read,canEdit);
+          tile.ondblclick=()=>{if(canEdit())applyMaterial(id);};
+        }
+        tile.title=item.name+(kind==='materials'?' · 拖到材质图层指定位置，或双击创建填充层':' · 应用于后续笔触');
         tile.append(resourcePreview(kind,item,asset=>'/api/projects/'+doc.id+'/paint/assets/'+asset),el('span','library-name',item.name));
         return tile;
       }));

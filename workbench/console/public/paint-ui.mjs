@@ -53,6 +53,7 @@ import {enhanceSelectMenu,setSelectValue,syncSelectMenu} from './paint-select.mj
 import {scrubNumber} from './studio-fields.mjs';
 import {decorateWorkspaceButtons,workspaceIcons} from './workspace-icons.mjs';
 import {layerParent,layerChildren,layerIsVisible,layerLockOwner,materialLayerRows,paintAnchorSources,hasMaterialMask as hasLayerMask} from './paint-layer-tree.mjs';
+import {libraryFill,materialDragType} from './smart-material-placement.mjs';
 import {createMaterialLayerDrag,materialLayerDrop} from './material-layer-drag.mjs';
 import {navigationCommand,projectionCamera} from './viewport-navigation.mjs';
 import {canvasZoomPercent,canvasScale,zoomCanvas,resizeCanvas} from './paint-canvas-navigation.mjs';
@@ -95,14 +96,18 @@ const materialLayerDrag=createMaterialLayerDrag({
   selection:()=>[...selection],
   canDrag:()=>!busy&&!maskEditor.isOpen()&&!surfaceTools.isEditing(),
   commit:(operation,{id,revision})=>run(()=>api('/api/projects/'+id+'/paint/commands',{revision,operations:[operation]})),
-  importSmartMaterial:async(resource,placement,{id,revision})=>{
+  applyShelfMaterial:async(type,resource,placement,{id,revision})=>{
+    if(type===materialDragType&&(resource.projectId!==id||resource.revision!==revision))
+      return run(()=>{throw Error('材质或工程已变化，请重新拖动');});
+    if(type===materialDragType&&resource.libraryRevision===undefined)
+      return run(()=>addAndSelect(libraryFill(doc.paint,resource.id,{placement})));
     const generation=layerSelectionGeneration;
     let imported;
     const saved=await run(async()=>{imported=await api('/api/projects/'+id+'/paint/library-import',{
-      revision,libraryRevision:resource.revision,id:resource.id,placement
+      revision,libraryRevision:resource.libraryRevision??resource.revision,id:resource.id,placement
     });});
     if(saved&&doc?.id===id&&generation===layerSelectionGeneration){
-      setSelection([imported.resource.id]);render(true);areaSystem?.materialSelectionChanged();
+      setSelection([imported.layerId??imported.resource.id],{followMaterial:false});render(true);areaSystem?.materialSelectionChanged();
     }
     return saved;
   }
@@ -276,13 +281,13 @@ function localButton(text,action){const node=element('button',text);node.type='b
 function button(text,action){return localButton(text,()=>run(action));}
 function link(text,url){const node=element('a',text);node.href=url;return node;}
 function layer(){return doc.paint.layers.find(l=>l.id===selected);}
-function setSelection(ids=[],current=ids.at(-1)??null,anchor=current){
+function setSelection(ids=[], {current=ids.at(-1)??null,anchor=current,followMaterial=true}={}){
   layerSelectionGeneration++;
   const leavingMask=paintTarget==='mask';
   selection=new Set(ids);selected=current;selectionAnchor=anchor;inspectMask=false;
   paintTarget='material';
   const materialId=doc?.paint.layers.find(l=>l.id===current)?.materialId;
-  if(materialId)libraryUI?.select('materials',materialId);
+  if(materialId&&followMaterial)libraryUI?.select('materials',materialId);
   if(leavingMask){$('brush-erase').checked=false;surfaceTools.setMode(layer()?.kind==='paint'?'paint':'orbit');}
   if(isolatedLayerId&&current!==isolatedLayerId&&!isLayerUnder(doc?.paint.layers.find(item=>item.id===current),isolatedLayerId)){
     isolatedLayerId=null;
@@ -295,11 +300,11 @@ function selectLayer(l,event){
       const siblings=layerChildren(doc.paint.layers,parent).map(item=>item.id);
       const anchor=siblings.includes(selectionAnchor)?selectionAnchor:active.id;
       const start=siblings.indexOf(anchor),end=siblings.indexOf(l.id);
-      setSelection(siblings.slice(Math.min(start,end),Math.max(start,end)+1),l.id,anchor);return;
+      setSelection(siblings.slice(Math.min(start,end),Math.max(start,end)+1),{current:l.id,anchor});return;
     }
     if(event.metaKey||event.ctrlKey){
       if(selection.has(l.id))setSelection([...selection].filter(id=>id!==l.id));
-      else setSelection([...selection,l.id],l.id);
+      else setSelection([...selection,l.id]);
       return;
     }
   }
@@ -587,7 +592,7 @@ libraryUI=createPaintLibrary({host:$('paint-library'),read:()=>doc,uploadMaps:im
   write:operations=>run(()=>command(operations)),
   openNodes:()=>areaSystem?.areas.openEditor('shader'),
   changed:options=>{updatePaintDraft(null);shaderEditor?.sync();areaSystem?.resourceChanged(options);},
-  applyMaterial:id=>run(()=>addAndSelect({op:'add',kind:'fill',parentId:selectedParent(),patch:{name:doc.paint.materials[id].name,materialId:id,channels:Object.fromEntries(paintChannels.map(k=>[k,true]))}}))
+  applyMaterial:applyLibraryFill
 });
 const uvSelection=createUVSelection({
   pane:$('uv-view'),canvas:$('live-uv'),isHandHeld:()=>uvHandHeld||uvZoomTool,
@@ -1710,7 +1715,7 @@ async function refresh({signal}={}){
   if(changed){
     const active=layer(),parent=active&&layerParent(active);
     const retained=doc.paint.layers.filter(item=>selection.has(item.id)&&(!active||layerParent(item)===parent)).map(item=>item.id);
-    if(retained.length!==selection.size)setSelection(retained,active?.id);
+    if(retained.length!==selection.size)setSelection(retained,{current:active?.id});
     if(viewportReady())viewport.syncDocument(doc);
     modeler.syncDocument();
     render();
@@ -1940,12 +1945,15 @@ function selectedParent(){
   const active=layer();
   return active?.kind==='group'&&selection.size===1?active.id:active?layerParent(active):null;
 }
+function applyLibraryFill(id){
+  return run(()=>addAndSelect(libraryFill(doc.paint,id,{parentId:selectedParent()})));
+}
 function materialLayerOperation(kind){
   const target=kind==='fill'?libraryUI.visibleTarget():null;
   const operation={op:'add',kind,parentId:selectedParent()};
   if(kind==='paint')operation.patch={name:'材质绘制层'};
   if(target?.library==='materials'){
-    operation.patch={name:target.name,materialId:target.id,channels:Object.fromEntries(paintChannels.map(key=>[key,true]))};
+    return libraryFill(doc.paint,target.id,{parentId:selectedParent()});
   }
   return operation;
 }
@@ -3119,7 +3127,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,
+  applyLibraryFill,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,

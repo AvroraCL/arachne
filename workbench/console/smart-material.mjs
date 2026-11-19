@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {layerParent,layerTreeOrder,remapPaintAnchors} from './public/paint-layer-tree.mjs';
 import {compileLibraryMaterial,libraryOperation} from './public/paint-library.mjs';
 import {imageDocumentLimit} from './public/image-documents.mjs';
-import {smartMaterialPlacement} from './public/smart-material-placement.mjs';
+import {insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {isStrokeBlock} from './public/stroke-blocks.mjs';
 
 export function captureSmartMaterial(paint, groupId) {
@@ -47,8 +47,6 @@ export function smartMaterialAssets(preset) {
 
 export function applySmartMaterial(paint, preset, name, placement) {
   if(preset?.version!==1||preset.layers[0]?.kind!=='group')throw Error('智能材质格式无效');
-  const target=placement&&smartMaterialPlacement(paint.layers,placement.targetId,placement.zone);
-  if(placement&&!target)throw Error('智能材质的放置位置已变化或被锁定');
   if(paint.layers.length+preset.layers.length>64)throw Error('应用智能材质后会超过 64 个材质图层');
   if(Object.keys(paint.imageDocuments??{}).length+Object.keys(preset.documents).length>imageDocumentLimit)
     throw Error('应用智能材质后会超过 16 个贴图文档');
@@ -77,11 +75,8 @@ export function applySmartMaterial(paint, preset, name, placement) {
     return copy;
   });
   copies[0].name=name;
-  if(target){
-    copies[0].parentId=target.parentId;
-    const index=target.zone==='inside'?paint.layers.length:
-      paint.layers.findIndex(layer=>layer.id===target.targetId)+(target.zone==='above'?1:0);
-    paint.layers.splice(index,0,...copies);
+  if(placement){
+    insertMaterialLayers(paint.layers,copies,placement);
     paint.layers=layerTreeOrder(paint.layers);
   }else paint.layers.push(...copies);
   return copies[0].id;

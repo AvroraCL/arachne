@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {brushImageAssets,compileLibraryMaterial,evaluateBrushGraph,libraryOperation} from './public/paint-library.mjs';
+import {applyPlacedMaterial} from './paint.mjs';
 import {captureSmartMaterial,applySmartMaterial,smartMaterialAssets} from './smart-material.mjs';
 
 const kinds=['materials','brushes','images','smartMaterials'],sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -65,10 +66,10 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
   }
   function importResource({projectId,projectRevision,revision,id,placement}){
     const state=expected(revision),entry=resource(state,id),doc=project(projectId,projectRevision),copies=[];
-    if(placement!==undefined&&(entry.kind!=='smartMaterials'||!placement||typeof placement.targetId!=='string'||!['above','below','inside'].includes(placement.zone)))
-      throw failure('智能材质的放置位置无效');
+    if(placement!==undefined&&(!['materials','smartMaterials'].includes(entry.kind)||!placement||typeof placement.targetId!=='string'||!['above','below','inside'].includes(placement.zone)))
+      throw failure('材质的放置位置无效');
     for(const asset of Object.values(entry.assets)){const bytes=assetBytes(asset,path.join(blobs,path.basename(asset.file)));const existing=doc.paint.assets[asset.id];if(existing&&(existing.sha256!==asset.sha256||existing.file!==asset.file))throw failure('项目素材编号冲突');copies.push([entry.kind==='images'?{...asset,name:entry.name}:asset,bytes]);}
-    let resourceId=entry.kind==='images'?entry.image:crypto.randomUUID(),preset;
+    let resourceId=entry.kind==='images'?entry.image:crypto.randomUUID(),preset,layerId;
     if(entry.kind==='smartMaterials'){
       const bytes=fs.readFileSync(presetFile(entry.id));
       if(sha(bytes)!==entry.presetSha256)throw failure('智能材质的图层数据指纹变化');
@@ -80,10 +81,11 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
         resourceId=applySmartMaterial(next.paint,preset,entry.name,placement);
         validatePaint(next);
       }else if(entry.kind!=='images')libraryOperation(next.paint,{library:entry.kind,id:resourceId,action:'create',patch:{name:entry.name,graph:structuredClone(entry.graph)}});
+      if(placement&&entry.kind==='materials')layerId=applyPlacedMaterial(next,resourceId,placement);
       for(const [asset,bytes] of copies)ensure(path.join(projectFolder(doc.id),'assets',asset.file),bytes);
       return next;
-    },preset?'应用智能材质':'从个人库导入独立资源副本');
-    return {document,resource:{kind:entry.kind,id:resourceId}};
+    },preset?'应用智能材质':placement?'导入个人材质并创建填充层':'从个人库导入独立资源副本');
+    return {document,resource:{kind:entry.kind,id:resourceId},...(layerId?{layerId}:{})};
   }
   function update({revision,id,patch}){
     const state=expected(revision),entry=resource(state,id);
