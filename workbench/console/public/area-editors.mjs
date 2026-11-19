@@ -287,6 +287,7 @@ export function registerAreaEditors(registry,bridge){
         toggle:id=>{setMode('object');modeler.toggleVisibility(id);},
         frame:id=>frameSceneObjects([id]),
         frameObjects:frameSceneObjects,
+        setMaterialSlot:modeler.setMaterialSlot,
         inspectObject:id=>{const info=modeler.inspectObject(id);return info?{...info,label:project.document?.paint.objectNames?.[info.label]||info.label}:null;},
         setVisibility:(ids,value)=>{setMode('object');return modeler.setObjectVisibility(ids,value);},
         transformObject:(id,kind,values,space)=>modeler.transformObject(id,kind,values,space),
@@ -669,7 +670,7 @@ export function registerAreaEditors(registry,bridge){
         if(disposed||!shown||task!==loading||mode!=='object'||view.dataset.state!=='ready')return;
         const doc=project.document;
         if(doc?.id===surface.projectId&&doc.source.files?.[doc.source.reviewSource]===surface.binding){
-          modeler.setObjectSelection([surface.objectId],surface.objectId);
+          modeler.setObjectSelection([surface.objectId],surface.objectId,surface.name);
         }
       },
       clearSurfacePick(){if(!disposed&&viewport.pickedSurface())viewport.select(null);},

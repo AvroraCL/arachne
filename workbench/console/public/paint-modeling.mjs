@@ -28,7 +28,7 @@ export function createPaintModeling(report, project = {}) {
   let pendingOperation=null,queuedHistory=[];
   let mode = 'object', element = 'vertex', tool = 'translate', orientation = 'global', pivotMode = 'median', object = null;
   const selected = new Map(), selectedObjects = new Set(), objects = new Map(), meshes = [];
-  const welds = new WeakMap();
+  const welds = new WeakMap(), materialSlots = new WeakMap();
   const point = new THREE.Vector3();
   const raycaster = new THREE.Raycaster();
   let helper, marker, sceneItems = [];
@@ -339,7 +339,8 @@ export function createPaintModeling(report, project = {}) {
     const owner = ownerOf(hit.object);
     if (!owner) return;
     if (mode === 'object') {
-      selectObject(owner.userData.modelingId,event.shiftKey);
+      const material=hit.object.userData.original?.userData.viewportOriginalMaterials?.[hit.face.materialIndex];
+      selectObject(owner.userData.modelingId,event.shiftKey,material?.userData.sourceMaterial||material?.name);
       return;
     }
     if (object !== owner || !event.shiftKey) selected.clear();
@@ -513,7 +514,7 @@ export function createPaintModeling(report, project = {}) {
     return true;
   }
 
-  function selectObject(id, extend = false) {
+  function selectObject(id, extend = false, materialName) {
     const node = objects.get(id);
     if (!active || gesture || saving || !node || !isVisible(node) || !inLocalView(node)) return;
     error = '';selectionVersion++;
@@ -521,6 +522,7 @@ export function createPaintModeling(report, project = {}) {
       const next=objectClickSelection([...selectedObjects],object,node,extend);
       selectedObjects.clear();for(const item of next.selected)selectedObjects.add(item);
       object=next.active;
+      if(object===node&&materialName)materialSlots.set(node,materialName);
     } else if (object !== node) {
       selected.clear();
       selectedObjects.clear();
@@ -980,7 +982,8 @@ export function createPaintModeling(report, project = {}) {
       for(const child of part.children)if(child.userData.modelingId===undefined)collect(child);
     }
     collect(node);
-    return {id,materials:[...materials.values()],label:node.userData.original.userData.modelingLabel||node.name||'未命名物体',position,visible:isVisible(node),binding:context.binding};
+    const chosen=materialSlots.get(node);
+    return {id,materials:[...materials.values()],materialSlot:materials.has(chosen)?chosen:null,label:node.userData.original.userData.modelingLabel||node.name||'未命名物体',position,visible:isVisible(node),binding:context.binding};
   }
 
   async function transformObject(id,kind,values,space='global'){
@@ -1183,7 +1186,22 @@ export function createPaintModeling(report, project = {}) {
 
   return {
     syncDocument(){if(active&&!gesture&&!saving&&readDraft()){error='已同步工程建模修改';replay();}},
-    setObjectSelection(ids,activeId){if(!active||gesture||saving)return;selected.clear();selectedObjects.clear();for(const id of ids){const node=objects.get(id);if(node&&isVisible(node)&&inLocalView(node))selectedObjects.add(node);}const target=objects.get(activeId);object=selectedObjects.has(target)?target:[...selectedObjects].at(-1)||null;updateSelection();},
+    setObjectSelection(ids,activeId,materialName){
+      if(!active||gesture||saving)return;
+      selected.clear();selectedObjects.clear();
+      for(const id of ids){
+        const node=objects.get(id);
+        if(node&&isVisible(node)&&inLocalView(node))selectedObjects.add(node);
+      }
+      const target=objects.get(activeId);
+      object=selectedObjects.has(target)?target:[...selectedObjects].at(-1)||null;
+      if(object&&object===target&&materialName)materialSlots.set(object,materialName);
+      updateSelection();
+    },
+    setMaterialSlot(id,name){
+      const node=objects.get(id);
+      if(active&&node&&mode==='object'&&!gesture&&!saving){materialSlots.set(node,name);notify();}
+    },
     open,close,pick,boxSelect,selectAll,selectLinked,invertSelection,selectObject,frameSelection,frameObjects,setObjectVisibility,toggleVisibility,hideSelection,showAll,toggleLocalView,applyNumeric,inspectObject,transformObject,canSmooth,smooth,travel,exportDraft,cancelTransform,transformKey,isDragging:()=>!!gesture||saving||!!pendingOperation,
     setDisplayHelpers({overlays,transform}){
       showOverlays=overlays;showGizmo=transform;

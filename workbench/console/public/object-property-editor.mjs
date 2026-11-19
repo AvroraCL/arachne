@@ -122,7 +122,10 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
   const editLayer=el('button','','查看图层属性');editLayer.type='button';editLayer.onclick=openPaintLayers;
   paintControls.append(editLayer);surfaceBody.append(paintControls,sourceControls);
   let targetKey='',pending=false,lastStatus=null;
-  slot.addEventListener('change',()=>refresh());
+  slot.addEventListener('change',()=>{
+    const target=getTarget(),scene=project.scene;
+    if(target&&scene&&target.projectId===project.document?.id&&target.binding===scene.binding)scene.setMaterialSlot(target.id,slot.value);
+  });
   const sourceEditor=createSourceMaterialFields(sourceControls,project,()=>{
     const target=getTarget(),scene=project.scene;
     if(!target||target.projectId!==project.document?.id||target.binding!==scene?.binding)return null;
@@ -154,6 +157,8 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
         const previous=slot.value;slot.replaceChildren(...names.map(name=>new Option(name,name)));
         if(names.includes(previous))slot.value=previous;
       }
+      if(current.materialSlot)slot.value=current.materialSlot;
+      else if(targetChanged)slot.selectedIndex=0;
       const base=slots.find(item=>item.name===slot.value);
       const painted=!!base.painted;
       surfaceTitle.textContent=painted?'涂装材质':'原模型材质';
@@ -167,6 +172,7 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
         editLayer.textContent=selected.openWorkspace?'打开材质工作区':'查看图层属性';
       }
       slot.disabled=scene?.dragging||scene?.mode!=='object'||slots.length===1;
+      syncSelectMenu(slot);
     }
     sourceEditor.sync();
     const disabled=!current||pending||scene?.dragging||scene?.mode!=='object';

@@ -213,8 +213,8 @@ export function setupPaintAreas(hooks){
     const surface=areas.name==='material'&&next==='modeling'?bridge.pickedSurface():null;
     let material=null;
     if(areas.name==='modeling'&&next==='material'&&scene?.mode==='object'&&scene.selectedIds.length===1){
-      const slots=scene.inspectObject(scene.activeId)?.materials;
-      if(slots?.length===1)material=slots[0].name;
+      const object=scene.inspectObject(scene.activeId);
+      material=object?.materialSlot||(object?.materials.length===1?object.materials[0].name:null);
     }
     if(!areas.switchWorkspace(next))return;
     const view=areas.active?.kind==='viewport'?areas.active:visibleEditors.find(editor=>editor.kind==='viewport');

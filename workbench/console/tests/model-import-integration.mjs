@@ -46,13 +46,17 @@ function sampleModel(coverUv=true,coverHeight=.3){
     accessors:[{bufferView:0,componentType:5126,count:4,type:'VEC3',min:[-1,0,-1],max:[1,0,1]},
       {bufferView:1,componentType:5126,count:4,type:'VEC2'},{bufferView:2,componentType:5123,count:6,type:'SCALAR'}]
   };
+  return {bytes:glbBytes(gltf,binary),binary,gltf};
+}
+
+function glbBytes(gltf,binary){
   const json=Buffer.from(JSON.stringify(gltf));
   const metadata=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
   const header=Buffer.alloc(20),chunk=Buffer.alloc(8);
   header.write('glTF');header.writeUInt32LE(2,4);header.writeUInt32LE(28+metadata.length+binary.length,8);
   header.writeUInt32LE(metadata.length,12);header.write('JSON',16);
   chunk.writeUInt32LE(binary.length);chunk.write('BIN',4);
-  return {bytes:Buffer.concat([header,metadata,chunk,binary]),binary,gltf};
+  return Buffer.concat([header,metadata,chunk,binary]);
 }
 
 async function until(read,timeout=120000){
@@ -586,6 +590,58 @@ async function verifyObjectMaterialNavigation(id){
     assert.deepEqual((await api('/api/projects/'+id)).paint,before.paint);
     console.log('PASS switching workspaces follows the single object into its material and back to the newly picked object');
     console.log('PASS clicking a source in the material workspace edits that material and preserves the paint-layer target on undo');
+  }finally{await page.close();}
+}
+
+async function verifyMultiMaterialPick(){
+  // Split the existing test rectangle at its diagonal. Both materials belong to one object.
+  const {gltf,binary}=sampleModel();
+  gltf.nodes=[{name:'双色试片',mesh:0}];gltf.scenes[0].nodes=[0];
+  gltf.meshes.length=1;gltf.accessors[2].count=3;
+  gltf.accessors.push({...gltf.accessors[2],byteOffset:6});
+  const primitives=gltf.meshes[0].primitives;
+  primitives.push({...primitives[0],material:1,indices:3});
+  const response=await fetch(origin+'/api/projects/model-import?material=0',{
+    method:'POST',headers:{'Content-Type':'model/gltf-binary',Origin:origin},body:glbBytes(gltf,binary)
+  });
+  const doc=await response.json();assert.ok(response.ok,JSON.stringify(doc));
+  const page=await browser.newPage({viewport:{width:1400,height:900}});
+  try{
+    await page.goto(origin+'/paint.html?project='+doc.id);
+    const workspace=mode=>page.locator('[data-area-mode='+mode+']').click();
+    await workspace('modeling');
+    const view=page.locator('.editor-viewport[data-state=ready]').first();await view.waitFor();
+    const inspector=page.locator('.object-property-editor:visible'),slot=inspector.getByRole('button',{name:'物体材质槽'});
+    const box=await view.boundingBox(),hit=x=>page.mouse.click(box.x+box.width*x,box.y+box.height*.55);
+    await hit(.775);await until(async()=>await slot.innerText()==='遮挡材料',10000);
+    const rough=inspector.getByLabel('模型材质粗糙度');
+    assert.equal(Number(await rough.inputValue()),.7);
+    const saved=page.waitForResponse(r=>r.url().endsWith('/paint/commands')&&r.request().method()==='POST');
+    await rough.fill('.24');await rough.press('Enter');assert.ok((await saved).ok());
+    const changed=await api('/api/projects/'+doc.id);
+    assert.equal(changed.paint.sourceMaterials['遮挡材料'].roughness,.24);
+    assert.deepEqual(changed.paint.layers,doc.paint.layers);
+    await hit(.475);await inspector.getByRole('button',{name:'查看图层属性'}).waitFor();assert.equal(await slot.innerText(),'表面材料');
+    await hit(.775);await workspace('material');await view.waitFor();
+    const picked=page.locator('.surface-properties:visible').getByLabel('模型材质粗糙度');
+    await picked.waitFor();assert.equal(Number(await picked.inputValue()),.24);
+    const screen=view.locator('canvas').first();
+    for(let i=0;i<3;i++)await screen.press('c');
+    await view.and(page.locator('[data-inspected-channel=roughness]')).waitFor();
+    const area=await view.boundingBox();
+    const pixel=x=>pixelAt(page,Math.floor(area.x+area.width*x),Math.floor(area.y+area.height*.53));
+    assert.deepEqual(await pixel(.81),[61,61,61]);assert.deepEqual(await pixel(.48),[153,153,153]);
+    await screen.press('m');
+    await workspace('modeling');await rough.waitFor();assert.equal(await slot.innerText(),'遮挡材料');
+    await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
+    await until(async()=>Number(await rough.inputValue())===.7,10000);
+    assert.deepEqual((await api('/api/projects/'+doc.id)).paint,doc.paint);
+    await slot.click();await page.getByRole('option',{name:'表面材料',exact:true}).click();
+    await workspace('material');await view.waitFor();
+    await page.locator('.editor-area[data-editor=properties] .editor-properties:visible').waitFor();
+    await workspace('modeling');await inspector.getByRole('button',{name:'查看图层属性'}).waitFor();
+    assert.equal(await slot.innerText(),'表面材料');
+    console.log('PASS face picking and manual slot choice edit the correct material on a multi-material object across both workspaces');
   }finally{await page.close();}
 }
 
@@ -1662,6 +1718,7 @@ async function verifyModelWorkflows(){
   console.log('PASS OBJ with Chinese sidecar paths, concave face, original UV orientation, model edit, reopen and 4K bake');
 
   await verifyProceduralMasks(templates[0].id);
+  await verifyMultiMaterialPick();
   await verifyMarkedMaterialInspection();
 
   await assert.rejects(fs.stat(marker),{code:'ENOENT'});
@@ -1678,6 +1735,7 @@ try{
     const result=await response.json();assert.ok(response.ok,JSON.stringify(result));
     browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
     await verifyObjectMaterialNavigation(result.id);
+    await verifyMultiMaterialPick();
     await verifyMarkedMaterialInspection();
     await verifyRenderedSurfacePicking(result.id);
     await verifyOriginalTextureChannels(prepareTexturedModel().texturedFile);
