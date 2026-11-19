@@ -108,7 +108,21 @@ try{
   await packedPage.screenshot({path:path.join(data,'packed-material-import.png')});
   await confirmMap.click();
   await packedDialog.waitFor({state:'hidden'});
+  await packedShelf.getByRole('button',{name:'＋ 新建',exact:true}).click();
+  await packedShelf.getByRole('button',{name:'新材质',exact:true}).waitFor();
+  await packedShelf.getByRole('button',{name:'蓝钢',exact:true}).click();
+  const searchResource=packedShelf.getByRole('searchbox',{name:'搜索资源'});
+  const createFill=packedShelf.getByRole('button',{name:'创建填充层',exact:true});
+  await searchResource.fill('新材质');
+  assert.deepEqual(await packedShelf.locator('.library-tile:visible').allTextContents(),['新材质']);
+  assert.equal(await createFill.isDisabled(),true);
+  assert.equal(await packedShelf.getByRole('button',{name:'保存到个人库'}).isDisabled(),true);
+  await packedShelf.getByRole('button',{name:'新材质',exact:true}).click();
+  assert.equal(await createFill.isEnabled(),true);
+  await searchResource.fill('蓝钢');
+  assert.equal(await createFill.isDisabled(),true);
   await packedShelf.getByRole('button',{name:'蓝钢',exact:true}).dblclick();
+  await searchResource.fill('');
   const packedMaterial=await until(async()=>{
     const doc=await api(packRoute);
     return doc.paint.layers.some(layer=>layer.materialId)&&doc;

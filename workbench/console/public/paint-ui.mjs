@@ -1941,7 +1941,7 @@ function selectedParent(){
   return active?.kind==='group'&&selection.size===1?active.id:active?layerParent(active):null;
 }
 function materialLayerOperation(kind){
-  const target=kind==='fill'?libraryUI.target():null;
+  const target=kind==='fill'?libraryUI.visibleTarget():null;
   const operation={op:'add',kind,parentId:selectedParent()};
   if(kind==='paint')operation.patch={name:'材质绘制层'};
   if(target?.library==='materials'){

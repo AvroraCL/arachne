@@ -82,6 +82,10 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   }
   const current=()=>{const entries=read()?.paint[kind];return entries&&Object.hasOwn(entries,picked)?entries[picked]:null;};
   function target(){const item=current();return scope==='project'&&item?{library:kind,id:picked,...item}:null;}
+  function visibleTarget(){
+    const item=target();
+    return item&&matchesSearch(item.name,searchTerms(search.value))?item:null;
+  }
   async function mutate(action){
     const doc=read();if(!doc||!canEdit())return;
     if(action==='remove')return write([{op:'library',library:kind,id:picked,action:'remove'}]);
@@ -120,14 +124,15 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
       b.hidden=b.dataset.library==='smartMaterials'&&!isPersonal;
     }
     for(const b of tools.querySelectorAll('button'))b.disabled=!canEdit();
-    for(const b of [duplicate,rename,remove])b.disabled||=!item;
+    const visibleItem=visibleTarget();
+    for(const b of [duplicate,rename,remove])b.disabled||=!visibleItem;
     const referenced=kind==='materials'&&doc.paint.layers.some(layer=>layer.materialId===picked);
     remove.disabled||=referenced;remove.title=referenced?'材质仍被填充层引用，请先解除引用':'删除资源';
     for(const b of [create,capture,duplicate,rename,remove,nodes,output])b.hidden=images;
-    apply.hidden=fromMaps.hidden=kind!=='materials';apply.disabled||=!picked;nodes.disabled||=!item;nodes.setAttribute('aria-pressed',String(nodesOpen));
+    apply.hidden=fromMaps.hidden=kind!=='materials';apply.disabled||=!visibleItem;nodes.disabled||=!visibleItem;nodes.setAttribute('aria-pressed',String(nodesOpen));
     if(isPersonal)for(const b of tools.querySelectorAll('button'))b.hidden=true;
     else savePersonal.hidden=false;
-    savePersonal.disabled=!canEdit()||personal.working||!(images?selectedImage():item);
+    savePersonal.disabled=!canEdit()||personal.working||!(images?selectedImage():visibleItem);
     search.hidden=images&&!isPersonal;
     if(isPersonal)return;
     const terms=searchTerms(search.value);
@@ -158,5 +163,5 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
     remember();sync();changed();rememberView();
     return personal.save('smartMaterials',id);
   }
-  return {sync,select,target,showImages,saveSmart,getView,mountView};
+  return {sync,select,target,visibleTarget,showImages,saveSmart,getView,mountView};
 }

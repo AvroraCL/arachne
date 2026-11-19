@@ -1023,13 +1023,15 @@ function createLibraryEditor(ctx,bridge){
     createResource.hidden=savePersonal.hidden=!projectScope;
     fromMaps.hidden=!projectScope||kind!=='materials';
     fromMaps.disabled=bridge.busy();
-    savePersonal.disabled=bridge.busy()||!(image?pickedAsset:project.resource?.library===kind);
-    fill.hidden=!projectScope||kind!=='materials';fill.disabled=bridge.busy()||!selectedMaterial();
-    preview.hidden=!projectScope||!image;preview.disabled=!pickedAsset;
+    const entries=projectScope?matching(doc):[];
+    const selected=image?pickedAsset:project.resource?.library===kind?project.resource.id:null;
+    const visibleSelection=entries.some(([id])=>id===selected);
+    savePersonal.disabled=bridge.busy()||!visibleSelection;
+    fill.hidden=!projectScope||kind!=='materials';fill.disabled=bridge.busy()||!visibleSelection;
+    preview.hidden=!projectScope||!image;preview.disabled=!visibleSelection;
     ctx.title.textContent=doc.name;
     if(!projectScope)return;
 
-    const entries=matching(doc);
     const next=JSON.stringify([doc.id,kind,entries,searchTerms(query)]);
     if(next!==key){
       key=next;
@@ -1060,7 +1062,6 @@ function createLibraryEditor(ctx,bridge){
       if(!entries.length)body.append(el('p','library-empty',searchTerms(query).length?'没有匹配的资源':'当前项目还没有这类资源'));
       if(focused)body.querySelector('[data-resource-id="'+CSS.escape(focused)+'"]')?.focus({preventScroll:true});
     }
-    const selected=image?pickedAsset:project.resource?.library===kind?project.resource.id:null;
     for(const tile of body.querySelectorAll('.library-tile'))tile.setAttribute('aria-pressed',String(tile.dataset.resourceId===selected));
   }
   const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,scroll:body.scrollTop}),dispose(){disposed=true;unsub();mapDialog.dispose();personal.dispose();}};
