@@ -190,10 +190,12 @@ export function fillLivePaintTextures(pixels, size, maps, solo = null) {
 
 // A source-material mark uses a transparent, original-UV pigment map. Preserve
 // the source roughness, metalness and optical settings on the same material.
-export function compositeSurfaceMark(image,color){
-  const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+export function compositeSurfaceMark(image,color,existing){
+  const canvas=existing?.image||document.createElement('canvas');
+  if(!existing){canvas.width=image.width;canvas.height=image.height;}
   const ctx=canvas.getContext('2d');ctx.fillStyle=color;ctx.fillRect(0,0,canvas.width,canvas.height);
   ctx.drawImage(image,0,0);
+  if(existing){existing.needsUpdate=true;return existing;}
   const map=new THREE.CanvasTexture(canvas);map.flipY=false;map.colorSpace=THREE.SRGBColorSpace;
   return map;
 }

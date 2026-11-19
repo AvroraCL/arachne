@@ -44,18 +44,19 @@ export function setupPaintColorPicker(root=document){
     popover.style.left=Math.max(gap,Math.min(left,innerWidth-box.width-gap))+'px';
     popover.style.top=Math.max(gap,Math.min(top,innerHeight-box.height-gap))+'px';
   }
-  function dismissed(state,focus){
+  function dismissed(state,focus,commit=false){
     if(active!==state)return;
     active=null;state.events.abort();state.observer.disconnect();
     state.input.removeAttribute('data-color-open');
     popover.remove();
+    if(!commit)state.preview?.(null);
     if(focus&&state.input.isConnected&&!state.input.disabled)state.input.focus({preventScroll:true});
   }
-  function dismiss(focus=true){
+  function dismiss(focus=true,commit=false){
     const state=active;
     if(!state)return;
     if(popover.matches(':popover-open'))popover.hidePopover();
-    dismissed(state,focus);
+    dismissed(state,focus,commit);
   }
   popover.addEventListener('toggle',event=>{
     if(event.newState==='closed'&&!popover.matches(':popover-open')&&active)dismissed(active,false);
@@ -63,6 +64,9 @@ export function setupPaintColorPicker(root=document){
   function render(updateText=true){
     if(!active)return;
     const {h,s,v}=active.color,chosen=paintHex(active.color);
+    if(active.preview&&chosen!==active.lastColor){
+      active.lastColor=chosen;active.preview(chosen);
+    }
     if(updateText)hex.value=chosen;
     field.style.setProperty('--picker-hue',String(h));
     marker.style.left=s*100+'%';marker.style.top=(1-v)*100+'%';
@@ -94,7 +98,9 @@ export function setupPaintColorPicker(root=document){
     const gray=input.hasAttribute('data-color-gray'),color=normalizePaintHex(input.value)||'#000000';
     const events=new AbortController();
     const observer=new MutationObserver(()=>{if(input.disabled||!input.isConnected)dismiss(false);});
-    active={input,gray,color:paintHsv(gray?grayColor(color):color),events,observer,pointer:null};
+    const state={input,gray,color:paintHsv(gray?grayColor(color):color),events,observer,pointer:null,lastColor:color};
+    active=state;
+    state.preview=input.beginColorPreview?.(()=>{if(active===state)dismiss(false);});
     input.setAttribute('data-color-open','');
     title.textContent=input.getAttribute('aria-label')||input.title||'颜色';
     popover.setAttribute('aria-label',title.textContent+'选色');
@@ -115,10 +121,11 @@ export function setupPaintColorPicker(root=document){
     }
     const {input}=active,value=paintHex(active.color);
     if(input.disabled||!input.isConnected){dismiss(false);return;}
-    dismiss(true);
+    const changed=input.value!==value;
+    dismiss(true,changed);
     recent=[value,...recent.filter(color=>color!==value)].slice(0,maxRecent);
     try{localStorage.setItem(paletteKey,JSON.stringify(recent));}catch{}
-    if(input.value===value)return;
+    if(!changed)return;
     input.value=value;
     input.dispatchEvent(new Event('input',{bubbles:true}));
     input.dispatchEvent(new Event('change',{bubbles:true}));

@@ -11,7 +11,17 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     const input=el('input');input.type=key==='color'?'color':'number';
     if(key!=='color'){input.min='0';input.max='1';input.step='any';}
     input.setAttribute('aria-label','模型材质'+title);
-    if(key!=='color'){
+    if(key==='color'){
+      input.beginColorPreview=close=>{
+        const target=readTarget();
+        if(pending||!sameTarget(target,shown)||target.locked)return;
+        scrub={target,revision:project.document.revision,preview:beginSourcePreview(target.name),close};
+        return value=>{
+          if(value===null)endScrub();
+          else if(currentScrub(readTarget()))scrub.preview({color:value});
+        };
+      };
+    }else{
       input.addEventListener('input',()=>{
         if(!input.closest('.workspace-range-field[data-dragging]'))return;
         const target=readTarget();
@@ -40,7 +50,9 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
   }
   function sync(force=false){
     const target=readTarget(),changed=!sameTarget(target,shown);
-    if(scrub&&!currentScrub(target))scrub.preview(null);
+    if(scrub&&!currentScrub(target)){
+      if(scrub.close)scrub.close();else scrub.preview(null);
+    }
     if(changed)materialMessage.textContent='';
     shown=target;
     const patch=project.document?.paint.sourceMaterials?.[target?.name];

@@ -625,8 +625,15 @@ async function verifyMarkedMaterialInspection(){
     const shows=(dx,color)=>until(async()=>JSON.stringify(await rgbAt(dx))===JSON.stringify(color),10000);
     await shows(0,mark);
     const uncovered=await rgbAt(75);assert.deepEqual(uncovered,before);
-    await base.fill('#3a70b4');
+    const revision=(await api('/api/projects/'+project.id)).revision;
+    const picker=page.getByRole('dialog',{name:'模型材质底色选色',exact:true}),hex=picker.getByLabel('HEX 颜色');
+    await base.click();await hex.fill('#3a70b4');
     await shows(75,blue);assert.deepEqual(await rgbAt(),mark);
+    assert.equal((await api('/api/projects/'+project.id)).revision,revision);
+    await hex.press('Escape');await shows(75,before);
+    await base.click();await hex.fill('#3a70b4');await shows(75,blue);
+    await hex.press('Enter');await until(async()=>(await api('/api/projects/'+project.id)).revision===revision+1);
+    assert.deepEqual(await rgbAt(75),blue);assert.deepEqual(await rgbAt(),mark);
     const travel=async direction=>{
       await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
       await page.locator('#'+direction).click();

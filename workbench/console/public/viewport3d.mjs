@@ -235,7 +235,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     const copy = material.clone();
     const original = materialState.get(material);
     if (!original) return copy;
-    const mark=markedMaps.get(material.userData.sourceMaterial||material.name);
+    const mark=markedMaps.get(material.userData.sourceMaterial||material.name)?.map;
     copy.map = mark||original.map;
     copy.color.copy(original.color);
     copy.opacity = original.opacity;
@@ -299,7 +299,8 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     });
     for (const material of allMaterials) material.dispose();
     if (texture) textures.add(texture);
-    for (const map of markedMaps.values()) textures.add(map);
+    for (const mark of markedMaps.values()) textures.add(mark.map);
+    clearSourcePreview();
     markedMaps.clear();
     for (const image of textures) image.dispose();
     model = null;
@@ -312,12 +313,19 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     const layers=doc?.paint?.layers||[];
     return layers.some(layer=>layer.fillProjection?.mode==='triplanar'&&layer.opacity>0&&layerIsVisible(layers,layer));
   }
+  function clearSourcePreview(){
+    sourcePreview?.map?.dispose();
+    sourcePreview=null;
+  }
   function beginSourcePreview(name){
     const origin=doc,preview={name,patch:null};
     return patch=>{
       if(disposed||!manifest||doc!==origin)return;
-      if(patch){preview.patch=patch;sourcePreview=preview;}
-      else if(sourcePreview===preview)sourcePreview=null;
+      if(patch){
+        if(sourcePreview!==preview)clearSourcePreview();
+        preview.patch=patch;sourcePreview=preview;
+      }
+      else if(sourcePreview===preview)clearSourcePreview();
       else return;
       paintMaterials(name);
     };
@@ -330,7 +338,16 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       if(onlyName&&onlyName!==name)continue;
       const saved=doc.paint?.sourceMaterials?.[name];
       const factors=sourcePreview?.name===name?{...saved,...sourcePreview.patch}:saved;
-      const mark=markedMaps.get(name);
+      const coverage=markedMaps.get(name);
+      let mark=coverage?.map;
+      if(coverage&&sourcePreview?.name===name&&sourcePreview.patch.color){
+        const draft=sourcePreview,color=draft.patch.color;
+        if(draft.color!==color||draft.coverage!==coverage){
+          draft.map=compositeSurfaceMark(coverage.image,color,draft.map);
+          draft.map.anisotropy=mark.anisotropy;draft.color=color;draft.coverage=coverage;
+        }
+        mark=draft.map;
+      }
       for (const material of list) {
         const original = materialState.get(material);
         const isTarget = name === manifest.targetMaterial;
@@ -395,7 +412,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     texture?.dispose();for(const v of Object.values(scalarTextures))v.dispose();texture=loaded.color;delete loaded.color;scalarTextures=loaded;manifest=next;paintMaterials();textureStatus();
   }
   async function loadProject(nextDoc){
-    sourcePreview=null;
+    clearSourcePreview();
     const changed=doc?.id!==nextDoc.id;
     if(changed||doc?.source.reviewSource!==nextDoc.source.reviewSource){selected=null;pickedObject=null;}
     const previousCamera=!changed&&model&&camera?(axisMotion?.end||cameraState()):null;axisMotion=null;doc=nextDoc;manifest=null;if(changed)textureOverride=null;textureSequence++;delete host.dataset.meshes;delete host.dataset.uvUnchanged;const token=++sequence;host.dataset.projectId=nextDoc.id;host.dataset.state='loading';state('正在准备真实模型…');
@@ -460,23 +477,28 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     const token=sequence;
     await Promise.all(changed.map(async name=>{
       const record=after[name],previous=markedMaps.get(name);
-      if(!record?.mark){markedMaps.delete(name);previous?.dispose();return;}
+      if(!record?.mark){markedMaps.delete(name);previous?.map.dispose();return;}
       const defaults=materialState.get(materials.get(name).values().next().value);
       if(defaults.map)throw Error('附属材质标记当前支持纯色底材：'+name);
       const current=()=>token===sequence&&sameSurfaceMarkPixels(record,doc.paint.sourceMaterials?.[name]);
+      const color=record.color||'#'+defaults.color.getHexString();
+      if(previous?.key===record.mark.coverage){
+        compositeSurfaceMark(previous.image,color,previous.map);return;
+      }
       let image;
       try{image=await new THREE.ImageLoader().loadAsync('/api/projects/'+doc.id+'/paint/assets/'+record.mark.coverage);}
       catch(error){if(current())throw Error('无法载入投影标记：'+name,{cause:error});return;}
       if(!current())return;
-      const map=compositeSurfaceMark(image,record.color||'#'+defaults.color.getHexString());
+      const map=compositeSurfaceMark(image,color);
       map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
-      markedMaps.get(name)?.dispose();markedMaps.set(name,map);
+      markedMaps.get(name)?.map.dispose();
+      markedMaps.set(name,{key:record.mark.coverage,image,map});
     }));
     if(token===sequence&&manifest)paintMaterials();
   }
   function syncDocument(next){
     if(doc?.id!==next.id||doc.source.reviewSource!==next.source.reviewSource)return loadProject(next);
-    const previous=doc,previewName=sourcePreview?.name;doc=next;sourcePreview=null;
+    const previous=doc,previewName=sourcePreview?.name;doc=next;clearSourcePreview();
     if(model&&manifest&&JSON.stringify(previous.paint?.sourceMaterials)!==JSON.stringify(next.paint?.sourceMaterials)){
       void updateSurfaceMarks(previous.paint.sourceMaterials,next.paint.sourceMaterials)
         .catch(error=>state(error.message,'error'));
