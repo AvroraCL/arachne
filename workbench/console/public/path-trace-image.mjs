@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {createViewportModelLoader} from './viewport-model-loader.mjs';
 import {applySurfaceMarks,applySourceFactors} from './viewport-materials.mjs';
 import {applyModelState} from './paint-model-state.mjs';
 import {channelSpecs} from './paint-channels.mjs';
@@ -12,7 +12,7 @@ import {useRenderTextureAtlas} from './render-texture-atlas.mjs';
 import {completedPathTraceTarget,drawPathTrace} from './path-trace-display.mjs';
 
 async function loadModel(input){
-  const gltf=await new GLTFLoader().loadAsync('/input/model.glb');
+  const gltf=await createViewportModelLoader().loadAsync('/input/model.glb');
   const root=gltf.scene,materials=new Set();
   await applySurfaceMarks(root,input.sourceMaterials,id=>'/input/mark-'+id+'.png');
   root.traverse(node=>{

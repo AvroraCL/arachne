@@ -607,6 +607,10 @@ async function verifyMultiMaterialPick(){
   gltf.accessors.push({...gltf.accessors[2],byteOffset:6});
   const primitives=gltf.meshes[0].primitives;
   primitives.push({...primitives[0],material:1,indices:3});
+  // A second object uses the orange material twice. A third is in an inactive scene.
+  gltf.meshes.push({primitives:primitives.map(p=>({...p,material:1}))});
+  gltf.nodes.push({name:'饰片',mesh:1,translation:[-.55,.04,-.55],scale:[.12,1,.12]},{name:'另一场景的饰片',mesh:1});
+  gltf.scenes[0].nodes.push(1);gltf.scenes.unshift({nodes:[2]});gltf.scene=1;
   const response=await fetch(origin+'/api/projects/model-import?material=0',{
     method:'POST',headers:{'Content-Type':'model/gltf-binary',Origin:origin},body:glbBytes(gltf,binary)
   });
@@ -630,7 +634,7 @@ async function verifyMultiMaterialPick(){
     const changed=await api('/api/projects/'+doc.id);
     assert.equal(changed.paint.sourceMaterials['遮挡材料'].roughness,.24);
     assert.deepEqual(changed.paint.layers,doc.paint.layers);
-    await hit(.475);await inspector.getByRole('button',{name:'查看图层属性'}).waitFor();assert.equal(await slot.innerText(),'表面材料');
+    await hit(.36);await inspector.getByRole('button',{name:'查看图层属性'}).waitFor();assert.equal(await slot.innerText(),'表面材料');
     await hit(.775);await workspace('material');await view.waitFor();
     const picked=page.locator('.surface-properties:visible').getByLabel('模型材质粗糙度');
     await picked.waitFor();assert.equal(Number(await picked.inputValue()),.24);
