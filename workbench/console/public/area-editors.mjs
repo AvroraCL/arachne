@@ -659,6 +659,19 @@ export function registerAreaEditors(registry,bridge){
     setMode(mode);viewportControllers.set(ctx.areaId,publishScene);
     viewport.setActive(true);void sync().catch(ctx.error);
     return {kind:'viewport',viewport,pickedSurface:()=>!disposed&&shown&&mode==='view'?viewport.pickedSurface():null,
+      inspectModelSurface(name,label,id){
+        if(mode!=='view')return false;
+        viewport.select(name,label,id);return true;
+      },
+      async selectPickedObject(surface){
+        const task=loading;
+        await task;
+        if(disposed||!shown||task!==loading||mode!=='object'||view.dataset.state!=='ready')return;
+        const doc=project.document;
+        if(doc?.id===surface.projectId&&doc.source.files?.[doc.source.reviewSource]===surface.binding){
+          modeler.setObjectSelection([surface.objectId],surface.objectId);
+        }
+      },
       clearSurfacePick(){if(!disposed&&viewport.pickedSurface())viewport.select(null);},
       showRenderCamera:camera=>toggleCameraFrame(camera,true),drawRenderRegion,pickRenderFocus,wantsLiveDetail:()=>true,preferencesChanged:()=>syncRenderPreview(),getBrushSettings:()=>painter.getSettings(),isReady:()=>view.dataset.state==='ready',setPaintMode:setMode,reproject(layerId){placement={...project.origin(),layerId};setMode('place');status.textContent='点击模型表面重新放置贴花 · Esc 取消';},sync:()=>void sync().catch(ctx.error),activate(){publishScene();},
       editCommand(name){if(name==='undo'&&painter.isEditing())return painter.cancel({preserveMode:true});},

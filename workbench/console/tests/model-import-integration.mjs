@@ -523,9 +523,9 @@ async function verifyObjectMaterialNavigation(id){
     const pickSurface=(u,v)=>page.mouse.click(materialBox.x+u*materialBox.width,materialBox.y+v*materialBox.height);
     const original=properties.locator('.surface-properties');
     const before=await api('/api/projects/'+id);
-    await pickSurface(.5,.74);
     const sourceRough=original.getByRole('spinbutton',{name:'模型材质粗糙度'});
     await sourceRough.waitFor();
+    assert.equal(await sourceRough.inputValue(),'0.6');
     const owner=page.locator('.editor-area[data-editor=layers]:visible .layer-stack-owner');
     assert.equal(await owner.innerText(),'主材质\n'+before.source.material);
     const addToPrimary=page.getByRole('button',{name:'＋ 主材质绘制层',exact:true});
@@ -558,6 +558,13 @@ async function verifyObjectMaterialNavigation(id){
     await page.getByRole('button',{name:'全 UV 底层',exact:true}).click();
     await properties.locator('.editor-properties').waitFor();
     assert.equal(await original.isVisible(),false);
+    await pickSurface(.55,.48);
+    await page.locator('[data-area-mode=modeling]').click();
+    await viewport.waitFor();
+    await inspector.getByText('遮挡材料',{exact:true}).filter({visible:true}).waitFor();
+    assert.ok(await inspector.getByRole('button',{name:'查看图层属性'}).isVisible());
+    assert.deepEqual((await api('/api/projects/'+id)).paint,before.paint);
+    console.log('PASS switching workspaces follows the single object into its material and back to the newly picked object');
     console.log('PASS clicking a source in the material workspace edits that material and preserves the paint-layer target on undo');
   }finally{await page.close();}
 }

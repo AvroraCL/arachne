@@ -19,7 +19,7 @@ import {createViewportModelLoader} from './viewport-model-loader.mjs';
 export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect=()=>{},onRenderPreviewStatus=()=>{},onModelingPick,animateAxes=false,localUI=false}){
   let resizeObserver,stopWatchingScale,pixelRatio=1;let disposed=false,sceneCursor=null,cursorMark=null;
   let renderer,scene,camera,controls,model,previewModel,manifest,doc,sequence=0,active=false,pending=false,sceneChanged=true;
-  let scalarTextures={},texture,maskPreview=null,textureOverride=null,textureSequence=0,wireframe=false,unlit=false,orthographic=false,solo=false,selected=null,pickedLabel=null;
+  let scalarTextures={},texture,maskPreview=null,textureOverride=null,textureSequence=0,wireframe=false,unlit=false,orthographic=false,solo=false,selected=null,pickedObject=null;
   let livePaint=null,paintFrame=null,axisMotion=null,liveUsageKey='';
   let inspectionMap=null,inspectionChannel='';
   let radius=1,center=new THREE.Vector3(),topUp=new THREE.Vector3(0,0,-1),frameCount=0;
@@ -176,10 +176,10 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if(!manifest||host.dataset.state!=='ready')return;
     const hit = pickModel(event, model);
     let node=hit?.object;
-    while(node&&!node.userData.modelingLabel)node=node.parent;
+    while(node&&node.userData.modelingObject===undefined)node=node.parent;
     const material = hit && (Array.isArray(hit.object.material)
       ? hit.object.material[hit.face.materialIndex] : hit.object.material);
-    select(material ? material.userData.sourceMaterial || material.name : null,node?.userData.modelingLabel||hit?.object.name);
+    select(material ? material.userData.sourceMaterial || material.name : null,node?.userData.modelingLabel||hit?.object.name,node?.userData.modelingObject);
     onSelect(selected);
   }
   function pickModel(event, root) {
@@ -393,7 +393,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   async function loadProject(nextDoc){
     sourcePreview=null;
     const changed=doc?.id!==nextDoc.id;
-    if(changed||doc?.source.reviewSource!==nextDoc.source.reviewSource){selected=null;pickedLabel=null;}
+    if(changed||doc?.source.reviewSource!==nextDoc.source.reviewSource){selected=null;pickedObject=null;}
     const previousCamera=!changed&&model&&camera?(axisMotion?.end||cameraState()):null;axisMotion=null;doc=nextDoc;manifest=null;if(changed)textureOverride=null;textureSequence++;delete host.dataset.meshes;delete host.dataset.uvUnchanged;const token=++sequence;host.dataset.projectId=nextDoc.id;host.dataset.state='loading';state('正在准备真实模型…');
     try{init();disposeModel();onMaterials([]);let r=await fetch(`/api/projects/${doc.id}/viewport`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});let next=await r.json();if(!r.ok)throw Error(next.error||'模型请求失败');
       while(next.status==='running'){await new Promise(resolve=>setTimeout(resolve,650));if(token!==sequence)return;const r=await fetch(`/api/projects/${nextDoc.id}/viewport`);next=await r.json();if(!r.ok)throw Error(next.error||'模型准备状态读取失败');}
@@ -558,15 +558,15 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   function projection(value){if(!renderer||orthographic===value)return;applyCamera(projectionCamera(cameraState(),value));}
   function navigate(command,amount=1){if(!model)return;applyCamera(movedCamera(cameraState(),command,amount,host.clientHeight));}
 
-  function select(name,label=null){
-    const changed=selected!==name;selected=name;pickedLabel=label;
+  function select(name,label=null,id=null){
+    const changed=selected!==name;selected=name;pickedObject=label!=null?{label,id}:null;
     if(solo&&changed&&manifest)paintMaterials();
     else scheduleFrame(false);
   }
   function pickedSurface(){
-    if(!selected||pickedLabel==null||!doc)return null;
+    if(!selected||!pickedObject||!doc)return null;
     return {projectId:doc.id,binding:doc.source.files?.[doc.source.reviewSource],name:selected,
-      objectName:doc.paint?.objectNames?.[pickedLabel]||pickedLabel,painted:selected===doc.source.material};
+      objectId:pickedObject.id,objectName:doc.paint?.objectNames?.[pickedObject.label]||pickedObject.label,painted:selected===doc.source.material};
   }
   function sourceMaterial(target){
     if(!manifest||target.projectId!==doc.id||target.binding!==manifest.modelSha256)return null;

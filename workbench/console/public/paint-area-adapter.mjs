@@ -208,7 +208,20 @@ export function setupPaintAreas(hooks){
     onActivate:instance=>{if(instance?.domain)project.setEditorDomain(instance.domain);if(instance?.kind==='viewport'){const changed=preferredViewport!==instance;preferredViewport=instance;project.setEditorDomain('material');if(changed)project.notifyView('surfacePick');}if(['viewport','image','uv'].includes(instance?.kind))preferredCanvas=instance;syncWorkspaceButtons();hooks.cameraChanged?.();},onWorkspace:()=>{project.setEditorDomain(areas.name==='drawing'?'image':'material');syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name);hooks.remember();}
   });
   function syncWorkspaceButtons(){for(const b of document.querySelectorAll('[data-area-mode]'))b.setAttribute('aria-pressed',String(b.dataset.areaMode===areas.name));}
-  for(const b of document.querySelectorAll('[data-area-mode]'))b.onclick=()=>{if(areas.switchWorkspace(b.dataset.areaMode)){syncWorkspaceButtons();hooks.remember();}};
+  for(const b of document.querySelectorAll('[data-area-mode]'))b.onclick=()=>{
+    const next=b.dataset.areaMode,scene=project.scene;
+    const surface=areas.name==='material'&&next==='modeling'?bridge.pickedSurface():null;
+    let material=null;
+    if(areas.name==='modeling'&&next==='material'&&scene?.mode==='object'&&scene.selectedIds.length===1){
+      const slots=scene.inspectObject(scene.activeId)?.materials;
+      if(slots?.length===1&&!slots[0].painted)material=slots[0].name;
+    }
+    if(!areas.switchWorkspace(next))return;
+    const view=areas.active?.kind==='viewport'?areas.active:visibleEditors.find(editor=>editor.kind==='viewport');
+    if(material&&view?.inspectModelSurface(material,scene.activeLabel,scene.activeId)){preferredViewport=view;project.notifyView('surfacePick');}
+    if(surface?.objectId!=null)void view?.selectPickedObject(surface);
+    syncWorkspaceButtons();hooks.remember();
+  };
   $('open-render-settings').onclick=()=>areas.openEditor('renderSettings',{placement:'sidebar'});
   $('open-render-results').onclick=()=>areas.openEditor('renderResult');
   $('reset-docks').onclick=()=>areas.reset();for(const label of $('window-menu').querySelectorAll('label'))label.hidden=true;
