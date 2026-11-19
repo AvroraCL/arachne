@@ -65,8 +65,9 @@ const fields=(patch,keys)=>{
 function checkSourceMaterials(records,target,registered){
   if(!records||typeof records!=='object'||Array.isArray(records))throw Error('模型材质记录无效');
   for(const [name,factors] of Object.entries(records)){
-    if(!name||['__proto__','constructor','prototype',target].includes(name)||registered&&!registered.includes(name))throw Error('无法编辑该模型材质');
-    fields(factors,['color','metallic','roughness','mark']);
+    if(!name||['__proto__','constructor','prototype',target].includes(name)||registered&&!registered.materials.includes(name))throw Error('无法编辑该模型材质');
+    fields(factors,['color','metallic','roughness','transmission','mark']);
+    if(factors.transmission!==undefined&&registered&&!registered.transmissionMaterials.includes(name))throw Error('该模型材质没有透射通道');
     if(factors.mark){
       fields(factors.mark,['image','coverage','projector','surfaceBinding']);
       if(typeof factors.mark.surfaceBinding!=='string'||!sha256(factors.mark.image)||!sha256(factors.mark.coverage))throw Error('投影标记素材无效');
@@ -484,8 +485,8 @@ function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
     const {op,id,patch}=o;
     if(op==='sourceMaterial'){
       fields(o,['op','name','patch']);
-      const names=renderSceneObjects(next).materials;
-      if(next.source.format!=='glb'||!names.includes(o.name)||o.name===next.source.material)throw Error('无法编辑该模型材质');
+      const registered=renderSceneObjects(next);
+      if(next.source.format!=='glb'||!registered.materials.includes(o.name)||o.name===next.source.material)throw Error('无法编辑该模型材质');
       const records={...p.sourceMaterials};
       if(patch===null)delete records[o.name];
       else if(patch?.mark===null){
@@ -495,7 +496,7 @@ function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
         if(!Object.keys(records[o.name]).length)delete records[o.name];
       }
       else{
-        fields(patch,['color','metallic','roughness']);
+        fields(patch,['color','metallic','roughness','transmission']);
         if(!Object.keys(patch).length)throw Error('模型材质参数无效');
         const updated={...records[o.name]};
         for(const [key,value] of Object.entries(patch)){
@@ -503,7 +504,7 @@ function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
           else updated[key]=value;
         }
         if(Object.keys(updated).length){
-          checkSourceMaterials({[o.name]:updated},next.source.material,names);
+          checkSourceMaterials({[o.name]:updated},next.source.material,registered);
           records[o.name]=updated;
         }else delete records[o.name];
       }
@@ -1517,7 +1518,7 @@ export async function restorePaint(archive,scratch){
     break;
   }
   const restore=async source=>{
-    if(sourceMaterials)checkSourceMaterials(sourceMaterials,source.source.material,renderSceneObjects(source).materials);
+    if(sourceMaterials)checkSourceMaterials(sourceMaterials,source.source.material,renderSceneObjects(source));
     if(source.source.format==='glb')for(const [key,state] of Object.entries(paint.surfaceBindings||{})){
       const sha=state?.modelSha256??(key==='original'?geometry.modelSha256:key);
       if(sha!==geometry.modelSha256&&!source.source.history?.includes(sha))throw Error('工程副本缺少投放时的历史模型');

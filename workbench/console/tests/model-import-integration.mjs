@@ -370,7 +370,8 @@ function prepareTexturedModel(){
     'pbr["baseColorTexture"] = texture([(255,0,0,128),(0,255,0,255),(0,0,255,255),(255,255,255,0)],"color")',
     'pbr["metallicRoughnessTexture"] = texture([(16,40,200,255),(64,160,60,255)]*2,"orm")',
     'pbr["metallicRoughnessTexture"]["extensions"] = {"KHR_texture_transform":{"offset":[.5,0]}}',
-    'scene["extensionsUsed"] = ["KHR_texture_transform"]',
+    'material.setdefault("extensions", {})["KHR_materials_transmission"] = {"transmissionFactor":.75,"transmissionTexture":{"index":1}}',
+    'scene["extensionsUsed"] = ["KHR_texture_transform","KHR_materials_transmission"]',
     'scene["samplers"] = [{"magFilter":9728,"minFilter":9728}]',
     'scene["textures"][1]["sampler"] = 0',
     'material.update(alphaMode="MASK",alphaCutoff=.35,emissiveFactor=[.25,.5,1])',
@@ -410,7 +411,20 @@ async function verifyOriginalTextureChannels(texturedFile){
     await page.mouse.click(x,y);
     await page.locator('.object-property-editor').getByText('表面材料',{exact:true}).filter({visible:true}).waitFor();
     const maps=page.locator('.object-property-editor .source-texture-channel:visible');
-    assert.deepEqual(await maps.allTextContents(),['× color.RGB','× orm.B','× orm.G']);
+    assert.deepEqual(await maps.allTextContents(),['× color.RGB','× orm.B','× orm.G','× orm.R']);
+    const transmission=page.locator('.object-property-editor').getByLabel('模型材质透射',{exact:true});
+    assert.equal(await transmission.inputValue(),'0.75');
+    await transmission.fill('0');await transmission.press('Enter');
+    await until(async()=>(await api('/api/projects/'+doc.id)).paint.sourceMaterials?.['表面材料']?.transmission===0);
+    const lensEdit=await api('/api/projects/'+doc.id);
+    const incompatible=await fetch(origin+'/api/projects/'+doc.id+'/paint/update-glb?revision='+lensEdit.revision,{
+      method:'POST',headers:{Origin:origin,'Content-Type':'model/gltf-binary'},body:model.bytes
+    });
+    assert.equal(incompatible.ok,false);
+    assert.match((await incompatible.json()).error,/表面材料.*透射/);
+    assert.equal((await api('/api/projects/'+doc.id)).revision,lensEdit.revision);
+    await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
+    await until(async()=>await transmission.inputValue()==='0.75');
     const canvas=viewport.locator('canvas').first();
     const channels=await page.locator('select[aria-label="视口材质通道"]').locator('option').evaluateAll(options=>options.map(o=>o.value));
     assert.ok(channels.includes('normal')&&channels.includes('ao')&&channels.includes('alpha')&&channels.includes('emission'),JSON.stringify(channels));
@@ -465,6 +479,7 @@ async function verifyObjectMaterialNavigation(id){
     const roughness=inspector.getByLabel('模型材质粗糙度',{exact:true});
     assert.equal(await roughness.inputValue(),'0.6');
     assert.equal(await inspector.locator('.source-texture-channel:visible').count(),0);
+    assert.ok(await inspector.getByLabel('模型材质透射',{exact:true}).isHidden());
     assert.equal(await roughness.isVisible(),true);
     await pick('遮挡面');
     const layer=inspector.getByRole('button',{name:'查看图层属性'});

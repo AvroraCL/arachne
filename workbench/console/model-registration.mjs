@@ -37,11 +37,11 @@ export function historicalSource(source,sha){
     files:Object.fromEntries(coreRegistrationFiles.map(name=>[file(name),source.files[file(name)]]))};
 }
 
-export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput,previousModel,targetMaterial,positionReplay,markedMaterials}={}){
+export async function registerGlb(input,scratch,{python=pythonExecutable(),material,textureOutput,previousModel,targetMaterial,positionReplay,markedMaterials,transmissionMaterials}={}){
   const staging=path.join(scratch,'registration');
   const config=path.join(scratch,'input.json');
   await fs.mkdir(staging);
-  atomic(config,{input,out:staging,material,textureOutput,previousModel,targetMaterial,positionReplay,markedMaterials,ownerPid:process.pid});
+  atomic(config,{input,out:staging,material,textureOutput,previousModel,targetMaterial,positionReplay,markedMaterials,transmissionMaterials,ownerPid:process.pid});
   try{
     await execute(python,['-X','utf8',path.join(ROOT,'model_surface.py'),'register',config],
       {cwd:ROOT,windowsHide:true,timeout:180000});
@@ -118,7 +118,8 @@ export async function updateProjectGlb(doc,revision,input,scratch){
   const positionReplay=lastPosition<0?undefined:modeling.steps.slice(0,lastPosition+1);
   const staging=await registerGlb(input,scratch,{
     previousModel:doc.source.reviewSource,targetMaterial:doc.source.material,positionReplay,
-    markedMaterials:Object.entries(doc.paint.sourceMaterials||{}).filter(([,m])=>m.mark).map(([name])=>name)
+    markedMaterials:Object.entries(doc.paint.sourceMaterials||{}).filter(([,m])=>m.mark).map(([name])=>name),
+    transmissionMaterials:Object.entries(doc.paint.sourceMaterials||{}).filter(([,m])=>m.transmission!==undefined).map(([name])=>name)
   });
   const metadata=JSON.parse(await fs.readFile(path.join(staging,'metadata.json'),'utf8'));
   if(metadata.source_sha256===doc.source.files[doc.source.reviewSource])throw Error('所选模型与当前工程相同');

@@ -29,6 +29,15 @@ test('source PBR edits retain texture bindings and alpha when a cap has no paint
   assert.equal('roughness' in unlit,false);
 });
 
+test('transmission edits keep the original lens map, opacity and optical thickness', () => {
+  const transmissionMap=new THREE.Texture();
+  const lens=new THREE.MeshPhysicalMaterial({transmission:.87,transmissionMap,opacity:.9,ior:1.57,thickness:.027});
+  applySourceFactors(lens,{transmission:0});
+  assert.equal(lens.transmission,0);
+  assert.equal(lens.transmissionMap,transmissionMap);
+  assert.deepEqual([lens.opacity,lens.ior,lens.thickness],[.9,1.57,.027]);
+});
+
 test('unlit view preserves alpha textures, cutouts and vertex colors without changing the source PBR material', () => {
   const source = new THREE.MeshPhysicalMaterial({
     color: 0x778899, map: new THREE.Texture(), normalMap: new THREE.Texture(),

@@ -7,7 +7,7 @@ function row(parent,label,control){const item=el('label','render-settings-row');
 // Both the object inspector and the viewport pick edit the same GLB material.
 export function createSourceMaterialFields(sourceControls,project,readTarget,error,beginSourcePreview){
   const inputs={},labels={};
-  for(const [key,title,channel] of [['color','底色','RGB'],['metallic','金属度','B'],['roughness','粗糙度','G']]){
+  for(const [key,title,channel] of [['color','底色','RGB'],['metallic','金属度','B'],['roughness','粗糙度','G'],['transmission','透射','R']]){
     const input=el('input');input.type=key==='color'?'color':'number';
     if(key!=='color'){input.min='0';input.max='1';input.step='any';}
     input.setAttribute('aria-label','模型材质'+title);
@@ -30,8 +30,8 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
   const markName=row(sourceControls,'投影标记',el('span','render-settings-readout'));
   const removeMark=el('button','','移除标记');removeMark.type='button';removeMark.onclick=()=>save({mark:null});
   sourceControls.append(removeMark);
-  restore.type='button';restore.title='恢复模型的底色、金属度和粗糙度';
-  restore.onclick=()=>save({color:null,metallic:null,roughness:null});sourceControls.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
+  restore.type='button';restore.title='恢复模型原始材质参数';
+  restore.onclick=()=>save(Object.fromEntries(Object.keys(inputs).filter(key=>shown?.[key]!==undefined).map(key=>[key,null])));sourceControls.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
   let shown=null,pending=false,scrub=null;
   function currentScrub(target){return sameTarget(target,scrub?.target)&&project.document?.revision===scrub.revision;}
   function endScrub(){scrub?.preview(null);scrub=null;}
@@ -48,6 +48,7 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     for(const [key,input] of Object.entries(inputs)){
       if(changed){
         const {title,channel,item,caption,detail}=labels[key],map=target?.maps?.[key];
+        item.hidden=key==='transmission'&&target?.transmission===undefined;
         caption.textContent=title;
         if(map){
           detail.replaceChildren('× ',el('span','',map),'.'+channel);
@@ -57,8 +58,8 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
         }else input.removeAttribute('aria-description');
         item.dataset.search=map?detail.title:title;
       }
-      if(target&&(force||changed||document.activeElement!==input))input.value=patch?.[key]??target[key];
-      input.disabled=!!locked;
+      if(target?.[key]!==undefined&&(force||changed||document.activeElement!==input))input.value=patch?.[key]??target[key];
+      input.disabled=!!locked||target?.[key]===undefined;
     }
     markName.parentElement.hidden=removeMark.hidden=!patch?.mark;
     markName.textContent=project.document?.paint.assets[patch?.mark?.image]?.name||'';

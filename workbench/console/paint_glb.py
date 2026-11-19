@@ -233,6 +233,8 @@ def main(config):
         for key in ('metallic', 'roughness'):
             if key in override:
                 pbr[key + 'Factor'] = override[key]
+        if 'transmission' in override:
+            original['extensions']['KHR_materials_transmission']['transmissionFactor'] = override['transmission']
     material = scene['materials'][selected]
     paint_material(scene, binary, material, config['maps'], set(config['activeChannels']))
     scene['asset'].setdefault('extras', {})['arachne'] = {

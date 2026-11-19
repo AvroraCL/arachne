@@ -228,8 +228,8 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if(name===manifest.targetMaterial)return {name,painted:true};
     if(!material.isMeshStandardMaterial||doc.source.format!=='glb')return null;
     const textureName=texture=>texture&&(texture.name||'内嵌贴图');
-    return {name,color:'#'+base.color.getHexString(),metallic:base.metalness,roughness:base.roughness,
-      maps:{color:textureName(base.map),metallic:textureName(base.metalnessMap),roughness:textureName(base.roughnessMap)}};
+    return {name,color:'#'+base.color.getHexString(),metallic:base.metalness,roughness:base.roughness,transmission:base.transmission,
+      maps:{color:textureName(base.map),metallic:textureName(base.metalnessMap),roughness:textureName(base.roughnessMap),transmission:textureName(material.transmissionMap)}};
   }
   function sourceMaterialForExport(material) {
     const copy = material.clone();
@@ -241,6 +241,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     copy.opacity = original.opacity;
     copy.transparent = original.transparent;
     copy.depthWrite = original.depthWrite;
+    if(original.transmission!==undefined)copy.transmission=original.transmission;
     if ('metalness' in copy) {
       copy.metalness = original.metalness;
       copy.roughness = original.roughness;
@@ -355,7 +356,10 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
           material.emissiveMap=emission||original.emissiveMap;material.emissive.copy(emission?new THREE.Color(1,1,1):original.emissive);material.emissiveIntensity=emission?1:original.emissiveIntensity;
           material.aoMap=ao||original.aoMap;material.aoMapIntensity=ao?1:original.aoMapIntensity;
         }
-        if(!isTarget)applySourceFactors(material,factors,!!mark);
+        if(!isTarget){
+          if(original.transmission!==undefined&&factors?.transmission===undefined)material.transmission=original.transmission;
+          applySourceFactors(material,factors,!!mark);
+        }
         if(contactMaterials.has(material)){
           material.defines??={};
           if(projected&&material.map&&(material.map===livePaint?.color||material.map===texture||(inspectionChannel==='normal'&&material.map===inspectionMap)))material.defines.PAINT_CONTACT_COLOR=1;
@@ -400,6 +404,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       if(token!==sequence)return;if(next.status!=='ready')throw Error(next.error||'模型尚未准备好');
       state('正在载入模型与原 UV 贴图…');const gltf=await loader.loadAsync(next.modelUrl);if(token!==sequence){gltf.scene.traverse(o=>o.geometry?.dispose());return;}manifest=next;model=gltf.scene;scene.add(model);
       const contactBounds=touchingPaintBounds(model,next.targetMaterial);
+      const transmissionMaterials=new Set((gltf.parser.json.materials||[]).filter(m=>m.extensions?.KHR_materials_transmission).map(m=>m.name));
       model.traverse(object => {
         if (onModelingPick) {
           const mapping = gltf.parser.associations.get(object);
@@ -424,6 +429,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
           if (!materials.has(name)) materials.set(name, new Set());
           materials.get(name).add(material);
           materialState.set(material, {normalMap:material.normalMap,normalScale:material.normalScale?.clone(),bumpMap:material.bumpMap,bumpScale:material.bumpScale,emissiveMap:material.emissiveMap,emissive:material.emissive?.clone(),emissiveIntensity:material.emissiveIntensity,alphaMap:material.alphaMap,aoMap:material.aoMap,aoMapIntensity:material.aoMapIntensity,metalnessMap:material.metalnessMap,roughnessMap:material.roughnessMap,metalness:material.metalness,roughness:material.roughness,map: material.map, color: material.color.clone(), opacity: material.opacity, transparent: material.transparent, depthWrite: material.depthWrite,vertexColors:material.vertexColors});
+          if(material.isMeshPhysicalMaterial&&transmissionMaterials.has(name))materialState.get(material).transmission=material.transmission;
           for (const image of Object.values(material)) if (image?.isTexture) image.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
         }
         object.userData.viewportUnlitMaterials.forEach((display,index)=>{

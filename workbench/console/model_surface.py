@@ -85,7 +85,10 @@ def register(config):
         if previous.uv_digest() != uv_digest:
             raise ValueError('三角形索引或原 UV 已改变。请保留拓扑与 UV 后再更新，或另建工程')
         marked = set(config.get('markedMaterials') or [])
+        transmission = set(config.get('transmissionMaterials') or [])
         for material in model.scene['materials']:
+            if material['name'] in transmission and 'KHR_materials_transmission' not in material.get('extensions', {}):
+                raise ValueError(f'「{material["name"]}」已调整透射，请保留源材质的透射通道或先恢复材质参数')
             if material['name'] in marked and 'baseColorTexture' in material.get('pbrMetallicRoughness', {}):
                 raise ValueError(f'「{material["name"]}」已使用附属材质标记，请保留纯色底材或先移除标记')
         if config.get('positionReplay'):

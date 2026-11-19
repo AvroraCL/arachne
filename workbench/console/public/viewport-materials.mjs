@@ -111,6 +111,7 @@ export function applySourceFactors(material,factors,marked=material.userData.mar
     if(factors.metallic!==undefined)material.metalness=factors.metallic;
     if(factors.roughness!==undefined)material.roughness=factors.roughness;
   }
+  if(material.isMeshPhysicalMaterial&&factors.transmission!==undefined)material.transmission=factors.transmission;
 }
 
 // The inspection texture uses the same sRGB decoding and linear filtering as

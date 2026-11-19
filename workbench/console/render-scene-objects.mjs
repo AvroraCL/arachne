@@ -27,7 +27,8 @@ export function renderSceneObjects(doc){
     .filter(node=>node.mesh!==undefined&&node.name)
     .map(node=>[node.name,metadata.render_visibility?.[node.name]!==false])));
   const materials=(gltf.materials||[]).filter(material=>material.name&&!material.extensions?.KHR_materials_unlit).map(material=>material.name);
-  const result={sourceSha256:metadata.source_sha256,visibility,materials};
+  const transmissionMaterials=(gltf.materials||[]).filter(material=>material.extensions?.KHR_materials_transmission).map(material=>material.name);
+  const result={sourceSha256:metadata.source_sha256,visibility,materials,transmissionMaterials};
   cache.set(key,result);
   while(cache.size>8)cache.delete(cache.keys().next().value);
   return result;
