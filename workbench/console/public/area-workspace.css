@@ -393,7 +393,7 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .modular-workspace #layers .layer-row:hover{background:#ffffff06}
 .modular-workspace #layers .layer-row:has(.layer-select[aria-pressed=true]){background:#383838;box-shadow:none}
 .modular-workspace #layers .layer-select[aria-pressed=true]{border-color:transparent;background:transparent}
-.modular-workspace #layers .layer-title{font-weight:400;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}
+.modular-workspace #layers .layer-title{font-weight:400}
 .modular-workspace #layers .layer-row:has(.layer-select[aria-pressed=true]) .layer-title{color:#fff}
 .modular-workspace #layers .layer-lock:not(:hover){opacity:.55}
 .modular-workspace form.editor-properties label{color:#c5c5c5;min-width:0}

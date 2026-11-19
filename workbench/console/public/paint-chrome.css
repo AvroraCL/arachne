@@ -147,7 +147,10 @@
 }
 #workspace .material-tree-icon,#workspace .material-tree-lock{display:flex;flex:none;color:#a8a8a8}
 #workspace .material-tree-lock{width:17px}
-#workspace .material-tree-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#workspace #layers .layer-title,#workspace .editor-material-tree .material-tree-name{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  overflow:hidden;overflow-wrap:anywhere;line-height:14px;text-align:start;white-space:normal
+}
 #workspace .editor-material-tree .editor-layer-row[data-active-layer]{box-shadow:inset 2px 0 #929292}
 #workspace .editor-material-tree .editor-layer-row[data-folded-selection] .material-tree-icon{color:#eee}
 #workspace .editor-material-tree .editor-layer-row[data-inherited-hidden] .material-tree-name{color:#999}
