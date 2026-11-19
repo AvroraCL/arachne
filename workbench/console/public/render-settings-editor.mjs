@@ -544,7 +544,7 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   }
   const objectHost=el('div','property-editor-object');frame.panel('object').append(objectHost);
   const objectEditor=createObjectPropertyEditor({host:objectHost,project,state:state.object,onChange,error:ctx.error,
-    getTarget:()=>target('object'),getPaintSelection:()=>({...adapters.propertyTarget(),openWorkspace:!!pins.material}),
+    beginSourcePreview:adapters.beginSourcePreview,getTarget:()=>target('object'),getPaintSelection:()=>({...adapters.propertyTarget(),openWorkspace:!!pins.material}),
     openPaintLayers(){
       if(pins.material){adapters.openMaterial(project.layerId);return;}
       materialResource=null;
@@ -668,5 +668,5 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   const unsubscribe=settings.subscribe(sync),unsubscribeProject=project.subscribe(event=>event.kind==='project'?sync(event):observe(event));
   sync();
   return {kind:'renderSettings',sync,getState:()=>({...frame.getState(),sections:{...openSections},cameraBookmark:bookmarkId,light:activeLight,pins:structuredClone(pins),object:objectEditor.getState(),material:materialEditor.getState()}),
-    dispose(){unsubscribe();unsubscribeProject();materialEditor.dispose();drawingEditor.dispose();}};
+    dispose(){unsubscribe();unsubscribeProject();objectEditor.dispose();materialEditor.dispose();drawingEditor.dispose();}};
 }

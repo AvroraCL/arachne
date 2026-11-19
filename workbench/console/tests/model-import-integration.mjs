@@ -469,9 +469,26 @@ async function verifyObjectMaterialNavigation(id){
     await canvas.press('c');await canvas.press('c');await canvas.press('c');
     await viewport.and(page.locator('[data-inspected-channel=roughness]')).waitFor();
     assert.deepEqual(await pixelAt(page,x,y),[153,153,153]);
-    await roughness.fill('0.2');await roughness.press('Enter');
+    const field=await roughness.locator('..').boundingBox();
+    const startX=Math.floor(field.x+field.width/2),startY=Math.floor(field.y+field.height/2);
+    const scrub=async delta=>{
+      await page.mouse.move(startX,startY);await page.mouse.down();
+      await page.mouse.move(startX+delta,startY,{steps:5});
+    };
+    const revision=(await api('/api/projects/'+id)).revision;
+    await scrub(-20);
+    assert.deepEqual(await pixelAt(page,x,y),[102,102,102]);
+    assert.equal((await api('/api/projects/'+id)).revision,revision);
+    await page.keyboard.press('Escape');await page.mouse.up();
+    assert.deepEqual(await pixelAt(page,x,y),[153,153,153]);
+    assert.equal(await roughness.inputValue(),'0.6');
+    await scrub(-40);
+    assert.deepEqual(await pixelAt(page,x,y),[51,51,51]);
+    assert.equal((await api('/api/projects/'+id)).revision,revision);
+    await page.mouse.up();
     await until(async()=>(await api('/api/projects/'+id)).paint.sourceMaterials?.['表面材料']?.roughness===.2);
     assert.deepEqual(await pixelAt(page,x,y),[51,51,51]);
+    assert.equal((await api('/api/projects/'+id)).revision,revision+1);
     await canvas.press('m');
     await viewport.and(page.locator('[data-inspected-channel]')).waitFor({state:'hidden'});
     await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();

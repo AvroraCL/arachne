@@ -729,16 +729,17 @@ export function registerAreaEditors(registry,bridge){
     }
     const sourceEditor=createSourceMaterialFields(fields,ctx.project,()=>{
       const target=picked();return target&&bridge.inspectSource(target);
-    },ctx.error);
+    },ctx.error,bridge.beginSourcePreview);
     ctx.host.append(form,sourcePanel);let key='',first=true;
     const sync=()=>{
       if(!ctx.project.document)return;
       const surface=picked();form.hidden=!!surface;sourcePanel.hidden=!surface;
+      sourceEditor.sync();
       if(surface){
         objectName.textContent=surface.objectName;objectName.parentElement.hidden=!surface.objectName||surface.objectName===surface.name;
         materialName.parentElement.firstChild.textContent=surface.name===surface.objectName?'物体 / 材质':'材质';
         materialName.textContent=surface.name;unavailable.hidden=!!bridge.inspectSource(surface);fields.hidden=!unavailable.hidden;
-        sourceEditor.sync();return;
+        return;
       }
       const scope=scopeTarget?.();if(scopeTarget&&!scope){if(key){form.replaceChildren();key='';}return;}
       const next=JSON.stringify(scopeTarget?[ctx.project.document.id,ctx.project.document.revision,scope]:bridge.propertyKey());if(next===key)return;key=next;
@@ -749,7 +750,7 @@ export function registerAreaEditors(registry,bridge){
       if(focused)form.focus({preventScroll:true});
     };
     const unsub=ctx.project.subscribe(sync);sync();
-    return {sync,getState:()=>({scroll:form.scrollTop,sections:{...form.propertySections}}),dispose:unsub};
+    return {sync,getState:()=>({scroll:form.scrollTop,sections:{...form.propertySections}}),dispose(){unsub();sourceEditor.dispose();}};
   }
   function materialPanel(ctx,factory){
     ctx.root.dataset.layerDomain='material';const host=el('div','domain-material-pane');ctx.host.append(host);
@@ -764,7 +765,7 @@ export function registerAreaEditors(registry,bridge){
   registry.register('scene',ctx=>createSceneEditor(ctx));
   registry.register('renderResult',ctx=>createRenderResultEditor(ctx,bridge.renderResults));
   registry.register('renderSettings',ctx=>createRenderSettingsEditor(ctx,bridge.renderSettings,{
-    propertyTarget:bridge.propertyTarget,pickedSurface:bridge.pickedSurface,inspectSource:bridge.inspectSource,busy:bridge.busy,openMaterial:bridge.openMaterial,
+    propertyTarget:bridge.propertyTarget,pickedSurface:bridge.pickedSurface,inspectSource:bridge.inspectSource,beginSourcePreview:bridge.beginSourcePreview,busy:bridge.busy,openMaterial:bridge.openMaterial,
     material:(host,state,scope)=>materialProperties({...ctx,host,state},scope),
     drawing:(host,tools,root,project)=>createImagePanel('properties',{...ctx,host,tools,root,project,busy:bridge.busy,openMaterial:bridge.openMaterial,openImageText:bridge.openImageText,imageAdjustment:bridge.imageAdjustment,pickAdjustmentColor:bridge.pickAdjustmentColor})
   }));

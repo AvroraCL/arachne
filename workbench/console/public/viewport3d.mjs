@@ -60,6 +60,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
 
   const materialState=new WeakMap(), contactMaterials=new WeakSet(),sourceChannels=new Set();
   const markedMaps=new Map();
+  let sourcePreview=null;
   const materials=new Map(),loader=new GLTFLoader(),gizmoState={instance:null};
   const state=(text,kind='info')=>onStatus(text,kind);
   function drawAxis(){const root=host.querySelector('.vp-axis');if(!root||!camera)return;gizmoState.instance??=createAxisGizmo({root,getCamera:()=>camera,frameAxis,isMoving:()=>!!axisMotion});gizmoState.instance.draw();}
@@ -308,11 +309,24 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     const layers=doc?.paint?.layers||[];
     return layers.some(layer=>layer.fillProjection?.mode==='triplanar'&&layer.opacity>0&&layerIsVisible(layers,layer));
   }
-  function paintMaterials() {
+  function beginSourcePreview(name){
+    const origin=doc,preview={name,patch:null};
+    return patch=>{
+      if(disposed||!manifest||doc!==origin)return;
+      if(patch){preview.patch=patch;sourcePreview=preview;}
+      else if(sourcePreview===preview)sourcePreview=null;
+      else return;
+      paintMaterials(name);
+    };
+  }
+  function paintMaterials(onlyName) {
     const projected=hasProjectedFill();
     const enabled=new Set(livePaint?activePaintChannels(doc.paint):manifest?.activeChannels||activePaintChannels(doc?.paint));
     const liveMap=key=>livePaint?.[key==='ao'?'scalar':key==='height'||key==='alpha'?'detail':key];
     for (const [name, list] of materials) {
+      if(onlyName&&onlyName!==name)continue;
+      const saved=doc.paint?.sourceMaterials?.[name];
+      const factors=sourcePreview?.name===name?{...saved,...sourcePreview.patch}:saved;
       const mark=markedMaps.get(name);
       for (const material of list) {
         const original = materialState.get(material);
@@ -339,7 +353,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
           material.emissiveMap=emission||original.emissiveMap;material.emissive.copy(emission?new THREE.Color(1,1,1):original.emissive);material.emissiveIntensity=emission?1:original.emissiveIntensity;
           material.aoMap=ao||original.aoMap;material.aoMapIntensity=ao?1:original.aoMapIntensity;
         }
-        if(!isTarget)applySourceFactors(material,doc.paint?.sourceMaterials?.[name],!!mark);
+        if(!isTarget)applySourceFactors(material,factors,!!mark);
         if(contactMaterials.has(material)){
           material.defines??={};
           if(projected&&material.map&&(material.map===livePaint?.color||material.map===texture||(inspectionChannel==='normal'&&material.map===inspectionMap)))material.defines.PAINT_CONTACT_COLOR=1;
@@ -352,7 +366,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
         const paintedBlend=Boolean(alpha&&!material.alphaTest);
         material.transparent = dimmed||!inspecting&&(original.transparent||paintedBlend);
         material.depthWrite = !dimmed&&(inspecting||!paintedBlend&&original.depthWrite);
-        if(sourcePbr)inspectSourceChannel(material,sourcePbr,doc.paint?.sourceMaterials?.[name],inspectionChannel);
+        if(sourcePbr)inspectSourceChannel(material,sourcePbr,factors,inspectionChannel);
         material.needsUpdate = true;
       }
     }
@@ -369,6 +383,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     texture?.dispose();for(const v of Object.values(scalarTextures))v.dispose();texture=loaded.color;delete loaded.color;scalarTextures=loaded;manifest=next;paintMaterials();textureStatus();
   }
   async function loadProject(nextDoc){
+    sourcePreview=null;
     const changed=doc?.id!==nextDoc.id;
     if(changed||doc?.source.reviewSource!==nextDoc.source.reviewSource){selected=null;pickedLabel=null;}
     const previousCamera=!changed&&model&&camera?(axisMotion?.end||cameraState()):null;axisMotion=null;doc=nextDoc;manifest=null;if(changed)textureOverride=null;textureSequence++;delete host.dataset.meshes;delete host.dataset.uvUnchanged;const token=++sequence;host.dataset.projectId=nextDoc.id;host.dataset.state='loading';state('正在准备真实模型…');
@@ -447,12 +462,12 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   }
   function syncDocument(next){
     if(doc?.id!==next.id||doc.source.reviewSource!==next.source.reviewSource)return loadProject(next);
-    const previous=doc;doc=next;
+    const previous=doc,previewName=sourcePreview?.name;doc=next;sourcePreview=null;
     if(model&&manifest&&JSON.stringify(previous.paint?.sourceMaterials)!==JSON.stringify(next.paint?.sourceMaterials)){
       void updateSurfaceMarks(previous.paint.sourceMaterials,next.paint.sourceMaterials)
         .catch(error=>state(error.message,'error'));
       paintMaterials();
-    }
+    }else if(model&&manifest&&previewName)paintMaterials(previewName);
     if(JSON.stringify(previous.paint?.renderVisibility)!==JSON.stringify(next.paint?.renderVisibility))request();
     if(model&&!previewModel&&JSON.stringify(previous.modeling)!==JSON.stringify(next.modeling)){
       applyModelState(model,doc.modeling);updateModelBounds();request();
@@ -744,5 +759,5 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     (localUI?host.querySelector('[data-vp-ortho]'):document.getElementById('vp-ortho'))?.setAttribute('aria-pressed', String(orthographic));
     size();
   }
-  return {showChannelPreview,inspectionChannels,pickedSurface,sourceMaterial,readCamera:()=>camera&&cameraState(),dispose(){if(disposed)return;disposed=true;sequence++;textureSequence++;active=false;resizeObserver?.disconnect();stopWatchingScale?.();controls?.dispose();pathTracer?.dispose();disposeModel();objectOutline?.dispose();environment?.dispose();solidMaterial.dispose();wireMaterial.dispose();renderer?.dispose();renderer?.domElement.remove();cursorMark?.remove();},modelingContext,applyCamera,navigate,pickTargetUV,focusDistanceAt,viewFrame,screenPoint,setSceneCursor,cursorPointAt,showLivePaint,showMaskCanvas,setRenderPreview,renderPreviewState:()=>pathTracer?.state(),setDisplay,setOverlays,setEnvironment(raw){displaySettings=sceneOptions(raw);syncEnvironment();},capture(){if(!renderer||!camera||host.dataset.state!=='ready')throw Error('请等待模型载入');updateDepthRange();renderObserved();notifyCamera();const data=renderer.domElement.toDataURL('image/png');request();return data;},getRenderSettings(samples=64){if(!manifest||host.dataset.state!=='ready'||!camera)throw Error('请等待三维模型与贴图载入');const aspect=host.clientWidth/Math.max(host.clientHeight,1),width=Math.round(Math.min(1200,1200*aspect)),height=Math.round(width/aspect);const match=manifest.textureUrl?.match(/\/jobs\/([^/]+)\/files\//);return {samples,width:Math.max(128,width),height:Math.max(128,Math.min(2048,height)),textureJobId:match?.[1]||null,camera:cameraState()};},loadProject,focusSelected,setActive(value){active=value;if(!active&&axisMotion)applyCamera(axisMotion.end);else size();},fit:frameAll,direction,projection,select,setWireframe(value){wireframe=value;paintMaterials();},setUnlit:shade,setSolo(value){solo=value;paintMaterials();},syncDocument,async setTextureSource(source){textureOverride=source;await this.refreshTexture();},async reload(){if(doc)return loadProject(doc);},async refreshTexture(){if(!doc||!manifest||host.dataset.state==='error')return;const token=sequence,textureToken=++textureSequence;try{const r=await fetch(`/api/projects/${doc.id}/viewport`);if(!r.ok)throw Error('贴图来源请求失败');const next=resolvedTexture(await r.json());if(token!==sequence||textureToken!==textureSequence)return;if(next.status==='ready'&&(next.textureUrl!==manifest.textureUrl||JSON.stringify(next.materialUrls)!==JSON.stringify(manifest.materialUrls)))await applyTexture(next,token,textureToken);else{manifest=next;textureStatus();}}catch(e){state('贴图更新失败：'+e.message,'error');}},getState(){return {projectId:doc?.id,modelRadius:radius,meshCount:host.dataset.meshes,frames:frameCount,clipping:camera?{near:camera.near,far:camera.far}:null,selected,wireframe,unlit,orthographic,position:camera?.position.toArray(),materialUrls:manifest?.materialUrls,textureUrl:manifest?.textureUrl,textureRevision:manifest?.textureRevision};}};
+  return {showChannelPreview,beginSourcePreview,inspectionChannels,pickedSurface,sourceMaterial,readCamera:()=>camera&&cameraState(),dispose(){if(disposed)return;disposed=true;sequence++;textureSequence++;active=false;resizeObserver?.disconnect();stopWatchingScale?.();controls?.dispose();pathTracer?.dispose();disposeModel();objectOutline?.dispose();environment?.dispose();solidMaterial.dispose();wireMaterial.dispose();renderer?.dispose();renderer?.domElement.remove();cursorMark?.remove();},modelingContext,applyCamera,navigate,pickTargetUV,focusDistanceAt,viewFrame,screenPoint,setSceneCursor,cursorPointAt,showLivePaint,showMaskCanvas,setRenderPreview,renderPreviewState:()=>pathTracer?.state(),setDisplay,setOverlays,setEnvironment(raw){displaySettings=sceneOptions(raw);syncEnvironment();},capture(){if(!renderer||!camera||host.dataset.state!=='ready')throw Error('请等待模型载入');updateDepthRange();renderObserved();notifyCamera();const data=renderer.domElement.toDataURL('image/png');request();return data;},getRenderSettings(samples=64){if(!manifest||host.dataset.state!=='ready'||!camera)throw Error('请等待三维模型与贴图载入');const aspect=host.clientWidth/Math.max(host.clientHeight,1),width=Math.round(Math.min(1200,1200*aspect)),height=Math.round(width/aspect);const match=manifest.textureUrl?.match(/\/jobs\/([^/]+)\/files\//);return {samples,width:Math.max(128,width),height:Math.max(128,Math.min(2048,height)),textureJobId:match?.[1]||null,camera:cameraState()};},loadProject,focusSelected,setActive(value){active=value;if(!active&&axisMotion)applyCamera(axisMotion.end);else size();},fit:frameAll,direction,projection,select,setWireframe(value){wireframe=value;paintMaterials();},setUnlit:shade,setSolo(value){solo=value;paintMaterials();},syncDocument,async setTextureSource(source){textureOverride=source;await this.refreshTexture();},async reload(){if(doc)return loadProject(doc);},async refreshTexture(){if(!doc||!manifest||host.dataset.state==='error')return;const token=sequence,textureToken=++textureSequence;try{const r=await fetch(`/api/projects/${doc.id}/viewport`);if(!r.ok)throw Error('贴图来源请求失败');const next=resolvedTexture(await r.json());if(token!==sequence||textureToken!==textureSequence)return;if(next.status==='ready'&&(next.textureUrl!==manifest.textureUrl||JSON.stringify(next.materialUrls)!==JSON.stringify(manifest.materialUrls)))await applyTexture(next,token,textureToken);else{manifest=next;textureStatus();}}catch(e){state('贴图更新失败：'+e.message,'error');}},getState(){return {projectId:doc?.id,modelRadius:radius,meshCount:host.dataset.meshes,frames:frameCount,clipping:camera?{near:camera.near,far:camera.far}:null,selected,wireframe,unlit,orthographic,position:camera?.position.toArray(),materialUrls:manifest?.materialUrls,textureUrl:manifest?.textureUrl,textureRevision:manifest?.textureRevision};}};
 }

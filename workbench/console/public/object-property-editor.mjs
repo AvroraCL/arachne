@@ -5,12 +5,22 @@ const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.cla
 function row(parent,label,control){const item=el('label','render-settings-row');item.dataset.search=label;item.append(el('span','',label),control);parent.append(item);return control;}
 
 // Both the object inspector and the viewport pick edit the same GLB material.
-export function createSourceMaterialFields(sourceControls,project,readTarget,error){
+export function createSourceMaterialFields(sourceControls,project,readTarget,error,beginSourcePreview){
   const inputs={};
   for(const [key,title] of [['color','底色'],['metallic','金属度'],['roughness','粗糙度']]){
     const input=el('input');input.type=key==='color'?'color':'number';
     if(key!=='color'){input.min='0';input.max='1';input.step='any';}
     input.setAttribute('aria-label','模型材质'+title);
+    if(key!=='color'){
+      input.addEventListener('input',()=>{
+        if(!input.closest('.workspace-range-field[data-dragging]'))return;
+        const target=readTarget();
+        if(pending||!sameTarget(target,shown)||target.locked)return;
+        scrub??={target,revision:project.document.revision,preview:beginSourcePreview(target.name)};
+        if(currentScrub(target))scrub.preview({[key]:input.valueAsNumber});
+      });
+      input.addEventListener('workspace-range-cancel',()=>{endScrub();sync(true);});
+    }
     input.addEventListener('change',()=>save({[key]:key==='color'?input.value:input.valueAsNumber}));
     inputs[key]=row(sourceControls,title,input);
   }
@@ -20,12 +30,15 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
   sourceControls.append(removeMark);
   restore.type='button';restore.title='恢复模型的底色、金属度和粗糙度';
   restore.onclick=()=>save({color:null,metallic:null,roughness:null});sourceControls.append(restore,el('p','object-property-hint','共用此材质的物体会同步更新。'),materialMessage);
-  let shown=null,pending=false;
+  let shown=null,pending=false,scrub=null;
+  function currentScrub(target){return sameTarget(target,scrub?.target)&&project.document?.revision===scrub.revision;}
+  function endScrub(){scrub?.preview(null);scrub=null;}
   function sameTarget(a,b){
     return !!a&&!!b&&a.projectId===b.projectId&&a.binding===b.binding&&a.name===b.name;
   }
   function sync(force=false){
     const target=readTarget(),changed=!sameTarget(target,shown);
+    if(scrub&&!currentScrub(target))scrub.preview(null);
     if(changed)materialMessage.textContent='';
     shown=target;
     const patch=project.document?.paint.sourceMaterials?.[target?.name];
@@ -41,19 +54,19 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
   async function save(patch){
     if(pending)return;
     const target=readTarget(),origin=project.origin();
-    if(!sameTarget(target,shown)||target.locked||target.projectId!==origin?.id){
-      sync(true);error(Error('材质目标已变化，请重新选择'));return;
+    if(!sameTarget(target,shown)||target.locked||target.projectId!==origin?.id||(scrub&&!currentScrub(target))){
+      endScrub();sync(true);error(Error('材质目标已变化，请重新选择'));return;
     }
     pending=true;sync();materialMessage.textContent='正在保存…';
     try{await project.commands([{op:'sourceMaterial',name:target.name,patch}],origin);materialMessage.textContent='';}
     catch(failure){materialMessage.textContent=failure.message;error(failure);}
-    finally{pending=false;sync(true);}
+    finally{endScrub();pending=false;sync(true);}
   }
-  return {sync};
+  return {sync,dispose:endScrub};
 }
 
 // Object edits use the same modeler and project revision as the 3D viewport.
-export function createObjectPropertyEditor({host,project,state={},onChange,error,getTarget,getPaintSelection,openPaintLayers}){
+export function createObjectPropertyEditor({host,project,state={},onChange,error,beginSourcePreview,getTarget,getPaintSelection,openPaintLayers}){
   const root=el('div','object-property-editor'),info=el('details','render-settings-section');root.tabIndex=-1;info.open=true;
   info.append(el('summary','','物体'));const infoBody=el('div','render-settings-body');info.append(infoBody);
   const name=el('span','render-settings-readout'),position=el('span','object-position');
@@ -89,7 +102,7 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
     if(!target||target.projectId!==project.document?.id||target.binding!==scene?.binding)return null;
     const base=scene.inspectObject(target.id)?.materials.find(item=>item.name===slot.value&&!item.painted);
     return base&&{...base,projectId:target.projectId,binding:target.binding,locked:scene.dragging||scene.mode!=='object'};
-  },error);
+  },error,beginSourcePreview);
   body.addEventListener('submit',event=>{
     event.preventDefault();if(pending)return;
     const target=getTarget(),origin=project.document,scene=project.scene,values=fields.map(input=>input.valueAsNumber);
@@ -134,5 +147,5 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
     apply.disabled=!!disabled;apply.title=scene?.mode==='edit'?'请先切换到物体模式':'';
     for(const input of fields)input.disabled=!!disabled;tool.disabled=space.disabled=!!disabled;syncSelectMenu(tool);syncSelectMenu(space);
   }
-  return {refresh,getState:()=>({tool:tool.value,space:space.value,transformOpen:transform.open})};
+  return {refresh,dispose:sourceEditor.dispose,getState:()=>({tool:tool.value,space:space.value,transformOpen:transform.open})};
 }

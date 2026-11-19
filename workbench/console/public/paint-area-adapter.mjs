@@ -101,6 +101,11 @@ export function setupPaintAreas(hooks){
   const registry=createEditorRegistry({decorate:ctx=>{ctx.root.querySelectorAll('select').forEach(select=>{enhanceSelectMenu(select);if(select.hidden)select.closest('.custom-select').hidden=true;});for(const input of ctx.root.querySelectorAll('input[type=number]')){input.dataset.scrubNumber='';input.dataset.scrubSpeed??=input.max==='1'?'.01':'1';}}});
   const bridge={imageColors,materialStrokes,readStrokeProject:hooks.readStrokeProject,strokeSaveSettled:hooks.strokeSaveSettled,
     pickedSurface:()=>preferredViewport?.pickedSurface()||null,
+    beginSourcePreview:name=>{
+      const previews=visibleEditors.filter(editor=>editor.kind==='viewport'&&editor.isReady())
+        .map(editor=>editor.viewport.beginSourcePreview(name));
+      return patch=>{for(const preview of previews)preview(patch);};
+    },
     inspectSource:target=>{
       const view=visibleEditors.includes(preferredViewport)&&preferredViewport.isReady()?preferredViewport:
         visibleEditors.find(editor=>editor.kind==='viewport'&&editor.isReady());
