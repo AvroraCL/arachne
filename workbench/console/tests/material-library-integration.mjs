@@ -606,6 +606,9 @@ try{
   await secondFolder.locator('.editor-layer-name').click();
   const secondFold=secondFolder.locator('.material-tree-fold');
   if(await secondFold.getAttribute('aria-expanded')==='true')await secondFold.click();
+  const outerFold=sideShelf.locator('[data-material-layer-id="'+parent.id+'"] .material-tree-fold');
+  await outerFold.click();
+  await secondFolder.waitFor({state:'detached'});
   await swatchInLockedFolder.dblclick();
   const trial=await until(async()=>{
     const doc=await api(newRoute);
@@ -613,6 +616,7 @@ try{
   },'trying a shelf material in the nested folder');
   assert.equal(trial.parentId,nested.id);
   await sideShelf.locator('[data-material-layer-id="'+trial.id+'"] .editor-layer-name[aria-pressed=true]').waitFor();
+  assert.equal(await outerFold.getAttribute('aria-expanded'),'true');
   assert.equal(await firstFold.getAttribute('aria-expanded'),'false');
   await travelTrial();
   await packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select[aria-pressed=true]').waitFor();

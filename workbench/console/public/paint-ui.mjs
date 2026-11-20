@@ -2007,7 +2007,11 @@ function captureLayerReveal(){
   const view=areaSystem?.layerPlacementView(),query=view?.filterText();
   return (id,parentId)=>{
     if(!view||areaSystem.layerPlacementView()!==view||view.filterText()!==query)return;
-    if(parentId)view.openFolder(parentId);
+    // An independent layer tree can keep its target selected under folded ancestors.
+    while(parentId){
+      view.openFolder(parentId);
+      parentId=doc.paint.layers.find(folder=>folder.id===parentId)?.parentId;
+    }
     view.revealPlaced(id);
   };
 }
