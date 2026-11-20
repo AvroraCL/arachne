@@ -521,6 +521,18 @@ try{
   }
   await undoTrial(); // Unlock the folder.
   const nestedSelect=packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select');
+  const fold=folderRow.locator('.layer-disclosure');
+  await fold.click();
+  await nestedSelect.waitFor({state:'detached'});
+  const swatchBox=await swatchInLockedFolder.boundingBox(),foldBox=await fold.boundingBox();
+  await packedPage.mouse.move(swatchBox.x+swatchBox.width/2,swatchBox.y+swatchBox.height/2);
+  await packedPage.mouse.down();
+  await packedPage.mouse.move(foldBox.x+foldBox.width/2,foldBox.y+foldBox.height/2,{steps:12});
+  await packedPage.mouse.move(foldBox.x+foldBox.width/2+1,foldBox.y+foldBox.height/2);
+  await nestedSelect.waitFor();
+  await packedPage.keyboard.press('Escape');
+  await packedPage.mouse.up();
+  assert.deepEqual((await api(newRoute)).paint,dropped.paint);
   await nestedSelect.click();
   await swatchInLockedFolder.dblclick();
   const trial=await until(async()=>{

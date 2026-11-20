@@ -126,6 +126,10 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
         marker=row;
         row.ownerDocument.addEventListener('dragend',clearMarker,true);
       }
+      // The disclosure opens the path to a child without releasing the swatch.
+      // The folder label remains the ordinary drop-inside target.
+      if(shelf&&drop.zone==='inside'&&event.target.closest('button[aria-expanded="false"]:enabled'))
+        openFolder?.(id);
     };
     host.ondragleave=event=>{
       if(marker===row&&!host.contains(event.relatedTarget))clearMarker();
