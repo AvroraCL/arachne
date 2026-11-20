@@ -7,7 +7,7 @@ import {isSelectionAsset} from './uv-selection-region.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
 import {bindMaterialTile,syncFillAction} from './smart-material-placement.mjs';
 import {paintChannels,channelSpecs,renderChannel,liveStride} from './paint-channels.mjs';
-import {headerControls,chromeButton,areaIcons,createContextActions} from './area-chrome.mjs';
+import {headerControls,libraryBrowseControls,chromeButton,areaIcons,createContextActions} from './area-chrome.mjs';
 import {projectionIsCurrent} from './paint-surface-state.mjs';
 import {createViewport} from './viewport3d.mjs';
 import {modelPivotLabels} from './paint-model-transform.mjs';
@@ -1011,7 +1011,7 @@ function createLibraryEditor(ctx,bridge){
   }
   const fill=button('创建填充层',()=>applyMaterial(selectedMaterial()));
   const preview=button('查看大图',()=>viewAsset(pickedAsset,preview));
-  toolbar.append(fill,preview);
+  const browse=libraryBrowseControls(ctx,search,fill,preview);
   function viewAsset(id,from){
     if(id&&project.document?.paint.assets[id])bridge.viewAsset(id,from,matching(project.document).map(([asset])=>asset));
   }
@@ -1073,7 +1073,7 @@ function createLibraryEditor(ctx,bridge){
     }
     for(const tile of body.querySelectorAll('.library-tile'))tile.setAttribute('aria-pressed',String(tile.dataset.resourceId===selected));
   }
-  const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,scroll:body.scrollTop}),dispose(){disposed=true;unsub();mapDialog.dispose();personal.dispose();}};
+  const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,scroll:body.scrollTop}),dispose(){disposed=true;unsub();browse.remove();mapDialog.dispose();personal.dispose();}};
 }
 function createSceneEditor(ctx){
   const {host,project,state}=ctx,toolbar=el('div','editor-toolbar editor-scene-tools'),search=el('input'),searchField=el('div','editor-scene-search'),list=el('div','editor-scroll editor-list editor-scene-list'),status=el('output','editor-scene-status');

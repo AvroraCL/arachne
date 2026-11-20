@@ -111,6 +111,27 @@ try{
   await packedShelf.getByRole('button',{name:'＋ 新建',exact:true}).click();
   await packedShelf.getByRole('button',{name:'新材质',exact:true}).waitFor();
   await packedShelf.getByRole('button',{name:'蓝钢',exact:true}).click();
+  const desktopSize=packedPage.viewportSize(),sideShelf=packedPage.locator('[data-area-id=side-bottom]');
+  const sidePicker=sideShelf.getByRole('button',{name:'编辑器类型',exact:true});
+  const originalType=await sideShelf.locator('.area-editor-picker select option:checked').innerText();
+  await packedPage.setViewportSize({width:1000,height:680});
+  await sidePicker.click();
+  await packedPage.getByRole('option',{name:'资源库',exact:true}).click();
+  const sideSearch=sideShelf.getByRole('searchbox',{name:'搜索资源'});
+  const sideApply=sideShelf.getByRole('button',{name:'创建填充层',exact:true});
+  for(const control of [sideShelf.getByRole('button',{name:'资源库范围'}),sideSearch,sideApply]){
+    assert.ok(await control.evaluate(node=>{
+      const r=node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));
+    }),'library scope, search and apply are reachable without panning the compact header');
+  }
+  await sideSearch.fill('蓝钢');
+  await sideSearch.press('ArrowDown');
+  await packedPage.keyboard.press('Enter');
+  assert.ok(await sideApply.isEnabled());
+  await sidePicker.click();
+  await packedPage.getByRole('option',{name:originalType,exact:true}).click();
+  await packedPage.setViewportSize(desktopSize);
   const searchResource=packedShelf.getByRole('searchbox',{name:'搜索资源'});
   const createFill=packedShelf.getByRole('button',{name:'创建填充层',exact:true});
   await searchResource.fill('新材质');

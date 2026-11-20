@@ -60,3 +60,21 @@
 @container (max-width:175px){
   #workspace #drawing-opacity-label{display:none}
 }
+
+
+/* Keep search and apply visible while the other library commands can pan. */
+#workspace .area-header>.library-browse-controls{
+  display:flex;flex:0 1 auto;flex-wrap:nowrap;min-width:0;height:var(--chrome-control);
+  padding:0;border:0;background:transparent;gap:4px
+}
+#workspace .area-header>.library-browse-controls:not(:has(>:not([hidden]))){display:none}
+#workspace .library-browse-controls input[type=search]{min-width:0}
+@container (max-width:440px){
+  #workspace .area-header:has(>.library-browse-controls){height:auto;flex-wrap:wrap;row-gap:2px}
+  #workspace .area-header .library-bar>.library-scope{order:-1;min-width:82px}
+  #workspace .area-header>.library-browse-controls{order:1;flex:1 0 100%}
+  #workspace .library-browse-controls input[type=search]{flex:1;width:auto;max-width:none}
+}
+@container (max-width:235px){
+  #workspace .area-header:has(>.library-browse-controls)>.area-caption{display:none}
+}

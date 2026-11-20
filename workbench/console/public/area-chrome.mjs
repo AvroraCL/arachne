@@ -104,6 +104,13 @@ export function createContextActions(label,onError){
     menu.showPopover();const {width,height}=menu.getBoundingClientRect();menu.style.left=Math.max(6,Math.min(innerWidth-width-6,event.clientX))+'px';menu.style.top=Math.max(6,Math.min(innerHeight-height-6,event.clientY))+'px';menu.querySelector('button:enabled')?.focus();
   },close,dispose(){close();menu.remove();}};
 }
+export function libraryBrowseControls(ctx,...controls){
+  const bar=document.createElement('div');
+  bar.className='editor-toolbar library-browse-controls';
+  bar.append(...controls);
+  ctx.tools.after(bar);
+  return bar;
+}
 export function leaseLibraryHeader(ctx,panel){
   const bar=panel.querySelector('.library-bar'),actions=bar.querySelector('.library-actions'),original=[...actions.children];
   const menu=document.createElement('details');menu.className='area-toolbar-menu';
@@ -114,5 +121,8 @@ export function leaseLibraryHeader(ctx,panel){
     else if(b.getAttribute('aria-label')==='显示资源节点')chromeButton(b,'shader');
   }
   menu.append(summary,content);actions.append(menu);chromeMenu(menu,content);content.addEventListener('click',event=>{if(event.target.closest('button'))menu.open=false;});
-  const restore=leaseHeader(ctx,bar);return ()=>{restore();actions.replaceChildren(...original);};
+  const search=bar.querySelector('input[type=search]'),fill=actions.querySelector('[data-library-fill]');
+  const browse=libraryBrowseControls(ctx,search,fill);
+  const restore=leaseHeader(ctx,bar);
+  return ()=>{restore();bar.insertBefore(search,actions);actions.replaceChildren(...original);browse.remove();};
 }

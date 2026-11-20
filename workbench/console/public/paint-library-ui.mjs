@@ -39,11 +39,13 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   const rename=button('重命名',()=>{const item=current();if(!item||!canEdit())return;name.value=item.name;dialog.showModal();name.select();});
   const remove=button('删除',()=>mutate('remove'));
   const apply=button('创建填充层',()=>{if(picked&&canEdit())applyMaterial(picked);});
+  apply.dataset.libraryFill='';
   const nodes=button('节点',()=>{if(!canEdit())return;if(openNodes){openNodes();return;}nodesOpen=!nodesOpen;remember();sync();changed();});nodes.setAttribute('aria-label','显示资源节点');
   const output=button('工程输出',()=>{if(!canEdit())return;picked=null;nodesOpen=false;remember();sync();changed();});output.title='查看合成后的工程输出节点';
   const scopeSelect=el('select');scopeSelect.setAttribute('aria-label','资源库范围');scopeSelect.append(new Option('当前项目','project'),new Option('个人','personal'));scopeSelect.value=scope;
   const savePersonal=button('保存到个人库',()=>void personal.save(kind,kind==='images'?selectedImage():picked));
-  tools.append(create,fromMaps,capture,duplicate,rename,remove,apply,nodes,output,savePersonal);bar.append(tabs,scopeSelect,search,tools);host.append(bar,grid);enhanceSelectMenu(scopeSelect);scopeSelect.closest('.custom-select').classList.add('library-scope');
+  const resourceActions=[create,fromMaps,capture,duplicate,rename,remove,apply,nodes,output,savePersonal];
+  tools.append(...resourceActions);bar.append(tabs,scopeSelect,search,tools);host.append(bar,grid);enhanceSelectMenu(scopeSelect);scopeSelect.closest('.custom-select').classList.add('library-scope');
   scopeSelect.onchange=()=>{if(!canEdit()){setSelectValue(scopeSelect,scope);return;}selectionGeneration++;scope=scopeSelect.value;
     if(scope==='project'&&kind==='smartMaterials'){kind='materials';picked=null;remember();}
     try{localStorage.setItem('arachne-library-scope',scope);}catch{}sync();changed();rememberView();};
@@ -131,14 +133,14 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
       b.setAttribute('aria-selected',String(b.dataset.library===kind));
       b.hidden=b.dataset.library==='smartMaterials'&&!isPersonal;
     }
-    for(const b of tools.querySelectorAll('button'))b.disabled=!canEdit();
+    for(const b of resourceActions)b.disabled=!canEdit();
     const visibleItem=visibleTarget();
     for(const b of [duplicate,rename,remove])b.disabled||=!visibleItem;
     const referenced=kind==='materials'&&doc.paint.layers.some(layer=>layer.materialId===picked);
     remove.disabled||=referenced;remove.title=referenced?'材质仍被填充层引用，请先解除引用':'删除资源';
     for(const b of [create,capture,duplicate,rename,remove,nodes,output])b.hidden=images;
     apply.hidden=fromMaps.hidden=kind!=='materials';syncFillAction(apply,fillDestination(),!!visibleItem&&!apply.disabled);nodes.disabled||=!visibleItem;nodes.setAttribute('aria-pressed',String(nodesOpen));
-    if(isPersonal)for(const b of tools.querySelectorAll('button'))b.hidden=true;
+    if(isPersonal)for(const b of resourceActions)b.hidden=true;
     else savePersonal.hidden=false;
     savePersonal.disabled=!canEdit()||personal.working||!(images?selectedImage():visibleItem);
     search.hidden=images&&!isPersonal;
