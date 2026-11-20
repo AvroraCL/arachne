@@ -49,10 +49,7 @@ export function setupPaintAreas(hooks){
       while(hooks.busy()&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,25));
       const doc=hooks.read();
       if(doc?.id!==origin?.id)throw Error('工程已切换，撤销未执行');
-      const restore=hooks.prepareLayerHistoryRestore();
-      const result=await write(()=>hooks.api('/api/projects/'+doc.id+'/paint/'+direction,{revision:doc.revision}));
-      restore?.();
-      return result;
+      return hooks.travelWithLayerSelection(()=>write(()=>hooks.api('/api/projects/'+doc.id+'/paint/'+direction,{revision:doc.revision})));
     },
     draft:op=>{activePreview().update(op);hooks.draft(op);},
     selectLayer:id=>{if(applying)return;applying=true;try{hooks.selectLayer(id);}finally{applying=false;}},

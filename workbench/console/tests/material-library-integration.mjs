@@ -643,6 +643,16 @@ try{
   await trialOpacity.press('Enter');
   const adjusted=await (await changeOpacity).json();
   assert.deepEqual(adjusted.paint.layers,kept.paint.layers.map(layer=>layer.id===nextTrial.id?{...layer,opacity:.42}:layer));
+  const historyDialog=packedPage.locator('#history-dialog');
+  for(const direction of ['undo','redo']){
+    await packedPage.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
+    await packedPage.locator('#open-history').click();
+    await historyDialog.locator('[data-direction="'+direction+'"][data-steps="2"]').click();
+    await historyDialog.waitFor({state:'hidden'});
+    await (direction==='undo'?secondFolder.locator('.editor-layer-name[aria-pressed=true]'):secondTrial).waitFor();
+  }
+  assert.equal(await trialOpacity.inputValue(),'42');
+  assert.deepEqual((await api(newRoute)).paint,adjusted.paint);
   await travelTrial(); // Undo the opacity change.
   await travelTrial(); // Remove the trial again, then choose a different target.
   await folderRow.locator('.layer-select').click();

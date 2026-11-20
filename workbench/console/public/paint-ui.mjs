@@ -1949,7 +1949,11 @@ migrationStart.onclick=async()=>{
 };
 
 historyPanel=setupPaintHistory({trigger:$('open-history'),read:()=>doc,load:id=>api('/api/projects/'+id+'/paint/history'),canEdit:()=>!busy&&!modeler.isDragging()&&!surfaceTools.isEditing()&&!uvSelection.isDragging()&&!uvSelection.isTransforming(),
-  restore:(direction,steps,origin)=>run(async()=>{if(doc.id!==origin.id)throw Error('当前工程已切换');await api('/api/projects/'+origin.id+'/paint/'+direction,{revision:origin.revision,steps});approvedPreviewId=null;},$('history-error'))});
+  restore:(direction,steps,origin)=>travelWithLayerSelection(()=>run(async()=>{
+    if(doc.id!==origin.id)throw Error('当前工程已切换');
+    await api('/api/projects/'+origin.id+'/paint/'+direction,{revision:origin.revision,steps});
+    approvedPreviewId=null;
+  },$('history-error')))});
 const newPaintDialog=$('new-paint-dialog'),importDialog=$('paint-import-dialog');
 setupProjectFiles({canOpen:canOpenProjectDialog,notice:message=>$('status').textContent=message,
   create:(name,model,error,material,modelTemplate,preserveTextures,upAxis)=>run(async()=>{
@@ -2007,17 +2011,18 @@ function captureLayerReveal(){
     view.revealPlaced(id);
   };
 }
-function prepareLayerHistoryRestore(){
+async function travelWithLayerSelection(travel){
   const id=displacedLayer,projectId=doc.id;
-  if(!id||doc.paint.layers.some(item=>item.id===id))return;
-  const reveal=captureLayerReveal();
-  return ()=>{
-    if(doc?.id!==projectId||displacedLayer!==id)return;
+  if(!id||doc.paint.layers.some(item=>item.id===id))return travel();
+  const reveal=captureLayerReveal(),result=await travel();
+  if(result&&doc?.id===projectId&&displacedLayer===id){
     const restored=doc.paint.layers.find(item=>item.id===id);
-    if(!restored)return;
-    setSelection([id],{followMaterial:false});render(true);areaSystem?.materialSelectionChanged();
-    reveal(id,layerParent(restored));
-  };
+    if(restored){
+      setSelection([id],{followMaterial:false});render(true);areaSystem?.materialSelectionChanged();
+      reveal(id,layerParent(restored));
+    }
+  }
+  return result;
 }
 function prepareSmartApply(){
   const projectId=doc.id,generation=layerSelectionGeneration,reveal=captureLayerReveal();
@@ -2179,7 +2184,8 @@ $('upload').onchange=()=>run(async()=>{
 for(const id of ['undo','redo','preview'])$(id).onclick=()=>{
   if(areaSystem&&id!=='preview')areaSystem.travelHistory(id);
   else if(workArea==='modeling'&&id!=='preview')modeler.travel(id);
-  else void run(()=>post(id,{requestId:crypto.randomUUID()}));
+  else if(id==='preview')void run(()=>post(id,{requestId:crypto.randomUUID()}));
+  else void travelWithLayerSelection(()=>run(()=>post(id,{requestId:crypto.randomUUID()})));
 };
 function schedulePreview(reset=false){
   if(reset){clearTimeout(autoTimer);autoTimer=null;}
@@ -3216,7 +3222,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  applyLibraryFill,fillDestination,prepareSmartApply,prepareLayerHistoryRestore,layerPlacementView,mountLayerList,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
+  applyLibraryFill,fillDestination,prepareSmartApply,travelWithLayerSelection,layerPlacementView,mountLayerList,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,
