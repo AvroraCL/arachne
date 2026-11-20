@@ -468,6 +468,23 @@ try{
   await packedPage.locator('[data-area-mode=material]').click();
   await packedShelf.getByRole('tab',{name:'智能材质',exact:true}).click();
   const folderRow=packedPage.locator('[data-layer-id="'+parent.id+'"]');
+  await folderRow.locator('.layer-select').click();
+  const folderArrow=folderRow.locator('.layer-disclosure');
+  if(await folderArrow.getAttribute('aria-expanded')==='true')await folderArrow.click();
+  const directImport=packedPage.waitForResponse(r=>r.url().endsWith('/paint/library-import')&&r.request().method()==='POST');
+  await smartTile.dblclick();
+  const direct=await (await directImport).json();
+  const directRoot=direct.document.paint.layers.find(layer=>layer.id===direct.resource.id);
+  assert.equal(directRoot.parentId,parent.id);
+  assert.equal(direct.document.paint.layers.filter(layer=>layer.parentId===directRoot.id).length,2);
+  await packedPage.locator('[data-layer-id="'+directRoot.id+'"] .layer-select[aria-pressed=true]').waitFor();
+  assert.equal(await folderArrow.getAttribute('aria-expanded'),'true');
+  await packedPage.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
+  const undoApply=packedPage.waitForResponse(r=>r.url().endsWith('/paint/undo')&&r.request().method()==='POST');
+  await packedPage.locator('#undo').click();
+  const undone=await (await undoApply).json();
+  assert.deepEqual(undone.paint,parentFolder.paint);
+  await folderRow.locator('.layer-select[aria-pressed=true]').waitFor();
   const rowBounds=await folderRow.boundingBox();
   await smartTile.dragTo(folderRow,{targetPosition:{x:rowBounds.width/2,y:rowBounds.height/2}});
   const dropped=await until(async()=>{
@@ -477,7 +494,7 @@ try{
   const nested=dropped.paint.layers.find(layer=>layer.parentId===parent.id);
   assert.equal(nested.name,smartName);
   assert.equal(dropped.paint.layers.filter(layer=>layer.parentId===nested.id).length,2);
-  assert.equal(dropped.revision,parentFolder.revision+1);
+  assert.equal(dropped.revision,undone.revision+1);
   await packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select').click();
   const actions=packedPage.locator('details[data-property-section=actions]').filter({visible:true}).first();
   if(!await actions.evaluate(node=>node.open))await actions.locator('summary').click();
@@ -503,6 +520,12 @@ try{
   assert.deepEqual((await api(newRoute)).paint,locked.paint);
   await packedPage.reload();
   await packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select').click();
+  await packedShelf.getByRole('tab',{name:'智能材质',exact:true}).click();
+  await smartTile.click();
+  assert.ok(await packedShelf.getByRole('button',{name:'文件夹已锁定'}).isDisabled());
+  await smartTile.dblclick();
+  await packedShelf.getByRole('status').filter({hasText:'「'+parent.name+'」已锁定'}).waitFor();
+  assert.equal((await api(newRoute)).revision,locked.revision);
   await packedShelf.getByRole('button',{name:'资源库范围'}).click();
   await packedPage.getByRole('option',{name:'当前项目',exact:true}).click();
   await packedShelf.getByRole('tab',{name:'材质',exact:true}).click();

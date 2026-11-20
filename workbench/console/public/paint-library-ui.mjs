@@ -8,7 +8,7 @@ import {enableResourceGridKeys,enableResourceSearchKeys,resourcePreview} from '.
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
-export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,fillDestination,selectedImage=()=>null,importResource,onImportedImage,onAppliedSmart}){
+export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,fillDestination,selectedImage=()=>null,importResource,onImportedImage,prepareSmartApply}){
   let kind='materials',picked=null,project=null,brushKey='',gridKey='',nodesOpen=true,selectionGeneration=0,mountedView=null;
   let initialScope='project';try{initialScope=localStorage.getItem('arachne-library-scope')==='personal'?'personal':'project';}catch{}
   let scope=initialScope;
@@ -48,15 +48,17 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
     if(scope==='project'&&kind==='smartMaterials'){kind='materials';picked=null;remember();}
     try{localStorage.setItem('arachne-library-scope',scope);}catch{}sync();changed();rememberView();};
   const personal=createPersonalShelf({
-    host,read,canEdit,
-    importResource:async(item,revision)=>{
-      const selection=selectionGeneration,image=selectedImage(),result=await importResource(item,revision);
-      return result===false?false:{result,selection,image};
+    host,read,canEdit,fillDestination,
+    importResource:async(item,revision,placement)=>{
+      const selection=selectionGeneration,image=selectedImage();
+      const showSmart=item.kind==='smartMaterials'?prepareSmartApply():null;
+      const result=await importResource(item,revision,placement);
+      return result===false?false:{result,selection,image,showSmart};
     },
     onImported:(packet,projectId,projectQuery)=>{
       if(read()?.id!==projectId||packet.selection!==selectionGeneration||packet.image!==selectedImage())return false;
       const result=packet.result;
-      if(result.resource.kind==='smartMaterials')onAppliedSmart?.(result.resource.id);
+      if(result.resource.kind==='smartMaterials')packet.showSmart(result.resource.id);
       else if(result.resource.kind==='images'){showImages();onImportedImage?.(result.resource.id);}
       else{
         search.value=projectQuery;

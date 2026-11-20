@@ -585,8 +585,8 @@ libraryUI=createPaintLibrary({host:$('paint-library'),read:()=>doc,fillDestinati
   saveMap:(ops,origin)=>areaSystem.project.commands(ops,origin),
   selectedImage:()=>selectedAsset,
   onImportedImage:id=>{selectedAsset=id;renderAssets();renderAssetRoles();},
-  onAppliedSmart:id=>{setSelection([id]);render(true);areaSystem?.materialSelectionChanged();},
-  importResource:async(item,libraryRevision)=>{const origin={id:doc.id,revision:doc.revision};let result;const ok=await run(async()=>{result=await api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id});});return ok===true?result:false;},
+  prepareSmartApply,
+  importResource:async(item,libraryRevision,placement)=>{const origin={id:doc.id,revision:doc.revision};let result;const ok=await run(async()=>{result=await api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id,placement});});return ok===true?result:false;},
   canEdit:()=>!!doc&&!busy&&!shaderEditor?.isEditing()&&!surfaceTools.isEditing()&&!modeler.isDragging()&&!maskEditor.isOpen(),
   selectedLayer:()=>layer(),brushSettings:()=>areaSystem?.brushSettings()||surfaceTools.getSettings(),applyBrush:settings=>surfaceTools.setSettings(settings),
   write:operations=>run(()=>command(operations)),
@@ -1971,23 +1971,35 @@ function selectedFolder(){
   const id=selectedParent();
   return id==null?null:doc.paint.layers.find(layer=>layer.id===id);
 }
-function fillDestination(){
+function fillDestination(action='创建填充层'){
   const folder=selectedFolder(),owner=lockOwner(folder);
   return {parentId:folder?.id??null,locked:!!owner,description:owner?
     '「'+owner.name+'」已锁定，可拖到其他位置':
-    (folder?'在「'+folder.name+'」顶部':'在图层栈顶部')+'创建填充层'};
+    (folder?'在「'+folder.name+'」顶部':'在图层栈顶部')+action};
+}
+function captureLayerReveal(){
+  const tree=areaSystem?.areas.editors().find(editor=>editor.kind==='layers');
+  const view=tree?.placementView,query=view?.filterText();
+  return (id,parentId)=>{
+    if(!view||!areaSystem.areas.editors().includes(tree)||view.filterText()!==query)return;
+    if(parentId)view.openFolder(parentId);
+    view.revealPlaced(id);
+  };
+}
+function prepareSmartApply(){
+  const projectId=doc.id,generation=layerSelectionGeneration,reveal=captureLayerReveal();
+  return id=>{
+    if(doc?.id!==projectId||generation!==layerSelectionGeneration)return;
+    setSelection([id]);render(true);areaSystem?.materialSelectionChanged();
+    reveal(id,layerParent(layer()));
+  };
 }
 async function applyLibraryFill(id){
   const before=doc,{parentId,locked,description}=fillDestination();
   if(locked){$('status').textContent=description;return false;}
-  const tree=areaSystem?.areas.editors().find(editor=>editor.kind==='layers');
-  const view=tree?.placementView,query=view?.filterText();
+  const reveal=captureLayerReveal();
   const saved=await run(()=>addAndSelect(libraryFill(before.paint,id,{parentId})));
-  if(saved&&view&&areaSystem.areas.editors().includes(tree)&&doc.id===before.id&&
-     view.filterText()===query&&selected&&!before.paint.layers.some(layer=>layer.id===selected)){
-    if(parentId)view.openFolder(parentId);
-    view.revealPlaced(selected);
-  }
+  if(saved&&doc.id===before.id&&selected&&!before.paint.layers.some(layer=>layer.id===selected))reveal(selected,parentId);
   return saved;
 }
 function materialLayerOperation(kind){
@@ -3169,7 +3181,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  applyLibraryFill,fillDestination,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
+  applyLibraryFill,fillDestination,prepareSmartApply,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,

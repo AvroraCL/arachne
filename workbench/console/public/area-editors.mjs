@@ -954,15 +954,17 @@ function createLibraryEditor(ctx,bridge){
   }
   const personalHost=el('div','editor-scroll personal-editor-host');host.insertBefore(personalHost,status);
   personal=createPersonalShelf({
-    host:personalHost,read:()=>project.document,canEdit:()=>!bridge.busy(),
-    importResource:async(item,revision)=>{
-      const view=viewGeneration,selection=selectionGeneration,result=await bridge.importPersonal(item,revision);
-      return result===false?false:{result,view,selection};
+    host:personalHost,read:()=>project.document,canEdit:()=>!bridge.busy(),fillDestination:bridge.fillDestination,
+    importResource:async(item,revision,placement)=>{
+      const view=viewGeneration,selection=selectionGeneration;
+      const showSmart=item.kind==='smartMaterials'?bridge.prepareSmartApply():null;
+      const result=await bridge.importPersonal(item,revision,placement);
+      return result===false?false:{result,view,selection,showSmart};
     },
     onImported:(packet,projectId,projectQuery)=>{
       if(disposed||project.document?.id!==projectId||packet.view!==viewGeneration||packet.selection!==selectionGeneration)return false;
       const result=packet.result;
-      if(result.resource.kind==='smartMaterials'){project.selectLayer(result.resource.id);return true;}
+      if(result.resource.kind==='smartMaterials'){packet.showSmart(result.resource.id);return true;}
       query=search.value=projectQuery;
       scope='project';scopeSelect.value=scope;syncSelectMenu(scopeSelect);
       kind=result.resource.kind==='images'?'assets':result.resource.kind;tabs.value=kind;syncSelectMenu(tabs);

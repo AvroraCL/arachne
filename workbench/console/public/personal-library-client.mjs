@@ -13,7 +13,7 @@ export async function libraryRequest(action,data){
 export async function refreshPersonalLibrary(){if(!pending)pending=libraryRequest('').finally(()=>pending=null);return pending;}
 channel?.addEventListener('message',()=>void refreshPersonalLibrary().catch(()=>{}));
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text)node.textContent=text;return node;};
-export function createPersonalShelf({host,read,canEdit,importResource,onImported}){
+export function createPersonalShelf({host,read,canEdit,fillDestination,importResource,onImported}){
   let kind='materials',query='',active=false,picked=null,working=false,error='',notice='',key='',loaded=false,favoritesOnly=false;
   const panel=el('div','personal-shelf'),tools=el('div','personal-shelf-actions'),grid=el('div','library-grid'),status=el('output','personal-library-status');status.setAttribute('role','status');
   enableResourceGridKeys(grid);
@@ -28,7 +28,10 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
   async function act(action){if(working||!canEdit())return false;working=true;error='';notice='';sync();try{return await action();}catch(e){error=e.message;if(e.status===409)await refresh().catch(()=>{});return false;}finally{working=false;sync();}}
   async function importItem(item){
     const doc=read(),originalQuery=query;if(!item||!doc)return;
-    const result=await importResource(item,state.revision);
+    const destination=item.kind==='smartMaterials'?fillDestination('应用智能材质'):null;
+    if(destination?.locked)throw Error(destination.description);
+    const placement=destination?.parentId?{targetId:destination.parentId,zone:'inside'}:undefined;
+    const result=await importResource(item,state.revision,placement);
     if(result===false)return;
     // Personal tags can match a search even when the project resource's name doesn't.
     const projectQuery=matchesSearch(item.name,searchTerms(originalQuery))?originalQuery:item.name;
@@ -101,8 +104,11 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
   function sync(){
     panel.hidden=!active;
     const selected=current();
-    add.textContent=kind==='smartMaterials'?'应用到工程':'导入项目';
+    const destination=kind==='smartMaterials'&&read()?fillDestination('应用智能材质'):null;
+    add.textContent=destination?(destination.locked?'文件夹已锁定':'应用到工程'):'导入项目';
+    add.title=destination?.description||'导入当前工程资源库';
     for(const control of [add,edit,star,remove])control.disabled=working||!canEdit()||!selected;
+    if(destination?.locked)add.disabled=true;
     icon(star,selected?.favorite?'starFilled':'star',selected?.favorite?'取消收藏':'收藏资源');
     star.setAttribute('aria-pressed',String(!!selected?.favorite));
     icon(only,favoritesOnly?'starFilled':'star','仅显示收藏');
@@ -139,7 +145,7 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
             sync();
           };
         }
-        tile.title=[item.name,...(item.tags||[]),item.kind==='smartMaterials'?'双击应用到工程':item.kind==='materials'?'双击导入项目，拖到材质图层导入并创建填充层':'双击导入项目'].join(' · ');
+        tile.title=[item.name,...(item.tags||[]),item.kind==='smartMaterials'?'双击在当前层级顶部应用，拖动可指定位置':item.kind==='materials'?'双击导入项目，拖到材质图层导入并创建填充层':'双击导入项目'].join(' · ');
         tile.append(resourcePreview(kind,item,id=>'/api/personal-library/'+item.id+'/assets/'+id),el('span','library-name',item.name));
         if(item.favorite){
           const badge=el('span','personal-favorite-badge');

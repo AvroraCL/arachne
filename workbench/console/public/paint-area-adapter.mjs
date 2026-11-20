@@ -112,7 +112,7 @@ export function setupPaintAreas(hooks){
       return view?.viewport.sourceMaterial(target)||null;
     },
     saveStateChanged:hooks.saveStateChanged,legacyCameraProject:hooks.legacyCameraProject,renderSettings:hooks.renderSettings,renderResults:hooks.renderResults,openMaterial:layerId=>{if(areas.switchWorkspace('material')){project.selectLayer(layerId);project.setEditorDomain('material');}},renderProperties:hooks.renderProperties,propertyKey:hooks.propertyKey,propertyTarget:hooks.propertyTarget,parking,busy:hooks.busy,foreground:hooks.foreground,setForeground:hooks.setForeground,maskInk:hooks.maskInk,setMaskInk:hooks.setMaskInk,colorKey:hooks.colorKey,colorPair:hooks.colorPair,setColor:hooks.setColor,preferences:hooks.preferences,viewAsset:hooks.viewAsset,
-    importPersonal:async(item,libraryRevision)=>{const origin=project.origin();if(!origin)throw Error('请先打开工程');const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id}));if(project.document?.id!==origin.id)throw Error('资源已导入原工程，请打开原工程查看');project.publish(result.document);return result;},
+    importPersonal:async(item,libraryRevision,placement)=>{const origin=project.origin();if(!origin)throw Error('请先打开工程');const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id,placement}));if(project.document?.id!==origin.id)throw Error('资源已导入原工程，请打开原工程查看');project.publish(result.document);return result;},
     createSelection:createUVSelection,openImageText:hooks.openImageText,
     async saveImageText(origin,layer,placement,text){
       const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/text',{
@@ -154,7 +154,7 @@ export function setupPaintAreas(hooks){
     clearMaterialInspection:hooks.clearMaterialInspection,toggleMaterialIsolation:hooks.toggleMaterialIsolation,
     clearLayerIsolation:hooks.clearLayerIsolation,
     retryPreview:async()=>{const doc=project.document;if(doc.modeling?.steps?.length)await write(()=>hooks.api('/api/projects/'+doc.id+'/paint/model-prepare',{revision:doc.revision}));activePreview().retryDetail();},
-    applyLibraryFill:hooks.applyLibraryFill,fillDestination:hooks.fillDestination,materialLayerOperation:hooks.materialLayerOperation,canAddMaterialLayer:hooks.canAddMaterialLayer,
+    applyLibraryFill:hooks.applyLibraryFill,fillDestination:hooks.fillDestination,prepareSmartApply:hooks.prepareSmartApply,materialLayerOperation:hooks.materialLayerOperation,canAddMaterialLayer:hooks.canAddMaterialLayer,
     placeSourceMark:(origin,name,image,projector)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/source-mark',{revision:origin.revision,name,image,projector})),
     validateSurface:async(hit,origin)=>{const r=await fetch('/api/projects/'+origin.id+'/paint/live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:origin.revision,pickUv:[hit.u,hit.v]})});if(!r.ok)throw Error('工程表面已变化，请重新放置贴花');const [code]=new Uint8Array(await r.arrayBuffer());if(code!==0)throw Error('此落点属于保护区、共享 UV 或不可写区域');},
     saveModel:(modeling,origin)=>write(()=>hooks.api('/api/projects/'+origin.id+'/paint/model',{revision:origin.revision,modeling})),
