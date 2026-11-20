@@ -1303,6 +1303,11 @@ function revealPlacedLayer(id){
   }
   stack.querySelector(selector)?.scrollIntoView({block:'nearest',inline:'nearest'});
 }
+const layerPlacementView={
+  filterText:()=>layerSearch.value,
+  openFolder:id=>{if(collapsedFolders.delete(id)){saveCollapsedFolders();renderLayers();}},
+  revealPlaced:revealPlacedLayer
+};
 function renderLayers(){
   if(revealedDrop!==selected)revealedDrop=null;
   const pending=endLayerRename();
@@ -1372,9 +1377,6 @@ function renderLayer(l,depth,channel,filtering){
     lock.disabled=inheritedLock;
     row.append(visibility,node,lock);
     node.draggable=!owner;
-    const expand=id=>{
-      if(collapsedFolders.delete(id)){saveCollapsedFolders();renderLayers();}
-    };
     if(folder){
       const collapsed=!filtering&&collapsedFolders.has(l.id);
       const disclosure=localButton('',()=>{
@@ -1396,7 +1398,7 @@ function renderLayer(l,depth,channel,filtering){
     }
     const hasMask=hasLayerMask(l);
     row.toggleAttribute('data-has-mask',hasMask);
-    if(folder&&!hasMask){materialLayerDrag.bind(node,row,l.id,{openFolder:expand,filterText:()=>layerSearch.value,revealPlaced:revealPlacedLayer});return row;}
+    if(folder&&!hasMask){materialLayerDrag.bind(node,row,l.id,layerPlacementView);return row;}
     const maskButton=localButton(hasMask?'':'＋',event=>{
       if(busy||maskEditor.isOpen()||surfaceTools.isEditing())return;
       if(hasMask&&event.shiftKey){
@@ -1419,7 +1421,7 @@ function renderLayer(l,depth,channel,filtering){
     }
     if(hasMask)maskButton.setAttribute('aria-pressed',String(paintTarget==='mask'&&selected===l.id));
     row.append(maskButton);
-    materialLayerDrag.bind(node,row,l.id,{openFolder:expand,filterText:()=>layerSearch.value,revealPlaced:revealPlacedLayer,mask:maskButton});
+    materialLayerDrag.bind(node,row,l.id,{...layerPlacementView,mask:maskButton});
     return row;
 }
 function isLayerUnder(layer,folder){
@@ -1955,8 +1957,17 @@ function selectedParent(){
   const active=layer();
   return active?.kind==='group'&&selection.size===1?active.id:active?layerParent(active):null;
 }
-function applyLibraryFill(id){
-  return run(()=>addAndSelect(libraryFill(doc.paint,id,{parentId:selectedParent()})));
+async function applyLibraryFill(id){
+  const before=doc,parentId=selectedParent();
+  const tree=areaSystem?.areas.editors().find(editor=>editor.kind==='layers');
+  const view=tree?.placementView,query=view?.filterText();
+  const saved=await run(()=>addAndSelect(libraryFill(before.paint,id,{parentId})));
+  if(saved&&view&&areaSystem.areas.editors().includes(tree)&&doc.id===before.id&&
+     view.filterText()===query&&selected&&!before.paint.layers.some(layer=>layer.id===selected)){
+    if(parentId)view.openFolder(parentId);
+    view.revealPlaced(selected);
+  }
+  return saved;
 }
 function materialLayerOperation(kind){
   const target=kind==='fill'?libraryUI.visibleTarget():null;
@@ -3137,7 +3148,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  applyLibraryFill,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,
+  applyLibraryFill,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,

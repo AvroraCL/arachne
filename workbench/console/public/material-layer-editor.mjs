@@ -61,6 +61,18 @@ export function createMaterialLayerEditor(ctx,bridge){
     ctx.onChange();
   }
   let revealedDrop=null;
+  const placementView={
+    filterText:()=>search.value,
+    openFolder:folderId=>{if(!disposed&&collapsedByProject.get(activeProject).delete(folderId))changed();},
+    revealPlaced:placed=>{
+      if(disposed)return;
+      if(!views.has(placed)&&search.value.trim()){
+        revealedDrop=placed;
+        sync();
+      }
+      views.get(placed)?.row.scrollIntoView({block:'nearest',inline:'nearest'});
+    }
+  };
   search.oninput=()=>{revealedDrop=null;changed();};
   search.onkeydown=event=>{
     if(event.key!=='Escape'||!search.value)return;
@@ -160,18 +172,7 @@ export function createMaterialLayerEditor(ctx,bridge){
     lock.setAttribute('role','img');
     row.dataset.materialLayerId=id;
     row.append(eye,indent,fold,spacer,label,lock);
-    bridge.bindMaterialLayerDrag?.(label,row,id,{
-      filterText:()=>search.value,
-      openFolder:folderId=>{if(!disposed&&collapsedByProject.get(activeProject).delete(folderId))changed();},
-      revealPlaced:placed=>{
-        if(disposed)return;
-        if(!views.has(placed)&&search.value.trim()){
-          revealedDrop=placed;
-          sync();
-        }
-        views.get(placed)?.row.scrollIntoView({block:'nearest',inline:'nearest'});
-      }
-    });
+    bridge.bindMaterialLayerDrag?.(label,row,id,placementView);
     return Object.assign(view,{eye,fold,spacer,icon,name,label,lock});
   }
   function updateRow(view,entry,filtering){
@@ -278,7 +279,7 @@ export function createMaterialLayerEditor(ctx,bridge){
   sync();
   if(state.scroll)queueMicrotask(()=>{if(!disposed)body.scrollTop=state.scroll;});
   return {
-    kind:'layers',sync,isEditing:()=>!!rename,
+    kind:'layers',sync,placementView,isEditing:()=>!!rename,
     getState:()=>({query:search.value,scroll:body.scrollTop,collapsedByProject:Object.fromEntries(
       [...collapsedByProject].filter(([,ids])=>ids.size).slice(-12).map(([id,ids])=>[id,[...ids]])
     )}),

@@ -189,7 +189,7 @@ export function setupPaintAreas(hooks){
         };
       },
       properties:()=>({nodes:[panels.properties],kind:'properties'}),
-      layers:ctx=>{const controls=panels.layers.querySelector('.layer-heading'),restore=leaseHeader(ctx,controls);chromeButton(controls.querySelector('#add-folder'),'plus');return {nodes:[panels.layers],kind:'layers',dispose:restore};},
+      layers:ctx=>{const controls=panels.layers.querySelector('.layer-heading'),restore=leaseHeader(ctx,controls);chromeButton(controls.querySelector('#add-folder'),'plus');return {nodes:[panels.layers],kind:'layers',placementView:hooks.layerPlacementView,dispose:restore};},
       library:ctx=>{
         const restore=leaseLibraryHeader(ctx,panels.assets);
         const release=hooks.mountLibraryView(ctx.state,ctx.workspaceName==='drawing'?'assets':'materials',ctx.onChange);
