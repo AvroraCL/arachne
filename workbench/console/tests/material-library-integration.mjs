@@ -211,8 +211,11 @@ try{
   await packedShelf.getByRole('button',{name:'资源库范围'}).click();
   await packedPage.getByRole('option',{name:'个人',exact:true}).click();
   const personalTile=packedShelf.locator('[data-resource-id="'+personalItem.id+'"]:visible');
+  await packedPage.reload();
   await personalTile.waitFor();
+  assert.equal(await personalTile.getAttribute('aria-pressed'),'false');
   const importedDrop=await dropBelow(personalTile);
+  assert.equal(await personalTile.getAttribute('aria-pressed'),'true');
   assert.equal(importedDrop.next.revision,packedMaterial.revision+1);
   assert.notEqual(importedDrop.layer.materialId,otherId);
   assert.deepEqual(importedDrop.next.paint.materials[importedDrop.layer.materialId].graph,beforeDrop.materials[otherId].graph);

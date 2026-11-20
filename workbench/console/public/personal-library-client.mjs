@@ -131,6 +131,11 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
             else event.dataTransfer.setData(smartMaterialDragType,JSON.stringify({id:item.id,revision:state.revision}));
             event.dataTransfer.effectAllowed='copy';
           };
+          tile.ondragend=event=>{
+            if(event.dataTransfer.dropEffect!=='copy'||!active||!grid.contains(tile))return;
+            picked=item.id;
+            sync();
+          };
         }
         tile.title=[item.name,...(item.tags||[]),item.kind==='smartMaterials'?'双击应用到工程':item.kind==='materials'?'双击导入项目，拖到材质图层导入并创建填充层':'双击导入项目'].join(' · ');
         tile.append(resourcePreview(kind,item,id=>'/api/personal-library/'+item.id+'/assets/'+id),el('span','library-name',item.name));
