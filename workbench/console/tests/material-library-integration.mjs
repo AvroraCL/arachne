@@ -488,6 +488,32 @@ try{
   assert.ok(await createFill.isEnabled());
   console.log('PASS dragging smart materials into a folder with atomic placement and lock checks');
 
+  async function undoTrial(){
+    await packedPage.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
+    const response=packedPage.waitForResponse(r=>r.url().endsWith('/paint/undo')&&r.request().method()==='POST');
+    await packedPage.locator('#undo').click();
+    assert.ok((await response).ok());
+  }
+  await undoTrial(); // Unlock the folder.
+  const nestedSelect=packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select');
+  await nestedSelect.click();
+  await swatchInLockedFolder.dblclick();
+  const trial=await until(async()=>{
+    const doc=await api(newRoute);
+    return doc.paint.layers.find(layer=>!dropped.paint.layers.some(old=>old.id===layer.id));
+  },'trying a shelf material in the nested folder');
+  assert.equal(trial.parentId,nested.id);
+  await packedPage.locator('[data-layer-id="'+trial.id+'"] .layer-select[aria-pressed=true]').waitFor();
+  await undoTrial();
+  await packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select[aria-pressed=true]').waitFor();
+  assert.deepEqual((await api(newRoute)).paint,dropped.paint);
+  await createFill.click();
+  await until(async()=>{
+    const doc=await api(newRoute);
+    return doc.paint.layers.some(layer=>layer.parentId===nested.id&&!dropped.paint.layers.some(old=>old.id===layer.id));
+  },'applying another shelf fill at the same level directly after undo');
+  console.log('PASS undoing a nested shelf fill keeps the destination for the next swatch');
+
   await packedPage.goto(origin+'/?project='+packProject.id);
   await packedPage.locator('[data-area-mode=material]').click();
   await sourceView.waitFor();

@@ -1723,12 +1723,21 @@ async function refresh({signal}={}){
   snapshotTag=value?{revision:returnedRevision,value}:null;
   const changed=doc.revision!==returnedRevision;
   if(changed)approvedPreviewId=null;
+  const previousLayers=doc.paint.layers;
   if(document)doc=document;
   jobs=next;
   if(changed){
     const active=layer(),parent=active&&layerParent(active);
     const retained=doc.paint.layers.filter(item=>selection.has(item.id)&&(!active||layerParent(item)===parent)).map(item=>item.id);
-    if(retained.length!==selection.size)setSelection(retained,{current:active?.id});
+    if(retained.length!==selection.size){
+      // Undoing an inserted layer should leave its folder ready for the next swatch.
+      let parentId=previousLayers.find(item=>item.id===selected)?.parentId;
+      while(!retained.length&&parentId){
+        if(doc.paint.layers.some(item=>item.id===parentId))retained.push(parentId);
+        else parentId=previousLayers.find(item=>item.id===parentId)?.parentId;
+      }
+      setSelection(retained,{current:active?.id});
+    }
     if(viewportReady())viewport.syncDocument(doc);
     modeler.syncDocument();
     render();
