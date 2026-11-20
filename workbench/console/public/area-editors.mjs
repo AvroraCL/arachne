@@ -5,7 +5,7 @@ import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
 import {isSelectionAsset} from './uv-selection-region.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
-import {bindMaterialTile} from './smart-material-placement.mjs';
+import {bindMaterialTile,syncFillAction} from './smart-material-placement.mjs';
 import {paintChannels,channelSpecs,renderChannel,liveStride} from './paint-channels.mjs';
 import {headerControls,chromeButton,areaIcons,createContextActions} from './area-chrome.mjs';
 import {projectionIsCurrent} from './paint-surface-state.mjs';
@@ -1028,7 +1028,7 @@ function createLibraryEditor(ctx,bridge){
     const selected=image?pickedAsset:project.resource?.library===kind?project.resource.id:null;
     const visibleSelection=entries.some(([id])=>id===selected);
     savePersonal.disabled=bridge.busy()||!visibleSelection;
-    fill.hidden=!projectScope||kind!=='materials';fill.disabled=bridge.busy()||!visibleSelection;
+    fill.hidden=!projectScope||kind!=='materials';syncFillAction(fill,bridge.fillDestination(),!bridge.busy()&&visibleSelection);
     preview.hidden=!projectScope||!image;preview.disabled=!visibleSelection;
     ctx.title.textContent=doc.name;
     if(!projectScope)return;

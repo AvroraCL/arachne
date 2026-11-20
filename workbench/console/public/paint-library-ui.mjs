@@ -1,4 +1,4 @@
-import {bindMaterialTile} from './smart-material-placement.mjs';
+import {bindMaterialTile,syncFillAction} from './smart-material-placement.mjs';
 import {createMaterialMapDialog} from './material-map-dialog.mjs';
 import {chromeButton} from './area-chrome.mjs';
 import {defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph} from './paint-library.mjs';
@@ -8,7 +8,7 @@ import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mj
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
-export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,selectedImage=()=>null,importResource,onImportedImage,onAppliedSmart}){
+export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,selectedLayer,brushSettings,applyBrush,changed,applyMaterial,openNodes=null,fillDestination,selectedImage=()=>null,importResource,onImportedImage,onAppliedSmart}){
   let kind='materials',picked=null,project=null,brushKey='',gridKey='',nodesOpen=true,selectionGeneration=0,mountedView=null;
   let initialScope='project';try{initialScope=localStorage.getItem('arachne-library-scope')==='personal'?'personal':'project';}catch{}
   let scope=initialScope;
@@ -130,7 +130,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
     const referenced=kind==='materials'&&doc.paint.layers.some(layer=>layer.materialId===picked);
     remove.disabled||=referenced;remove.title=referenced?'材质仍被填充层引用，请先解除引用':'删除资源';
     for(const b of [create,capture,duplicate,rename,remove,nodes,output])b.hidden=images;
-    apply.hidden=fromMaps.hidden=kind!=='materials';apply.disabled||=!visibleItem;nodes.disabled||=!visibleItem;nodes.setAttribute('aria-pressed',String(nodesOpen));
+    apply.hidden=fromMaps.hidden=kind!=='materials';syncFillAction(apply,fillDestination(),!!visibleItem&&!apply.disabled);nodes.disabled||=!visibleItem;nodes.setAttribute('aria-pressed',String(nodesOpen));
     if(isPersonal)for(const b of tools.querySelectorAll('button'))b.hidden=true;
     else savePersonal.hidden=false;
     savePersonal.disabled=!canEdit()||personal.working||!(images?selectedImage():visibleItem);
@@ -148,8 +148,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
         if(kind==='materials'){
           bindMaterialTile(tile,id,read,canEdit);
           tile.ondblclick=()=>{if(canEdit())applyMaterial(id);};
-        }
-        tile.title=item.name+(kind==='materials'?' · 拖到材质图层指定位置，或双击创建填充层':' · 应用于后续笔触');
+        }else tile.title=item.name+' · 应用于后续笔触';
         tile.append(resourcePreview(kind,item,asset=>'/api/projects/'+doc.id+'/paint/assets/'+asset),el('span','library-name',item.name));
         return tile;
       }));

@@ -469,6 +469,20 @@ try{
   });
   assert.equal(rejected.status,400);
   assert.deepEqual((await api(newRoute)).paint,locked.paint);
+  await packedPage.reload();
+  await packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select').click();
+  await packedShelf.getByRole('button',{name:'资源库范围'}).click();
+  await packedPage.getByRole('option',{name:'当前项目',exact:true}).click();
+  await packedShelf.getByRole('tab',{name:'材质',exact:true}).click();
+  const swatchInLockedFolder=packedShelf.locator('.library-tile:visible').first();
+  await swatchInLockedFolder.click();
+  assert.ok(await packedShelf.getByRole('button',{name:'文件夹已锁定'}).isDisabled());
+  assert.equal(await swatchInLockedFolder.getAttribute('draggable'),'true');
+  await swatchInLockedFolder.dblclick();
+  await packedPage.locator('#status').filter({hasText:'「'+parent.name+'」已锁定'}).waitFor();
+  assert.equal((await api(newRoute)).revision,locked.revision);
+  await packedPage.locator('#base').click();
+  assert.ok(await createFill.isEnabled());
   console.log('PASS dragging smart materials into a folder with atomic placement and lock checks');
 
   await packedPage.goto(origin+'/?project='+packProject.id);

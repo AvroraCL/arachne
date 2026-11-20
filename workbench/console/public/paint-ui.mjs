@@ -89,7 +89,7 @@ let collapsedFolders=new Set(),revealedDrop=null;
 const areaButtons=[...document.querySelectorAll('[data-area-mode]')];
 const addLayerControls=['fill','paint-layer','add-folder','decal','uv-text-tool'].map($);
 const lockOwner=layer=>doc&&layerLockOwner(doc.paint.layers,layer);
-const canAddLayer=()=>doc&&!lockOwner(doc.paint.layers.find(item=>item.id===selectedParent()));
+const canAddLayer=()=>doc&&!lockOwner(selectedFolder());
 let layerSelectionGeneration=0;
 const materialLayerDrag=createMaterialLayerDrag({
   read:()=>doc,
@@ -581,7 +581,7 @@ const surfaceTools=createSurfaceTools({viewport,host:$('viewport'),uvHost:$('uv-
   },
   swapInk:()=>changePaintColors(target=>paintColors.swap(target),'mask')
 });
-libraryUI=createPaintLibrary({host:$('paint-library'),read:()=>doc,uploadMaps:importProjectMaps,
+libraryUI=createPaintLibrary({host:$('paint-library'),read:()=>doc,fillDestination,uploadMaps:importProjectMaps,
   saveMap:(ops,origin)=>areaSystem.project.commands(ops,origin),
   selectedImage:()=>selectedAsset,
   onImportedImage:id=>{selectedAsset=id;renderAssets();renderAssetRoles();},
@@ -1958,8 +1958,19 @@ function selectedParent(){
   const active=layer();
   return active?.kind==='group'&&selection.size===1?active.id:active?layerParent(active):null;
 }
+function selectedFolder(){
+  const id=selectedParent();
+  return id==null?null:doc.paint.layers.find(layer=>layer.id===id);
+}
+function fillDestination(){
+  const folder=selectedFolder(),owner=lockOwner(folder);
+  return {parentId:folder?.id??null,locked:!!owner,description:owner?
+    '「'+owner.name+'」已锁定，可拖到其他位置':
+    (folder?'在「'+folder.name+'」顶部':'在图层栈顶部')+'创建填充层'};
+}
 async function applyLibraryFill(id){
-  const before=doc,parentId=selectedParent();
+  const before=doc,{parentId,locked,description}=fillDestination();
+  if(locked){$('status').textContent=description;return false;}
   const tree=areaSystem?.areas.editors().find(editor=>editor.kind==='layers');
   const view=tree?.placementView,query=view?.filterText();
   const saved=await run(()=>addAndSelect(libraryFill(before.paint,id,{parentId})));
@@ -3149,7 +3160,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  applyLibraryFill,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
+  applyLibraryFill,fillDestination,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,

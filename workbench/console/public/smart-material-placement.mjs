@@ -12,12 +12,19 @@ export function libraryFill(paint,id,position){
 
 export function bindMaterialTile(tile,id,read,canEdit){
   tile.draggable=true;
+  tile.title=tile.getAttribute('aria-label')+' · 双击在当前层级顶部创建填充层，拖动可指定位置';
   tile.ondragstart=event=>{
     const doc=read();
     if(!doc||!canEdit()||!Object.hasOwn(doc.paint.materials,id)){event.preventDefault();return;}
     event.dataTransfer.setData(materialDragType,JSON.stringify({id,projectId:doc.id,revision:doc.revision}));
     event.dataTransfer.effectAllowed='copy';
   };
+}
+
+export function syncFillAction(button,destination,available){
+  button.disabled=!available||destination.locked;
+  button.textContent=destination.locked?'文件夹已锁定':'创建填充层';
+  button.title=destination.description;
 }
 
 export const smartMaterialDragType='application/x-arachne-smart-material';
