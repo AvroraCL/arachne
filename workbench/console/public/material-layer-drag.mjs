@@ -62,6 +62,7 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
   function findShelfDrop(event,row,id){
     if(!applyShelfMaterial||!canDrag())return null;
     const doc=read(),target=doc?.paint.layers.find(layer=>layer.id===id);
+    if(doc&&id===null)return smartMaterialPlacement(doc.paint.layers,null,'above');
     return target&&smartMaterialPlacement(doc.paint.layers,id,dropZone(event,row,target));
   }
   function findMaskDrop(event,id){
@@ -73,7 +74,7 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
     if(!target||!hasMaterialMask(source)||layerLockOwner(layers,target)||!copy&&layerLockOwner(layers,source))return null;
     return {zone:'mask',operation:{op:'transferMask',id,sourceId,copy}};
   }
-  function bind(handle,row,id,{openFolder,mask,filterText,revealPlaced}){
+  function bind(handle,row,id,view){
     handle.ondragstart=event=>{
       const doc=read();
       if(!doc||!handle.draggable||!canDrag()){event.preventDefault();return;}
@@ -90,6 +91,7 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
       event.dataTransfer.effectAllowed='move';
     };
     handle.ondragend=cancel;
+    const mask=view.mask;
     if(mask){
       mask.ondragstart=event=>{
         const doc=read(),layer=doc?.paint.layers.find(item=>item.id===id);
@@ -102,7 +104,16 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
       };
       mask.ondragend=cancel;
     }
-    row.ondragenter=row.ondragover=event=>{
+    bindTarget(row,id,view);
+  }
+  function bindTarget(row,id,{openFolder,filterText,revealPlaced},host=row){
+    const accepts=event=>host===row||row.contains(event.target)||
+      event.target===host&&event.clientY>=row.getBoundingClientRect().bottom;
+    host.ondragenter=host.ondragover=event=>{
+      if(!accepts(event)){
+        if(marker===row)clearMarker();
+        return;
+      }
       const shelf=event.dataTransfer.types.some(type=>type===materialDragType||type===smartMaterialDragType);
       const drop=shelf?findShelfDrop(event,row,id):event.dataTransfer.types.includes(maskMime)?findMaskDrop(event,id):findDrop(event,row,id);
       const valid=shelf?!!drop:!!drop?.operation;
@@ -116,10 +127,11 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
         row.ownerDocument.addEventListener('dragend',clearMarker,true);
       }
     };
-    row.ondragleave=event=>{
-      if(marker===row&&!row.contains(event.relatedTarget))clearMarker();
+    host.ondragleave=event=>{
+      if(marker===row&&!host.contains(event.relatedTarget))clearMarker();
     };
-    row.ondrop=event=>{
+    host.ondrop=event=>{
+      if(!accepts(event))return;
       const type=event.dataTransfer.types.find(type=>type===materialDragType||type===smartMaterialDragType);
       if(type){
         const placement=findShelfDrop(event,row,id),resource=draggedMaterial(event.dataTransfer,type),doc=read();
@@ -145,5 +157,5 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
       });
     };
   }
-  return {bind};
+  return {bind,bindBase:(row,view)=>bindTarget(row,null,view,row.parentElement)};
 }

@@ -121,7 +121,21 @@ try{
   assert.equal(await createFill.isEnabled(),true);
   await searchResource.fill('蓝钢');
   assert.equal(await createFill.isDisabled(),true);
-  await packedShelf.getByRole('button',{name:'蓝钢',exact:true}).dblclick();
+  const blueTile=packedShelf.getByRole('button',{name:'蓝钢',exact:true});
+  const emptyStack=await api(packRoute);
+  assert.equal(emptyStack.paint.layers.length,0);
+  const firstDrop=packedPage.waitForResponse(r=>r.url().endsWith('/paint/commands')&&r.request().method()==='POST');
+  await blueTile.dragTo(packedPage.locator('#base'));
+  assert.ok((await firstDrop).ok());
+  const firstLayer=(await api(packRoute)).paint.layers[0];
+  assert.equal(firstLayer.materialId,await blueTile.getAttribute('data-resource-id'));
+  await packedPage.locator('[data-layer-id="'+firstLayer.id+'"] .layer-select[aria-pressed=true]').waitFor();
+  await packedPage.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
+  const undoFirst=packedPage.waitForResponse(r=>r.url().endsWith('/paint/undo')&&r.request().method()==='POST');
+  await packedPage.locator('#undo').click();
+  assert.ok((await undoFirst).ok());
+  assert.deepEqual((await api(packRoute)).paint,emptyStack.paint);
+  await blueTile.dblclick();
   await searchResource.fill('');
   let packedMaterial=await until(async()=>{
     const doc=await api(packRoute);

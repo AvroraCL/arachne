@@ -23,6 +23,7 @@ export function bindMaterialTile(tile,id,read,canEdit){
 export const smartMaterialDragType='application/x-arachne-smart-material';
 
 export function smartMaterialPlacement(layers,targetId,zone){
+  if(targetId===null&&zone==='above')return {targetId,zone,parentId:null};
   const target=layers.find(layer=>layer.id===targetId);
   if(!target||!['above','below','inside'].includes(zone)||zone==='inside'&&target.kind!=='group')return null;
   const parentId=zone==='inside'?targetId:layerParent(target);
@@ -34,8 +35,9 @@ export function insertMaterialLayers(layers,copies,placement){
   const target=smartMaterialPlacement(layers,placement?.targetId,placement?.zone);
   if(!target)throw Error('材质的放置位置已变化或被锁定');
   copies[0].parentId=target.parentId;
-  const index=target.zone==='inside'?layers.length:
-    layers.findIndex(layer=>layer.id===target.targetId)+(target.zone==='above'?1:0);
+  let index=0; // A null target is the permanent UV base, below every editable layer.
+  if(target.zone==='inside')index=layers.length;
+  else if(target.targetId!==null)index=layers.findIndex(layer=>layer.id===target.targetId)+(target.zone==='above'?1:0);
   layers.splice(index,0,...copies);
 }
 

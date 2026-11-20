@@ -66,7 +66,7 @@ export function createPersonalLibrary({root,readProject,projectFolder,commitProj
   }
   function importResource({projectId,projectRevision,revision,id,placement}){
     const state=expected(revision),entry=resource(state,id),doc=project(projectId,projectRevision),copies=[];
-    if(placement!==undefined&&(!['materials','smartMaterials'].includes(entry.kind)||!placement||typeof placement.targetId!=='string'||!['above','below','inside'].includes(placement.zone)))
+    if(placement!==undefined&&(!['materials','smartMaterials'].includes(entry.kind)||!placement||typeof placement!=='object'))
       throw failure('材质的放置位置无效');
     for(const asset of Object.values(entry.assets)){const bytes=assetBytes(asset,path.join(blobs,path.basename(asset.file)));const existing=doc.paint.assets[asset.id];if(existing&&(existing.sha256!==asset.sha256||existing.file!==asset.file))throw failure('项目素材编号冲突');copies.push([entry.kind==='images'?{...asset,name:entry.name}:asset,bytes]);}
     let resourceId=entry.kind==='images'?entry.image:crypto.randomUUID(),preset,layerId;

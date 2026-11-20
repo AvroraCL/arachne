@@ -157,18 +157,18 @@
 #workspace .editor-material-tree .layer-inline-name{flex:1;min-height:26px;padding:2px 4px}
 #workspace .editor-material-tree .editor-layer-base{min-height:28px;padding-inline:8px;text-align:left;justify-content:flex-start}
 #workspace :is(#layers,.editor-material-tree) [data-dragging]{opacity:.55}
-#workspace :is(#layers,.editor-material-tree) [data-layer-drop]{position:relative}
-#workspace :is(#layers,.editor-material-tree) [data-layer-drop]::after{
+#workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop]{position:relative}
+#workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop]::after{
   content:"";position:absolute;pointer-events:none;z-index:1;
   inset-inline:calc(4px + var(--layer-depth,var(--material-depth,0))*9px) 3px;
 }
-#workspace :is(#layers,.editor-material-tree) [data-layer-drop=above]::after,
-#workspace :is(#layers,.editor-material-tree) [data-layer-drop=below]::after{
+#workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop=above]::after,
+#workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop=below]::after{
   height:2px;background:#9ab9e1;border-radius:1px;
 }
-#workspace :is(#layers,.editor-material-tree) [data-layer-drop=above]::after{top:0}
-#workspace :is(#layers,.editor-material-tree) [data-layer-drop=below]::after{bottom:0}
-#workspace :is(#layers,.editor-material-tree) [data-layer-drop=inside]::after{
+#workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop=above]::after{top:0}
+#workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop=below]::after{bottom:0}
+#workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop=inside]::after{
   inset-block:1px;border:1px solid #9ab9e1;border-radius:3px;
 }
 #workspace .editor-material-tree .editor-layer-row[data-isolated-away]{opacity:.42}

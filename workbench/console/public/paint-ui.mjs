@@ -1308,6 +1308,7 @@ const layerPlacementView={
   openFolder:id=>{if(collapsedFolders.delete(id)){saveCollapsedFolders();renderLayers();}},
   revealPlaced:revealPlacedLayer
 };
+materialLayerDrag.bindBase($('base'),layerPlacementView);
 function renderLayers(){
   if(revealedDrop!==selected)revealedDrop=null;
   const pending=endLayerRename();
@@ -3148,7 +3149,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  applyLibraryFill,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,
+  applyLibraryFill,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,

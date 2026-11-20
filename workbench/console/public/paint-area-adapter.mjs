@@ -148,7 +148,7 @@ export function setupPaintAreas(hooks){
       for(const editor of areas.editors())editor.previewAdjustment?.(origin,operation);
       project.draft(operation);
     },
-    layerSelection:hooks.layerSelection,selectMaterialLayer:hooks.selectMaterialLayer,openMaterialLayerMenu:hooks.openMaterialLayerMenu,bindMaterialLayerDrag:hooks.bindMaterialLayerDrag,cameraChanged:hooks.cameraChanged,viewportDisplayChanged:updateMaterialDemand,
+    layerSelection:hooks.layerSelection,selectMaterialLayer:hooks.selectMaterialLayer,openMaterialLayerMenu:hooks.openMaterialLayerMenu,bindMaterialLayerDrag:hooks.bindMaterialLayerDrag,bindMaterialBaseDrop:hooks.bindMaterialBaseDrop,cameraChanged:hooks.cameraChanged,viewportDisplayChanged:updateMaterialDemand,
     selectSurfaceTarget:hooks.selectSurfaceTarget,
     materialPreview:()=>({inspection,frame:inspectionFrame||project.frame,status:inspection?inspectionStatus:project.previewStatus}),
     clearMaterialInspection:hooks.clearMaterialInspection,toggleMaterialIsolation:hooks.toggleMaterialIsolation,

@@ -73,6 +73,7 @@ export function createMaterialLayerEditor(ctx,bridge){
       views.get(placed)?.row.scrollIntoView({block:'nearest',inline:'nearest'});
     }
   };
+  bridge.bindMaterialBaseDrop(base,placementView);
   search.oninput=()=>{revealedDrop=null;changed();};
   search.onkeydown=event=>{
     if(event.key!=='Escape'||!search.value)return;
