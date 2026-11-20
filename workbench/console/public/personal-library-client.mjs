@@ -167,6 +167,8 @@ export function createPersonalShelf({host,read,canEdit,fillDestination,importRes
   return {
     set(options){const entering=options.active&&!active;kind=options.kind;query=options.query||'';active=options.active;sync();if(entering)void refresh().catch(e=>{error=e.message;sync();});},
     async save(resourceKind,resourceId){const origin=read()&&{id:read().id,revision:read().revision};return act(async()=>{if(!origin||!resourceId)throw Error('请先选择一个项目资源');await refresh();if(read()?.id!==origin.id||read()?.revision!==origin.revision)throw Error('工程或修订已变化，请重新选择资源');const result=await libraryRequest('save',{projectId:origin.id,projectRevision:origin.revision,revision:state.revision,kind:resourceKind,resourceId});picked=result.item.id;notice='已保存到个人库：'+result.item.name;return result;});},
+    get selectedId(){return picked;},
+    restoreSelection(id){picked=typeof id==='string'?id:null;},
     get working(){return working;},
     dispose(){clearInterval(timer);listeners.delete(notify);dialog.remove();panel.remove();status.remove();}
   };

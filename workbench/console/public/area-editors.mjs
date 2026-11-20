@@ -973,6 +973,7 @@ function createLibraryEditor(ctx,bridge){
       revealSelectedResource(body,focus);
     }
   });
+  personal.restoreSelection(state.personalId);
   scopeSelect=choice('资源库范围',[['project','当前项目'],['personal','个人']],scope,value=>{
     scope=value;
     if(scope==='project'&&kind==='smartMaterials')kind='materials';
@@ -1073,7 +1074,7 @@ function createLibraryEditor(ctx,bridge){
     }
     for(const tile of body.querySelectorAll('.library-tile'))tile.setAttribute('aria-pressed',String(tile.dataset.resourceId===selected));
   }
-  const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,scroll:body.scrollTop}),dispose(){disposed=true;unsub();browse.remove();mapDialog.dispose();personal.dispose();}};
+  const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,personalId:personal.selectedId,scroll:body.scrollTop}),dispose(){disposed=true;unsub();browse.remove();mapDialog.dispose();personal.dispose();}};
 }
 function createSceneEditor(ctx){
   const {host,project,state}=ctx,toolbar=el('div','editor-toolbar editor-scene-tools'),search=el('input'),searchField=el('div','editor-scene-search'),list=el('div','editor-scroll editor-list editor-scene-list'),status=el('output','editor-scene-status');

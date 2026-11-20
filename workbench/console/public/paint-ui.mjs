@@ -1822,7 +1822,7 @@ async function load(id,{initialLayer}={}){
   }catch{}
   let savedTarget;try{savedTarget=JSON.parse(localStorage.getItem('arachne-material-target:'+id));}catch{}
   const active=next.paint.layers.find(item=>item.id===(initialLayer??savedTarget?.layerId));
-  setSelection(active?[active.id]:[]);
+  setSelection(active?[active.id]:[],{followMaterial:initialLayer!==undefined});
   if(initialLayer===undefined&&savedTarget?.target==='mask'&&active&&hasLayerMask(active))paintTarget='mask';
   selectedAsset=null;jobs=[];$('asset-search').value='';setSelectValue($('compare-preview'),'');inspectChannel=false;viewport.setUnlit(false);resetUV();textureKey='';approvedPreviewId=null;
   updateProjectUrl();

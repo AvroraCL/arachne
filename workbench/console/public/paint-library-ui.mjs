@@ -75,7 +75,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   form.onsubmit=async e=>{e.preventDefault();const t=target();if(!t||!canEdit())return;dialog.close();await write([{op:'library',library:t.library,id:t.id,action:'update',patch:{name:name.value.trim()}}]);};
   function remember(){try{localStorage.setItem('arachne-library:'+project,JSON.stringify({kind,picked,nodesOpen}));}catch{}}
   const rememberView=()=>mountedView?.();
-  const getView=()=>({kind:kind==='images'?'assets':kind,scope,query:search.value.slice(0,120)});
+  const getView=()=>({kind:kind==='images'?'assets':kind,scope,query:search.value.slice(0,120),personalId:personal.selectedId});
   function mountView(state,fallback,onChange){
     mountedView=onChange;
     const type=state.kind||fallback;
@@ -83,6 +83,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
     const nextScope=['project','personal'].includes(state.scope)?state.scope:initialScope;
     if(scope!==nextScope||kind!==next)picked=null;
     scope=nextScope;
+    personal.restoreSelection(state.personalId);
     if(['materials','brushes','images','smartMaterials'].includes(next))kind=next;
     if(scope==='project'&&kind==='smartMaterials'){kind='materials';picked=null;}
     setSelectValue(scopeSelect,scope);
