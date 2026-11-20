@@ -52,12 +52,16 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
       const selection=selectionGeneration,image=selectedImage(),result=await importResource(item,revision);
       return result===false?false:{result,selection,image};
     },
-    onImported:(packet,projectId)=>{
+    onImported:(packet,projectId,projectQuery)=>{
       if(read()?.id!==projectId||packet.selection!==selectionGeneration||packet.image!==selectedImage())return false;
       const result=packet.result;
       if(result.resource.kind==='smartMaterials')onAppliedSmart?.(result.resource.id);
       else if(result.resource.kind==='images'){showImages();onImportedImage?.(result.resource.id);}
-      else select(result.resource.kind,result.resource.id);
+      else{
+        search.value=projectQuery;
+        select(result.resource.kind,result.resource.id);
+        grid.querySelector('[aria-pressed=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
+      }
     }
   });
   const dialog=el('dialog','library-name-dialog'),form=el('form'),name=el('input'),heading=el('strong','','重命名资源'),actions=el('div','bar');

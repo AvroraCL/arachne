@@ -958,14 +958,16 @@ function createLibraryEditor(ctx,bridge){
       const view=viewGeneration,selection=selectionGeneration,result=await bridge.importPersonal(item,revision);
       return result===false?false:{result,view,selection};
     },
-    onImported:(packet,projectId)=>{
+    onImported:(packet,projectId,projectQuery)=>{
       if(disposed||project.document?.id!==projectId||packet.view!==viewGeneration||packet.selection!==selectionGeneration)return false;
       const result=packet.result;
       if(result.resource.kind==='smartMaterials'){project.selectLayer(result.resource.id);return true;}
+      query=search.value=projectQuery;
       scope='project';scopeSelect.value=scope;syncSelectMenu(scopeSelect);
       kind=result.resource.kind==='images'?'assets':result.resource.kind;tabs.value=kind;syncSelectMenu(tabs);
       if(kind==='assets')pickedAsset=result.resource.id;else project.selectResource({library:kind,id:result.resource.id});
       key='';sync();ctx.onChange();
+      body.querySelector('[aria-pressed=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
     }
   });
   scopeSelect=choice('资源库范围',[['project','当前项目'],['personal','个人']],scope,value=>{

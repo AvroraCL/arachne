@@ -27,10 +27,12 @@ export function createPersonalShelf({host,read,canEdit,importResource,onImported
   async function refresh(){await refreshPersonalLibrary();loaded=true;}
   async function act(action){if(working||!canEdit())return false;working=true;error='';notice='';sync();try{return await action();}catch(e){error=e.message;if(e.status===409)await refresh().catch(()=>{});return false;}finally{working=false;sync();}}
   async function importItem(item){
-    const doc=read();if(!item||!doc)return;
+    const doc=read(),originalQuery=query;if(!item||!doc)return;
     const result=await importResource(item,state.revision);
     if(result===false)return;
-    const selected=onImported?.(result,doc.id)!==false;
+    // Personal tags can match a search even when the project resource's name doesn't.
+    const projectQuery=matchesSearch(item.name,searchTerms(originalQuery))?originalQuery:item.name;
+    const selected=active&&kind===item.kind&&query===originalQuery&&onImported?.(result,doc.id,projectQuery)!==false;
     notice=item.kind==='smartMaterials'?'已应用到工程 · '+item.name:
       selected?'':'已导入项目，保留当前选择。';
   }
