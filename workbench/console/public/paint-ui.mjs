@@ -90,7 +90,7 @@ const areaButtons=[...document.querySelectorAll('[data-area-mode]')];
 const addLayerControls=['fill','paint-layer','add-folder','decal','uv-text-tool'].map($);
 const lockOwner=layer=>doc&&layerLockOwner(doc.paint.layers,layer);
 const canAddLayer=()=>doc&&!lockOwner(selectedFolder());
-let layerSelectionGeneration=0;
+let layerSelectionGeneration=0,displacedLayer=null;
 const materialLayerDrag=createMaterialLayerDrag({
   read:()=>doc,
   selection:()=>[...selection],
@@ -282,7 +282,7 @@ function button(text,action){return localButton(text,()=>run(action));}
 function link(text,url){const node=element('a',text);node.href=url;return node;}
 function layer(){return doc.paint.layers.find(l=>l.id===selected);}
 function setSelection(ids=[], {current=ids.at(-1)??null,anchor=current,followMaterial=true}={}){
-  layerSelectionGeneration++;
+  layerSelectionGeneration++;displacedLayer=null;
   const leavingMask=paintTarget==='mask';
   selection=new Set(ids);selected=current;selectionAnchor=anchor;inspectMask=false;
   paintTarget='material';
@@ -1731,12 +1731,14 @@ async function refresh({signal}={}){
     const retained=doc.paint.layers.filter(item=>selection.has(item.id)&&(!active||layerParent(item)===parent)).map(item=>item.id);
     if(retained.length!==selection.size){
       // Undoing an inserted layer should leave its folder ready for the next swatch.
+      const removed=!active&&selection.size===1&&paintTarget==='material'?selected:null;
       let parentId=previousLayers.find(item=>item.id===selected)?.parentId;
       while(!retained.length&&parentId){
         if(doc.paint.layers.some(item=>item.id===parentId))retained.push(parentId);
         else parentId=previousLayers.find(item=>item.id===parentId)?.parentId;
       }
       setSelection(retained,{current:active?.id});
+      displacedLayer=removed;
     }
     if(viewportReady())viewport.syncDocument(doc);
     modeler.syncDocument();
@@ -1983,6 +1985,18 @@ function captureLayerReveal(){
     if(!view||areaSystem.layerPlacementView()!==view||view.filterText()!==query)return;
     if(parentId)view.openFolder(parentId);
     view.revealPlaced(id);
+  };
+}
+function prepareLayerHistoryRestore(){
+  const id=displacedLayer,projectId=doc.id;
+  if(!id||doc.paint.layers.some(item=>item.id===id))return;
+  const reveal=captureLayerReveal();
+  return ()=>{
+    if(doc?.id!==projectId||displacedLayer!==id)return;
+    const restored=doc.paint.layers.find(item=>item.id===id);
+    if(!restored)return;
+    setSelection([id],{followMaterial:false});render(true);areaSystem?.materialSelectionChanged();
+    reveal(id,layerParent(restored));
   };
 }
 function prepareSmartApply(){
@@ -3182,7 +3196,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  applyLibraryFill,fillDestination,prepareSmartApply,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
+  applyLibraryFill,fillDestination,prepareSmartApply,prepareLayerHistoryRestore,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,

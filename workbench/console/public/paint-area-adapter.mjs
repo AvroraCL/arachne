@@ -44,7 +44,16 @@ export function setupPaintAreas(hooks){
       if(materialStrokes.editing)throw Error('请先完成当前材质笔触');
       if(materialStrokes.size&&!await materialStrokes.flush())throw Error('请先保存或放弃待保存的材质笔触');
     },
-    travel:async(direction,origin)=>{const until=Date.now()+30000;while(hooks.busy()&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,25));const doc=hooks.read();if(doc?.id!==origin?.id)throw Error('工程已切换，撤销未执行');return write(()=>hooks.api('/api/projects/'+doc.id+'/paint/'+direction,{revision:doc.revision}));},
+    travel:async(direction,origin)=>{
+      const until=Date.now()+30000;
+      while(hooks.busy()&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,25));
+      const doc=hooks.read();
+      if(doc?.id!==origin?.id)throw Error('工程已切换，撤销未执行');
+      const restore=hooks.prepareLayerHistoryRestore();
+      const result=await write(()=>hooks.api('/api/projects/'+doc.id+'/paint/'+direction,{revision:doc.revision}));
+      restore?.();
+      return result;
+    },
     draft:op=>{activePreview().update(op);hooks.draft(op);},
     selectLayer:id=>{if(applying)return;applying=true;try{hooks.selectLayer(id);}finally{applying=false;}},
     selectResource:t=>{if(applying)return;applying=true;try{if(t?.library==='materials'||t?.library==='brushes')hooks.selectResource(t);}finally{applying=false;}}

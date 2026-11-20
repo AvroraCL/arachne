@@ -563,13 +563,13 @@ try{
   assert.ok(await createFill.isEnabled());
   console.log('PASS dragging smart materials into a folder with atomic placement and lock checks');
 
-  async function undoTrial(){
+  async function travelTrial(direction='undo'){
     await packedPage.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();
-    const response=packedPage.waitForResponse(r=>r.url().endsWith('/paint/undo')&&r.request().method()==='POST');
-    await packedPage.locator('#undo').click();
+    const response=packedPage.waitForResponse(r=>r.url().endsWith('/paint/'+direction)&&r.request().method()==='POST');
+    await packedPage.locator('#'+direction).click();
     assert.ok((await response).ok());
   }
-  await undoTrial(); // Unlock the folder.
+  await travelTrial(); // Unlock the folder.
   const nestedSelect=packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select');
   const fold=folderRow.locator('.layer-disclosure');
   await fold.click();
@@ -599,7 +599,7 @@ try{
   assert.equal(trial.parentId,nested.id);
   await sideShelf.locator('[data-material-layer-id="'+trial.id+'"] .editor-layer-name[aria-pressed=true]').waitFor();
   assert.equal(await firstFold.getAttribute('aria-expanded'),'false');
-  await undoTrial();
+  await travelTrial();
   await packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select[aria-pressed=true]').waitFor();
   assert.deepEqual((await api(newRoute)).paint,dropped.paint);
   await createFill.click();
@@ -610,6 +610,24 @@ try{
   await sideShelf.locator('[data-material-layer-id="'+nextTrial.id+'"] .editor-layer-name').waitFor();
   assert.equal(await secondFold.getAttribute('aria-expanded'),'true');
   assert.equal(await firstFold.getAttribute('aria-expanded'),'false');
+  const secondTrial=sideShelf.locator('[data-material-layer-id="'+nextTrial.id+'"] .editor-layer-name[aria-pressed=true]');
+  const kept=await api(newRoute);
+  await travelTrial();
+  await secondFolder.locator('.editor-layer-name[aria-pressed=true]').waitFor();
+  await travelTrial('redo');
+  await secondTrial.waitFor();
+  const trialOpacity=packedPage.locator('#drawing-layer-opacity');
+  await trialOpacity.fill('42');
+  const changeOpacity=packedPage.waitForResponse(r=>r.url().endsWith('/paint/commands')&&r.request().method()==='POST');
+  await trialOpacity.press('Enter');
+  const adjusted=await (await changeOpacity).json();
+  assert.deepEqual(adjusted.paint.layers,kept.paint.layers.map(layer=>layer.id===nextTrial.id?{...layer,opacity:.42}:layer));
+  await travelTrial(); // Undo the opacity change.
+  await travelTrial(); // Remove the trial again, then choose a different target.
+  await folderRow.locator('.layer-select').click();
+  await travelTrial('redo');
+  await folderRow.locator('.layer-select[aria-pressed=true]').waitFor();
+  assert.deepEqual((await api(newRoute)).paint,kept.paint);
   await sidePicker.click();
   await packedPage.getByRole('option',{name:originalType,exact:true}).click();
   console.log('PASS nested shelf trials keep their parent on undo and reveal the next choice in the originating layer tree');
