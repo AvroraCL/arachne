@@ -1474,7 +1474,7 @@ const layerSearch=$('layer-search'),layerSearchToggle=$('toggle-layer-search');
 function setLayerSearch(open,interactive=true){
   layerSearch.hidden=!open;
   layerSearchToggle.setAttribute('aria-expanded',String(open));
-  if(open){layerSearch.focus({preventScroll:true});return;}
+  if(open){if(interactive)layerSearch.focus({preventScroll:true});return;}
   revealedDrop=null;
   const hadQuery=!!layerSearch.value;
   layerSearch.value='';
@@ -1482,6 +1482,26 @@ function setLayerSearch(open,interactive=true){
     if(hadQuery)renderLayers();
     layerSearchToggle.focus({preventScroll:true});
   }
+}
+// Restore this panel after the document's layer rows exist. A filter may also
+// be showing the just-placed layer even when its name does not match.
+function mountLayerList(state){
+  const scroller=$('layers').closest('.dock-content');
+  let pending=state;
+  return {
+    sync(){
+      if(!pending||!doc||!scroller.clientHeight)return;
+      const saved=pending;pending=null;
+      if(saved.projectId!==doc.id)return;
+      setLayerSearch(!!saved.searchOpen||!!saved.query,false);
+      layerSearch.value=saved.query||'';
+      revealedDrop=saved.revealedDrop===selected?selected:null;
+      renderLayers();
+      scroller.scrollTop=saved.scroll||0;
+    },
+    getState:()=>pending??{projectId:doc?.id,searchOpen:!layerSearch.hidden,query:layerSearch.value,
+      revealedDrop,scroll:scroller.scrollTop}
+  };
 }
 layerSearchToggle.onclick=()=>setLayerSearch(layerSearch.hidden);
 layerSearch.oninput=()=>{revealedDrop=null;renderLayers();};
@@ -3196,7 +3216,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  applyLibraryFill,fillDestination,prepareSmartApply,prepareLayerHistoryRestore,layerPlacementView,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
+  applyLibraryFill,fillDestination,prepareSmartApply,prepareLayerHistoryRestore,layerPlacementView,mountLayerList,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,

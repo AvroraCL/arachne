@@ -214,6 +214,11 @@ try{
   const placed=await dropBelow(otherTile);
   assert.equal(await layerSearch.inputValue(),'蓝钢');
   const placedRow=packedPage.locator('[data-layer-id="'+placed.layer.id+'"]');
+  await packedPage.reload();
+  await placedRow.locator('.layer-select[aria-pressed=true]').waitFor();
+  assert.equal(await layerSearch.inputValue(),'蓝钢');
+  assert.ok(await layerSearch.isVisible());
+  assert.deepEqual((await api(packRoute)).paint,placed.next.paint);
   await layerSearch.fill('蓝钢 2');
   await placedRow.waitFor({state:'detached'});
   await layerSearch.fill('蓝钢');
@@ -602,6 +607,8 @@ try{
   await travelTrial();
   await packedPage.locator('[data-layer-id="'+nested.id+'"] .layer-select[aria-pressed=true]').waitFor();
   assert.deepEqual((await api(newRoute)).paint,dropped.paint);
+  const secondQuery=sideShelf.getByRole('searchbox',{name:'搜索图层'});
+  await secondQuery.fill(nested.name);
   await createFill.click();
   const nextTrial=await until(async()=>{
     const doc=await api(newRoute);
@@ -616,6 +623,10 @@ try{
   await secondFolder.locator('.editor-layer-name[aria-pressed=true]').waitFor();
   await travelTrial('redo');
   await secondTrial.waitFor();
+  await packedPage.reload();
+  await secondTrial.waitFor();
+  assert.equal(await secondQuery.inputValue(),nested.name);
+  assert.equal(await firstFold.getAttribute('aria-expanded'),'false');
   const trialOpacity=packedPage.locator('#drawing-layer-opacity');
   await trialOpacity.fill('42');
   const changeOpacity=packedPage.waitForResponse(r=>r.url().endsWith('/paint/commands')&&r.request().method()==='POST');

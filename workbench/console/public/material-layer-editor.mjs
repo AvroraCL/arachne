@@ -27,7 +27,6 @@ export function createMaterialLayerEditor(ctx,bridge){
   search.type='search';
   search.placeholder='搜索';
   search.setAttribute('aria-label','搜索图层');
-  search.value=state.query||'';
   const add=element('select');
   add.setAttribute('aria-label','新建材质图层');
   add.title='新建材质图层';
@@ -227,6 +226,9 @@ export function createMaterialLayerEditor(ctx,bridge){
     const doc=project.document;
     if(disposed||!doc)return;
     if(activeProject!==doc.id){
+      const resume=activeProject==null&&(!state.projectId||state.projectId===doc.id);
+      search.value=resume?state.query||'':'';
+      body.scrollTop=0;
       revealedDrop=null;
       finishRename(false);
       for(const view of views.values())view.row.remove();
@@ -234,6 +236,15 @@ export function createMaterialLayerEditor(ctx,bridge){
       activeProject=doc.id;
       if(!collapsedByProject.has(doc.id))collapsedByProject.set(doc.id,new Set());
       structureKey='';
+      if(resume&&(state.scroll||state.revealedDrop))queueMicrotask(()=>{
+        if(disposed||activeProject!==doc.id)return;
+        // The shared selection is published immediately after the document.
+        if(state.revealedDrop&&state.revealedDrop===project.layerId){
+          revealedDrop=state.revealedDrop;
+          sync();
+        }
+        body.scrollTop=state.scroll||0;
+      });
     }
     const collapsed=collapsedByProject.get(doc.id),filtering=!!search.value.trim();
     if(revealedDrop!==project.layerId)revealedDrop=null;
@@ -278,10 +289,9 @@ export function createMaterialLayerEditor(ctx,bridge){
     sync();
   });
   sync();
-  if(state.scroll)queueMicrotask(()=>{if(!disposed)body.scrollTop=state.scroll;});
   return {
     kind:'layers',sync,placementView,isEditing:()=>!!rename,
-    getState:()=>({query:search.value,scroll:body.scrollTop,collapsedByProject:Object.fromEntries(
+    getState:()=>({projectId:activeProject,query:search.value,revealedDrop,scroll:body.scrollTop,collapsedByProject:Object.fromEntries(
       [...collapsedByProject].filter(([,ids])=>ids.size).slice(-12).map(([id,ids])=>[id,[...ids]])
     )}),
     dispose(){disposed=true;unsubscribe();finishRename(false);}
