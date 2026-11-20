@@ -265,7 +265,9 @@ try{
   await personalTile.dblclick();
   const importedByTag=await (await importByTag).json();
   const copyId=importedByTag.resource.id;
-  await packedShelf.locator('[data-resource-id="'+copyId+'"][aria-pressed=true]:visible').waitFor();
+  const importedTile=packedShelf.locator('[data-resource-id="'+copyId+'"][aria-pressed=true]:visible');
+  await importedTile.waitFor();
+  assert.ok(await importedTile.evaluate(el=>el===document.activeElement),'focus follows the imported shelf item');
   assert.equal(await searchResource.inputValue(),personalItem.name);
   await createFill.click();
   await until(async()=>(await api(packRoute)).paint.layers.some(layer=>layer.materialId===copyId),'using the tagged import immediately');

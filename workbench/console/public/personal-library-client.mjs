@@ -25,8 +25,8 @@ export function createPersonalShelf({host,read,canEdit,fillDestination,importRes
     return item&&matches(item,searchTerms(query))?item:null;
   };
   async function refresh(){await refreshPersonalLibrary();loaded=true;}
-  async function act(action){if(working||!canEdit())return false;working=true;error='';notice='';sync();try{return await action();}catch(e){error=e.message;if(e.status===409)await refresh().catch(()=>{});return false;}finally{working=false;sync();}}
-  async function importItem(item){
+  async function act(action){if(working||!canEdit())return false;const focus=document.activeElement;working=true;error='';notice='';sync();try{return await action(focus);}catch(e){error=e.message;if(e.status===409)await refresh().catch(()=>{});return false;}finally{working=false;sync();}}
+  async function importItem(item,focus){
     const doc=read(),originalQuery=query;if(!item||!doc)return;
     const destination=item.kind==='smartMaterials'?fillDestination('应用智能材质'):null;
     if(destination?.locked)throw Error(destination.description);
@@ -35,7 +35,8 @@ export function createPersonalShelf({host,read,canEdit,fillDestination,importRes
     if(result===false)return;
     // Personal tags can match a search even when the project resource's name doesn't.
     const projectQuery=matchesSearch(item.name,searchTerms(originalQuery))?originalQuery:item.name;
-    const selected=active&&kind===item.kind&&query===originalQuery&&onImported?.(result,doc.id,projectQuery)!==false;
+    const transferFocus=focus&&(document.activeElement===focus||document.activeElement===document.body);
+    const selected=active&&kind===item.kind&&query===originalQuery&&onImported?.(result,doc.id,projectQuery,transferFocus)!==false;
     notice=item.kind==='smartMaterials'?'已应用到工程 · '+item.name:
       selected?'':'已导入项目，保留当前选择。';
   }
@@ -44,7 +45,7 @@ export function createPersonalShelf({host,read,canEdit,fillDestination,importRes
     control.title=label;control.setAttribute('aria-label',label);
     return control;
   }
-  const add=button('导入项目',()=>importItem(current()));
+  const add=button('导入项目',focus=>importItem(current(),focus===add?focus:null));
   const edit=icon(button('',openEditor),'pen','编辑个人资源');
   const star=icon(button('',async()=>{
     const item=current();if(!item)return;
@@ -126,7 +127,7 @@ export function createPersonalShelf({host,read,canEdit,fillDestination,importRes
         const tile=el('button','library-tile');
         tile.type='button';tile.dataset.resourceId=item.id;tile.setAttribute('aria-label',item.name);
         tile.onclick=()=>{picked=item.id;sync();};
-        tile.ondblclick=()=>{picked=item.id;void act(()=>importItem(item));};
+        tile.ondblclick=()=>{picked=item.id;void act(focus=>importItem(item,focus===tile?focus:null));};
         if(item.kind==='smartMaterials'||item.kind==='materials'){
           tile.draggable=true;
           tile.ondragstart=event=>{

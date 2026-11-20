@@ -4,7 +4,7 @@ import {chromeButton} from './area-chrome.mjs';
 import {defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph} from './paint-library.mjs';
 import {createPersonalShelf} from './personal-library-client.mjs';
 import {enhanceSelectMenu,setSelectValue} from './paint-select.mjs';
-import {enableResourceGridKeys,enableResourceSearchKeys,resourcePreview} from './paint-library-preview.mjs';
+import {enableResourceGridKeys,enableResourceSearchKeys,revealSelectedResource,resourcePreview} from './paint-library-preview.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
@@ -57,7 +57,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
       const result=await importResource(item,revision,placement);
       return result===false?false:{result,selection,image,showSmart};
     },
-    onImported:(packet,projectId,projectQuery)=>{
+    onImported:(packet,projectId,projectQuery,focus)=>{
       if(read()?.id!==projectId||packet.selection!==selectionGeneration||packet.image!==selectedImage())return false;
       const result=packet.result;
       if(result.resource.kind==='smartMaterials')packet.showSmart(result.resource.id);
@@ -65,7 +65,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
       else{
         search.value=projectQuery;
         select(result.resource.kind,result.resource.id);
-        grid.querySelector('[aria-pressed=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
+        revealSelectedResource(grid,focus);
       }
     }
   });

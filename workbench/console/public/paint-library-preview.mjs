@@ -144,3 +144,9 @@ export function enableResourceGridKeys(grid){
     next?.focus();
   });
 }
+
+export function revealSelectedResource(grid,focus){
+  const selected=grid.querySelector('.library-tile[aria-pressed=true]');
+  if(focus)selected?.focus({preventScroll:true});
+  selected?.scrollIntoView({block:'nearest',inline:'nearest'});
+}

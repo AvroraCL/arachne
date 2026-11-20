@@ -1,5 +1,5 @@
 import {createSourceMaterialFields} from './object-property-editor.mjs';
-import {enableResourceGridKeys,enableResourceSearchKeys,resourcePreview} from './paint-library-preview.mjs';
+import {enableResourceGridKeys,enableResourceSearchKeys,revealSelectedResource,resourcePreview} from './paint-library-preview.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
@@ -961,7 +961,7 @@ function createLibraryEditor(ctx,bridge){
       const result=await bridge.importPersonal(item,revision,placement);
       return result===false?false:{result,view,selection,showSmart};
     },
-    onImported:(packet,projectId,projectQuery)=>{
+    onImported:(packet,projectId,projectQuery,focus)=>{
       if(disposed||project.document?.id!==projectId||packet.view!==viewGeneration||packet.selection!==selectionGeneration)return false;
       const result=packet.result;
       if(result.resource.kind==='smartMaterials'){packet.showSmart(result.resource.id);return true;}
@@ -970,7 +970,7 @@ function createLibraryEditor(ctx,bridge){
       kind=result.resource.kind==='images'?'assets':result.resource.kind;tabs.value=kind;syncSelectMenu(tabs);
       if(kind==='assets')pickedAsset=result.resource.id;else project.selectResource({library:kind,id:result.resource.id});
       key='';sync();ctx.onChange();
-      body.querySelector('[aria-pressed=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
+      revealSelectedResource(body,focus);
     }
   });
   scopeSelect=choice('资源库范围',[['project','当前项目'],['personal','个人']],scope,value=>{
