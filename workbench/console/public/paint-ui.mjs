@@ -100,7 +100,7 @@ const materialLayerDrag=createMaterialLayerDrag({
     if(type===materialDragType&&(resource.projectId!==id||resource.revision!==revision))
       return run(()=>{throw Error('材质或工程已变化，请重新拖动');});
     if(type===materialDragType&&resource.libraryRevision===undefined)
-      return run(()=>addAndSelect(libraryFill(doc.paint,resource.id,{placement})));
+      return run(()=>selectNewLayers([libraryFill(doc.paint,resource.id,{placement})]));
     const generation=layerSelectionGeneration;
     let imported;
     const saved=await run(async()=>{imported=await api('/api/projects/'+id+'/paint/library-import',{
@@ -1978,10 +1978,9 @@ function fillDestination(action='创建填充层'){
     (folder?'在「'+folder.name+'」顶部':'在图层栈顶部')+action};
 }
 function captureLayerReveal(){
-  const tree=areaSystem?.areas.editors().find(editor=>editor.kind==='layers');
-  const view=tree?.placementView,query=view?.filterText();
+  const view=areaSystem?.layerPlacementView(),query=view?.filterText();
   return (id,parentId)=>{
-    if(!view||!areaSystem.areas.editors().includes(tree)||view.filterText()!==query)return;
+    if(!view||areaSystem.layerPlacementView()!==view||view.filterText()!==query)return;
     if(parentId)view.openFolder(parentId);
     view.revealPlaced(id);
   };
@@ -1998,7 +1997,7 @@ async function applyLibraryFill(id){
   const before=doc,{parentId,locked,description}=fillDestination();
   if(locked){$('status').textContent=description;return false;}
   const reveal=captureLayerReveal();
-  const saved=await run(()=>addAndSelect(libraryFill(before.paint,id,{parentId})));
+  const saved=await run(()=>selectNewLayers([libraryFill(before.paint,id,{parentId})]));
   if(saved&&doc.id===before.id&&selected&&!before.paint.layers.some(layer=>layer.id===selected))reveal(selected,parentId);
   return saved;
 }
@@ -2011,7 +2010,8 @@ function materialLayerOperation(kind){
   }
   return operation;
 }
-async function addAndSelect(...operations){
+function addAndSelect(...operations){return selectNewLayers(operations,layerPlacementView);}
+async function selectNewLayers(operations,view){
   const id=doc.id,generation=layerSelectionGeneration,ids=new Set(doc.paint.layers.map(l=>l.id));
   const next=await command(operations);
   if(doc?.id!==id||layerSelectionGeneration!==generation)return next;
@@ -2020,7 +2020,8 @@ async function addAndSelect(...operations){
     const addedIds=new Set(added.map(l=>l.id));
     const roots=added.filter(l=>!addedIds.has(layerParent(l)));
     setSelection(roots.map(l=>l.id));
-    if(collapsedFolders.delete(layerParent(roots[0])))saveCollapsedFolders();
+    const parentId=layerParent(roots[0]);
+    if(parentId)view?.openFolder(parentId);
     if(doc.revision===next.revision)render();
   }
   return next;

@@ -21,7 +21,7 @@ export function setupPaintAreas(hooks){
   for(const id of ['fill','paint-layer'])$('drawing-layer-actions').append($(id));
   $('apply-asset').textContent='应用到材质图层';
   for(const child of [...workspace.children])parking.append(child);workspace.append(parking);
-  let applying=false,lastProject=null,preferredViewport=null,preferredCanvas=null;
+  let applying=false,lastProject=null,preferredViewport=null,preferredCanvas=null,preferredLayers=null;
   let materialVisible=false,materialDetail=false,visibleEditors=[],inspection=null,inspectionFrame=null,inspectionStatus=null;
   let adjustmentPreview=null;
   let materialStrokes;
@@ -204,8 +204,22 @@ export function setupPaintAreas(hooks){
   const areas=createAreaWorkspace({host:workspace,registry,project,initial:hooks.initial,restoreActive:hooks.restoreActive!==false,desktopWorkspace:hooks.desktopWorkspace,
     onSaveState:hooks.saveStateChanged,
     canChange:()=>!hooks.busy()&&!materialStrokes.size&&!document.querySelector('dialog[open]')&&!hooks.imageEditing(),
-    onVisibleEditors:editors=>{visibleEditors=editors;updateMaterialDemand();},
-    onActivate:instance=>{if(instance?.domain)project.setEditorDomain(instance.domain);if(instance?.kind==='viewport'){const changed=preferredViewport!==instance;preferredViewport=instance;project.setEditorDomain('material');if(changed)project.notifyView('surfacePick');}if(['viewport','image','uv'].includes(instance?.kind))preferredCanvas=instance;syncWorkspaceButtons();hooks.cameraChanged?.();},onWorkspace:()=>{project.setEditorDomain(areas.name==='drawing'?'image':'material');syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name);hooks.remember();}
+    onVisibleEditors:editors=>{
+      visibleEditors=editors;
+      if(!editors.includes(preferredLayers))preferredLayers=null;
+      updateMaterialDemand();
+    },
+    onActivate:instance=>{
+      if(instance?.kind==='layers')preferredLayers=instance;
+      if(instance?.domain)project.setEditorDomain(instance.domain);
+      if(instance?.kind==='viewport'){
+        const changed=preferredViewport!==instance;
+        preferredViewport=instance;project.setEditorDomain('material');
+        if(changed)project.notifyView('surfacePick');
+      }
+      if(['viewport','image','uv'].includes(instance?.kind))preferredCanvas=instance;
+      syncWorkspaceButtons();hooks.cameraChanged?.();
+    },onWorkspace:()=>{project.setEditorDomain(areas.name==='drawing'?'image':'material');syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name);hooks.remember();}
   });
   function syncWorkspaceButtons(){for(const b of document.querySelectorAll('[data-area-mode]'))b.setAttribute('aria-pressed',String(b.dataset.areaMode===areas.name));}
   for(const b of document.querySelectorAll('[data-area-mode]'))b.onclick=()=>{
@@ -260,6 +274,7 @@ export function setupPaintAreas(hooks){
   function materialViewport(){const editors=areas.editors();return preferredViewport&&editors.includes(preferredViewport)?preferredViewport:editors.find(e=>e.kind==='viewport');}
   function targetViewport(){const target=materialViewport();return target?.isReady()?target:areas.editors().find(e=>e.kind==='viewport'&&e.isReady());}
   return {project,areas,
+    layerPlacementView:()=>(preferredLayers??visibleEditors.find(editor=>editor.kind==='layers'))?.placementView,
     editorCommand(action,focused){
       const editor=areas.editorFor(focused)??areas.active;
       const handled=editor?.editCommand?.(action);
