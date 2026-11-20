@@ -29,13 +29,35 @@ export function materialLayerDrop(layers,ids,targetId,zone){
 }
 
 export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShelfMaterial}){
-  let session=null,marker=null;
+  let session=null,marker=null,location=null;
   function clearMarker(){
     if(marker){
       marker.ownerDocument.removeEventListener('dragend',clearMarker,true);
       delete marker.dataset.layerDrop;
     }
     marker=null;
+    location?.remove();location=null;
+  }
+  function showShelfDestination(row,drop){
+    const header=row.closest('.editor-area')?.querySelector(':scope > .area-header');
+    if(!header)return;
+    const layers=read().paint.layers,folders=[];
+    let folder=layers.find(layer=>layer.id===drop.parentId);
+    while(folder){
+      folders.unshift(folder.name);
+      folder=layers.find(layer=>layer.id===layerParent(folder));
+    }
+    const target=layers.find(layer=>layer.id===drop.targetId);
+    location?.remove();
+    const owner=row.ownerDocument;
+    location=owner.createElement('output');
+    location.className='material-drop-location';
+    const path=owner.createElement('span'),names=owner.createElement('bdi'),slot=owner.createElement('span');
+    names.textContent=folders.join(' › ')||'图层栈顶层';
+    path.append(names);
+    slot.textContent=drop.zone==='inside'?'放入文件夹顶部':
+      (drop.zone==='above'?'上方':'下方')+' · '+(target?.name||'全 UV 底层');
+    location.append(path,slot);header.append(location);
   }
   function cancel(){
     if(session)delete session.source.dataset.dragging;
@@ -121,7 +143,10 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
       if(!valid)return;
       event.preventDefault();
       event.dataTransfer.dropEffect=shelf||drop.operation?.copy?'copy':'move';
-      if(row.dataset.layerDrop!==drop.zone)row.dataset.layerDrop=drop.zone;
+      if(row.dataset.layerDrop!==drop.zone){
+        row.dataset.layerDrop=drop.zone;
+        if(shelf)showShelfDestination(row,drop);
+      }
       if(marker!==row){
         marker=row;
         row.ownerDocument.addEventListener('dragend',clearMarker,true);

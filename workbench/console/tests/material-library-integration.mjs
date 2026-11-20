@@ -179,9 +179,13 @@ try{
   await packedPage.mouse.move(dropX,dropY,{steps:12});
   await packedPage.mouse.move(dropX+1,dropY);
   assert.equal(await blueRow.getAttribute('data-layer-drop'),'above');
+  const destination=packedPage.locator('.material-drop-location');
+  assert.deepEqual(await destination.locator('span').allTextContents(),
+    ['图层栈顶层','上方 · '+beforeDrop.layers.at(-1).name]);
   await packedPage.keyboard.press('Escape');
   await packedPage.mouse.up();
   assert.equal(await blueRow.getAttribute('data-layer-drop'),null);
+  assert.equal(await destination.count(),0);
   assert.equal((await api(packRoute)).revision,packedMaterial.revision);
   const layerSearch=packedPage.locator('#layer-search');
   await packedPage.locator('#toggle-layer-search').click();

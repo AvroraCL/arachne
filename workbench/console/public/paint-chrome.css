@@ -158,6 +158,12 @@
 #workspace .editor-material-tree .editor-layer-base{min-height:28px;padding-inline:8px;text-align:left;justify-content:flex-start}
 #workspace :is(#layers,.editor-material-tree) [data-dragging]{opacity:.55}
 #workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop]{position:relative}
+.material-drop-location{
+  position:absolute;inset:0;z-index:2;display:grid;align-content:center;padding:0 8px;
+  background:var(--area-bar);pointer-events:none;text-align:left;
+}
+.material-drop-location span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:15px}
+.material-drop-location span:first-child{color:var(--area-muted);direction:rtl;text-align:left}
 #workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop]::after{
   content:"";position:absolute;pointer-events:none;z-index:1;
   inset-inline:calc(4px + var(--layer-depth,var(--material-depth,0))*9px) 3px;
