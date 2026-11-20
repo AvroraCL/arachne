@@ -117,7 +117,12 @@ try{
   assert.deepEqual(await packedShelf.locator('.library-tile:visible').allTextContents(),['新材质']);
   assert.equal(await createFill.isDisabled(),true);
   assert.equal(await packedShelf.getByRole('button',{name:'保存到个人库'}).isDisabled(),true);
-  await packedShelf.getByRole('button',{name:'新材质',exact:true}).click();
+  await searchResource.dispatchEvent('keydown',{key:'ArrowDown',isComposing:true});
+  assert.ok(await searchResource.evaluate(el=>el===document.activeElement));
+  await searchResource.press('ArrowDown');
+  assert.ok(await packedShelf.getByRole('button',{name:'新材质',exact:true}).evaluate(el=>el===document.activeElement));
+  assert.equal(await createFill.isDisabled(),true);
+  await packedPage.keyboard.press('Enter');
   assert.equal(await createFill.isEnabled(),true);
   await searchResource.fill('蓝钢');
   assert.equal(await createFill.isDisabled(),true);
@@ -229,6 +234,8 @@ try{
   await metadata.getByRole('button',{name:'保存',exact:true}).click();
   await metadata.waitFor({state:'hidden'});
   await searchResource.fill('试色备选');
+  await searchResource.press('ArrowDown');
+  assert.ok(await personalTile.evaluate(el=>el===document.activeElement));
   const importByTag=packedPage.waitForResponse(r=>r.url().endsWith('/paint/library-import')&&r.request().method()==='POST');
   await personalTile.dblclick();
   const importedByTag=await (await importByTag).json();

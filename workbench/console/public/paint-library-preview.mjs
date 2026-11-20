@@ -1,5 +1,6 @@
 import {evaluateBrushGraph} from './paint-library.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
+import {compositionKey} from './text-input.mjs';
 
 export function drawBrushPreview(canvas,settings,tip=null,texture=null){
   canvas.width=200;canvas.height=100;const c=canvas.getContext('2d');c.clearRect(0,0,200,100);
@@ -101,6 +102,20 @@ export function resourcePreview(kind,item,assetUrl){
     preview.append(sphere);
   }
   return preview;
+}
+
+export function enableResourceSearchKeys(input){
+  input.setAttribute('aria-keyshortcuts','ArrowDown');
+  input.title='↓ 聚焦第一项搜索结果';
+  input.addEventListener('keydown',event=>{
+    if(event.key!=='ArrowDown'||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||compositionKey(event))return;
+    const area=input.closest('.editor-area');
+    if(!area)return;
+    const first=Array.from(area.querySelectorAll('button.library-tile:enabled')).find(tile=>tile.getClientRects().length);
+    if(!first)return;
+    event.preventDefault();
+    first.focus();
+  });
 }
 
 export function enableResourceGridKeys(grid){

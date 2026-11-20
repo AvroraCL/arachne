@@ -4,7 +4,7 @@ import {chromeButton} from './area-chrome.mjs';
 import {defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph} from './paint-library.mjs';
 import {createPersonalShelf} from './personal-library-client.mjs';
 import {enhanceSelectMenu,setSelectValue} from './paint-select.mjs';
-import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mjs';
+import {enableResourceGridKeys,enableResourceSearchKeys,resourcePreview} from './paint-library-preview.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
@@ -16,6 +16,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   enableResourceGridKeys(grid);
   tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','资源库');
   const search=el('input');search.type='search';search.placeholder='搜索资源';search.setAttribute('aria-label','搜索资源');
+  enableResourceSearchKeys(search);
   function button(text,action,label){const b=el('button','',text);b.type='button';b.onclick=action;if(label)b.setAttribute('aria-label',label);return b;}
   for(const [id,name] of [['materials','材质'],['brushes','笔刷'],['images','图片'],['smartMaterials','智能材质']]){
     const b=button(name,()=>{if(!canEdit())return;selectionGeneration++;kind=id;picked=null;gridKey='';remember();sync();changed();rememberView();});b.dataset.library=id;b.setAttribute('role','tab');tabs.append(b);

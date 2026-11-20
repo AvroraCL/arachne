@@ -1,5 +1,5 @@
 import {createSourceMaterialFields} from './object-property-editor.mjs';
-import {enableResourceGridKeys,resourcePreview} from './paint-library-preview.mjs';
+import {enableResourceGridKeys,enableResourceSearchKeys,resourcePreview} from './paint-library-preview.mjs';
 import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
@@ -946,6 +946,7 @@ function createLibraryEditor(ctx,bridge){
   let key='',kind=state.kind||'materials',query=state.query||'',scope=state.scope==='personal'?'personal':'project',pickedAsset=null,personal,scopeSelect,createResource,savePersonal,selectionGeneration=0,viewGeneration=0,disposed=false;
   enableResourceGridKeys(body);
   const search=el('input');search.type='search';search.placeholder='搜索';search.setAttribute('aria-label','搜索资源');search.value=query;search.oninput=()=>{query=search.value;key='';sync();ctx.onChange();};toolbar.append(search);
+  enableResourceSearchKeys(search);
   function execute(ops,origin){return project.commands(ops,origin).catch(error=>{status.textContent=error.message;ctx.error(error);return false;});}
   function matching(doc){
     const terms=searchTerms(query);
