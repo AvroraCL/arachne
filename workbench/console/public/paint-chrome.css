@@ -286,23 +286,33 @@
 #workspace #layers .layer-mask[aria-pressed=true] :is(canvas,img){outline:1px solid #aaa;outline-offset:1px}
 
 /* Resource previews keep their artwork; only the caption carries UI state. */
-/* A shallow shelf keeps the swatch and its name on the same line. */
+/* Put the swatch beside the name in short shelves and narrow side panels. */
 .editor-area[data-editor=library]{container:resource-shelf / size}
-@container resource-shelf (max-height:180px){
+#workspace .library-tile{width:136px}
+#workspace .library-tile>.library-name{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  white-space:normal;overflow-wrap:anywhere;line-height:17px;margin-block:4px;
+}
+@container resource-shelf (max-height:180px) or (max-width:340px){
   #workspace .library-grid{padding:5px 8px;gap:3px 8px}
   #workspace .library-tile{
     flex-direction:row;align-items:center;width:210px;max-width:100%;height:42px;
   }
   #workspace .library-tile>.library-preview{width:49px;height:40px;flex:none}
   #workspace .library-sphere{width:32px;height:32px;box-shadow:2px 3px 3px #1118,inset -2px -2px 5px #0006}
-  #workspace .library-tile>.library-name{align-self:center;flex:1;min-width:0;text-align:start}
+  #workspace .library-tile>.library-name{
+    align-self:center;flex:1;min-width:0;text-align:start;margin-block:0;
+  }
 }
 #workspace :is(.library-tile,#assets button){background:transparent;border-color:transparent;border-radius:3px;box-shadow:none}
 #workspace :is(.library-tile,#assets button):is(:hover,[aria-pressed=true]){background:transparent;border-color:transparent;box-shadow:none}
 #workspace .library-preview{background:transparent}
-#workspace :is(.library-name,#assets button>span){
+#workspace .library-name,#workspace #assets button>span{
   display:block;align-self:stretch;width:100%;min-width:0;padding:0 6px;
   line-height:28px;border-radius:2px;background:transparent;color:#c5c5c5;font-weight:400;
+}
+@container resource-shelf (max-width:340px){
+  #workspace .library-tile{width:100%}
 }
 #workspace :is(.library-tile:hover>.library-name,#assets button:hover>span){background:var(--chrome-item-hover)}
 #workspace :is(.library-tile[aria-pressed=true]>.library-name,#assets button[aria-pressed=true]>span){background:var(--chrome-item-selected);color:#eee}
