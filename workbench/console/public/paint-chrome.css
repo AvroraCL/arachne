@@ -5,6 +5,7 @@
   --chrome-button:#383838;--chrome-field:#222222;--chrome-hover:#414141;
   --chrome-selected:#4a4a4a;--chrome-text:#d8d8d8;--chrome-radius:3px;
   --chrome-item-hover:#2f2f2f;--chrome-item-selected:#383838;
+  --chrome-active-marker:#87b1d8;--chrome-focus:#b8cbde;
   --chrome-control:28px;--chrome-header-height:34px;--chrome-section-height:30px;
 }
 :root[data-ui-density=comfortable]{
@@ -28,17 +29,17 @@
 }
 
 /* Actions are filled; contextual toolbar/menu commands sit directly on the bar. */
-#workspace :is(.editor-toolbar,.property-section-body,.viewport-display-options,.personal-shelf-actions) button:not(.custom-select-button){
+#workspace :is(.editor-toolbar,.property-section-body,.viewport-display-options,.personal-shelf-actions) button:not(.custom-select-button,.custom-select-option){
   min-height:var(--chrome-control);padding:3px 8px;border:1px solid transparent;
   border-radius:var(--chrome-radius);background:var(--chrome-button);box-shadow:none;
   color:var(--chrome-text);font-size:13px;font-weight:400;
 }
-#workspace :is(.editor-toolbar,.property-section-body,.viewport-display-options,.personal-shelf-actions) button:not(.custom-select-button):hover:not(:disabled){background:var(--chrome-hover);border-color:transparent}
-#workspace :is(.area-header,.editor-toolbar,#surface-tools,#drawing-layer-actions,.editor-preview-status,.view-status) button:not(.custom-select-button){
+#workspace :is(.editor-toolbar,.property-section-body,.viewport-display-options,.personal-shelf-actions) button:not(.custom-select-button,.custom-select-option):hover:not(:disabled){background:var(--chrome-hover);border-color:transparent}
+#workspace :is(.area-header,.editor-toolbar,#surface-tools,#drawing-layer-actions,.editor-preview-status,.view-status) button:not(.custom-select-button,.custom-select-option){
   border-color:transparent;border-radius:var(--chrome-radius);background:transparent;box-shadow:none;
 }
-#workspace :is(.area-header,.editor-toolbar,#surface-tools,#drawing-layer-actions,.editor-preview-status,.view-status) button:not(.custom-select-button):hover:not(:disabled){background:var(--chrome-hover)}
-#workspace :is(.area-header,.editor-toolbar,#surface-tools) button:is([aria-pressed=true],[aria-selected=true]){background:var(--chrome-selected);color:#eee}
+#workspace :is(.area-header,.editor-toolbar,#surface-tools,#drawing-layer-actions,.editor-preview-status,.view-status) button:not(.custom-select-button,.custom-select-option):hover:not(:disabled){background:var(--chrome-hover)}
+#workspace :is(.area-header,.editor-toolbar,#surface-tools) button:is([aria-pressed=true],[aria-selected=true]):not(.custom-select-option){background:var(--chrome-selected);color:#eee}
 #workspace .area-header :is(button,.custom-select-button){min-height:var(--chrome-control);font-size:13px;font-weight:400}
 #workspace .area-header .library-tabs button[aria-selected=true]{border-color:transparent;background:var(--chrome-selected)}
 #workspace .editor-list button[aria-pressed=true]{border-color:transparent;background:var(--chrome-selected)}
@@ -94,7 +95,7 @@
   border-radius:var(--chrome-radius);font-size:13px;font-weight:400;
 }
 :is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button:enabled,a,label):hover,
-.custom-select-menu .custom-select-option:is(:hover,.active):not(:disabled){background:var(--chrome-hover);border-color:transparent;color:#eee}
+.custom-select-menu .custom-select-option.active:not(:disabled){background:var(--chrome-hover);border-color:transparent;color:#eee}
 .custom-select-menu .custom-select-search{border-color:transparent;border-radius:var(--chrome-radius);background:var(--chrome-field)}
 
 /* Panel sections use a flat title strip; spacing separates individual fields. */
@@ -116,7 +117,7 @@
 .paint-menubar .app-menus .paint-menu>summary{border:0;border-radius:var(--chrome-radius)}
 /* Preserve focus even on controls with their own contextual CSS. */
 #workspace :is(button,summary,input[type=search]):focus-visible{
-  outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-2px;
+  outline:1px solid var(--chrome-focus);outline-offset:-2px;
 }
 
 /* Lists have one state surface per row, never a second button inside it. */
@@ -151,7 +152,8 @@
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
   overflow:hidden;overflow-wrap:anywhere;line-height:14px;text-align:start;white-space:normal
 }
-#workspace .editor-material-tree .editor-layer-row[data-active-layer]{box-shadow:inset 2px 0 #929292}
+#workspace :is(.editor-material-tree .editor-layer-row[data-active-layer],#layers .layer-row[data-active-layer],
+  .document-layer-row[data-active],#base[aria-pressed=true],.editor-layer-base[aria-pressed=true]){box-shadow:inset 2px 0 var(--chrome-active-marker)}
 #workspace .editor-material-tree .editor-layer-row[data-folded-selection] .material-tree-icon{color:#eee}
 #workspace .editor-material-tree .editor-layer-row[data-inherited-hidden] .material-tree-name{color:#999}
 #workspace .editor-material-tree .layer-inline-name{flex:1;min-height:26px;padding:2px 4px}
@@ -201,8 +203,6 @@
   #workspace .area-header .outline-filter{width:22px;min-width:22px}
 }
 .custom-select-menu.outline-filter-menu{--select-menu-width:132px;--select-menu-align:right}
-.outline-filter-menu .custom-select-option{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.outline-filter-menu .custom-select-option[aria-selected=false] .select-option-check{visibility:hidden}
 #workspace .editor-scene-list{
   --outline-row:25px;--outline-eye:26px;--outline-step:16px;--outline-start:6px;--outline-line:#4b4b4b;
   padding:0;gap:0;background:#282828;scrollbar-gutter:auto;
@@ -321,7 +321,7 @@
   #workspace .library-tile{width:100%}
 }
 #workspace :is(.library-tile:hover>.library-name,#assets button:hover>span){background:var(--chrome-item-hover)}
-#workspace :is(.library-tile[aria-pressed=true]>.library-name,#assets button[aria-pressed=true]>span){background:var(--chrome-item-selected);color:#eee}
+#workspace :is(.library-tile[aria-pressed=true]>.library-name,#assets button[aria-pressed=true]>span){background:var(--chrome-item-selected);color:#eee;box-shadow:inset 2px 0 var(--chrome-active-marker)}
 @media(prefers-reduced-motion:no-preference){
   #workspace :is(.library-name,#assets button>span){transition:background-color 100ms,color 100ms}
 }
@@ -329,14 +329,12 @@
 /* Compact command rows: icon, label, then a plain right-aligned shortcut. */
 :is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content){padding:4px;gap:1px}
 .paint-menu-content>hr{width:auto;margin:3px 5px;border:0;border-top:1px solid #ffffff14}
-:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button,a,label),
-.custom-select-menu:has(.menu-shortcut-option)>.custom-select-option{
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button,a,label){
   display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;
   column-gap:8px;min-height:26px;padding:3px 7px;border:0;border-radius:2px;
   font-size:13px;line-height:20px;text-align:left;text-decoration:none;
 }
-:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button,a,label):not(:has(>.chrome-icon,>input))::before,
-.custom-select-menu:has(.menu-shortcut-option)>.custom-select-option::before{content:'';grid-column:1;width:18px}
+:is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) :is(button,a,label):not(:has(>.chrome-icon,>input))::before{content:'';grid-column:1;width:18px}
 :is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) .chrome-icon{width:16px;height:16px;grid-column:1;color:#b9b9b9}
 .menu-item-label{min-width:0;overflow:hidden;text-overflow:ellipsis}
 :is(.paint-menu-content,.area-menu-content,.area-toolbar-menu-content) input[type=checkbox]{width:14px;height:14px;margin:0;grid-column:1}
@@ -344,6 +342,33 @@
   grid-column:3;margin:0 0 0 12px;padding:0;border:0;background:none;box-shadow:none;
   color:#a5a5a5;font:12px/20px var(--ui-font);text-align:right;white-space:nowrap;
 }
+#workspace .area-header .transform-tool-picker{flex:none}
+#workspace .area-header .transform-tool-picker>.custom-select-button{
+  display:flex;align-items:center;gap:5px;padding:2px 6px;
+  background-image:none;background-color:transparent;
+}
+#workspace .area-header .transform-tool-picker>.custom-select-button::after{
+  content:'';width:4px;height:4px;margin:-2px 1px 0 2px;
+  border:solid currentColor;border-width:0 1px 1px 0;transform:rotate(45deg);opacity:.7;
+}
+#workspace .area-header .transform-tool-picker:is(.open,:hover)>.custom-select-button{background-color:var(--chrome-hover)}
+.transform-tool-picker .chrome-icon,.transform-tool-menu .chrome-icon{display:block;width:16px;height:16px}
+.custom-select-menu.transform-tool-menu{--select-menu-width:144px;--select-menu-gap:3px;gap:1px;padding:4px}
+.custom-select-menu:focus{outline:none}
+.custom-select-menu .custom-select-option{
+  display:grid;grid-template-columns:var(--option-icon-width,16px) minmax(0,1fr) 12px;align-items:center;transition:none;
+  gap:6px;min-width:0;min-height:27px;padding:3px 7px;text-align:left;
+}
+.custom-select-menu.has-shortcuts .custom-select-option{grid-template-columns:16px minmax(0,1fr) 12px var(--shortcut-width,6ch)}
+.transform-tool-menu{--shortcut-width:1.5ch}
+.custom-select-menu .select-option-icon{display:flex;grid-column:1;grid-row:1;color:#bbb}
+.custom-select-menu .select-option-icon svg{width:16px;height:16px}
+.custom-select-option>:is(.select-option-label,.select-option-detail){grid-column:2;grid-row:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.custom-select-menu .select-option-check{grid-column:3;grid-row:1;visibility:hidden;color:#ddd;font-size:12px}
+.custom-select-menu [aria-selected=true]:not(:disabled)>.select-option-check{visibility:visible}
+.custom-select-menu .custom-select-option kbd{grid-column:4;grid-row:1;margin:0}
+
+
 .area-menu-content{min-width:260px;max-width:calc(100vw - 12px);max-height:calc(100dvh - 12px)}
 .area-neighbor-options{border-top:1px solid #ffffff0f;padding:2px 0;margin:2px 0}
 :is(.area-menu-content,.area-toolbar-menu-content) button:enabled:focus-visible{background:var(--chrome-hover);outline:0;color:#eee}

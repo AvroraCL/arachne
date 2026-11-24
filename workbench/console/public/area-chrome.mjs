@@ -43,7 +43,7 @@ export function openChromeMenu(menu,point){
 export function chromeMenu(menu,content){
   const summary=menu.querySelector('summary');
   content.popover='auto';
-  const items=()=>[...content.querySelectorAll('button:enabled,a[href],input:enabled,select:enabled')].filter(item=>item.getClientRects().length);
+  const items=()=>[...content.querySelectorAll('button:enabled,a[href],input:enabled,select:enabled')].filter(item=>item.tabIndex>=0&&item.getClientRects().length);
   const focusEnd=last=>{const visible=items();visible.at(last?-1:0)?.focus();};
   const state={content,point:null,focusOnOpen:null,position(){
     const r=menu.getBoundingClientRect(),height=content.getBoundingClientRect().height;

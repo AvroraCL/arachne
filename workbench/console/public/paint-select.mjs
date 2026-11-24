@@ -67,15 +67,19 @@ function openMenu(select,wrapper,button){
     if(option.hidden)continue;
     const item=document.createElement('button');
     item.id=menu.id+'-option-'+index;item.type='button';item.tabIndex=-1;
-    item.className='custom-select-option';item.textContent=option.label;item.title=option.label;
+    item.className='custom-select-option';item.title=option.label;
     item.setAttribute('aria-label',option.label);
-    if(optionIcon){const icon=document.createElement('span'),label=document.createElement('span');icon.className='select-option-icon';icon.setAttribute('aria-hidden','true');icon.innerHTML=optionIcon(option)||'';label.textContent=option.label;item.replaceChildren(icon,label);}
+    const shortcut=option.dataset.shortcut;
+    const label=document.createElement('span');
+    label.className='select-option-label';
+    label.textContent=shortcut?option.label.replace(' · '+shortcut,''):option.label;
     const detail=optionDetail?.(option);
     if(detail){
-      const text=document.createElement('span'),label=document.createElement('span'),description=document.createElement('small');
-      text.className='select-option-detail';label.textContent=option.label;description.textContent=detail.text||'';
-      text.append(label,description);item.replaceChildren(text);
-      item.title=item.title+(detail.text?' · '+detail.text:'');item.setAttribute('aria-label',item.title);
+      const text=document.createElement('span'),description=document.createElement('small');
+      text.className='select-option-detail';description.textContent=detail.text||'';
+      text.append(label,description);item.append(text);
+      item.title+=detail.text?' · '+detail.text:'';
+      item.setAttribute('aria-label',item.title);
       item.classList.add('select-option-with-detail');
       if(detail.image){
         const thumb=document.createElement('span'),image=document.createElement('img');
@@ -83,13 +87,19 @@ function openMenu(select,wrapper,button){
         image.src=detail.image;image.onerror=()=>{image.hidden=true;};
         thumb.append(image);item.prepend(thumb);
       }
+    }else{
+      if(optionIcon){
+        const icon=document.createElement('span');icon.className='select-option-icon';
+        icon.setAttribute('aria-hidden','true');icon.innerHTML=optionIcon(option)||'';item.append(icon);
+      }
+      item.append(label);
     }
-    if(option.dataset.shortcut){
-      const label=document.createElement('span'),shortcut=document.createElement('kbd');label.className='menu-item-label';
-      label.textContent=option.label.replace(' · '+option.dataset.shortcut,'');shortcut.textContent=option.dataset.shortcut;shortcut.setAttribute('aria-hidden','true');
-      item.classList.add('menu-shortcut-option');item.replaceChildren(label,shortcut);
+    const mark=document.createElement('span');mark.className='select-option-check';
+    mark.setAttribute('aria-hidden','true');mark.textContent='✓';item.append(mark);
+    if(shortcut){
+      const key=document.createElement('kbd');key.textContent=shortcut;key.setAttribute('aria-hidden','true');item.append(key);
+      menu.classList.add('has-shortcuts');
     }
-    if(menuClass){const mark=document.createElement('span');mark.className='select-option-check';mark.setAttribute('aria-hidden','true');mark.textContent='✓';item.append(mark);}
     item.disabled=option.disabled||option.parentElement.disabled===true;
     item.dataset.search=[option.label,option.value,option.dataset.search||''].join(' ').toLocaleLowerCase();
     item.setAttribute('role','option');item.setAttribute('aria-selected',String(option.selected));
@@ -168,7 +178,14 @@ export function syncSelectMenu(select){
   const control=controls.get(select);
   if(!control)return;
   const {button,wrapper,iconOnly,optionIcon,triggerIcon}=control,option=select.selectedOptions[0],value=option?.label||'';
-  if(iconOnly){const icon=triggerIcon||(option?optionIcon?.(option)||'':'');if(control.icon!==icon){button.innerHTML=icon;control.icon=icon;}}
+  if(iconOnly||optionIcon){
+    const icon=triggerIcon||(option?optionIcon?.(option)||'':'');
+    if(control.icon!==icon||control.label!==value){
+      button.innerHTML=icon;
+      if(!iconOnly)button.append(document.createTextNode(value));
+      control.icon=icon;control.label=value;
+    }
+  }
   else button.textContent=value;
   button.title=select.title||value;
   button.setAttribute('aria-description',value);

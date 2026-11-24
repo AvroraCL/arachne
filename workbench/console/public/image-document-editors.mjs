@@ -365,7 +365,16 @@ export function createDocumentEditor(ctx,bridge){
   };
   parameters.append(controls.bar);
   options.append(toolName,editTarget,parameterStrip,viewOptions);
-  host.classList.add('document-editor');host.append(options,rail,stage,status,importInput);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
+  const footer=el('div','document-status-bar'),clipboardNotice=el('output','document-clipboard-notice');
+  let clipboardTimer;
+  function clearClipboardNotice(){clearTimeout(clipboardTimer);clipboardNotice.textContent='';}
+  function reportClipboard(origin,text){
+    if(disposed||project.document?.id!==origin.id||project.imageContext?.documentId!==origin.documentId)return;
+    clearClipboardNotice();clipboardNotice.textContent=text;
+    clipboardTimer=setTimeout(clearClipboardNotice,3500);
+  }
+  footer.append(clipboardNotice,status);
+  host.classList.add('document-editor');host.append(options,rail,stage,footer,importInput);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
   let mode=state.tool||'orbit',selectionShape=Object.hasOwn(selectionNames,state.selectionTool)?state.selectionTool:'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
   let angle=state.angle??0,mirror=state.mirror===true;
   let lassoShape=state.lassoShape==='polygon'?'polygon':'lasso';
@@ -1108,7 +1117,7 @@ export function createDocumentEditor(ctx,bridge){
   function cutSelection(){
     if(!canCut())return false;
     const origin=imageSelectionOrigin(project),region=selection.clip();
-    cutting=true;sync();
+    clearClipboardNotice();cutting=true;sync();
     status.textContent='正在剪切 4K 像素…';
     void run(async()=>{
       const copied=await copyImagePixels(origin,region,{cut:true});
@@ -1117,7 +1126,7 @@ export function createDocumentEditor(ctx,bridge){
          current.layerId!==origin.layerId||current.target!==origin.target)
         throw Error('原图层已变化，请重新剪切');
       await commandAt(project,origin,{action:'cutPixels',layerId:origin.layerId,rect:region.clip,...uvShapePayload(region)});
-      if(!disposed)status.textContent='已剪切 '+copied.width+' × '+copied.height+' px';
+      reportClipboard(origin,'已剪切 '+copied.width+' × '+copied.height+' px');
     }).finally(()=>{cutting=false;if(!disposed)sync();});
     return true;
   }
@@ -1160,10 +1169,10 @@ export function createDocumentEditor(ctx,bridge){
   function copySelection(merged=false){
     if(!canCopy(merged))return false;
     const origin=imageSelectionOrigin(project),region=selection.clip()||{clip:[0,0,1,1]};
-    copying=true;syncClipboard();
+    clearClipboardNotice();copying=true;syncClipboard();
     status.textContent=merged?'正在复制可见图层…':'正在复制 4K 像素…';
     void copyImagePixels(origin,region,{merged}).then(({width,height})=>{
-      if(!disposed)status.textContent=`${merged?'已合并复制':'已复制'} ${width} × ${height} px`;
+      reportClipboard(origin,`${merged?'已合并复制':'已复制'} ${width} × ${height} px`);
     }).catch(error=>{
       if(!disposed&&error.name!=='AbortError'){status.textContent=error.message;ctx.error(error);}
     }).finally(()=>{if(!disposed){copying=false;syncClipboard();}});
@@ -1481,7 +1490,7 @@ export function createDocumentEditor(ctx,bridge){
     const imageKey=JSON.stringify([doc.id,c?.documentId,c?.layerId,c?.target]);if(lastImage!==imageKey){
       const first=lastProject!==doc.id,targetChanged=!first&&lastTarget!==c?.target;
       let next=mode;if(c?.target==='mask'&&!['gradient','move'].includes(mode)&&(mode==='paint'||targetChanged||first&&!state.tool))next='mask';else if(c?.target!=='mask'&&mode==='mask')next='paint';
-      lastImage=imageKey;lastTarget=c?.target;lastProject=doc.id;gradientTool.cancel();shapeTool.cancel();painter.cancel({preserveMode:true});selection.stop();setMode(next);if(next==='select')selection.choose(selectionShape,{focus:false});if(imageView.isActive())remember(project);
+      clearClipboardNotice();lastImage=imageKey;lastTarget=c?.target;lastProject=doc.id;gradientTool.cancel();shapeTool.cancel();painter.cancel({preserveMode:true});selection.stop();setMode(next);if(next==='select')selection.choose(selectionShape,{focus:false});if(imageView.isActive())remember(project);
     }
     const documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}
     const next=JSON.stringify([doc.id,doc.revision]);if(sourceKey!==next){sourceKey=next;syncDestination();}else if(destinationDocument!==c?.documentId)syncDestination();
@@ -1537,7 +1546,7 @@ export function createDocumentEditor(ctx,bridge){
       if(!visible){stopAdjustmentPick();edgeTool.cancel();penTool.cancelDrag();canvasText.cancel();gradientTool.cancel();shapeTool.cancel();moveTool.cancel();warpTool.cancel();}
       if(visible)sync();
     },
-    dispose(){disposed=true;stopAdjustmentPick();exportRequest?.abort();unsub();stopClipboard();gradientTool.cancel();cloneTool.dispose();shapeTool.cancel();moveTool.dispose();warpTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.dispose();uvGuide.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
+    dispose(){disposed=true;clearClipboardNotice();stopAdjustmentPick();exportRequest?.abort();unsub();stopClipboard();gradientTool.cancel();cloneTool.dispose();shapeTool.cancel();moveTool.dispose();warpTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.dispose();uvGuide.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
 }
 
 export function createImagePanel(type,ctx){

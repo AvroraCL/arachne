@@ -171,6 +171,9 @@ export function registerAreaEditors(registry,bridge){
     toolbar.append(modes,component,selectButton,meshButton,tool,orientation,transformPivot,cursorButton,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
       button('适应',()=>{markCameraFree();viewport.fit();}),
       button('正交',()=>{markCameraFree();viewport.projection(!viewport.getState().orthographic);onChange();}),cameraGroup);
+    const transformIcons={translate:workspaceIcons.move,rotate:workspaceIcons.rotate,scale:workspaceIcons.scale};
+    enhanceSelectMenu(tool,{menuClass:'transform-tool-menu',optionIcon:option=>transformIcons[option.value]});
+    tool.parentElement.classList.add('transform-tool-picker');
     transformPivot.dataset.searchable='false';
     enhanceSelectMenu(transformPivot,{iconOnly:true,triggerIcon:workspaceIcons.pivot});
     const numeric=el('form','editor-toolbar');numeric.setAttribute('aria-label','物体变换');const axes=[];

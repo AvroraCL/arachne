@@ -12,6 +12,8 @@ export const workspaceIcons = {
   moveUp: svg('<path d="M10 16V4m-5 5 5-5 5 5"/>'),
   moveDown: svg('<path d="M10 4v12m-5-5 5 5 5-5"/>'),
   move: svg('<path d="M10 2v16M2 10h16M7 5l3-3 3 3M7 15l3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3"/>'),
+  rotate: svg('<path d="M5 5.6a6.5 6.5 0 1 1-1.6 6.8M5 2.4v4.1h4.1"/><circle cx="10" cy="10" r="1" fill="currentColor" stroke="none"/>'),
+  scale: svg('<rect x="2.5" y="12.5" width="5" height="5" rx=".6"/><path d="m7.5 12.5 9-9m-6 0h6v6"/>'),
   warp: svg('<path d="M4 5l12-2 2 13L3 15Z M4 5l14 11M16 3L3 15"/><circle cx="10" cy="9.5" r="1.3" fill="currentColor"/>'),
   trash: svg('<path d="M3.5 5.5h13m-11 0 .8 11h7.4l.8-11M7.5 5.5V3h5v2.5m-4 3v5m3-5v5"/>'),
   object: svg('<path d="m10 2 7 4v8l-7 4-7-4V6l7-4Z M3 6l7 4 7-4 M10 10v8"/>'),

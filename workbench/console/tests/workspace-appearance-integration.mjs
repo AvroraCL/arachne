@@ -6,6 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
+import {defaultLibraryMaterial} from '../public/paint-library.mjs';
 import {chromium} from 'playwright-core';
 
 const data=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-workspaces-'));
@@ -35,6 +36,9 @@ try{
   const project=await api('/api/projects',{workflowType:'pbr_paint',modelTemplate:'cube',name:'高分辨率工业外壳与防护涂层测试工程'});
   const route='/api/projects/'+project.id,paint=route+'/paint',documentId='detail-color',layerId='stripe';
   await api(paint+'/commands',{revision:project.revision,operations:[
+    ...['灰蓝色防护涂层与拉丝金属表面 · 样张 A','橙色维护标识 · 样张 B'].map((name,index)=>({
+      op:'library',action:'create',library:'materials',id:'sample-'+index,patch:{name,graph:defaultLibraryMaterial()}
+    })),
     {op:'add',kind:'fill',patch:{name:'深海蓝 · 抗氧化半哑光金属底漆',values:{color:'#26415f',metallic:.64,roughness:.38}}},
     {op:'image',action:'create',documentId,patch:{name:'外壳颜色贴图 · 主涂装工作样张'}},
     {op:'image',action:'addLayer',documentId,layerId,kind:'pixel',patch:{name:'橙色标记条纹与细节修正图层'}},
@@ -59,12 +63,114 @@ try{
       await page.locator('.document-image-stage[data-preview-size="4096"]').first().waitFor({timeout:30000});
     }else await viewport.waitFor();
   }
+  const list=page.getByRole('listbox');
+  const trigger=(area,name)=>area.getByRole('button',{name,exact:true});
+  const hasFocus=control=>control.evaluate(element=>element===document.activeElement);
+  async function exerciseMenu(control,choice,previous,size){
+    const name=await control.getAttribute('aria-label');
+    await control.click();
+    await list.getByRole('option',{name:choice,exact:true}).click();
+    assert.ok(await hasFocus(control),name+' returns mouse selection to its trigger');
+    await control.press('ArrowDown');
+    const selected=list.locator('[role=option][aria-selected=true]');
+    assert.equal(await selected.getAttribute('aria-label'),choice);
+    assert.equal(await selected.locator('.select-option-check:visible').count(),1);
+    await page.keyboard.press('ArrowUp');
+    assert.equal(await list.locator('.active').getAttribute('aria-label'),previous);
+    assert.equal(await list.locator('.select-option-check:visible').count(),1);
+    const active=list.locator('.custom-select-option.active');
+    assert.notEqual(await active.evaluate(row=>getComputedStyle(row).backgroundColor),
+      await selected.evaluate(row=>getComputedStyle(row).backgroundColor),name+' separates the next choice from the saved value');
+    await list.screenshot({path:path.join(evidence,size+'-'+name+'.png'),animations:'disabled'});
+    await page.keyboard.press('Escape');
+    assert.ok(await hasFocus(control),name+' preserves focus on cancel');
+    assert.equal(await control.getAttribute('aria-description'),choice);
+    await control.press('ArrowDown');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    assert.ok(await hasFocus(control),name+' preserves focus on keyboard confirmation');
+    assert.equal(await control.getAttribute('aria-description'),previous);
+  }
+  async function checkVisiblePickers(root){
+    for(const button of await root.locator('.custom-select-button:visible:enabled').all()){
+      if(!await button.evaluate(el=>el.previousElementSibling.options.length))continue;
+      await button.press('ArrowDown');
+      const chosen=list.locator('[role=option][aria-selected=true]:enabled');
+      if(await chosen.count())assert.equal(await chosen.locator('.select-option-check:visible').count(),1);
+      await page.keyboard.press('Escape');
+      assert.ok(await hasFocus(button),await button.getAttribute('aria-label'));
+    }
+  }
+  async function checkMapDialog(size){
+    await trigger(library,'从贴图创建材质').click();
+    const dialog=page.getByRole('dialog',{name:'从贴图创建材质'});
+    const files=await Promise.all(['../public/arachne-icon.png','../../../examples/mavic-4-pro-studio/calibration-mark.png']
+      .map(name=>fs.readFile(new URL(name,import.meta.url))));
+    const prefix=size+'_工业设备维护标记与保护涂层_面板左侧';
+    await dialog.getByLabel('导入材质贴图').setInputFiles(['BaseColor','Albedo'].map((suffix,index)=>({
+      name:prefix+'_'+suffix+'.png',mimeType:'image/png',buffer:files[index]
+    })));
+    await dialog.getByRole('status').filter({hasText:'项待选择'}).waitFor();
+    const color=trigger(dialog,'颜色');
+    await color.click();
+    const candidate=list.locator('.select-option-with-detail').first();
+    const plain=list.locator('[role=option]').first();
+    assert.ok(await candidate.locator('img').count());
+    assert.ok(await candidate.locator('.select-option-label').evaluate(label=>label.scrollWidth<=label.clientWidth),
+      'The full candidate filename can be read inside the menu');
+    const start=locator=>locator.evaluate(el=>el.getBoundingClientRect().left);
+    assert.ok(Math.abs(await start(plain.locator('.select-option-label'))-await start(candidate.locator('.select-option-label')))<1);
+    const chosenName=await candidate.getAttribute('aria-label');
+    await candidate.click();await color.press('ArrowDown');
+    assert.equal(await list.locator('[aria-selected=true]').getAttribute('aria-label'),chosenName);
+    await list.screenshot({path:path.join(evidence,size+'-map-picker.png'),animations:'disabled'});
+    await page.keyboard.press('Escape');assert.ok(await hasFocus(color));
+    await checkVisiblePickers(dialog);
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({state:'hidden'});
+  }
+  async function menuAndSelection(size){
+    await show('modeling');
+    const model=page.locator('.editor-area[data-editor=viewport]').first();
+    await exerciseMenu(trigger(model,'变换工具'),'旋转','移动',size);
+    const nodeArea=page.locator('.editor-area[data-editor=shader]').first();
+    const id=await nodeArea.getAttribute('data-area-id');
+    const area=page.locator('[data-area-id="'+id+'"].editor-area');
+    await exerciseMenu(trigger(area,'编辑器类型'),'材质图层','材质节点编辑器',size);
+    await model.locator('summary[aria-label="着色设置"]').press('ArrowDown');
+    await until(()=>hasFocus(trigger(model,'视口材质通道')),'focus visible channel picker');
+    await exerciseMenu(trigger(model,'视口材质通道'),'颜色','完整材质',size);
+    await page.keyboard.press('Escape');
+    await show('material');
+    const stack=page.locator('.editor-area[data-editor=layers]').first(),filter=trigger(stack,'图层栈通道');
+    await exerciseMenu(filter,'颜色','全部通道',size);
+    for(const button of [filter,trigger(stack,'图层混合模式')])
+      assert.ok(await button.evaluate(el=>el.scrollWidth<=el.clientWidth),
+        size+' '+await button.getAttribute('aria-label')+' '+await button.evaluate(el=>[el.clientWidth,el.scrollWidth]));
+    const tileA=library.locator('[data-resource-id=sample-0]'),tileB=library.locator('[data-resource-id=sample-1]');
+    await tileA.click();await tileB.hover();
+    const layer=page.locator('.editor-area[data-editor=layers] :is(.editor-layer-name,.layer-select)').first();
+    const tabStops=await page.locator('button:visible:enabled,input:visible:enabled,[tabindex="0"]:visible,summary:visible').count();
+    for(let tab=0;tab<tabStops&&!await hasFocus(layer);tab++)await page.keyboard.press('Tab');
+    assert.equal(await tileA.getAttribute('aria-pressed'),'true');
+    assert.equal(await tileB.getAttribute('aria-pressed'),'false');
+    assert.ok(await tileB.evaluate(b=>b.matches(':hover')));
+    assert.ok(await layer.evaluate(b=>b.matches(':focus-visible')));
+    assert.ok(await hasFocus(layer));
+    await library.screenshot({path:path.join(evidence,size+'-resources.png')});
+    await page.screenshot({path:path.join(evidence,size+'-layer-focus.png')});
+    await layer.press('Enter');
+    assert.equal(await layer.getAttribute('aria-pressed'),'true');
+    assert.ok(await hasFocus(layer),'selecting the layer keeps keyboard focus in its row');
+  }
   for(const [size,dimensions] of [['wide',{width:1440,height:940}],['narrow',{width:900,height:630}]]){
     await page.setViewportSize(dimensions);
+    await menuAndSelection(size);
     for(const workspace of ['modeling','material','drawing']){
       await show(workspace);
       if(workspace==='drawing')assert.equal(await shelf('图片').getAttribute('aria-selected'),'true');
       if(workspace==='material')assert.equal(await shelf('材质').getAttribute('aria-selected'),'true');
+      await checkVisiblePickers(page.locator('#workspace'));
       const widths=await page.evaluate(()=>({document:document.documentElement.scrollWidth,window:innerWidth}));
       assert.ok(widths.document<=widths.window);
       await page.screenshot({path:path.join(evidence,workspace+'-'+size+'.png')});
@@ -177,7 +283,20 @@ try{
   assert.equal((await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync())).state,'ready');
   await page.reload();await viewport.waitFor();
   assert.equal(await ratio(),pendingRatio);
+  for(const [size,width,height] of [['wide',1440,940],['narrow',900,630]]){
+    await page.setViewportSize({width,height});await show('material');await checkMapDialog(size);
+    await page.getByRole('button',{name:'设置',exact:true}).click();
+    await checkVisiblePickers(page.locator('#settings-dialog'));
+    await page.getByRole('button',{name:'取消',exact:true}).click();
+    await page.locator('.paint-menu>summary').filter({hasText:'文件'}).click();
+    await page.locator('#open-delivery').click();
+    await checkVisiblePickers(page.locator('#delivery-dialog'));
+    await page.keyboard.press('Escape');
+    await page.locator('#delivery-dialog').waitFor({state:'hidden'});
+  }
   assert.deepEqual(errors,[]);
+  console.log('PASS checked menu values, pointer and keyboard selection, focus return, resource hover and layer focus at both sizes');
+  console.log('PASS long map candidates align names across rows with and without thumbnail previews');
   console.log('PASS all three workspaces at 1440 and 900 px; viewport reallocates its buffer at 125%, 200% and 100% without a CSS resize');
   console.log('PASS narrow drawing toolbar keeps its height across eight tools and transform, with reachable brush settings');
   console.log('PASS drawing defaults to image assets, and drawing and material remember their separate library tabs after reload');

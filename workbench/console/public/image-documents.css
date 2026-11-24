@@ -125,7 +125,7 @@
 .document-tools{
   grid-row:2;display:grid;grid-template-rows:minmax(0,1fr) auto;min-height:0;
   background:var(--chrome-panel-title);border-inline-end:1px solid var(--chrome-line);
-  --drawing-tool-ink:#bcbcbc;--drawing-tool-active:#d9e8f7;--drawing-tool-marker:#87b1d8;
+  --drawing-tool-ink:#bcbcbc;--drawing-tool-active:#d9e8f7;--drawing-tool-marker:var(--chrome-active-marker);
 }
 .document-tool-list{
   min-height:0;overflow:hidden auto;overscroll-behavior-y:contain;scroll-padding-block:4px;
@@ -146,7 +146,7 @@
   content:'';position:absolute;inset:7px auto 7px 1px;width:2px;border-radius:2px;background:var(--drawing-tool-marker);
 }
 #workspace .document-tool-group>button:disabled{opacity:.45;cursor:default}
-#workspace :is(.document-tool-group,.document-color-actions)>button:focus-visible{outline:1px solid var(--drawing-tool-marker);outline-offset:-1px}
+#workspace :is(.document-tool-group,.document-color-actions)>button:focus-visible{outline:1px solid var(--chrome-focus);outline-offset:-2px}
 .document-tool-group>button .chrome-icon{width:20px;height:20px;stroke-width:1.5}
 .document-image-stage{grid-row:2;grid-column:2;min-width:0;min-height:0;outline:0;background:#242424}
 .document-image-stage canvas{background:repeating-conic-gradient(#454545 0 25%,#363636 0 50%) 0/16px 16px;box-shadow:0 0 0 1px #151515}
@@ -223,7 +223,10 @@
   flex:none;width:54px;height:18px;border-radius:2px;border:1px solid #1d1d1d;
   background:var(--gradient-preview),repeating-conic-gradient(#474747 0 25%,#626262 0 50%) 0/8px 8px
 }
-.document-editor>.editor-message{grid-row:3;grid-column:1/-1;min-height:24px;font-size:12px;white-space:nowrap;overflow:hidden}
+.document-status-bar{grid-row:3;grid-column:1/-1;display:flex;align-items:center;min-width:0;min-height:24px;white-space:nowrap;overflow:hidden}
+.document-status-bar>.editor-message,.document-clipboard-notice{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.document-clipboard-notice{padding-inline-start:9px;color:var(--chrome-text)}
+.document-clipboard-notice:empty{display:none}
 .document-empty{position:absolute;inset:0;display:flex;justify-content:center;align-items:center;flex-direction:column;gap:12px;color:#aaa;font-size:13px}
 .document-empty[hidden]{display:none}
 .document-empty strong{color:#ddd;font-size:15px;font-weight:500}

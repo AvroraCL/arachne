@@ -1194,6 +1194,7 @@ function syncLayerSelection(){
   const maskId=paintTarget==='mask'?selected:null;
   for(const row of $('layers').querySelectorAll('.layer-row')){
     const {layerId}=row.dataset;
+    row.toggleAttribute('data-active-layer',layerId===selected);
     row.querySelector('.layer-select').setAttribute('aria-pressed',String(selection.has(layerId)));
     row.querySelector('.layer-thumb')?.toggleAttribute('data-active',selection.size===1&&selected===layerId&&paintTarget==='material');
     row.toggleAttribute('data-isolated-layer',layerId===isolatedLayerId);
@@ -1320,10 +1321,15 @@ function renderLayers(){
   const rows=materialLayerRows(doc.paint.layers,{query,collapsed:collapsedFolders,revealId:revealedDrop});
   const stack=$('layers');
   const previous=stack.dataset.projectId===doc.id?new Map([...stack.children].map(row=>[row.dataset.layerId,row])):new Map();
+  const focused=document.activeElement;
+  let replacementFocus=null;
   stack.dataset.projectId=doc.id;
   stack.replaceChildren(...rows.map(({layer,depth})=>{
     const row=renderLayer(layer,depth,channel,filtering),old=previous.get(layer.id);
     if(old){
+      if(focused?.parentElement===old&&focused.matches('button')){
+        replacementFocus=row.querySelector('.'+CSS.escape(focused.classList[0]));
+      }
       for(const selector of ['.layer-thumb canvas','.layer-mask canvas']){
         const existing=old.querySelector(selector),replacement=row.querySelector(selector);
         if(!existing||!replacement)continue;
@@ -1336,6 +1342,7 @@ function renderLayers(){
   }));
   $('layer-search-empty').hidden=!filtering||rows.length!==0;
   syncLayerSelection();
+  replacementFocus?.focus({preventScroll:true});
 }
 function renderLayer(l,depth,channel,filtering){
     const node=localButton('',event=>selectMaterialLayerById(l.id,event));

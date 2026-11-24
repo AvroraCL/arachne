@@ -203,7 +203,13 @@ export function createAreaWorkspace({host,registry,project,initial='material',re
     const context={host:body,root:section,header,tools,title,maximize:()=>maximize(area.id),areaId:area.id,workspaceName:name,state:structuredClone(area.states[area.editor]||{}),project,onChange:stateChanged,
       activate:()=>activate(area.id),error:showError};
     const instance=registry.create(area.editor,context),view={section,select,body,instance,restore,stopHeader,summary:actions.querySelector('summary'),type:area.editor};views.set(area.id,view);
-    select.onchange=()=>{if(!mutate(tree=>changeEditor(tree,area.id,select.value))){select.value=area.editor;syncSelectMenu(select);}};
+    select.onchange=()=>{
+      const pickerFocused=select.parentElement.contains(document.activeElement);
+      if(!mutate(tree=>changeEditor(tree,area.id,select.value))){
+        select.value=area.editor;syncSelectMenu(select);return;
+      }
+      if(pickerFocused)views.get(area.id).section.querySelector('.area-editor-picker>.custom-select-button').focus({preventScroll:true});
+    };
     section.addEventListener('pointerdown',event=>{if(!event.target.closest('.area-menu,.area-corner'))activate(area.id,event);},true);
     section.addEventListener('focusin',()=>{if(active!==area.id)activate(area.id);});
     const ownsCorner=event=>gesture?.owner===corner&&gesture.pointer===event.pointerId;
