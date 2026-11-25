@@ -338,6 +338,23 @@ assert bytes(raw)==expected
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8',env:{...process.env,OPENBLAS_NUM_THREADS:'1'}});
 });
 
+test('packaged ACES colorants implement the published AP0 to AP1 matrix',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import numpy as np
+from io import BytesIO
+from PIL import ImageCms
+from image_color_spaces import profile_bytes
+def colorants(space):
+    p=ImageCms.ImageCmsProfile(BytesIO(profile_bytes(space))).profile
+    return np.array([p.red_colorant[0],p.green_colorant[0],p.blue_colorant[0]]).T
+# ACEScg specification TRA_1. ICC XYZ tags are signed 16.16 numbers.
+actual=np.linalg.solve(colorants('acescg'),colorants('aces2065-1'))
+expected=[[1.4514393161,-.2365107469,-.2149285693],[-.0765537734,1.1762296998,-.0996759264],
+          [.0083161484,-.0060324498,.9977163014]]
+np.testing.assert_allclose(actual,expected,rtol=0,atol=2e-5)
+`],{cwd:new URL('..',import.meta.url)});
+});
+
 test('working RGB preserves native samples and alpha while the canvas matches the embedded PNG profile',()=>{
   const samples=JSON.parse(execFileSync(pythonExecutable(),['-B','-c',`
 from io import BytesIO
@@ -346,7 +363,7 @@ import json, numpy as np
 from image_documents import composite_document, png_bytes, read_placed_image
 from image_color_spaces import decode
 rows=[]
-for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec2020-g24','dci-p3','linear-srgb'):
+for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec2020-g24','dci-p3','acescg','aces2065-1','linear-srgb'):
     # Midtones, near-black transfer curves and out-of-sRGB primaries.
     pixels=np.array([[[68,119,170,161],[4,12,3,39],[145,50,99,255],[0,250,32,128],[253,226,241,192]]],np.uint8)
     data=png_bytes(pixels,space)
@@ -366,7 +383,7 @@ for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec202
     doc=dict(colorSpace=space,layers=[layer('base','#000000',1),layer('light','#ffffff',.5)])
     # Half-light encoded in each document's working space.
     middle={'display-p3':188,'adobe-rgb':186,'prophoto-rgb':174,'rec709':180,'rec2020':180,
-            'rec2020-g24':191,'dci-p3':195,'linear-srgb':128}[space]
+            'rec2020-g24':191,'dci-p3':195,'acescg':128,'aces2065-1':128,'linear-srgb':128}[space]
     assert list(composite_document(doc,{},16)[8,8])==[middle,middle,middle,255]
     rows.append([space,pixels.flatten().tolist(),expected.flatten().tolist()])
 print(json.dumps(rows))

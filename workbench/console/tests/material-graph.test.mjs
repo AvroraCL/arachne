@@ -100,7 +100,7 @@ with tempfile.TemporaryDirectory() as temp:
         result=ImageCms.profileToProfile(Image.fromarray(original),BytesIO(profile_bytes(space)),ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
         return np.asarray(result)[0]
     preview=PreviewImages()
-    for setting,source in [('auto','rec2020'),('adobe-rgb','adobe-rgb'),('auto','rec2020')]:
+    for setting,source in [('auto','rec2020'),('adobe-rgb','adobe-rgb'),('acescg','acescg'),('aces2065-1','aces2065-1'),('auto','rec2020')]:
         node['params']['colorSpace']=setting
         expected=proof(source)
         for cache in [None,preview]:

@@ -808,6 +808,7 @@ let compositorFingerprint;
 export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
   compositorFingerprint??=crypto.createHash('sha256').update(JSON.stringify([
     'paint_worker.py','paint_channels.py','paint_surface.py','paint_mask_generators.py','fill_projection.py','material_graph.py','material_noise.py','image_documents.py','image_color_spaces.py','public/color-profiles/sRGB-v4.icc','public/color-profiles/DisplayP3-v4.icc','public/color-profiles/AdobeCompat-v2.icc','public/color-profiles/ProPhoto-v4.icc',
+    'public/color-profiles/ACEScg-linear.icc','public/color-profiles/ACES2065-1-linear.icc',
     'public/color-profiles/Rec709-v4.icc','public/color-profiles/Rec2020-v4.icc','public/color-profiles/Rec2020-g24-v4.icc','public/color-profiles/DCI-P3-v4.icc','public/color-profiles/scRGB-v2.icc','image_adjustments.py','image_filters.py','image_raster_tools.py',
     'project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
     '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'

@@ -70,7 +70,7 @@ try{
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
   assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
-  for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['linear-srgb','线性 sRGB（颜色）','cRGB']]){
+  for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['acescg','ACEScg（AP1 线性）','ACEScg - Arachne Linear RGB'],['aces2065-1','ACES2065-1（AP0 线性）','ACES2065-1 - Arachne Linear RGB'],['linear-srgb','线性 sRGB（颜色）','cRGB']]){
     await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
     await width.fill('63');await height.fill('31');
     await dialog.getByRole('button',{name:'背景内容',exact:true}).click();

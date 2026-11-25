@@ -67,6 +67,8 @@ function newImageSettings(form,width,height,defaultName){
     }
     const hex=readColor(),profiled=!['linear','srgb'].includes(space.value);
     const usage={
+      'acescg':'使用 AP1 线性 RGB，PNG 保存 0–1 范围的 8 位颜色。',
+      'aces2065-1':'使用 AP0 线性 RGB，PNG 保存 0–1 范围的 8 位颜色。',
       'linear-srgb':'按线性光处理颜色，预览会校正亮度。',
       'rec709':'使用 Rec.709 摄像传递曲线。',
       'rec2020':'使用 Rec.2020 摄像传递曲线。',
