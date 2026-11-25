@@ -1,4 +1,4 @@
-import {writeDisplayRGB} from './image-display-rgb.mjs';
+import {hasWideGamut,writeDisplayRGB} from './image-display-rgb.mjs';
 import {previewDimensions,documentFrame} from './image-document-size.mjs';
 import {renderChannel,liveStride,effectiveValues,channelSpecs,paintChannels} from './paint-channels.mjs';
 const workingSize=256,detailSize=4096;
@@ -138,7 +138,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       canvas.width=width;canvas.height=height;
       image=ctx.createImageData(width,height);
     }
-    if(rgba)writeDisplayRGB(image.data,pixels,request.inspectMask?null:request.colorSpace);else renderChannel(pixels,size,channel,image.data);
+    if(rgba)writeDisplayRGB(image.data,pixels,request.inspectMask?null:request.colorSpace,state.gamutWarning);else renderChannel(pixels,size,channel,image.data);
     if(channel==='coverage'){
       const stride=liveStride(pixels,size);
       for(let i=0,j=0;i<pixels.length;i+=stride,j+=4){const [r,g,b]=palette[pixels[i+5]&3];image.data[j]=r;image.data[j+1]=g;image.data[j+2]=b;}
@@ -150,8 +150,17 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       viewport.showLivePaint(pixels,size,solo?image.data:null,{revision:request.revision,draft:!!request.operation});
       if(!drawn?.preview3D||drawn.solo!==solo)viewport.setUnlit(solo);
     }
-    drawn={pixels,channel,solo,preview3D};
+    drawn={pixels,channel,solo,preview3D,colorSpace:request.inspectMask?null:request.colorSpace};
     status();
+  }
+
+  function drawPatch({request,pixels,window:[x,y,side]},warnGamut){
+    const [ox,oy]=documentFrame(request.imageGeometry);
+    const space=request.inspectMask?null:request.colorSpace;
+    const wide=space&&!['srgb','linear'].includes(space);
+    const tile=wide?ctx.createImageData(side,side):new ImageData(new Uint8ClampedArray(pixels.buffer,pixels.byteOffset,pixels.byteLength),side,side);
+    if(wide)writeDisplayRGB(tile.data,pixels,space,warnGamut);
+    ctx.putImageData(tile,x-ox,y-oy);
   }
 
   function flush(){
@@ -202,7 +211,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       const next=new Uint8Array(await transport(()=>response.arrayBuffer()));
       if(window&&response.headers?.get('X-Paint-Window')===window.join(',')){
         if(!isCurrent())return;
-        const [x,y,side]=window;
+        const side=window[2];
         const [ox,oy]=documentFrame(request.imageGeometry);
         const [width,height]=previewDimensions(request.imageGeometry,detailSize);
         if(next.length!==side*side*4||canvas.width!==width||canvas.height!==height||!image)throw Error('局部预览尺寸无效');
@@ -210,11 +219,9 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
           const [left,top,side]=patched.window;
           ctx.putImageData(image,0,0,left-ox,top-oy,side,side);
         }
-        const wide=!request.inspectMask&&request.colorSpace&&!['srgb','linear'].includes(request.colorSpace);
-        const tile=wide?ctx.createImageData(side,side):new ImageData(new Uint8ClampedArray(next.buffer),side,side);
-        if(wide)writeDisplayRGB(tile.data,next,request.colorSpace);
-        ctx.putImageData(tile,x-ox,y-oy);
-        patched={window,request};
+        const patch={window,request,pixels:next};
+        drawPatch(patch,context().gamutWarning);
+        patched=!request.inspectMask&&hasWideGamut(request.colorSpace)?patch:{window,request};
         onFrame({request,pixels:next,window});
         return;
       }
@@ -326,6 +333,13 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
         else if(intent?.size===detailSize&&frame?.request.size!==detailSize)status('refining');
       }
       scheduleDetail();
+    },
+    displayChanged(){
+      const state=context();
+      if(!rgba||!hasWideGamut(drawn?.colorSpace)||!image||!state)return;
+      writeDisplayRGB(image.data,drawn.pixels,drawn.colorSpace,state.gamutWarning);
+      ctx.putImageData(image,0,0);
+      if(patched?.pixels)drawPatch(patched,state.gamutWarning);
     },
     interactionResolutionChanged(){
       const state=context();

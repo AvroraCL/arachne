@@ -75,8 +75,9 @@ try{
     await width.fill('63');await height.fill('31');
     await dialog.getByRole('button',{name:'背景内容',exact:true}).click();
     await dialog.getByRole('option',{name:'自定颜色',exact:true}).click();
-    await dialog.getByLabel('背景颜色').fill('#4477aa');
-    assert.equal(await paper.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(68, 119, 170)');
+    const sourceHex=colorSpace==='acescg'?'#00ff00':'#4477aa';
+    await dialog.getByLabel('背景颜色').fill(sourceHex);
+    assert.equal(await paper.evaluate(e=>getComputedStyle(e).backgroundColor),colorSpace==='acescg'?'rgb(0, 255, 0)':'rgb(68, 119, 170)');
     await dialog.getByRole('button',{name:'颜色空间',exact:true}).click();
     for(const name of ['Display P3','Adobe RGB (1998)','ProPhoto RGB','Rec.709','Rec.2020','Rec.2020（Gamma 2.4）','DCI-P3（影院）','线性 sRGB（颜色）'])assert.ok(await dialog.getByRole('option',{name,exact:true}).isVisible());
     await dialog.getByRole('option',{name:label,exact:true}).click();
@@ -100,7 +101,9 @@ assert ImageCms.getProfileDescription(profile).strip()==sys.argv[2]
 proof=ImageCms.profileToProfile(im,profile,ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
 print(*proof.getpixel((30,15)))
 assert im.size==(63,31)
-assert im.getextrema()==((68,68),(119,119),(170,170),(255,255)),im.getextrema()`,backgroundFile,description],{encoding:'utf8'}).trim().split(/\s+/).map(Number);
+from PIL import ImageColor
+rgba=ImageColor.getrgb(sys.argv[3])+(255,)
+assert im.getextrema()==tuple((n,n) for n in rgba),im.getextrema()`,backgroundFile,description,sourceHex],{encoding:'utf8'}).trim().split(/\s+/).map(Number);
     swatch.forEach((value,i)=>assert.ok(Math.abs(value-expectedDisplay[i])<=1,label+' 新建预览色块'));
     async function checkDisplay(){
       await until(async()=>{
@@ -110,6 +113,14 @@ assert im.getextrema()==((68,68),(119,119),(170,170),(255,255)),im.getextrema()`
     }
     if(colorSpace==='acescg'){
       const revisionBefore=(await api(route)).revision;
+      await checkDisplay();
+      const viewButton=editor.getByRole('button',{name:'画布视图',exact:true});
+      await viewButton.click();
+      const warning=editor.getByRole('checkbox',{name:'sRGB 色域警告'});
+      await warning.check();
+      assert.deepEqual(await canvas.evaluate(c=>[...c.getContext('2d').getImageData(c.width>>1,c.height>>1,1,1).data]),[255,173,54,255]);
+      assert.match(await editor.locator('.editor-message').innerText(),/sRGB 色域警告/);
+      await viewButton.click();
       await editor.getByRole('button',{name:'选择 PNG 输出颜色空间',exact:true}).click();
       const asSRGB=page.waitForEvent('download');
       await page.getByRole('menuitem',{name:'颜色（sRGB）',exact:true}).click();
@@ -123,6 +134,7 @@ im=Image.open(sys.argv[1]);assert im.size==(63,31) and im.info['srgb']==0
 print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).map(Number);
       assert.ok(png.every((v,i)=>Math.abs(v-expectedDisplay[i])<=1),'sRGB 输出副本与受色彩管理的原稿预览一致');
       assert.equal((await api(route)).revision,revisionBefore);
+      await viewButton.click();await warning.uncheck();await viewButton.click();
     }
     await checkDisplay();
     await page.reload();await checkDisplay();

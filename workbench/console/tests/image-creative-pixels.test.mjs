@@ -418,3 +418,17 @@ print(json.dumps(rows))
       assert.ok(Math.abs(display[i]-expected[i])<=(i%4===3?0:1),space+' '+i+' '+display[i]+' vs '+expected[i]);
   }
 });
+
+test('sRGB proof warning marks wide-gamut visible colors and preserves neutral, hidden RGB and soft alpha',()=>{
+  const source=Uint8Array.of(0,255,0,77, 255,255,255,255, 72,72,72,128, 0,255,0,0);
+  const display=new Uint8ClampedArray(source.length),warning=display.slice();
+  writeDisplayRGB(display,source,'display-p3');
+  writeDisplayRGB(warning,source,'display-p3',true);
+  assert.deepEqual([...warning.slice(0,4)],[255,173,54,77]);
+  assert.deepEqual(warning.slice(4),display.slice(4));
+  for(const space of ['linear','srgb','linear-srgb','rec709']){
+    writeDisplayRGB(display,source,space);
+    writeDisplayRGB(warning,source,space,true);
+    assert.deepEqual(warning,display);
+  }
+});

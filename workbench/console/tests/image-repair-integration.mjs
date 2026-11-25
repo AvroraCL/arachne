@@ -109,9 +109,9 @@ try{
   const imagePath=path.join(data,'registered-uv.png');
   const overlayBytes=await overlay.evaluate(async image=>Array.from(new Uint8Array(await (await fetch(image.src)).arrayBuffer())));
   await fs.writeFile(imagePath,Buffer.from(overlayBytes));
-  const viewButton=editor.getByRole('button',{name:'画布方向',exact:true});
+  const viewButton=editor.getByRole('button',{name:'画布视图',exact:true});
   await viewButton.click();
-  const orientation=editor.getByRole('dialog',{name:'画布方向',exact:true});
+  const orientation=editor.getByRole('dialog',{name:'画布视图',exact:true});
   await orientation.getByRole('button',{name:'水平镜像视图',exact:true}).click();
   assert.equal(await overlay.evaluate(image=>image.style.transform),await canvas.evaluate(image=>image.style.transform));
   await orientation.getByRole('button',{name:'复位视图方向',exact:true}).click();

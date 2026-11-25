@@ -13,7 +13,11 @@ const toSRGB={
 };
 const decoders=new Map();
 let encoded;
-export function writeDisplayRGB(target,pixels,space){
+export function hasWideGamut(space){
+  return Boolean(toSRGB[space])&&space!=='rec709'&&space!=='linear-srgb';
+}
+
+export function writeDisplayRGB(target,pixels,space,warnGamut=false){
   const m=toSRGB[space];
   if(!m){if(target!==pixels)target.set(pixels);return;}
   if(!encoded)encoded=Uint8Array.from({length:65536},(_,i)=>{
@@ -37,9 +41,12 @@ export function writeDisplayRGB(target,pixels,space){
   const byte=x=>encoded[Math.round(Math.max(0,Math.min(1,x))*65535)];
   for(let i=0;i<pixels.length;i+=4){
     const r=linear[pixels[i]],g=linear[pixels[i+1]],b=linear[pixels[i+2]];
-    target[i]=byte(m[0]*r+m[1]*g+m[2]*b);
-    target[i+1]=byte(m[3]*r+m[4]*g+m[5]*b);
-    target[i+2]=byte(m[6]*r+m[7]*g+m[8]*b);
+    const red=m[0]*r+m[1]*g+m[2]*b,green=m[3]*r+m[4]*g+m[5]*b,blue=m[6]*r+m[7]*g+m[8]*b;
+    // Ignore tiny excursions from rounding ICC matrix tags (signed 16.16).
+    const outside=warnGamut&&pixels[i+3]>0&&(Math.min(red,green,blue)<-.0002||Math.max(red,green,blue)>1.0002);
+    target[i]=outside?255:byte(red);
+    target[i+1]=outside?173:byte(green);
+    target[i+2]=outside?54:byte(blue);
     target[i+3]=pixels[i+3];
   }
 }

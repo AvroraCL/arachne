@@ -422,3 +422,24 @@ test('an exact stroke patch survives its matching save and yields to the next co
   revise(3);view.refresh();await finish(4,30);
   assert.equal(drawn.at(-1),30);
 });
+
+test('toggling the gamut warning redraws a held wide-gamut brush patch without issuing a preview request',async t=>{
+  const {view,requests,drawn,finish,configure,revise}=fixture(t,true,{rgba:true});
+  t.after(()=>view.dispose());
+  configure({documentId:'p3',colorSpace:'display-p3',visiblePixels:[[0,4096],[0,4096]],detailDelay:60_000});
+  view.refresh();await finish(0,10);
+  view.retryDetail();await finish(1,11,4096);
+  const stroke={op:'image',action:'stroke',layerId:'color',target:'pixels',stroke:{radius:.001,stamps:[[.5,.5]]}};
+  view.update(stroke);
+  const {window}=requests[2].data,pixels=new Uint8Array(window[2]**2*4);
+  pixels.set([0,255,0,73]);
+  requests[2].resolve(new Response(pixels,{headers:{'X-Paint-Window':window.join(',')}}));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(drawn.at(-1),0);
+  revise(2);view.update(null,structuredClone(stroke));await finish(3,20);
+  configure({gamutWarning:true});view.displayChanged();
+  assert.equal(drawn.at(-1),255);
+  configure({gamutWarning:false});view.displayChanged();
+  assert.equal(drawn.at(-1),0);
+  assert.equal(requests.length,4);
+});

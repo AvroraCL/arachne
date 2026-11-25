@@ -65,8 +65,8 @@ try{
     await page.mouse.move(...a);await page.mouse.down();
     await page.mouse.move(...b,{steps:6});await page.mouse.up();
   }
-  const view=editor.getByRole('button',{name:'画布方向',exact:true});
-  const dialog=editor.getByRole('dialog',{name:'画布方向',exact:true});
+  const view=editor.getByRole('button',{name:'画布视图',exact:true});
+  const dialog=editor.getByRole('dialog',{name:'画布视图',exact:true});
   await stage.focus();await page.keyboard.press('r');
   await editor.getByRole('button',{name:'旋转视图',exact:true,pressed:true}).waitFor();
   await stage.locator('xpath=self::*[@data-preview-size="4096"]').waitFor({timeout:65000});

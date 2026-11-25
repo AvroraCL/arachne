@@ -1,5 +1,6 @@
 import {menuShortcut} from './menu-shortcut.mjs';
 import {documentClip,documentFrame,editingSide,imageViewGeometry,previewDimensions} from './image-document-size.mjs';
+import {hasWideGamut} from './image-display-rgb.mjs';
 import {editDocumentSize} from './image-size-dialog.mjs';
 import {textEffects,imageStyleKinds,outlinePositions,hasImageStyle} from './image-text-style.mjs';
 import {createImageEdgeTool} from './image-edge-tool.mjs';
@@ -430,7 +431,10 @@ export function createDocumentEditor(ctx,bridge){
   footer.append(clipboardNotice,status);
   host.classList.add('document-editor');host.append(options,rail,stage,footer,importInput);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
   let mode=state.tool||'orbit',selectionShape=Object.hasOwn(selectionNames,state.selectionTool)?state.selectionTool:'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
-  let angle=state.angle??0,mirror=state.mirror===true;
+  let angle=state.angle??0,mirror=state.mirror===true,gamutWarning=state.gamutWarning===true;
+  function canWarnGamut(){
+    return !project.imageContext?.inspectMask&&hasWideGamut(currentDocument(project)?.colorSpace);
+  }
   let lassoShape=state.lassoShape==='polygon'?'polygon':'lasso';
   let painter,gradientTool,bucketTool,cloneTool,shapeTool,moveTool,warpTool,canvasText,penTool,edgeTool,pendingImageEdit=null,previewCaption='',fillGroup=state.fillGroup==='bucket'?'bucket':'gradient';
   function layoutBrushOptions(){
@@ -461,7 +465,7 @@ export function createDocumentEditor(ctx,bridge){
     if(previewCaption){
       const pending=strokeQueue?.size>0?` · ${strokeQueue.failure?'待恢复':'保存中'} ${strokeQueue.size} 笔`:'';
       const doc=currentDocument(project);
-      const label=`${(fitScale()*zoom*100).toFixed(1)}%　文档 ${doc?.width??4096} × ${doc?.height??4096}　${project.imageContext?.inspectMask?'蒙版 · ':''}${previewCaption}${pending}`;
+      const label=`${(fitScale()*zoom*100).toFixed(1)}%　文档 ${doc?.width??4096} × ${doc?.height??4096}　${project.imageContext?.inspectMask?'蒙版 · ':''}${previewCaption}${gamutWarning&&canWarnGamut()?' · sRGB 色域警告':''}${pending}`;
       if(status.textContent!==label)status.textContent=label;
     }
   }
@@ -538,7 +542,7 @@ export function createDocumentEditor(ctx,bridge){
         ]);
       }
       return {id:doc.id,revision:doc.revision,documentId:c.documentId,inspectMask:c.inspectMask?c.layerId:null,channel:'color',
-        colorSpace:image.colorSpace,imageGeometry:imageViewGeometry(image),
+        colorSpace:image.colorSpace,gamutWarning:gamutWarning&&canWarnGamut(),imageGeometry:imageViewGeometry(image),
         fastSize,visiblePixels,strokeBleed,detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};
     },
     onFrame:frame=>{stage.dataset.strokeWindow=frame.window?.join(',')??'';},
@@ -1022,8 +1026,8 @@ export function createDocumentEditor(ctx,bridge){
   const actualSize=button('实际像素',()=>{zoom=1/fitScale();pan=[0,0];layout();});
   const viewMenu=el('details','document-brush-popup document-orientation-menu'),viewSummary=el('summary');
   const viewPopup=el('div','document-brush-popup-content document-orientation-popup');
-  viewPopup.setAttribute('role','dialog');viewPopup.setAttribute('aria-label','画布方向');
-  chromeButton(viewSummary,'rotateView','画布方向');
+  viewPopup.setAttribute('role','dialog');viewPopup.setAttribute('aria-label','画布视图');
+  chromeButton(viewSummary,'rotateView','画布视图');
   viewSummary.setAttribute('role','button');viewSummary.setAttribute('aria-haspopup','dialog');viewSummary.setAttribute('aria-expanded','false');
   const angleField=el('input'),angleLabel=el('label','','视图角度');
   Object.assign(angleField,{type:'number',min:-180,max:180,step:.1,value:angle});
@@ -1033,7 +1037,14 @@ export function createDocumentEditor(ctx,bridge){
   const mirrorView=chromeButton(button('水平镜像视图',()=>{mirror=!mirror;layout();}),'mirrorView');
   mirrorView.append('水平镜像视图');
   const resetView=button('复位视图方向',resetOrientation);
-  viewPopup.append(angleLabel,mirrorView,resetView);viewMenu.append(viewSummary,viewPopup);
+  const gamutLabel=el('label','','sRGB 色域警告'),gamutToggle=el('input');
+  gamutToggle.type='checkbox';gamutToggle.checked=gamutWarning;
+  gamutLabel.title='橙色标出超出 sRGB 的颜色，透明度保留';
+  gamutToggle.onchange=()=>{
+    gamutWarning=gamutToggle.checked;live.displayChanged();updateViewStatus();ctx.onChange();
+  };
+  gamutLabel.append(gamutToggle);
+  viewPopup.append(angleLabel,mirrorView,resetView,gamutLabel);viewMenu.append(viewSummary,viewPopup);
   viewMenu.addEventListener('toggle',()=>viewSummary.setAttribute('aria-expanded',String(viewMenu.open)),{signal});
   chromeMenu(viewMenu,viewPopup);
   chromeButton(fitCanvas,'fit');fitCanvas.append(el('span','document-fit-label','适应画布'));
@@ -1591,6 +1602,7 @@ export function createDocumentEditor(ctx,bridge){
     picker.value=c?.documentId||'';syncSelectMenu(picker);
     backToParent.hidden=!c?.sourceTrail?.length;
     backToParent.disabled=writing();backToParent.title='返回 '+(doc.paint.imageDocuments?.[c?.sourceTrail?.at(-1)?.documentId]?.name??'原稿');
+    gamutLabel.hidden=!canWarnGamut();
     dimensions.disabled=!image||writing();syncSelectMenu(dimensions);
     syncBind();textTool.disabled=!image||writing()||c?.target==='mask'||(!canInsertImage(project)&&!(layer?.text&&!layerLockOwner(image.layers,layer)));
     const locked=layer&&layerLockOwner(image.layers,layer);
@@ -1606,7 +1618,7 @@ export function createDocumentEditor(ctx,bridge){
     ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();live.refresh();uvGuide.sync();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,angle,mirror,uvGuide:uvGuide.enabled,tool:mode,edgeRefine:edgeTool.getState(),selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),wand:readWand(),colorRange:readRange(),selectionRefineRadius:refineRadius.valueAsNumber,gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),move:moveTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,angle,mirror,gamutWarning,uvGuide:uvGuide.enabled,tool:mode,edgeRefine:edgeTool.getState(),selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),wand:readWand(),colorRange:readRange(),selectionRefineRadius:refineRadius.valueAsNumber,gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),move:moveTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
     strokeSaveStatus:()=>({pending:strokeQueue.size,saving:strokeQueue.saving,failure:strokeQueue.failure}),retryStrokeSave,
     editCommand,canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
     canCut,cutSelection,pasteSystemImage,canPasteInPlace:()=>canPaste()&&canInsertImage(project)&&!!copiedImage(),pasteInPlace:()=>pasteSelection(true),
