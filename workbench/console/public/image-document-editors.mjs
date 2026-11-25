@@ -1,3 +1,4 @@
+import {menuShortcut} from './menu-shortcut.mjs';
 import {documentClip,documentFrame,editingSide,imageViewGeometry,previewDimensions} from './image-document-size.mjs';
 import {editDocumentSize} from './image-size-dialog.mjs';
 import {textEffects,imageStyleKinds,outlinePositions,hasImageStyle} from './image-text-style.mjs';
@@ -2060,7 +2061,7 @@ export function createImagePanel(type,ctx){
     const move=(label,icon,shortcut,direction)=>guarded(label,icon,shortcut,()=>imageLayerMoveStep(layers,ids,direction),async placement=>{
       await moveLayerSelection(origin,ids,placement,count);
     });
-    const duplicate=guarded(item.embedded&&!multi?'放置关联实例':'复制','copy','⌘ / Ctrl + J',()=>checkImageLayerDuplicate(layers,ids),async plan=>{
+    const duplicate=guarded(item.embedded&&!multi?'放置关联实例':'复制','copy',menuShortcut('Mod+J'),()=>checkImageLayerDuplicate(layers,ids),async plan=>{
       const copyIds=plan.roots.map(()=>crypto.randomUUID());
       await apply('duplicateLayers',{copyIds});
       if(sameImage()&&project.imageContext?.layerId===origin.layerId){
@@ -2088,7 +2089,7 @@ export function createImagePanel(type,ctx){
           '将删除 '+count+' 项。'+clips,removeSelection);
       }else return removeSelection();
     });
-    return [move('上移','moveUp','⌘ / Ctrl + ]',1),move('下移','moveDown','⌘ / Ctrl + [',-1),duplicate,remove];
+    return [move('上移','moveUp',menuShortcut('Mod+]'),1),move('下移','moveDown',menuShortcut('Mod+['),-1),duplicate,remove];
   }
   function editText(item,origin=imageSelectionOrigin(project)){
     if(item?.text&&!layerLockOwner(currentDocument(project).layers,item)&&!ctx.busy?.())ctx.openImageText?.(origin,item);
@@ -2137,14 +2138,14 @@ export function createImagePanel(type,ctx){
       if(stamp&&layers.length>=imageLayerLimit)reason='请先合并图层，为盖印结果腾出空间';
       return {
         label:imageCombineLabels[action],icon:rasterize?'brush':'copy',enabled:!reason,
-        shortcut:rasterize?undefined:stamp?'⇧⌥⌘E / Ctrl+Alt+Shift+E':'⌘ / Ctrl + E',
+        shortcut:rasterize?undefined:stamp?menuShortcut('Mod+Alt+Shift+E'):menuShortcut('Mod+E'),
         title:reason||(stamp?'生成像素层，暂时隐藏原图层。可撤销恢复原来的显隐状态。':undefined),
         run:()=>combineImageLayers(project,origin,action,layerIds)
       };
     }
     if(selectedRows.size>1){
       menu.open(position,'已选 '+selectedRows.size+' 个图层',[
-        {label:'将所选图层成组',icon:'folder',shortcut:'⌘ / Ctrl + G',enabled:editable,run:()=>createGroup(true)},
+        {label:'将所选图层成组',icon:'folder',shortcut:menuShortcut('Mod+G'),enabled:editable,run:()=>createGroup(true)},
         combine('mergeSelected',[...selectedRows]),combine('stampVisible',[]),
         null,up,down,destination,copy,remove
       ]);
@@ -2152,11 +2153,11 @@ export function createImagePanel(type,ctx){
     }
     menu.open(position,item.name,[
       {label:'重命名',icon:'pen',shortcut:'F2',enabled:editable,run:()=>startRename(view)},
-      {label:'将所选图层成组',icon:'folder',shortcut:'⌘ / Ctrl + G',enabled:editable,run:()=>createGroup(true)},
+      {label:'将所选图层成组',icon:'folder',shortcut:menuShortcut('Mod+G'),enabled:editable,run:()=>createGroup(true)},
       ...(item.embedded?[{label:'编辑内嵌源稿',icon:'image',run:()=>openEmbeddedSource(project,item)}]:
         [{label:'转换为内嵌对象',icon:'image',enabled:editable&&item.kind!=='adjustment',
           run:()=>commandAt(project,origin,{action:'embedLayer',layerId:item.id,newDocumentId:crypto.randomUUID()})}]),
-      ...(item.kind==='group'?[{label:'解散图层组',icon:'folder',shortcut:'⌘ / Ctrl + Shift + G',enabled:editable,run:()=>ungroup(item,origin)}]:[]),
+      ...(item.kind==='group'?[{label:'解散图层组',icon:'folder',shortcut:menuShortcut('Mod+Shift+G'),enabled:editable,run:()=>ungroup(item,origin)}]:[]),
       ...(item.text?[{label:'编辑文字…',icon:'text',enabled:editable,run:()=>editText(item,origin)}]:[]),
       ...(['image','shape'].includes(item.kind)||hasImageStyle(item)||item.edgeDecontaminate?[combine('rasterize',[item.id])]:[]),
       combine('mergeDown',[item.id]),combine('stampVisible',[]),
@@ -2166,7 +2167,7 @@ export function createImagePanel(type,ctx){
       ...(item.kind==='pixel'?[{label:item.alphaLocked?'解锁透明像素':'锁定透明像素',icon:'alphaLock',
         enabled:editable,run:update({alphaLocked:!item.alphaLocked})}]:[]),
       null,up,down,destination,null,
-      ...(item.kind==='group'?[]:[{label:item.clipped?'释放剪贴蒙版':'创建剪贴蒙版',icon:'clippingMask',shortcut:'⌥⌘G',
+      ...(item.kind==='group'?[]:[{label:item.clipped?'释放剪贴蒙版':'创建剪贴蒙版',icon:'clippingMask',shortcut:menuShortcut('Mod+Alt+G'),
         enabled:editable&&!!imageClippingBase(layers,index),
         run:()=>commandAt(project,origin,{action:'setClipping',layerId:item.id,clipped:!item.clipped})}]),
       {label:hasMask?'选择蒙版':'添加蒙版',icon:'mask',enabled:editable||hasMask,run:()=>selectLayerMask(item,origin)},
@@ -2179,12 +2180,12 @@ export function createImagePanel(type,ctx){
         {label:'从蒙版载入选区',icon:'marquee',run:()=>ctx.sampleLayerSelection?.(origin,item.id,'mask','replace')},
         {label:item.maskLinked===false?'链接图层和蒙版':'解除蒙版链接',icon:'mask',enabled:editable,
           run:update({maskLinked:item.maskLinked===false})},
-        {label:'单独查看蒙版',icon:'eye',shortcut:'Alt',run:()=>selectLayerMask(item,origin,{inspect:true})},
+        {label:'单独查看蒙版',icon:'eye',shortcut:menuShortcut('Alt+点击'),run:()=>selectLayerMask(item,origin,{inspect:true})},
         {label:item.maskEnabled?'停用蒙版':'启用蒙版',icon:'mask',enabled:editable,run:update({maskEnabled:!item.maskEnabled})},
         {label:'反相蒙版',icon:'invert',enabled:editable,run:maskAction('invertMask')},
         {label:'删除蒙版',icon:'trash',enabled:editable,run:maskAction('removeMask')}
       ]:[{label:ctx.imageSelection?.(origin)?'用蒙版隐藏选区':'用蒙版隐藏全部',icon:'mask',enabled:editable,
-        shortcut:'Alt 点击蒙版按钮',run:()=>selectLayerMask(item,origin,{reveal:false})}]),
+        shortcut:menuShortcut('Alt+点击蒙版按钮'),run:()=>selectLayerMask(item,origin,{reveal:false})}]),
       null,remove
     ]);
   }

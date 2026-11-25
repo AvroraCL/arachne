@@ -82,8 +82,16 @@ export function chromeMenu(menu,content){
   });
   content.addEventListener('beforetoggle',event=>{if(event.newState==='closed'){menu.open=false;state.point=null;state.focusOnOpen=null;}});
 }
+// Keep the keyboard cursor on the hovered command when switching input methods.
+export function followMenuPointer(menu){
+  menu.addEventListener('pointermove',event=>{
+    const row=event.target.closest('button[role=menuitem]:enabled');
+    if(row&&row!==document.activeElement)row.focus({preventScroll:true});
+  });
+}
 export function createContextActions(label,onError){
   const menu=document.createElement('div');menu.className='scene-context-menu';menu.popover='auto';menu.setAttribute('role','menu');menu.setAttribute('aria-label',label);document.body.append(menu);
+  followMenuPointer(menu);
   const close=()=>{if(menu.matches(':popover-open'))menu.hidePopover();};
   menu.onkeydown=event=>{
     if(!['Escape','ArrowDown','ArrowUp','Home','End'].includes(event.key))return;event.preventDefault();event.stopPropagation();

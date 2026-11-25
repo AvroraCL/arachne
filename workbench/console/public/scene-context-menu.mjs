@@ -1,8 +1,10 @@
+import {followMenuPointer} from './area-chrome.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {renamedObjects} from './scene-object-names.mjs';
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 export function createSceneContextMenu({host,project,ctx,renderState,changeRendered}){
   const menu=el('div','scene-context-menu');menu.popover='auto';menu.setAttribute('role','menu');menu.setAttribute('aria-label','物体操作');host.append(menu);
+  followMenuPointer(menu);
   let snapshot=null;
   const close=()=>{if(menu.matches(':popover-open'))menu.hidePopover();};
   function current(){const scene=project.scene;if(project.document?.id!==snapshot?.projectId||scene?.binding!==snapshot.binding||scene.dragging||snapshot.ids.some(id=>!scene.sceneItems.some(item=>item.id===id)))throw Error('物体目标已变化，请重新打开菜单');return scene;}

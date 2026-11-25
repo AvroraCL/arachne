@@ -1,3 +1,4 @@
+import {menuShortcut} from './menu-shortcut.mjs';
 import {connectDesktopWorkspace} from './paint-desktop-workspace.mjs';
 import {isSelectionAsset} from './uv-selection-region.mjs';
 import {compositionKey} from './text-input.mjs';
@@ -62,6 +63,7 @@ import {createMaskThumbnails} from './paint-mask-thumbnails.mjs';
 import {startAssetDrag,currentAssetDrag,endAssetDrag,hasAssetDrag,readAssetDrag} from './paint-asset-drag.mjs';
 
 const $=id=>document.getElementById(id);
+for(const key of document.querySelectorAll('.app-menus kbd[data-shortcut]'))key.textContent=menuShortcut(key.dataset.shortcut);
 const [desktopSettings,desktopWorkspace]=await Promise.all([connectDesktopSettings(window,localStorage),connectDesktopWorkspace(window)]);
 let preferences=desktopSettings?.initial?.preferences||loadPreferences(localStorage);
 applyAppearance(preferences);
@@ -1454,11 +1456,11 @@ function openMaterialLayerMenu(event,id,rename=startLayerRename){
   const editable=!!single&&!lockOwner(single),canGroup=items.every(layer=>!lockOwner(layer)&&layerParent(layer)===layerParent(item));
   const canCopy=items.every(layer=>{const owner=lockOwner(layer);return !owner||owner===layer;});
   const actions=[name('重命名…','text',()=>rename(single.id),editable,'F2'),
-    edit(items.length>1?'复制所选图层':'复制图层','copy',()=>addAndSelect(...ids.map(id=>({op:'duplicate',id}))),canCopy,'⌘D'),
-    edit('收进新文件夹','collection',()=>addAndSelect({op:'group',ids}),canGroup,'⌘G'),null,
+    edit(items.length>1?'复制所选图层':'复制图层','copy',()=>addAndSelect(...ids.map(id=>({op:'duplicate',id}))),canCopy,menuShortcut('Mod+D')),
+    edit('收进新文件夹','collection',()=>addAndSelect({op:'group',ids}),canGroup,menuShortcut('Mod+G')),null,
     edit('隐藏所选图层','hidden',()=>command(ids.map(id=>({op:'update',id,patch:{visible:false}}))),items.some(layer=>layer.visible)),
     edit('显示所选图层','eye',()=>command(ids.map(id=>({op:'update',id,patch:{visible:true}}))),items.some(layer=>!layer.visible))];
-  if(single)actions.push(name(isolatedLayerId===single.id?'退出图层独显':'独显图层','eye',()=>toggleLayerIsolation(single),true,'⌥ 点击眼睛'));
+  if(single)actions.push(name(isolatedLayerId===single.id?'退出图层独显':'独显图层','eye',()=>toggleLayerIsolation(single),true,menuShortcut('Alt+点击眼睛')));
   if(single?.kind==='group')actions.push(null,name('保存为智能材质','material',()=>{
     areaSystem?.areas.openEditor('library');
     return libraryUI.saveSmart(single.id);
@@ -1466,7 +1468,7 @@ function openMaterialLayerMenu(event,id,rename=startLayerRename){
   if(single){
     actions.push(null);
     if(hasLayerMask(single))actions.push(name('编辑蒙版','mask',()=>selectMaskTarget(single)),
-      name(inspectedMask()?.id===single.id?'退出蒙版查看':'查看蒙版','mask',()=>selectMaskTarget(single,{altKey:true}),true,'⌥ 点击缩略图'),
+      name(inspectedMask()?.id===single.id?'退出蒙版查看':'查看蒙版','mask',()=>selectMaskTarget(single,{altKey:true}),true,menuShortcut('Alt+点击缩略图')),
       edit(single.maskEnabled===false?'启用蒙版':'停用蒙版','mask',()=>command([{op:'update',id:single.id,patch:{maskEnabled:single.maskEnabled===false}}]),editable),
       edit('删除蒙版','trash',()=>command([{op:'removeMask',id:single.id}]),editable));
     else for(const [label,value] of [['添加白色蒙版',1],['添加黑色蒙版',0]])actions.push(name(label,'mask',async()=>{

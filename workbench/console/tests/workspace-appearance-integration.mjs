@@ -8,6 +8,10 @@ import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {defaultLibraryMaterial} from '../public/paint-library.mjs';
 import {chromium} from 'playwright-core';
+import {menuShortcut} from '../public/menu-shortcut.mjs';
+
+assert.equal(menuShortcut('Mod+Alt+Shift+E','MacIntel'),'⇧⌥⌘E');
+assert.equal(menuShortcut('Mod+Alt+Shift+E','Win32'),'Ctrl+Alt+Shift+E');
 
 const data=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-workspaces-'));
 const evidence=process.env.ARACHNE_WORKSPACE_SCREENSHOTS||data;
@@ -79,6 +83,13 @@ try{
     assert.equal(await list.locator('.active').getAttribute('aria-label'),previous);
     assert.equal(await list.locator('.select-option-check:visible').count(),1);
     const active=list.locator('.custom-select-option.active');
+    if(name==='变换工具'){
+      const offsets=await active.evaluate(row=>{
+        const r=row.getBoundingClientRect(),label=row.querySelector('.select-option-label').getBoundingClientRect();
+        return [Math.round(label.left-r.left),Math.round(r.right-row.querySelector('kbd').getBoundingClientRect().right),r.height];
+      });
+      assert.deepEqual(offsets,[30,7,28],'transform picker and context commands share the same columns');
+    }
     assert.notEqual(await active.evaluate(row=>getComputedStyle(row).backgroundColor),
       await selected.evaluate(row=>getComputedStyle(row).backgroundColor),name+' separates the next choice from the saved value');
     await list.screenshot({path:path.join(evidence,size+'-'+name+'.png'),animations:'disabled'});
@@ -129,6 +140,34 @@ try{
     await page.keyboard.press('Escape');
     await dialog.waitFor({state:'hidden'});
   }
+  async function contextPreview(target,size,workspace){
+    await target.click({button:'right'});
+    const menu=page.getByRole('menu').filter({visible:true}),rows=menu.locator('[role=menuitem]:enabled');
+    await rows.nth(1).hover();
+    assert.ok(await hasFocus(rows.nth(1)),workspace+' hover moves the keyboard cursor');
+    const hoverFill=await rows.nth(1).evaluate(row=>getComputedStyle(row).backgroundColor);
+    await page.keyboard.press('ArrowDown');
+    assert.ok(await hasFocus(rows.nth(2)),workspace+' keyboard navigation starts at the hovered command');
+    assert.equal(await rows.nth(2).evaluate(row=>getComputedStyle(row).backgroundColor),hoverFill);
+    assert.notEqual(await rows.nth(1).evaluate(row=>getComputedStyle(row).backgroundColor),hoverFill);
+    const layout=await menu.getByRole('menuitem').evaluateAll(items=>items.map(item=>{
+      const row=item.getBoundingClientRect(),label=item.querySelector('.scene-menu-label').getBoundingClientRect();
+      const kbd=item.querySelector('kbd').getBoundingClientRect();
+      return [Math.round(label.left-row.left),Math.round(row.right-kbd.right),row.height];
+    }));
+    assert.ok(layout.every(([left,right,height])=>left===30&&right===7&&height>=28),workspace+' command columns');
+    const bounds=await menu.boundingBox(),view=page.viewportSize();
+    assert.ok(bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=view.width&&bounds.y+bounds.height<=view.height);
+    await rows.nth(1).hover();
+    await menu.screenshot({path:path.join(evidence,size+'-'+workspace+'-context.png'),animations:'disabled'});
+    if(workspace==='drawing'){
+      const platform=await page.evaluate(()=>navigator.platform);
+      assert.equal(await menu.getByRole('menuitem',{name:'盖印可见图层'}).locator('kbd').textContent(),menuShortcut('Mod+Alt+Shift+E',platform));
+      await page.screenshot({path:path.join(evidence,'drawing-menu-'+size+'.png'),animations:'disabled'});
+    }
+    await page.keyboard.press('Escape');
+    await menu.waitFor({state:'hidden'});
+  }
   async function menuAndSelection(size){
     await show('modeling');
     const model=page.locator('.editor-area[data-editor=viewport]').first();
@@ -149,6 +188,7 @@ try{
       assert.deepEqual(await surface(trigger(header,name)),reference,size+' collapsed '+name);
     assert.equal(await trigger(header,'框选').evaluate(el=>getComputedStyle(el).backgroundImage),'none');
     await header.screenshot({path:path.join(evidence,size+'-viewport-header.png'),animations:'disabled'});
+    await contextPreview(page.getByRole('button',{name:'立方体',exact:true}),size,'modeling');
     const selectMenu=trigger(header,'建模选择');
     await selectMenu.click();
     assert.equal(await selectMenu.getAttribute('aria-expanded'),'true');
@@ -185,6 +225,7 @@ try{
     await layer.press('Enter');
     assert.equal(await layer.getAttribute('aria-pressed'),'true');
     assert.ok(await hasFocus(layer),'selecting the layer keeps keyboard focus in its row');
+    await contextPreview(layer,size,'material');
   }
   for(const [size,dimensions] of [['wide',{width:1440,height:940}],['narrow',{width:900,height:630}]]){
     await page.setViewportSize(dimensions);
@@ -200,6 +241,7 @@ try{
       const statuses=page.locator(':is(.document-status-bar,.editor-preview-status,.shader-status,.editor-scene-footer):visible');
       statusHeights.push(...await statuses.evaluateAll(bars=>bars.map(bar=>bar.getBoundingClientRect().height)));
       if(workspace==='drawing'){
+        await contextPreview(page.locator('.document-layer-name:visible').first(),size,'drawing');
         const fit=await page.locator('.document-layer-actions:visible').first().evaluate(bar=>{
           const bounds=bar.getBoundingClientRect();
           return [...bar.querySelectorAll('button')].every(button=>{
