@@ -10,7 +10,7 @@ const vec=v=>new Vector3(...v);
 
 export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,place,sample,isHandHeld,uvClip,swapInk,
   onIdle=()=>{},elements=null,settingsKey:customKey=null,preserveUnavailableMode=false,stickySample=false,sampleAnyLayer=false,
-  cloneTool=()=>null}){
+  cloneTool=()=>null,uvBounds=null}){
   const $=id=>elements?.[id]||document.getElementById(id);
   const gizmo=$('projector-gizmo');
   const radiusInput=$('brush-radius'),brushCursor=$('brush-cursor');
@@ -147,7 +147,8 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   restoreBrush();
   function uvPoint(x,y,coordinates=canvasCoordinates(uvCanvas)){
     const [u,v]=coordinates.fromClient(x,y);
-    return u>=0&&u<=1&&v>=0&&v<=1?[u,v]:null;
+    const [left,top,right,bottom]=uvBounds?.()??[0,0,1,1];
+    return u>=left&&u<=right&&v>=top&&v<=bottom?[u,v]:null;
   }
   function trackUVCursor(event,x=event.clientX,y=event.clientY){
     uvHover={x,y,buttons:event.buttons,sampling:event.altKey,penPressure:event.pointerType==='pen'?event.pressure:null,overControls:uvControl(event)};
@@ -181,7 +182,7 @@ export function createSurfaceTools({viewport,host,uvHost,context,preview,commit,
   }
   function setTipOutline(coordinates,diameter,tip){
     if(!drawingBrush)return;
-    uvCursor.style.setProperty('--brush-tip-height',Math.max(3,diameter*(tip?.roundness??1))+'px');
+    uvCursor.style.setProperty('--brush-tip-height',Math.max(3,diameter*(tip?.roundness??1)*coordinates.height/coordinates.width)+'px');
     uvCursor.style.setProperty('--brush-tip-angle',coordinates.direction(tip?.angle??0)+'deg');
   }
   function uvControl(event){return event.target.closest('.uv-controls,#uv-wipe-control');}

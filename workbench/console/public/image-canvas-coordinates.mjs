@@ -1,23 +1,24 @@
 // A rotated bounding box keeps the canvas center, but its edges no longer track the document axes.
 const orientations=new WeakMap();
 
-export function orientImageCanvas(canvas,edge,angle,mirror){
+export function orientImageCanvas(canvas,edge,angle,mirror,height=edge,origin=[.5,.5]){
   const radians=angle*Math.PI/180,cos=Math.cos(radians),sin=Math.sin(radians);
-  orientations.set(canvas,{edge,cos,sin,sign:mirror?-1:1});
+  orientations.set(canvas,{edge,height,origin,cos,sin,sign:mirror?-1:1});
 }
 
 export function canvasCoordinates(canvas){
   const box=canvas.getBoundingClientRect(),pose=orientations.get(canvas);
   const center=[box.left+box.width/2,box.top+box.height/2];
-  const width=pose?.edge??box.width,height=pose?.edge??box.height;
+  const width=pose?.edge??box.width,height=pose?.height??box.height;
   const {cos,sin,sign}=pose??{cos:1,sin:0,sign:1};
+  const [u0,v0]=pose?.origin??[.5,.5];
   function offset([u,v]){
-    const x=(u-.5)*width*sign,y=(v-.5)*height;
+    const x=(u-u0)*width*sign,y=(v-v0)*height;
     return [cos*x-sin*y,sin*x+cos*y];
   }
   function fromClient(x,y){
     x-=center[0];y-=center[1];
-    return [.5+(cos*x+sin*y)*sign/width,.5+(-sin*x+cos*y)/height];
+    return [u0+(cos*x+sin*y)*sign/width,v0+(-sin*x+cos*y)/height];
   }
   function toLocal(host){
     return point=>{

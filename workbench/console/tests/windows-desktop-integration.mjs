@@ -272,6 +272,7 @@ try{
   await page.locator('[data-area-mode=drawing]').click();
   const editor=page.locator('.editor-area[data-editor=image]').first();
   await editor.getByRole('button',{name:'新建贴图',exact:true}).click();
+  await page.getByRole('dialog',{name:'新建贴图'}).getByRole('button',{name:'创建',exact:true}).click();
   const drawing=await waitFor(async()=>{
     const doc=await read('/api/projects/'+id);
     return Object.values(doc.paint.imageDocuments??{}).length&&doc;

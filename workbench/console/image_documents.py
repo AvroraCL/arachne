@@ -1362,6 +1362,26 @@ def refine_local_edge(pixels, edge, rgba=None):
     return pixels
 
 
+def document_frame(document):
+    width,height=document.get('width',4096),document.get('height',4096)
+    return document.get('frame',[(4096-width)//2,(4096-height)//2,width,height])
+
+
+def clear_outside_frame(pixels,document):
+    x,y,w,h=document_frame(document)
+    if (x,y,w,h)==(0,0,4096,4096):
+        return pixels
+    scale=pixels.shape[0]/4096
+    left,top,right,bottom=(max(0,min(pixels.shape[0],math.ceil(edge*scale-.5))) for edge in (x,y,x+w,y+h))
+    if not pixels.flags.writeable:
+        pixels=pixels.copy()
+    pixels[:top]=0
+    pixels[bottom:]=0
+    pixels[:,:left]=0
+    pixels[:,right:]=0
+    return pixels
+
+
 def image_selection_sample(document,assets,options,size):
     surface = ImageSurface(size,assets)
     source,operation = options['source'],options['operation']
@@ -1441,7 +1461,7 @@ def image_selection_sample(document,assets,options,size):
                 low,high = max(0,value-options['tolerance']),min(255,value+options['tolerance'])
                 matching &= (rgba[:,:,index]>=low)&(rgba[:,:,index]<=high)
             if options['contiguous']:
-                matching = connected_area(matching,y,x)
+                matching = connected_area(clear_outside_frame(matching,document),y,x)
             pixels = matching.astype(np.uint8)*255
         del rgba
         if operation!='replace':
@@ -1450,6 +1470,7 @@ def image_selection_sample(document,assets,options,size):
                 pixels = base-np.minimum(base,pixels)
             else:
                 pixels = combine_selection_pixels(base,pixels,operation)
+    pixels = clear_outside_frame(pixels,document)
     outline = selection_outline(pixels)
     metadata = json.dumps(outline,separators=(',',':')).encode()
     return struct.pack('>I',len(metadata))+metadata+(png_bytes(pixels) if outline is not None else b'')
@@ -1489,10 +1510,35 @@ def png_bytes(pixels, color_space=None):
     return out.getvalue()
 
 
+def framed_pixels(pixels, document, limit=None, target=None):
+    width, height = document.get('width',4096), document.get('height',4096)
+    x,y,w,h = document_frame(document)
+    if limit is not None:
+        scale = min(1,limit/max(width,height))
+        width,height = max(1,round(width*scale)),max(1,round(height*scale))
+    if target is not None:
+        width,height=target
+    factor = pixels.shape[0]/4096
+    box = [max(0,x*factor),max(0,y*factor),min(pixels.shape[1],(x+w)*factor),min(pixels.shape[0],(y+h)*factor)]
+    if all(value.is_integer() for value in map(float,box)):
+        left,top,right,bottom=map(int,box)
+        cropped=pixels[top:bottom,left:right]
+        if (right-left,bottom-top)==(width,height):
+            return cropped
+        return np.asarray(Image.fromarray(cropped).resize((width,height),Image.Resampling.BICUBIC))
+    image=Image.fromarray(pixels)
+    return np.asarray(image.resize((width,height),Image.Resampling.BICUBIC,box=tuple(box)))
+
+
 _cache=OrderedDict()
 def document_pixels(document,assets,size):
     key=hashlib.sha256(json.dumps([document,size],sort_keys=True).encode()).hexdigest()
     if key not in _cache:
-        _cache[key]=composite_document(document,assets,size)
+        width,height = document.get('width',4096),document.get('height',4096)
+        frame = document_frame(document)
+        # Match the document pixel density in the visible part of the working grid.
+        scale = min(1,size/max(width,height))
+        resolution = 4096 if scale==1 else min(4096,max(1,math.ceil(4096*scale*max(width/frame[2],height/frame[3]))))
+        _cache[key]=framed_pixels(composite_document(document,assets,resolution),document,size)
         while len(_cache)>1:_cache.popitem(last=False)
     return _cache[key]

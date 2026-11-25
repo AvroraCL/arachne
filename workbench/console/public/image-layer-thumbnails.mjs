@@ -1,3 +1,4 @@
+import {previewDimensions} from './image-document-size.mjs';
 const size=64;
 const retryDelays=[150,300,600,1200,2400,4000,4000,4000];
 const cache=new Map();
@@ -23,7 +24,7 @@ function cachedPixels(slot,key){
 }
 
 function draw(canvas,state,key,pixels){
-  if(canvas.width!==size||canvas.height!==size)canvas.width=canvas.height=size;
+  if(canvas.width!==pixels.width||canvas.height!==pixels.height){canvas.width=pixels.width;canvas.height=pixels.height;}
   canvas.getContext('2d').putImageData(pixels,0,0);
   state.shown=key;
 }
@@ -36,9 +37,10 @@ export function pauseImageThumbnail(canvas){
   clearTimeout(request.timer);
 }
 
-export function updateImageThumbnail(canvas,{projectId,revision,documentId,colorSpace},layer,mask=false){
+export function updateImageThumbnail(canvas,{projectId,revision,documentId,colorSpace,geometry},layer,mask=false){
   const slot=JSON.stringify([projectId,documentId,layer.id,mask]);
-  const key=thumbnailKey(slot,colorSpace,layer,mask);
+  const key=thumbnailKey(slot,[colorSpace,geometry],layer,mask);
+  const [width,height]=previewDimensions(geometry,size);
   let state=canvases.get(canvas);
   if(!state){state={shown:null,request:null};canvases.set(canvas,state);}
   if(state.request?.key===key){state.request.revision=revision;return;}
@@ -65,7 +67,7 @@ export function updateImageThumbnail(canvas,{projectId,revision,documentId,color
           signal:request.controller.signal,
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({
-            revision:sentRevision,documentId,isolatedImageLayer:layer.id,resolution:size,
+            revision:sentRevision,documentId,isolatedImageLayer:layer.id,resolution:size,...(geometry?{documentView:true}:{}),
             ...(mask?{inspectMask:layer.id}:{})
           })
         });
@@ -74,8 +76,8 @@ export function updateImageThumbnail(canvas,{projectId,revision,documentId,color
         if(response.status===503){deferred=retry(attempt);return;}
         if(!response.ok||response.status===204)return;
         const bytes=await response.arrayBuffer();
-        if(!current()||bytes.byteLength!==size*size*4)return;
-        const pixels=new ImageData(new Uint8ClampedArray(bytes),size,size);
+        if(!current()||bytes.byteLength!==width*height*4)return;
+        const pixels=new ImageData(new Uint8ClampedArray(bytes),width,height);
         cache.delete(slot);
         cache.set(slot,{key,pixels});
         while(cache.size>128)cache.delete(cache.keys().next().value);

@@ -1,3 +1,5 @@
+import {documentClip,documentFrame,editingSide,imageViewGeometry,previewDimensions} from './image-document-size.mjs';
+import {editDocumentSize} from './image-size-dialog.mjs';
 import {textEffects,imageStyleKinds,outlinePositions,hasImageStyle} from './image-text-style.mjs';
 import {createImageEdgeTool} from './image-edge-tool.mjs';
 import {createImagePenTool} from './image-pen-tool.mjs';
@@ -103,7 +105,8 @@ export function createDocumentEditor(ctx,bridge){
   const header=el('div','editor-toolbar'),picker=choice('图像文档',[],'',value=>{if(painter.isEditing()||selection.isTransforming())return;selectImage(project,{documentId:value||null,layerId:null,target:'pixels'});});
   const run=fn=>Promise.resolve().then(fn).catch(error=>{status.textContent=error.message;ctx.error(error);});
   const create=button('新建贴图',()=>{const origin=imageSelectionOrigin(project),documentId=crypto.randomUUID(),layerId=crypto.randomUUID();void run(async()=>{
-    await project.commands([{op:'image',action:'create',documentId,patch:{name:'未命名贴图 '+(Object.keys(project.document.paint.imageDocuments??{}).length+1)}},{op:'image',action:'addLayer',documentId,layerId,kind:'pixel'}],origin);
+    const dimensions=await editDocumentSize('create',null,{signal});if(!dimensions)return;
+    await project.commands([{op:'image',action:'create',documentId,patch:{...dimensions,name:'未命名贴图 '+(Object.keys(project.document.paint.imageDocuments??{}).length+1)}},{op:'image',action:'addLayer',documentId,layerId,kind:'pixel'}],origin);
     const c=project.imageContext;if(!disposed&&project.document?.id===origin.id&&c?.documentId===origin.documentId&&c?.layerId===origin.layerId&&c?.target===origin.target)selectImage(project,{documentId,layerId,target:'pixels'});
   });});
   const channel=choice('材质引用通道',paintChannels.map(k=>[k,channelSpecs[k].name]),state.channel||'color',()=>{syncDestination(true);ctx.onChange();});
@@ -157,12 +160,20 @@ export function createDocumentEditor(ctx,bridge){
   };
   const download=chromeButton(button('导出当前贴图 PNG',downloadDocument),'download');
   download.classList.add('document-export-button');
-  download.title='导出当前贴图 · 4096 × 4096 PNG';
+  download.title='导出当前贴图 PNG';
   chromeButton(copy,'copy');chromeButton(paste,'paste');
   copy.title='复制图像选区 · ⌘ / Ctrl + C';paste.title='粘贴为图像层 · ⌘ / Ctrl + V';
   copy.disabled=paste.disabled=importButton.disabled=download.disabled=true;
   let copying=false,cutting=false,importing=false,exportRequest=null;
-  header.append(picker,create,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
+  const dimensions=choice('图像尺寸操作',[['','尺寸'],['resizeCanvas','画布尺寸…'],['cropCanvas','裁切…'],['resizeImage','图像尺寸…']],'',action=>{
+    dimensions.value='';syncSelectMenu(dimensions);if(!action)return;
+    const origin=imageSelectionOrigin(project),doc=currentDocument(project);
+    void run(async()=>{
+      const patch=await editDocumentSize(action,doc,{canvas,signal});
+      if(patch)await commandAt(project,origin,{action,patch});
+    });
+  });
+  header.append(picker,create,dimensions,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const editTarget=el('span','document-edit-target'),targetLayerName=el('span'),targetKind=el('span');
   editTarget.append(targetLayerName,' · ',targetKind);
@@ -392,24 +403,36 @@ export function createDocumentEditor(ctx,bridge){
     }
     syncParameterEdges();
   }
-  function extent(){return Math.max(1,Math.min(stage.clientWidth,stage.clientHeight)-48);}
+  function fitScale(){
+    const doc=currentDocument(project);
+    return Math.min(Math.max(1,stage.clientWidth-48)/(doc?.width??editingSide),
+      Math.max(1,stage.clientHeight-48)/(doc?.height??editingSide));
+  }
+  function extent(){
+    const doc=currentDocument(project);
+    return fitScale()*(doc?.width??editingSide)*editingSide/documentFrame(doc)[2];
+  }
   // The wheel and keyboard share the same document-pixel range at any panel size.
-  function clampZoom(value){return Math.max(.03,Math.min(4096*16/extent(),value));}
+  function clampZoom(value){return Math.max(.03,Math.min(16/fitScale(),value));}
   function updateViewStatus(size){
     if(previewCaption){
       const pending=strokeQueue?.size>0?` · ${strokeQueue.failure?'待恢复':'保存中'} ${strokeQueue.size} 笔`:'';
-      const label=`${(size*zoom/4096*100).toFixed(1)}%　文档 4096 × 4096　${project.imageContext?.inspectMask?'蒙版 · ':''}${previewCaption}${pending}`;
+      const doc=currentDocument(project);
+      const label=`${(fitScale()*zoom*100).toFixed(1)}%　文档 ${doc?.width??4096} × ${doc?.height??4096}　${project.imageContext?.inspectMask?'蒙版 · ':''}${previewCaption}${pending}`;
       if(status.textContent!==label)status.textContent=label;
     }
   }
   function layout(){
     if(!shown)return;
-    const size=extent();
-    canvas.style.width=canvas.style.height=size+'px';
-    orientImageCanvas(canvas,size*zoom,angle,mirror);
-    canvas.style.transform=`translate(-50%,-50%) translate(${pan[0]}px,${pan[1]}px) rotate(${angle}deg) scale(${mirror?-zoom:zoom},${zoom})`;
-    uvGuideImage.style.width=uvGuideImage.style.height=size+'px';
-    uvGuideImage.style.transform=canvas.style.transform;
+    const doc=currentDocument(project),[x,y,w,h]=documentFrame(doc),scale=fitScale(),size=extent();
+    const logicalWidth=scale*(doc?.width??editingSide),logicalHeight=scale*(doc?.height??editingSide);
+    const gridHeight=logicalHeight*editingSide/h;
+    canvas.style.width=logicalWidth+'px';canvas.style.height=logicalHeight+'px';
+    orientImageCanvas(canvas,size*zoom,angle,mirror,gridHeight*zoom,[(x+w/2)/editingSide,(y+h/2)/editingSide]);
+    const transform=`translate(-50%,-50%) translate(${pan[0]}px,${pan[1]}px) rotate(${angle}deg) scale(${mirror?-zoom:zoom},${zoom})`;
+    canvas.style.transform=transform;
+    uvGuideImage.style.width=logicalWidth+'px';uvGuideImage.style.height=logicalHeight+'px';
+    uvGuideImage.style.transform=transform;
     angleField.value=angle;
     mirrorView.setAttribute('aria-pressed',String(mirror));
     viewSummary.toggleAttribute('data-oriented',!!angle||mirror);
@@ -455,7 +478,9 @@ export function createDocumentEditor(ctx,bridge){
       // Beyond 50% document scale, one 512px sample covers at least four CSS pixels.
       const fastSize=extent()*zoom>=2048?1024:zoom>=1.75?512:256;
       let visiblePixels,strokeBleed=0;
-      if(extent()*zoom>=4096*.9){
+      const image=currentDocument(project),frame=documentFrame(image);
+      const patchable=frame[2]===image.width&&frame[3]===image.height&&frame.every(Number.isInteger);
+      if(patchable&&extent()*zoom>=4096*.9){
         const layers=currentDocument(project).layers;
         for(let item=layers.find(layer=>layer.id===c.layerId);item;item=layers.find(layer=>layer.id===layerParent(item))){
           const {outline,shadow}=item.styles??{};
@@ -470,12 +495,14 @@ export function createDocumentEditor(ctx,bridge){
         ]);
       }
       return {id:doc.id,revision:doc.revision,documentId:c.documentId,inspectMask:c.inspectMask?c.layerId:null,channel:'color',
+        imageGeometry:imageViewGeometry(image),
         fastSize,visiblePixels,strokeBleed,detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};
     },
     onFrame:frame=>{stage.dataset.strokeWindow=frame.window?.join(',')??'';},
     onStatus:(text,error,detail)=>{if(disposed)return;if(!detail){previewCaption='';status.title=status.textContent=text;return;}const {size=0,revision,phase,message,failedSize}=detail;stage.dataset.previewSize=String(size);stage.dataset.previewRevision=String(revision??'');stage.dataset.previewPhase=phase||'';status.title=message||text;
       if(sampleNotice.dataset.pending&&sampleFrame(imageOrigin()))showSampleNotice();
-      const actual=size?`实际预览 ${size} × ${size}${size===4096?' · 4K':''}`:'等待实时预览',suffix=phase==='refining'?' · 正在提升到 4K…':phase==='retrying'?' · 预览暂不可用，正在重试…':phase==='error'?` · ${failedSize===4096?'4K 更新失败':'预览更新失败'} · 点击重试`:'';
+      const [pw,ph]=previewDimensions(currentDocument(project),size);
+      const actual=size?`实际预览 ${pw} × ${ph}${size===4096&&pw===4096&&ph===4096?' · 4K':''}`:'等待实时预览',suffix=phase==='refining'?(currentDocument(project)?.width===4096&&currentDocument(project)?.height===4096?' · 正在提升到 4K…':' · 正在细化至文档尺寸…'):phase==='retrying'?' · 预览暂不可用，正在重试…':phase==='error'?` · ${failedSize===4096?'全尺寸更新失败':'预览更新失败'} · 点击重试`:'';
       previewCaption=actual+suffix;status.tabIndex=phase==='error'?0:-1;if(phase==='error')status.setAttribute('role','button');else status.removeAttribute('role');layout();}});
   let brushPreview=[],brushPreviewRevision=null;
   function syncStrokePreview(){
@@ -588,8 +615,10 @@ export function createDocumentEditor(ctx,bridge){
     if(origin.maskTarget)return false;
     const frame=sampleFrame(origin);
     if(!frame){showSampleNotice('等待当前图像预览',true);return false;}
-    const {pixels,request:{size}}=frame;
-    const x=Math.min(size-1,Math.floor(hit.u*size)),y=Math.min(size-1,Math.floor(hit.v*size)),offset=(y*size+x)*4;
+    const {pixels,request:{size,imageGeometry}}=frame;
+    const [width,height]=previewDimensions(imageGeometry,size),[l,t,r,b]=documentClip(imageGeometry);
+    const x=Math.max(0,Math.min(width-1,Math.floor((hit.u-l)*width/(r-l))));
+    const y=Math.max(0,Math.min(height-1,Math.floor((hit.v-t)*height/(b-t)))),offset=(y*width+x)*4;
     if(!pixels[offset+3]){showSampleNotice('此处没有可取样的颜色');return false;}
     const color='#'+Array.from(pixels.subarray(offset,offset+3),n=>n.toString(16).padStart(2,'0')).join('');
     showSampleNotice();bridge.setForeground(color);syncColors();
@@ -605,7 +634,7 @@ export function createDocumentEditor(ctx,bridge){
         values:{color:bridge.foreground(),metallic:0,roughness:.5}}:null};
   }
   painter=createSurfaceTools({viewport:{},host:controls.dummy,uvHost:stage,elements,settingsKey:'arachne-document-brush:'+ctx.areaId,preserveUnavailableMode:true,stickySample:true,sampleAnyLayer:true,isHandHeld:()=>space||!!nav,uvClip:()=>selection?.clip(),onIdle:()=>{sync();syncStrokeSave();},
-    context:brushContext,cloneTool:()=>cloneTool,
+    context:brushContext,uvBounds:()=>documentClip(currentDocument(project)),cloneTool:()=>cloneTool,
     preview:(op,origin)=>strokeQueue.preview(mapOperation(op,origin),origin),
     commit:(op,origin)=>strokeQueue.submit(mapOperation(op,origin),origin),sample:sampleImage,place:()=>{}});
   const brushBinding=createBrushBinding({project,painter});
@@ -777,7 +806,7 @@ export function createDocumentEditor(ctx,bridge){
       const image=asset?{x:layer.x,y:layer.y,scale:layer.scale,rotation:layer.rotation,
         stretch:layer.stretch,size:[asset.width,asset.height]}:null;
       return {...origin,id:layer?.id,projectId:origin.id,active:!!currentDocument(project),interactive:!writing()&&!drawingGesture()&&!nav,image,
-        editTarget:pixels?'pixels':'mask',
+        canvasRect:documentClip(currentDocument(project)),editTarget:pixels?'pixels':'mask',
         canSampleLayer:!!layer&&layer.kind!=='adjustment',
         canTransform:editable&&pixels&&(!!image||layer.kind==='pixel'&&!layer.alphaLocked&&!!(layer.raster||layer.strokes?.length)),
         transformReason:layer?.locked?'请先解锁图层':layer&&!layer.visible?'请先显示图层':
@@ -942,10 +971,12 @@ export function createDocumentEditor(ctx,bridge){
     mirror=false;setAngle(0);
   }
   const fitCanvas=button('适应画布',()=>{
-    const {cos,sin}=viewRotation(),span=Math.abs(cos)+Math.abs(sin);
-    zoom=1/span;pan=[0,0];layout();
+    const {cos,sin}=viewRotation(),doc=currentDocument(project);
+    const w=doc?.width??editingSide,h=doc?.height??editingSide;
+    zoom=Math.min(Math.max(1,stage.clientWidth-48)/(Math.abs(cos)*w+Math.abs(sin)*h),
+      Math.max(1,stage.clientHeight-48)/(Math.abs(sin)*w+Math.abs(cos)*h))/fitScale();pan=[0,0];layout();
   });
-  const actualSize=button('实际像素',()=>{zoom=4096/extent();pan=[0,0];layout();});
+  const actualSize=button('实际像素',()=>{zoom=1/fitScale();pan=[0,0];layout();});
   const viewMenu=el('details','document-brush-popup document-orientation-menu'),viewSummary=el('summary');
   const viewPopup=el('div','document-brush-popup-content document-orientation-popup');
   viewPopup.setAttribute('role','dialog');viewPopup.setAttribute('aria-label','画布方向');
@@ -982,13 +1013,14 @@ export function createDocumentEditor(ctx,bridge){
   function fitSelection(){
     const region=selection.clip();
     if(!region||selection.isDragging()||selection.isTransforming())return false;
-    const [left,top,right,bottom]=region.clip,size=extent();
-    const rotation=viewRotation(),cos=Math.abs(rotation.cos),sin=Math.abs(rotation.sin);
-    const w=right-left,h=bottom-top;
-    const fitted=Math.min(Math.max(1,stage.clientWidth-48)/(w*cos+h*sin),Math.max(1,stage.clientHeight-48)/(w*sin+h*cos));
-    zoom=clampZoom(fitted/size);
-    orientImageCanvas(canvas,size*zoom,angle,mirror);
-    pan=canvasCoordinates(canvas).offset([(left+right)/2,(top+bottom)/2]).map(n=>-n);
+    const [left,top,right,bottom]=region.clip,doc=currentDocument(project);
+    const [x,y,fw,fh]=documentFrame(doc),width=extent(),height=fitScale()*doc.height*editingSide/fh;
+    const {cos,sin}=viewRotation(),w=(right-left)*width,h=(bottom-top)*height;
+    zoom=clampZoom(Math.min(Math.max(1,stage.clientWidth-48)/(w*Math.abs(cos)+h*Math.abs(sin)),
+      Math.max(1,stage.clientHeight-48)/(w*Math.abs(sin)+h*Math.abs(cos))));
+    const dx=((left+right)/2-(x+fw/2)/editingSide)*width*(mirror?-zoom:zoom);
+    const dy=((top+bottom)/2-(y+fh/2)/editingSide)*height*zoom;
+    pan=[-dx*cos+dy*sin,-dx*sin-dy*cos];
     layout();
     return true;
   }
@@ -1137,7 +1169,8 @@ export function createDocumentEditor(ctx,bridge){
     importButton.setAttribute('aria-busy',String(importing));
     download.disabled=!canPaste()||!!exportRequest;
     download.setAttribute('aria-busy',String(!!exportRequest));
-    download.title=exportRequest?'正在导出 4K PNG…':'导出当前贴图 · 4096 × 4096 PNG';
+    const doc=currentDocument(project);
+    download.title=exportRequest?'正在导出 PNG…':doc?`导出当前贴图 · ${doc.width} × ${doc.height} PNG`:'导出当前贴图 PNG';
   }
   async function downloadDocument(){
     const image=currentDocument(project);
@@ -1168,7 +1201,7 @@ export function createDocumentEditor(ctx,bridge){
   }
   function copySelection(merged=false){
     if(!canCopy(merged))return false;
-    const origin=imageSelectionOrigin(project),region=selection.clip()||{clip:[0,0,1,1]};
+    const origin=imageSelectionOrigin(project),region=selection.clip()||{clip:documentClip(currentDocument(project))};
     clearClipboardNotice();copying=true;syncClipboard();
     status.textContent=merged?'正在复制可见图层…':'正在复制 4K 像素…';
     void copyImagePixels(origin,region,{merged}).then(({width,height})=>{
@@ -1375,7 +1408,7 @@ export function createDocumentEditor(ctx,bridge){
     }
     let handled=true;
     if((event.altKey!==mod)&&!event.shiftKey&&(key==='backspace'||key==='delete')){
-      const {clip,...shape}=selection.clip()||{clip:[0,0,1,1]};
+      const {clip,...shape}=selection.clip()||{clip:documentClip(currentDocument(project))};
       const mask=colorTarget()==='mask',slot=event.altKey?'foreground':'background';
       const color=bridge.colorPair(colorTarget())[slot];
       const op=!selection.isTransforming()&&painter.fillUV(clip,mask?'mask':'material',maskGray(color),shape,{opacity:1,color});
@@ -1495,6 +1528,7 @@ export function createDocumentEditor(ctx,bridge){
     const documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}
     const next=JSON.stringify([doc.id,doc.revision]);if(sourceKey!==next){sourceKey=next;syncDestination();}else if(destinationDocument!==c?.documentId)syncDestination();
     picker.value=c?.documentId||'';syncSelectMenu(picker);
+    dimensions.disabled=!image||writing();syncSelectMenu(dimensions);
     syncBind();textTool.disabled=!image||writing()||c?.target==='mask'||(!canInsertImage(project)&&!(layer?.text&&!layerLockOwner(image.layers,layer)));
     const locked=layer&&layerLockOwner(image.layers,layer);
     gradientButton.disabled=!image||writing()||(c?.target==='mask'||layer?.kind==='gradient'?!!locked:!canInsertImage(project));
@@ -2289,7 +2323,8 @@ export function createImagePanel(type,ctx){
       view.row.remove();
       rows.delete(id);
     }
-    const previewContext={projectId:doc.id,revision:doc.revision,documentId:context.documentId,colorSpace:image.colorSpace};
+    const previewContext={projectId:doc.id,revision:doc.revision,documentId:context.documentId,colorSpace:image.colorSpace,
+      geometry:imageViewGeometry(image)};
     for(const [id,view] of rows){
       if(visibleIds.has(id))continue;
       view.row.toggleAttribute('data-selected',selectedRows.has(id));
@@ -2672,7 +2707,7 @@ export function createImagePanel(type,ctx){
       const remove=button('删除贴图',()=>void run(()=>command(project,{action:'remove'})),'删除图像文档');
       remove.disabled=!!refs.length;remove.title=refs.length?'请先解除材质通道引用':'删除图像文档';
       documentActions.append(duplicate,remove);
-      body.append(el('div','document-muted','4096 × 4096 · RGBA'),documentActions);
+      body.append(el('div','document-muted',`${image.width} × ${image.height} · RGBA`),documentActions);
       if(layer){addControl(body,'图层名称','text',layer.name,name=>command(project,{action:'updateLayer',layerId:layer.id,patch:{name}}),{disabled:!!lockOwner});addControl(body,'锁定图层','checkbox',layer.locked,locked=>command(project,{action:'updateLayer',layerId:layer.id,patch:{locked}}),{disabled:!!lockOwner&&lockOwner!==layer});
         if(layer.adjustment&&c.target!=='mask')renderAdjustment(layer,busy);
         if(layer.shape&&c.target!=='mask')renderShape(layer,busy);

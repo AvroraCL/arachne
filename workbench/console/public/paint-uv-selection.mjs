@@ -313,13 +313,13 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   }
   function selectAll(shape='rect'){
     if(!context().active||!choose(selecting()?tool:shape))return false;
-    assign({rect:canvasUVRect},context());render();
+    const state=context();assign({rect:state.canvasRect??canvasUVRect},state);render();
     return true;
   }
   function invert(){
     const state=context();
     if(!state.active||!state.interactive||busySelection()||draft)return false;
-    const selected=selectedRegion(state),full={rect:canvasUVRect};
+    const selected=selectedRegion(state),full={rect:state.canvasRect??canvasUVRect};
     if(selected?.coverage){void sample({source:'refine',operation:'invert'},state,selected);return true;}
     try{assign(selected?softened(combineUVSelections(full,selected,'subtract')):full,state);}
     catch(error){onError(error);return false;}

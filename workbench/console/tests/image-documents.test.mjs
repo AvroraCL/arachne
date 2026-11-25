@@ -396,3 +396,41 @@ with tempfile.TemporaryDirectory() as folder:
  assert p.shape==(512,512,4) and p[128,256,3]==180 and p[384,256,3]==0
 `;const result=spawnSync(process.env.ARACHNE_PYTHON||'python',['-c',script],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);
 });
+
+test('canvas anchors retain the selected source edge; nonuniform resize keeps path and selection coordinates',()=>{
+ for(let anchor=0;anchor<9;anchor++){
+   const paint=defaults();
+   edit(paint,'create',{patch:{width:512,height:1024}});
+   const doc=paint.imageDocuments.doc;
+   const region={name:'页边',rect:[.46,.42,.51,.52]};
+   const path={id:'cutline',name:'裁线',geometry:{closed:false,anchors:[{point:[.48,.45]},{point:[.51,.52]}]}};
+   edit(paint,'saveSelection',{patch:region});edit(paint,'savePath',{patch:path});
+   edit(paint,'resizeCanvas',{patch:{width:612,height:984,anchor}});
+   assert.deepEqual(doc.frame,[1792-50*(anchor%3),1536+20*Math.floor(anchor/3),612,984]);
+   const frame=[...doc.frame];
+   edit(paint,'resizeImage',{patch:{width:700,height:77}});
+   assert.deepEqual(doc.frame,frame);
+   assert.deepEqual([doc.width,doc.height],[700,77]);
+   assert.deepEqual(doc.selections,[region]);assert.deepEqual(doc.paths,[path]);
+   assert.throws(()=>edit(paint,'cropCanvas',{patch:{width:700,height:77,left:5,top:0}}));
+   assert.deepEqual(doc.frame,frame);
+ }
+});
+
+test('inverting a coverage selection on a banner only selects visible document pixels',()=>{
+ const script=`import json, struct
+from io import BytesIO
+import numpy as np
+from PIL import Image
+from image_documents import image_selection_sample
+doc=dict(width=2048,height=512,colorSpace='srgb',layers=[])
+out=image_selection_sample(doc,{},dict(source='refine',operation='invert',previous=dict(rect=[.375,.46875,.5,.5])),64)
+offset=4+struct.unpack('>I',out[:4])[0]
+mask=np.asarray(Image.open(BytesIO(out[offset:])))
+expected=np.zeros((64,64),dtype=np.uint8)
+expected[28:36,16:48]=255
+expected[30:32,24:32]=0
+assert np.array_equal(mask,expected)`;
+ const result=spawnSync(process.env.ARACHNE_PYTHON||'python',['-B','-c',script],{cwd:new URL('../',import.meta.url),encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);
+});

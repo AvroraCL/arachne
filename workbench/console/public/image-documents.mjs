@@ -1,3 +1,4 @@
+import {documentClip,validDimensions,validFrame,resizedDocument} from './image-document-size.mjs';
 import {checkImageStyles} from './image-text-style.mjs';
 import {validPenPath} from './image-pen-path.mjs';
 import {isBrushImage} from './paint-library.mjs';
@@ -138,7 +139,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
   let stamps=0;
   for(const [key,doc] of Object.entries(documents)){
     const checkCoverage=key=>cloneAsset(key)&&paint.assets[key]?.width===4096&&paint.assets[key]?.height===4096;
-    if(!id(key)||!exact(doc,['name','width','height','colorSpace','layers','selections','paths'])||!label(doc.name)||doc.width!==4096||doc.height!==4096||!['srgb','linear'].includes(doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>imageLayerLimit)throw Error('图像文档无效');
+    if(!id(key)||!exact(doc,['name','width','height','frame','colorSpace','layers','selections','paths'])||!label(doc.name)||!validDimensions(doc.width,doc.height)||(doc.frame!==undefined&&!validFrame(doc.frame))||!['srgb','linear'].includes(doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>imageLayerLimit)throw Error('图像文档无效');
     if(doc.selections!==undefined){
       if(!Array.isArray(doc.selections))throw Error('已保存的选区无效');
       const names=new Set();
@@ -171,11 +172,11 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
       const ownsCoverage=value=>value===undefined||layer.selectionSources?.includes(value);
       if(!ownsCoverage(layer.gradient?.coverage)||!ownsCoverage(layer.maskGradient?.coverage))throw Error('渐变选区覆盖图不存在');
       if(layer.raster!==undefined&&(layer.kind!=='pixel'||!Object.hasOwn(paint.assets,layer.raster)||
-         paint.assets[layer.raster].width!==doc.width||paint.assets[layer.raster].height!==doc.height))
+         paint.assets[layer.raster].width!==4096||paint.assets[layer.raster].height!==4096))
         throw Error('栅格图层底稿尺寸无效');
       if(layer.cloneSources!==undefined&&(layer.kind!=='pixel'||!Array.isArray(layer.cloneSources)||
          layer.cloneSources.some(key=>!cloneAsset(key)||!Object.hasOwn(paint.assets,key)||
-           paint.assets[key].width!==doc.width||paint.assets[key].height!==doc.height)))
+           paint.assets[key].width!==4096||paint.assets[key].height!==4096)))
         throw Error('仿制取样源无效');
       if(layer.clipped!==undefined&&(typeof layer.clipped!=='boolean'||layer.clipped&&!imageClippingBase(doc.layers,index)))
         throw Error('剪贴蒙版需要下方的底层');
@@ -293,14 +294,29 @@ export function imageCoverageSources(o){
 function retainCoverage(layer,sources){
   if(sources.length)layer.selectionSources=[...new Set([...(layer.selectionSources??[]),...sources])];
 }
+function clipNewPaint(doc,paint){
+  if(!paint||paint.clip)return paint;
+  const clip=documentClip(doc);
+  if(clip[0]===0&&clip[1]===0&&clip[2]===1&&clip[3]===1)return paint;
+  if(paint.rect){
+    const [l,t,r,b]=paint.rect;
+    return {...paint,rect:[Math.max(l,clip[0]),Math.max(t,clip[1]),Math.min(r,clip[2]),Math.min(b,clip[3])]};
+  }
+  return {...paint,clip};
+}
 export function imageDocumentOperation(paint,o,{requireUnlocked}){
   if(!exact(o,['op','action','documentId','newDocumentId','layerId','layerIds','copyIds','parentId','anchorId','placement','sourceLayerId','reveal','copy','clipped','patch','kind','target','stroke','transform','transforms','rect',...uvShapeFields,'index','channel','materialLayerId','newLayerId'])||!id(o.documentId))throw Error('图像文档命令无效');
   const documents=paint.imageDocuments??={},doc=Object.hasOwn(documents,o.documentId)?documents[o.documentId]:null;
   if(o.action==='create'){
-    if(doc||!exact(o.patch??{},['name','colorSpace']))throw Error('图像文档已存在或参数无效');
+    if(doc||!exact(o.patch??{},['name','colorSpace','width','height'])||!validDimensions(o.patch?.width??4096,o.patch?.height??4096))throw Error('图像文档已存在或参数无效');
     paint.imageDocuments={...documents,[o.documentId]:{name:'未命名贴图',width:4096,height:4096,colorSpace:'srgb',...o.patch,layers:[]}};return;
   }
   if(!doc)throw Error('图像文档不存在');
+  if(['resizeCanvas','cropCanvas','resizeImage'].includes(o.action)){
+    const fields=o.action==='cropCanvas'?['left','top']:o.action==='resizeCanvas'?['anchor']:[];
+    if(!exact(o.patch,['width','height',...fields]))throw Error('图像尺寸参数无效');
+    Object.assign(doc,resizedDocument(doc,o.action,o.patch));return;
+  }
   if(o.action==='duplicate'){
     if(!id(o.newDocumentId)||Object.hasOwn(documents,o.newDocumentId))throw Error('图像副本编号无效');
     if(Object.keys(documents).length>=imageDocumentLimit)throw Error('工程最多包含 16 个图像文档');
@@ -365,6 +381,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     const name=o.kind==='group'?imageGroupName(doc.layers):layerNames[o.kind];
     const layer={id:o.layerId,kind:o.kind,name,...imageLayerDefaults,...defaults,
       ...(parent?{parentId:parent}:{}),...(clipped?{clipped:true}:{}),...o.patch};
+    if(layer.gradient)layer.gradient=clipNewPaint(doc,layer.gradient);
     retainCoverage(layer,imageCoverageSources(o));
     doc.layers.splice(index,0,layer);
     return;
@@ -435,6 +452,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     if(layer.maskEnabled&&o.patch.maskEnabled===false)layer.maskStrokes??=[];
     const previous={...layer};
     Object.assign(layer,o.patch);
+    if(o.patch.gradient)layer.gradient=clipNewPaint(doc,o.patch.gradient);
     if(layer.maskGradient===null)delete layer.maskGradient;
     if(layer.warp===null)delete layer.warp;
     if(layer.styles===null)delete layer.styles;
@@ -527,7 +545,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     if(!['pixels','mask'].includes(o.target)||o.target==='pixels'&&layer.kind!=='pixel')throw Error('请在像素层或蒙版上绘制');
     if(!record(o.stroke)||isStrokeBlock(o.stroke)||['preserveAlpha','maskSpace','maskWarpIndex'].some(key=>Object.hasOwn(o.stroke,key)))
       throw Error('图像笔触参数无效');
-    const stroke=structuredClone(o.stroke),mask=o.target==='mask';
+    const stroke=clipNewPaint(doc,structuredClone(o.stroke)),mask=o.target==='mask';
     if(mask){
       layer.maskEnabled=true;
       if(layer.maskTransform)stroke.maskSpace=[...layer.maskTransform];

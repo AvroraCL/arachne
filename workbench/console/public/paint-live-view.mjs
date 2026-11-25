@@ -1,3 +1,4 @@
+import {previewDimensions,documentFrame} from './image-document-size.mjs';
 import {renderChannel,liveStride,effectiveValues,channelSpecs,paintChannels} from './paint-channels.mjs';
 const workingSize=256,detailSize=4096;
 const defaultRetryDelays=[150,300,600,1200,2400,4000,4000,4000];
@@ -131,9 +132,10 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     }
     if(drawn?.pixels===pixels&&drawn.channel===channel&&drawn.solo===solo&&drawn.preview3D===preview3D&&
        (!patched||intent?.operation&&intent.key===request.key))return;
-    if(!image||canvas.width!==size){
-      canvas.width=canvas.height=size;
-      image=ctx.createImageData(size,size);
+    const [width,height]=previewDimensions(request.imageGeometry,size);
+    if(!image||canvas.width!==width||canvas.height!==height){
+      canvas.width=width;canvas.height=height;
+      image=ctx.createImageData(width,height);
     }
     if(rgba)image.data.set(pixels);else renderChannel(pixels,size,channel,image.data);
     if(channel==='coverage'){
@@ -178,7 +180,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       if(context()?.modeling&&frame?.request.revision!==revision)onStatus('正在更新建模后的材质与表面…');
       const draft=rgba&&operation?.textDraft?{textDraft:operation.textDraft}:
         Array.isArray(operation)?{operations:operation}:{operation};
-      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:size,window}:{revision,...draft,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
+      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:size,window,...(request.imageGeometry?{documentView:true}:{})}:{revision,...draft,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
       const response=await transport(()=>fetch('/api/projects/'+id+'/paint/'+(rgba?'image-live':'live'),{
         method:'POST',headers:{'Content-Type':'application/json'},signal:request.controller.signal,
         body
@@ -200,17 +202,20 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       if(window&&response.headers?.get('X-Paint-Window')===window.join(',')){
         if(!isCurrent())return;
         const [x,y,side]=window;
-        if(next.length!==side*side*4||canvas.width!==detailSize||!image)throw Error('局部预览尺寸无效');
+        const [ox,oy]=documentFrame(request.imageGeometry);
+        const [width,height]=previewDimensions(request.imageGeometry,detailSize);
+        if(next.length!==side*side*4||canvas.width!==width||canvas.height!==height||!image)throw Error('局部预览尺寸无效');
         if(patched&&patched.window.join(',')!==window.join(',')){
           const [left,top,side]=patched.window;
-          ctx.putImageData(image,0,0,left,top,side,side);
+          ctx.putImageData(image,0,0,left-ox,top-oy,side,side);
         }
-        ctx.putImageData(new ImageData(new Uint8ClampedArray(next.buffer),side,side),x,y);
+        ctx.putImageData(new ImageData(new Uint8ClampedArray(next.buffer),side,side),x-ox,y-oy);
         patched={window,request};
         onFrame({request,pixels:next,window});
         return;
       }
-      if(rgba?next.length!==size*size*4:![6,15].includes(liveStride(next,size)))throw Error('实时贴图尺寸无效');
+      const [width,height]=previewDimensions(request.imageGeometry,size);
+      if(rgba?next.length!==width*height*4:![6,15].includes(liveStride(next,size)))throw Error('实时贴图尺寸无效');
       if(!isCurrent())return;
       if(size===detailSize)detailFailure=null;
       const candidate={request,pixels:next},previousFrame=frame,previousDrawn=drawn;onFrame(candidate);

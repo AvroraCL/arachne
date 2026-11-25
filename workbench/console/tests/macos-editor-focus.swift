@@ -160,6 +160,13 @@ import WebKit
                 button.click(); return true;
                 """) as? Bool == true
         }
+        try await waitFor("Confirm drawing dimensions") {
+            try await js("""
+                const create=document.querySelector('.image-size-dialog button[type=submit]');
+                if (!create) return false;
+                create.click(); return true;
+                """) as? Bool == true
+        }
         try await waitFor("Focus the drawing canvas") {
             try await js("""
                 const canvas=document.querySelector('[data-editor=image] canvas[aria-label="图像文档画布"]');

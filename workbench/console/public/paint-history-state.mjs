@@ -1,3 +1,4 @@
+import {documentFrame} from './image-document-size.mjs';
 import {imageAdjustments} from './image-adjustments.mjs';
 import {hasImageLayerMask} from './image-documents.mjs';
 import {strokeCount,isStrokeBlock} from './stroke-blocks.mjs';
@@ -61,6 +62,9 @@ function imageDocumentChanges(before,after){
       result.push({label:previous?'删除贴图':'新建贴图',detail:(image||previous).name});
       continue;
     }
+    const frameChanged=json(documentFrame(previous))!==json(documentFrame(image));
+    if(frameChanged||previous.width!==image.width||previous.height!==image.height)
+      result.push({label:frameChanged?'修改画布边界':'缩放图像',detail:`${image.name} · ${image.width} × ${image.height}`});
     if(previous.name!==image.name)result.push({label:'重命名贴图',detail:image.name});
     if(previous.colorSpace!==image.colorSpace)result.push({label:'切换图像颜色空间',detail:image.name});
     if(json(previous.selections)!==json(image.selections)){

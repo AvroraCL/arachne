@@ -15,7 +15,7 @@ from paint_surface import Surface, registered_surface
 from fill_projection import projection_geometry, projected_channels, extend_uv_gutter
 from paint_mask_generators import preview_generator, smooth
 from material_graph import MaterialGraph, MaterialImages, PreviewImages
-from image_documents import document_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
+from image_documents import document_pixels,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
 
 
 def decode(srgb):
@@ -721,6 +721,8 @@ def live_pixels(cfg):
         pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
         if cfg.get('clipboardRegion'):
             return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'],cfg['assets'])
+        if cfg.get('exportDocument') or cfg.get('imageViewSize'):
+            pixels=framed_pixels(pixels,doc,target=cfg.get('imageViewSize'))
         if cfg.get('imagePng'):
             return png_bytes(pixels,doc['colorSpace'])
         # Row reversal leaves a strided view. Copy rows once into a contiguous
