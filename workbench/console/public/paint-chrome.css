@@ -342,9 +342,24 @@
   grid-column:3;margin:0;padding:0;border:0;background:none;box-shadow:none;
   color:#a5a5a5;font:12px/20px var(--ui-font);text-align:right;white-space:nowrap;
 }
+/* Use the full height of the header as the hit target for the editor icon. */
+#workspace .area-header .area-editor-picker{flex:none;width:30px;margin-inline:-3px -2px}
+#workspace .area-header .area-editor-picker>.custom-select-button{
+  display:flex;align-items:center;justify-content:center;gap:4px;
+  width:100%;height:var(--chrome-control);padding:0 1px 0 0;border:0;border-radius:var(--chrome-radius);
+  background:none;color:#c5c5c5;cursor:pointer;
+}
+#workspace .area-header .area-editor-picker>.custom-select-button::after{
+  content:'';width:4px;height:4px;flex:none;margin-top:-2px;
+  border:solid currentColor;border-width:0 1px 1px 0;transform:rotate(45deg);opacity:.65;
+}
+#workspace .area-editor-picker .chrome-icon{width:15px;height:15px;flex:none}
+#workspace .area-header .area-editor-picker>.custom-select-button:hover:not(:disabled){background:none;color:#fff}
+#workspace .area-header .area-editor-picker.open>.custom-select-button{background:#222;color:#eee}
+
 /* Header menu triggers keep their arrow when hovered or expanded. */
 #workspace .editor-area>.area-header{
-  & :is(.custom-select>.custom-select-button,.area-header-controls button[aria-haspopup],.viewport-display-arrow){
+  & :is(.custom-select:not(.area-editor-picker)>.custom-select-button,.area-header-controls button[aria-haspopup],.viewport-display-arrow){
     align-items:center;gap:5px;
     min-width:0;height:var(--chrome-control);min-height:var(--chrome-control);
     padding:var(--menu-trigger-padding,0 20px 0 7px);border:0;border-radius:var(--chrome-radius);
@@ -361,8 +376,6 @@
     &:hover{background:var(--chrome-hover)}
   }
   & .area-menu[open]>summary{background:var(--chrome-hover)}
-  & .area-editor-picker{flex:none;width:36px;margin:0}
-  & .area-editor-picker>.custom-select-button::after{content:none}
   & .area-header-controls{gap:4px}
   & .viewport-camera-bookmarks[aria-haspopup],& .viewport-display-arrow{
     width:18px;--menu-trigger-padding:0;--menu-chevron-position:center;

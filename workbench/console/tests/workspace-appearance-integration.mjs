@@ -184,7 +184,14 @@ try{
     assert.deepEqual(strip,['rgba(0, 0, 0, 0)','0px'],size+' controls blend into the viewport header');
     const reference=await surface(trigger(header,'交互模式'));
     assert.notEqual(reference[2],'none','Collapsed menus advertise that they can expand');
-    for(const name of ['编辑器类型','建模选择','变换工具','变换坐标系','变换枢轴','三维游标','操纵器设置','叠加层设置','着色设置'])
+    for(const picker of await page.getByRole('button',{name:'编辑器类型',exact:true}).all()){
+      const style=await picker.evaluate(button=>{
+        const css=getComputedStyle(button),arrow=getComputedStyle(button,'::after');
+        return [button.offsetWidth,css.backgroundColor,css.backgroundImage,arrow.width,arrow.borderRightWidth];
+      });
+      assert.deepEqual(style,[30,'rgba(0, 0, 0, 0)','none','4px','1px'],size+' compact editor switcher');
+    }
+    for(const name of ['建模选择','变换工具','变换坐标系','变换枢轴','三维游标','操纵器设置','叠加层设置','着色设置'])
       assert.deepEqual(await surface(trigger(header,name)),reference,size+' collapsed '+name);
     assert.equal(await trigger(header,'框选').evaluate(el=>getComputedStyle(el).backgroundImage),'none');
     await header.screenshot({path:path.join(evidence,size+'-viewport-header.png'),animations:'disabled'});
