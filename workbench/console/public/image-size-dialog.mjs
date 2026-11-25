@@ -5,12 +5,23 @@ const presets=[
   ['全高清',1920,1080],['横幅',2048,512],['手机屏幕',1170,2532]
 ];
 
+function aspectLabel(w,h){
+  let a=w,b=h;
+  while(b){const remainder=a%b;a=b;b=remainder;}
+  return w/a+' : '+h/a;
+}
+
 function newImageSettings(form,width,height,defaultName){
   const layout=document.createElement('div');
   layout.className='new-image-layout';
   layout.innerHTML=`
     <section class="new-image-presets" aria-label="画布预设">
       <h4>画布预设</h4><div class="new-image-grid"></div>
+    </section>
+    <section class="new-image-preview" aria-label="画布预览">
+      <div class="new-image-preview-title"><strong></strong><span></span></div>
+      <div class="new-image-preview-stage"><div class="new-image-paper" aria-hidden="true"><i></i><b></b></div></div>
+      <div class="new-image-caption"><span>画布预览</span><output></output></div>
     </section>
     <section class="new-image-details" aria-label="图像设置">
       <h4>图像设置</h4>
@@ -20,18 +31,36 @@ function newImageSettings(form,width,height,defaultName){
         <span>方向</span><button type="button">横向</button><button type="button">纵向</button>
       </div>
       <label>颜色空间<select><option value="srgb">颜色（sRGB）</option><option value="linear">数据（线性）</option></select></label>
-      <p class="new-image-background"><span>背景</span>透明</p>
+      <label>背景内容<select class="new-image-background"><option value="">透明</option><option value="#ffffff">白色</option><option value="#000000">黑色</option><option value="custom">自定颜色</option></select></label>
+      <label class="new-image-color" hidden>背景颜色<input type="color" value="#7892ad"></label>
     </section>`;
   layout.querySelector('.new-image-size').append(width.parentElement,height.parentElement);
   form.append(layout);
   const name=layout.querySelector('input[type=text]'),space=layout.querySelector('select');
+  const background=layout.querySelector('.new-image-background'),color=layout.querySelector('input[type=color]');
+  const paper=layout.querySelector('.new-image-paper'),preview=layout.querySelector('.new-image-preview');
+  const readColor=()=>background.value==='custom'?color.value:background.value;
   name.value=defaultName;
   name.oninput=()=>name.setCustomValidity(name.value.trim()?'':'请输入图像名称');
   const grid=layout.querySelector('.new-image-grid');
   const orientations=layout.querySelectorAll('.new-image-orientation button');
   function sync(){
     const w=width.valueAsNumber,h=height.valueAsNumber;
-    presets.forEach(([,pw,ph],i)=>grid.children[i].setAttribute('aria-pressed',String(pw===w&&ph===h)));
+    const valid=width.validity.valid&&height.validity.valid;
+    const preset=presets.find(([,pw,ph])=>(pw===w&&ph===h)||(pw===h&&ph===w));
+    presets.forEach((entry,i)=>grid.children[i].setAttribute('aria-pressed',String(entry===preset)));
+    preview.querySelector('strong').textContent=preset?.[0]??'自定尺寸';
+    paper.hidden=!valid;
+    preview.querySelector('output').textContent=valid?w+' × '+h+' px':'宽高须为 1 至 '+editingSide+' 像素';
+    preview.querySelector('.new-image-preview-title span').textContent=valid?aspectLabel(w,h):'';
+    if(valid){
+      paper.style.setProperty('--paper-w',String(w/h));
+      paper.style.setProperty('--paper-h',String(h/w));
+      paper.querySelector('i').textContent=w+' px';
+      paper.querySelector('b').textContent=h+' px';
+    }
+    paper.style.background=readColor()||'';
+    color.parentElement.hidden=background.value!=='custom';
     orientations.forEach((button,i)=>{
       button.disabled=!width.validity.valid||!height.validity.valid||w===h;
       button.setAttribute('aria-pressed',String(i===0?w>h:h>w));
@@ -43,8 +72,8 @@ function newImageSettings(form,width,height,defaultName){
     button.type='button';button.className='new-image-preset';
     const outline=document.createElement('i'),title=document.createElement('strong'),size=document.createElement('small');
     outline.setAttribute('aria-hidden','true');
-    outline.style.width=Math.round(32*Math.min(1,w/h))+'px';
-    outline.style.height=Math.round(32*Math.min(1,h/w))+'px';
+    outline.style.aspectRatio=w+' / '+h;
+    outline.style.width=Math.round(27*Math.min(1,w/h))+'px';
     title.textContent=label;size.textContent=w+' × '+h;
     button.append(outline,title,size);grid.append(button);
     button.onclick=()=>setSize(w,h);
@@ -53,8 +82,8 @@ function newImageSettings(form,width,height,defaultName){
     const w=width.valueAsNumber,h=height.valueAsNumber;
     setSize(i===0?Math.max(w,h):Math.min(w,h),i===0?Math.min(w,h):Math.max(w,h));
   });
-  width.oninput=height.oninput=sync;sync();
-  return {name,space};
+  background.onchange=color.oninput=width.oninput=height.oninput=sync;sync();
+  return {name,space,readColor};
 }
 
 export function editDocumentSize(action,doc,{canvas,signal,defaultName}={}){
@@ -146,7 +175,7 @@ export function editDocumentSize(action,doc,{canvas,signal,defaultName}={}){
     dialog.onclose=()=>{signal?.removeEventListener('abort',close);dialog.remove();resolve(result);};
     form.onsubmit=e=>{
       e.preventDefault();const patch=Object.fromEntries(Object.entries(fields).map(([key,input])=>[key,input.valueAsNumber]));
-      if(creation){patch.name=creation.name.value.trim();patch.colorSpace=creation.space.value;}
+      if(creation){patch.name=creation.name.value.trim();patch.colorSpace=creation.space.value;patch.background=creation.readColor();}
       if(action==='resizeCanvas')patch.anchor=anchor;
       try{if(doc)resizedDocument(doc,action,patch);}catch(e){error.textContent=e.message;return;}
       result=patch;dialog.close();

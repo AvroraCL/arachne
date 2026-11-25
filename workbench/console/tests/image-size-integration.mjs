@@ -50,14 +50,41 @@ try{
   await dialog.getByRole('button',{name:/全高清/}).click();
   await dialog.getByRole('button',{name:'纵向'}).click();
   assert.deepEqual([await width.inputValue(),await height.inputValue()],['1080','1920']);
+  assert.equal(await dialog.getByRole('button',{name:/全高清/}).getAttribute('aria-pressed'),'true');
   await page.setViewportSize({width:540,height:680});
   const presets=await dialog.getByRole('region',{name:'画布预设'}).boundingBox();
   const details=await dialog.getByRole('region',{name:'图像设置'}).boundingBox();
   assert.ok(details.y>=presets.y+presets.height-1&&details.x+details.width<=540);
+  const paper=dialog.locator('.new-image-paper');
+  const portrait=await paper.boundingBox();
+  assert.ok(Math.abs(portrait.width/portrait.height-1080/1920)<.02);
+  await page.setViewportSize({width:390,height:600});
+  const confirm=await dialog.getByRole('button',{name:'创建',exact:true}).boundingBox();
+  assert.ok(confirm.y>=0&&confirm.y+confirm.height<=600);
   await dialog.getByLabel('颜色空间').selectOption('linear');
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
   assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
+  await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
+  await width.fill('63');await height.fill('31');
+  await dialog.getByLabel('背景内容').selectOption('custom');
+  await dialog.getByLabel('背景颜色').fill('#4477aa');
+  assert.equal(await paper.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(68, 119, 170)');
+  await dialog.getByRole('button',{name:'创建',exact:true}).click();await saved('创建带背景的图像');
+  const colored=Object.values(doc.paint.imageDocuments)[0];
+  assert.deepEqual(colored.layers.map(l=>l.kind),['shape','pixel']);
+  await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+  const backgroundFile=path.join(data,'background.png');
+  const downloadBackground=page.waitForEvent('download');
+  await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();
+  await (await downloadBackground).saveAs(backgroundFile);
+  execFileSync(pythonExecutable(),['-c',`from PIL import Image
+import sys
+im=Image.open(sys.argv[1]).convert('RGBA')
+assert im.size==(63,31)
+assert im.getextrema()==((68,68),(119,119),(170,170),(255,255)),im.getextrema()`,backgroundFile]);
+  await canvas.focus();await page.keyboard.press(mod+'+z');await saved('一次撤销整张图像');
+  assert.equal(Object.keys(doc.paint.imageDocuments??{}).length,0);
   await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
   await dialog.getByRole('button',{name:/横幅/}).click();
   assert.equal(await dialog.getByRole('button',{name:/横幅/}).getAttribute('aria-pressed'),'true');

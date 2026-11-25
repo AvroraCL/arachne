@@ -115,8 +115,17 @@ export function createDocumentEditor(ctx,bridge){
   const run=fn=>Promise.resolve().then(fn).catch(error=>{status.textContent=error.message;ctx.error(error);});
   const create=button('新建图像',()=>{const origin=imageSelectionOrigin(project),documentId=crypto.randomUUID(),layerId=crypto.randomUUID();void run(async()=>{
     const defaultName='未命名图像 '+(Object.keys(project.document.paint.imageDocuments??{}).length+1);
-    const patch=await editDocumentSize('create',null,{signal,defaultName});if(!patch)return;
-    await project.commands([{op:'image',action:'create',documentId,patch},{op:'image',action:'addLayer',documentId,layerId,kind:'pixel'}],origin);
+    const settings=await editDocumentSize('create',null,{signal,defaultName});if(!settings)return;
+    const {background,...patch}=settings;
+    const operations=[{op:'image',action:'create',documentId,patch}];
+    if(background){
+      const [left,top,width,height]=documentFrame(patch);
+      operations.push({op:'image',action:'addLayer',documentId,layerId:crypto.randomUUID(),kind:'shape',
+        patch:{name:'背景',x:(left+width/2)/editingSide,y:(top+height/2)/editingSide,scale:Math.max(width,height)/editingSide,
+          shape:{kind:'rectangle',width,height,fill:background,stroke:null,strokeWidth:0,cornerRadius:0}}});
+    }
+    operations.push({op:'image',action:'addLayer',documentId,layerId,kind:'pixel'});
+    await project.commands(operations,origin);
     const c=project.imageContext;if(!disposed&&project.document?.id===origin.id&&c?.documentId===origin.documentId&&c?.layerId===origin.layerId&&c?.target===origin.target)selectImage(project,{documentId,layerId,target:'pixels'});
   });});
   const channel=choice('材质引用通道',paintChannels.map(k=>[k,channelSpecs[k].name]),state.channel||'color',()=>{syncDestination(true);ctx.onChange();});
