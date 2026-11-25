@@ -481,3 +481,39 @@ with tempfile.TemporaryDirectory() as folder:
             assert out.info['icc_profile']==target and out.tobytes()==proof.tobytes()
 `,cmykProfile],{cwd:new URL('..',import.meta.url)});
 });
+
+test('a press-profile TIFF puts transparency on white in linear light before producing four ink channels',
+  {skip:existsSync(cmykProfile)?false:'requires a local CMYK ICC profile'},()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+from io import BytesIO
+from pathlib import Path
+import sys
+import numpy as np
+from PIL import Image,ImageCms
+from image_color_spaces import profiled_copy,profile_bytes
+target=Path(sys.argv[1]).read_bytes()
+# Black at 128/255 on white gives sRGB 187. Direct mixing in encoded space would give 127.
+rgba=np.array([[[12,39,78,0],[0,0,0,128],[15,155,220,255]]],np.uint8)
+paper=Image.fromarray(np.array([[[255,255,255],[187,187,187],[15,155,220]]],np.uint8))
+for key,intent in [('perceptual',0),('relative',1)]:
+    with Image.open(BytesIO(profiled_copy(rgba,'srgb',target,'CMYK',key))) as actual:
+        expected=ImageCms.profileToProfile(paper,BytesIO(profile_bytes('srgb')),BytesIO(target),outputMode='CMYK',renderingIntent=intent)
+        assert actual.format=='TIFF' and actual.mode=='CMYK' and actual.size==(3,1)
+        assert actual.info['icc_profile']==target and actual.tobytes()==expected.tobytes()
+`,cmykProfile],{cwd:new URL('..',import.meta.url)});
+});
+
+test('RGB output profile applies both intents to straight color and retains the full alpha byte',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+from io import BytesIO
+import numpy as np
+from PIL import Image,ImageCms
+from image_color_spaces import profile_bytes,profiled_copy
+rgba=np.array([[[180,130,55,0],[14,127,251,47],[204,96,64,255]]],np.uint8)
+source=profile_bytes('acescg');target=profile_bytes('display-p3')
+for key,intent in [('relative',1),('perceptual',0)]:
+    with Image.open(BytesIO(profiled_copy(rgba,'acescg',target,'RGB',key))) as actual:
+        expected=ImageCms.profileToProfile(Image.fromarray(rgba),BytesIO(source),BytesIO(target),outputMode='RGBA',renderingIntent=intent)
+        assert actual.info['icc_profile']==target and actual.tobytes()==expected.tobytes()
+`],{cwd:new URL('..',import.meta.url)});
+});

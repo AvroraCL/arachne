@@ -92,3 +92,32 @@ def image_input(image, space, box=None, authored=False):
         rgba = convert_image(rgba, source or profile_bytes('srgb'), profile_bytes(target))
         return np.asarray(rgba), target
     return np.asarray(rgba), 'srgb' if 'srgb' in info else space
+
+
+def profiled_copy(pixels, space, target, mode, intent):
+    """Convert the composited document once; CMYK output represents ink on white paper."""
+    image = Image.fromarray(pixels)
+    rgb = image.convert('RGB')
+    if mode == 'CMYK' and image.getchannel('A').getextrema()[0] < 255:
+        # Blend onto paper in the document's linear working light, in strips.
+        for top in range(0,pixels.shape[0],128):
+            strip = pixels[top:top+128]
+            alpha = strip[:,:,3:4].astype(np.float32)/255
+            if np.all(alpha == 1):
+                continue
+            color = decode(strip[:,:,:3].astype(np.float32)/255,space)
+            paper = encode(color*alpha+1-alpha,space)
+            rgb.paste(Image.fromarray(np.rint(np.clip(paper,0,1)*255).astype(np.uint8)),(0,top))
+    try:
+        converted = ImageCms.profileToProfile(rgb,BytesIO(profile_bytes(space)),BytesIO(target),
+            outputMode={'RGB':'RGB','GRAY':'L','CMYK':'CMYK'}[mode],
+            renderingIntent=ImageCms.Intent.PERCEPTUAL if intent=='perceptual' else ImageCms.Intent.RELATIVE_COLORIMETRIC)
+    except (ImageCms.PyCMSError, OSError) as error:
+        raise ValueError('ICC 配置不支持所选输出转换，请使用有效的目标设备配置') from error
+    out = BytesIO()
+    if mode == 'CMYK':
+        converted.save(out,format='TIFF',compression='tiff_deflate',icc_profile=target)
+    else:
+        converted.putalpha(image.getchannel('A'))
+        converted.save(out,format='PNG',compress_level=3,icc_profile=target)
+    return out.getvalue()

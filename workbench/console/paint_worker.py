@@ -16,6 +16,7 @@ from fill_projection import projection_geometry, projected_channels, extend_uv_g
 from paint_mask_generators import preview_generator, smooth
 from material_graph import MaterialGraph, MaterialImages, PreviewImages
 from image_color_spaces import display_pixels
+from image_color_spaces import profiled_copy
 from image_documents import embedded_image_assets,document_pixels,thumbnail_pixels,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
 
 
@@ -735,6 +736,9 @@ def live_pixels(cfg):
             return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'],cfg['assets'])
         if cfg.get('exportDocument') or cfg.get('imageViewSize'):
             pixels=framed_pixels(pixels,doc,target=cfg.get('imageViewSize'))
+        if cfg.get('exportProfile'):
+            profile=cfg['exportProfile']
+            return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'])
         if cfg.get('imagePng'):
             return png_bytes(pixels,doc['colorSpace'],cfg.get('exportColorSpace'))
         # Row reversal leaves a strided view. Copy rows once into a contiguous

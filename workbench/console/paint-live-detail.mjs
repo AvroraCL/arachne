@@ -15,9 +15,10 @@ function pump(){
     ['-X','utf8',path.join(ROOT,'paint_worker.py'),'--live-detail'],
     {cwd:ROOT,stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...process.env,OPENBLAS_NUM_THREADS:'1'}});
   const clipboard=!!task.config.clipboardRegion,selection=!!task.config.imageSelectionSample;
-  const encoded=clipboard||task.config.imagePng||selection;
+  const encoded=clipboard||task.config.imagePng||task.config.imageTiff||selection;
   const [width,height]=task.config.imageViewSize??[4096,4096];
-  const size=encoded?(clipboard?24:68)*1024*1024:width*height*(task.config.liveFormat==='rgba'?4:task.config.liveFormat==='pbr8'?15:6);
+  const profileBytes=Math.ceil((task.config.exportProfile?.data.length??0)*.75);
+  const size=encoded?(clipboard?24:68)*1024*1024+profileBytes:width*height*(task.config.liveFormat==='rgba'?4:task.config.liveFormat==='pbr8'?15:6);
   let pixels=encoded?[]:Buffer.allocUnsafe(size),offset=0,log='';
   const timer=setTimeout(()=>task.cancel(Error('4K 实时合成超时，请重试')),120000);
   task.cancel=error=>{task.error=error;child.kill();};

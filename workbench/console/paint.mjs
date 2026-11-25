@@ -1,4 +1,5 @@
 import {defaultExrSpace,exrSpaces} from './public/render-exr-color.mjs';
+import {outputProfileLimit,outputProfileMode} from './public/image-output-profile.mjs';
 import {previewDimensions,thumbnailDimensions} from './public/image-document-size.mjs';
 import {libraryFill,insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
@@ -958,13 +959,22 @@ export function imageClipboardInput(doc,request){
   return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
 }
 export function imageExportInput(doc,request){
-  const {revision,documentId,outputSpace}=fields(request,['revision','documentId','outputSpace']);
+  const {revision,documentId,outputSpace,outputProfile}=fields(request,['revision','documentId','outputSpace','outputProfile']);
   const input=imageDocumentInput(doc,{revision,documentId,resolution:4096});
   if(outputSpace!==undefined){
     const source=doc.paint.imageDocuments[documentId].colorSpace;
     if(!imageColorSpaces.some(([space])=>space===outputSpace))throw Error('请选择有效的 PNG 输出颜色空间');
     if((source==='linear')!==(outputSpace==='linear'))throw Error('数据贴图须保留原始通道数值');
     input.exportColorSpace=outputSpace;
+  }
+  if(outputProfile!==undefined){
+    if(outputSpace!==undefined||doc.paint.imageDocuments[documentId].colorSpace==='linear')
+      throw Error('请选择单个颜色转换目标，数据贴图须保留原始数值');
+    const {data,intent}=fields(outputProfile,['data','intent']);
+    if(typeof data!=='string'||data.length>4*Math.ceil(outputProfileLimit/3)||!['perceptual','relative'].includes(intent))
+      throw Error('ICC 文件或渲染意图无效');
+    const bytes=Buffer.from(data,'base64'),mode=outputProfileMode(bytes,bytes.length);
+    return {...input,exportProfile:{data,mode,intent},exportDocument:true,...(mode==='CMYK'?{imageTiff:true}:{imagePng:true})};
   }
   return {...input,imagePng:true,exportDocument:true};
 }

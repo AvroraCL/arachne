@@ -628,3 +628,8 @@
   .new-image-preview-stage{min-height:120px}
   .new-image-details{border-left:0;border-top:1px solid #181818}
 }
+
+.image-profile-dialog{width:min(400px,calc(100vw - 24px))}
+.image-profile-dialog .profile-source,.image-profile-dialog output{margin:4px 0 8px;color:var(--ui-muted);font-size:12px;overflow-wrap:anywhere}
+.image-profile-dialog .profile-file{grid-template-columns:70px minmax(0,1fr)}
+.image-profile-dialog input[type=file]{min-width:0;width:100%;font:inherit}

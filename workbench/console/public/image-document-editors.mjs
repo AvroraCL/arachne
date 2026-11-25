@@ -1,6 +1,7 @@
 import {menuShortcut} from './menu-shortcut.mjs';
 import {documentClip,documentFrame,editingSide,imageViewGeometry,previewDimensions} from './image-document-size.mjs';
 import {hasWideGamut} from './image-display-rgb.mjs';
+import {chooseOutputProfile} from './image-profile-dialog.mjs';
 import {editDocumentSize} from './image-size-dialog.mjs';
 import {textEffects,imageStyleKinds,outlinePositions,hasImageStyle} from './image-text-style.mjs';
 import {createImageEdgeTool} from './image-edge-tool.mjs';
@@ -179,8 +180,8 @@ export function createDocumentEditor(ctx,bridge){
     if(file)importFile(file);
   };
   const download=chromeButton(button('导出当前图像 PNG',()=>downloadDocument()),'download');
-  const exportMenu=createContextActions('PNG 输出颜色空间',error=>ctx.error(error));
-  const exportOptions=chromeButton(button('选择 PNG 输出颜色空间',()=>{
+  const exportMenu=createContextActions('图像输出颜色空间',error=>ctx.error(error));
+  const exportOptions=chromeButton(button('选择导出颜色空间',()=>{
     const image=currentDocument(project),origin=imageSelectionOrigin(project);
     if(!image)return;
     const rect=exportOptions.getBoundingClientRect();
@@ -192,8 +193,16 @@ export function createDocumentEditor(ctx,bridge){
         return downloadDocument(space);
       }
     }));
-    exportMenu.open({clientX:rect.left,clientY:rect.bottom},'导出 PNG · 原稿 '+label,choices);
-  }),'chevron','选择 PNG 输出颜色空间');
+    choices.push({label:'按 ICC 导出副本…',run:async()=>{
+      const profile=await chooseOutputProfile(image,label,signal);
+      if(!profile)return;
+      const current=imageSelectionOrigin(project);
+      if(current.id!==origin.id||current.documentId!==origin.documentId||current.revision!==origin.revision)
+        throw Error('图像已变化，请重新选择导出配置');
+      return downloadDocument(undefined,profile);
+    }});
+    exportMenu.open({clientX:rect.left,clientY:rect.bottom},'导出副本 · 原稿 '+label,choices);
+  }),'chevron','选择导出颜色空间');
   exportMenu.bindTrigger(exportOptions);
   const exportGroup=el('span','document-export-controls');
   exportGroup.append(download,exportOptions);
@@ -1226,27 +1235,36 @@ export function createDocumentEditor(ctx,bridge){
     download.setAttribute('aria-busy',String(!!exportRequest));
     const doc=currentDocument(project);
     exportOptions.disabled=download.disabled||doc?.colorSpace==='linear';
-    exportOptions.title=doc?.colorSpace==='linear'?'数据贴图按原始通道数值导出':'选择 PNG 输出颜色空间';
-    download.title=exportRequest?'正在导出 PNG…':doc?`导出当前图像 · ${doc.width} × ${doc.height} PNG`:'导出当前图像 PNG';
+    exportOptions.title=doc?.colorSpace==='linear'?'数据贴图按原始通道数值导出':'选择导出颜色空间';
+    download.title=exportRequest?'正在导出图像…':doc?`导出当前图像 · ${doc.width} × ${doc.height} PNG`:'导出当前图像 PNG';
   }
-  async function downloadDocument(outputSpace){
+  async function downloadDocument(outputSpace,profile){
     const image=currentDocument(project);
     if(!image||exportRequest||!canPaste())return;
     const {id,revision,documentId}=imageSelectionOrigin(project);
     const controller=exportRequest=new AbortController();
     syncClipboard();
     try{
+      let outputProfile;
+      if(profile){
+        const data=await new Promise((resolve,reject)=>{
+          const reader=new FileReader();reader.onerror=()=>reject(Error('无法读取 ICC 配置文件'));
+          reader.onload=()=>resolve(reader.result.split(',')[1]);reader.readAsDataURL(profile.file);
+        });
+        outputProfile={data,intent:profile.intent};
+      }
       const response=await fetch('/api/projects/'+id+'/paint/image-export',{
         method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-        body:JSON.stringify({revision,documentId,outputSpace})
+        body:JSON.stringify({revision,documentId,outputSpace,outputProfile})
       });
       if(response.status===204)throw Error('图像已变化，请重新导出');
-      if(!response.ok)throw Error((await response.json()).error||'导出 PNG 失败');
-      const png=await response.blob();
+      if(!response.ok)throw Error((await response.json()).error||'导出图像失败');
+      const result=await response.blob();
       if(controller.signal.aborted)return;
-      const url=URL.createObjectURL(png),link=el('a');
+      const url=URL.createObjectURL(result),link=el('a');
       const name=image.name.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g,'_').replace(/[ .]+$/,'')||'贴图';
-      link.href=url;link.download=name+(outputSpace&&outputSpace!==image.colorSpace?'-'+outputSpace:'')+'.png';
+      const suffix=profile?'-'+profile.mode.toLowerCase():outputSpace&&outputSpace!==image.colorSpace?'-'+outputSpace:'';
+      link.href=url;link.download=name+suffix+(profile?.mode==='CMYK'?'.tif':'.png');
       host.append(link);link.click();link.remove();
       setTimeout(()=>URL.revokeObjectURL(url),10000);
     }catch(error){

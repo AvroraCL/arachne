@@ -121,7 +121,7 @@ assert im.getextrema()==tuple((n,n) for n in rgba),im.getextrema()`,backgroundFi
       assert.deepEqual(await canvas.evaluate(c=>[...c.getContext('2d').getImageData(c.width>>1,c.height>>1,1,1).data]),[255,173,54,255]);
       assert.match(await editor.locator('.editor-message').innerText(),/sRGB 色域警告/);
       await viewButton.click();
-      await editor.getByRole('button',{name:'选择 PNG 输出颜色空间',exact:true}).click();
+      await editor.getByRole('button',{name:'选择导出颜色空间',exact:true}).click();
       const asSRGB=page.waitForEvent('download');
       await page.getByRole('menuitem',{name:'颜色（sRGB）',exact:true}).click();
       const copy=await asSRGB;
@@ -164,6 +164,45 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
       await session.send('Emulation.setEmulatedMedia',{features:[{name:'color-gamut',value:'srgb'}]});
       await page.reload();await session.detach();
       console.log('PASS P3 画布保留超出 sRGB 的绿色，切换色域警告可恢复');
+      const profiles=[[path.resolve('public/color-profiles/DisplayP3-v4.icc'),'RGBA','png']];
+      for(const [file,mode,ext] of [
+        [process.env.ARACHNE_TEST_CMYK_PROFILE||'/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc','CMYK','tif'],
+        [process.env.ARACHNE_TEST_GRAY_PROFILE||'/System/Library/ColorSync/Profiles/Generic Gray Gamma 2.2 Profile.icc','LA','png']
+      ])if(await fs.access(file).then(()=>true,()=>false))profiles.push([file,mode,ext]);
+      for(const [profile,mode,ext] of profiles){
+        await editor.getByRole('button',{name:'选择导出颜色空间',exact:true}).click();
+        await page.getByRole('menuitem',{name:'按 ICC 导出副本…',exact:true}).click();
+        const profileDialog=page.getByRole('dialog',{name:'按 ICC 导出副本'});
+        const chooser=profileDialog.getByLabel('目标 ICC');
+        const confirm=profileDialog.getByRole('button',{name:'导出副本',exact:true});
+        assert.ok(await confirm.isDisabled());
+        await chooser.setInputFiles({name:'broken.icc',mimeType:'application/octet-stream',buffer:Buffer.from('broken')});
+        await until(async()=>(await profileDialog.locator('output').textContent()).includes('不完整'),'损坏配置提示');
+        assert.ok(await confirm.isDisabled());
+        await chooser.setInputFiles(profile);
+        const fileName=path.join(data,'proof-'+mode+'.'+ext);
+        const result=page.waitForEvent('download');
+        await confirm.click();
+        const file=await result;
+        assert.equal(path.extname(file.suggestedFilename()),'.'+ext);await file.saveAs(fileName);
+        execFileSync(pythonExecutable(),['-B','-c',`import sys
+from io import BytesIO
+from pathlib import Path
+from PIL import Image,ImageCms
+from image_color_spaces import profile_bytes
+im=Image.open(sys.argv[1]);dest=Path(sys.argv[2]).read_bytes();mode=sys.argv[3]
+assert im.size==(63,31) and im.mode==mode and im.info['icc_profile']==dest
+assert im.format==('TIFF' if mode=='CMYK' else 'PNG')
+src=Image.new('RGB',(1,1),(0,255,0))
+ref=ImageCms.profileToProfile(src,BytesIO(profile_bytes('acescg')),BytesIO(dest),outputMode={'CMYK':'CMYK','RGBA':'RGB','LA':'L'}[mode],
+    renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC).getpixel((0,0))
+if mode=='LA': ref=(ref,255)
+if mode=='RGBA': ref=(*ref,255)
+assert im.getpixel((30,15))==ref,(im.getpixel((30,15)),ref)`,fileName,profile,mode],{cwd:new URL('..',import.meta.url)});
+        assert.equal((await api(route)).revision,revisionBefore);
+        console.log('PASS 选择 ICC 导出',mode,ext);
+      }
+
 
     }
     await checkDisplay();
