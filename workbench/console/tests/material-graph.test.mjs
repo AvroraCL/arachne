@@ -69,3 +69,60 @@ print('linear PBR, alpha and UV orientation verified')
 `],{cwd:new URL('../',import.meta.url),input:JSON.stringify(compileMaterialGraph(g)),encoding:'utf8'});
   assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/verified/);
 });
+
+test('one tagged texture supplies corrected color, raw channel data and unchanged alpha across cache reuse',()=>{
+  const g=defaultMaterialGraph(),asset='e'.repeat(64);
+  const color=makeNode('image',0,0,'texture'),raw=makeNode('image',0,0,'packed');
+  color.params.asset=raw.params.asset=asset;
+  raw.params.colorSpace='linear';
+  g.nodes.push(color,raw);
+  g.links=g.links.filter(link=>!['color','roughness','alpha'].includes(link.to.port));
+  for(const [source,port,channel] of [['texture','color','color'],['packed','value','roughness'],['texture','alpha','alpha']])
+    g.links.push({from:{node:source,port},to:{node:'pbr',port:channel}});
+  const plan=compileMaterialGraph(g,{[asset]:{}});
+  const result=spawnSync(pythonExecutable(),['-c',`
+import json,sys,tempfile,hashlib
+from pathlib import Path
+from io import BytesIO
+import numpy as np
+from PIL import Image,ImageCms
+from material_graph import MaterialGraph,MaterialImages,PreviewImages,prepare_blender_images,decode
+from image_color_spaces import profile_bytes
+from paint_channels import CHANNELS
+plan=json.load(sys.stdin)
+node=next(n for n in plan['nodes'] if n['id']=='texture')
+asset=node['params']['asset']
+with tempfile.TemporaryDirectory() as temp:
+    folder=Path(temp);file=folder/'图像 ICC.png'
+    original=np.array([[[68,119,170,161],[173,112,38,57]]],dtype=np.uint8)
+    Image.fromarray(original).save(file,icc_profile=profile_bytes('rec2020'))
+    def proof(space):
+        result=ImageCms.profileToProfile(Image.fromarray(original),BytesIO(profile_bytes(space)),ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
+        return np.asarray(result)[0]
+    preview=PreviewImages()
+    for setting,source in [('auto','rec2020'),('adobe-rgb','adobe-rgb'),('auto','rec2020')]:
+        node['params']['colorSpace']=setting
+        expected=proof(source)
+        for cache in [None,preview]:
+            with MaterialImages({asset:file},preview=cache) as images:
+                graph=MaterialGraph(plan,{asset:file},images)
+                uv=np.array([[.25,.5],[.75,.5],[.5,.5]])
+                out=graph.evaluate(np.zeros((3,14)),np.arange(3),2,1,uv)
+            linear=decode(expected[:,:3]/255)
+            np.testing.assert_allclose(out[:2,CHANNELS['color']],linear,atol=.008)
+            np.testing.assert_allclose(out[2,CHANNELS['color']],linear.mean(axis=0),atol=.008)
+            np.testing.assert_allclose(out[:2,CHANNELS['alpha']],original[0,:,3]/255)
+            np.testing.assert_allclose(out[:2,CHANNELS['roughness']],(original[0,:,:3]/255) @ [.2126,.7152,.0722],atol=1e-6)
+    digest=hashlib.sha256(file.read_bytes()).hexdigest()
+    entries=[dict(id=k,asset=digest,file=str(file),space='auto') for k in ('first','second')]
+    request=folder/'request.json';request.write_text(json.dumps(entries))
+    prepare_blender_images(request)
+    stages=json.loads((folder/'profiled-images.json').read_text())
+    assert stages['first']==stages['second']
+    output=Path(stages['first']['file'])
+    assert hashlib.sha256(output.read_bytes()).hexdigest()==stages['first']['sha256']
+    with Image.open(output) as im:
+        np.testing.assert_allclose(np.asarray(im)[0],proof('rec2020'),atol=1)
+`],{cwd:new URL('../',import.meta.url),input:JSON.stringify(plan),encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr);
+});

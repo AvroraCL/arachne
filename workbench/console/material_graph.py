@@ -7,15 +7,25 @@ import os
 import tempfile
 import numpy as np
 from PIL import Image
+from image_color_spaces import convert_image, profile_bytes
 
 
 def decode(c):
     return np.where(c <= .04045, c / 12.92, ((c + .055) / 1.055) ** 2.4)
 
 
-def decode_image(file, mode, max_edge=None):
+def decode_image(file, mode, max_edge=None, profile=None):
     with Image.open(file) as image:
+        source = None
+        if profile == 'auto':
+            source = image.info.get('icc_profile')
+            if not source and image.info.get('gamma') == 1 and 'srgb' not in image.info:
+                source = profile_bytes('linear-srgb')
+        elif profile:
+            source = profile_bytes(profile)
         image = image.convert(mode)
+        if source:
+            image = convert_image(image,source,profile_bytes('srgb'))
         if max_edge:
             image.thumbnail((max_edge, max_edge), Image.Resampling.BILINEAR)
         return np.asarray(image)
@@ -28,10 +38,10 @@ class PreviewImages:
         self.used_bytes = 0
         self.budget, self.max_entries = budget, max_entries
 
-    def load(self, file, mode='RGBA', max_edge=None):
+    def load(self, file, mode='RGBA', max_edge=None, profile=None):
         file = os.fspath(file)
         version = os.stat(file)
-        identity = (file, mode, max_edge)
+        identity = (file, mode, max_edge, profile)
         signature = (version.st_dev, version.st_ino, version.st_size, version.st_mtime_ns, version.st_ctime_ns)
         entry = self.images.get(identity)
         if entry is not None:
@@ -39,7 +49,7 @@ class PreviewImages:
                 self.images.move_to_end(identity)
                 return entry[1]
             self.used_bytes -= self.images.pop(identity)[1].nbytes
-        pixels = decode_image(file, mode, max_edge)
+        pixels = decode_image(file, mode, max_edge, profile)
         if pixels.nbytes <= self.budget:
             while self.images and (self.used_bytes + pixels.nbytes > self.budget or len(self.images) >= self.max_entries):
                 self.used_bytes -= self.images.popitem(last=False)[1][1].nbytes
@@ -67,11 +77,11 @@ class MaterialImages:
         self.spills.__exit__(*error)
         self.spills = None
 
-    def load(self, asset, mode='RGBA'):
-        key = (asset, mode)
+    def load(self, asset, mode='RGBA', profile=None):
+        key = (asset, mode, profile)
         if key not in self.images:
             file = self.assets[asset]
-            pixels = self.preview.load(file, mode) if self.preview is not None else decode_image(file, mode)
+            pixels = self.preview.load(file, mode, profile=profile) if self.preview is not None else decode_image(file, mode, profile=profile)
             if self.memory_bytes + pixels.nbytes <= self.memory_limit:
                 self.images[key] = pixels
                 self.memory_bytes += pixels.nbytes
@@ -97,7 +107,9 @@ class MaterialGraph:
         for node in plan['nodes']:
             if node['type'] == 'image' and node['params']['asset']:
                 asset = node['params']['asset']
-                self.images[asset] = cache.load(asset)
+                space = node['params'].get('colorSpace','srgb')
+                profile = None if space in ('srgb','linear') else space
+                self.images[node['id']] = cache.load(asset,profile=profile)
 
     def evaluate(self, paint, indices, width, height, uv=None):
         if not self.plan:
@@ -129,7 +141,7 @@ class MaterialGraph:
                 matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
                 out = dict(uv=coords @ matrix.T + [p['x'], p['y']])
             elif kind == 'image':
-                image = self.images.get(p['asset'])
+                image = self.images.get(node['id'])
                 if image is None:
                     out = dict(color=np.zeros(3), alpha=0., value=0.)
                 else:
@@ -140,7 +152,7 @@ class MaterialGraph:
                     fx, fy = (x - ix)[:, None], (y - iy)[:, None]
                     def texel(x,y):
                         result = image[y % h,x % w].astype(np.float32) / 255
-                        if p.get('colorSpace','srgb') == 'srgb':
+                        if p.get('colorSpace','srgb') != 'linear':
                             result[:,:3] = decode(result[:,:3])
                         return result
                     pixels = (texel(ix,iy) * (1-fx) + texel(ix+1,iy) * fx) * (1-fy) + (texel(ix,iy+1) * (1-fx) + texel(ix+1,iy+1) * fx) * fy
@@ -183,3 +195,32 @@ class MaterialGraph:
                 return np.clip(np.nan_to_num(get('surface', paint)), 0, 1)
             values[node['id']] = out
         raise ValueError('节点材质缺少输出')
+
+
+def prepare_blender_images(request):
+    """Stage profile-converted PNGs only for the optional Blender graph consumer."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    prepared, nodes = {}, {}
+    for entry in json.loads(request.read_text(encoding='utf8')):
+        key = (entry['asset'],entry['space'])
+        if key not in prepared:
+            with open(entry['file'],'rb') as source:
+                if hashlib.file_digest(source,'sha256').hexdigest() != entry['asset']:
+                    raise ValueError('材质图像源文件指纹变化')
+                source.seek(0)
+                pixels = decode_image(source,'RGBA',profile=entry['space'])
+            file = request.parent / ('profiled-'+str(len(prepared))+'.png')
+            Image.fromarray(pixels).save(file)
+            with file.open('rb') as source:
+                prepared[key] = {'file':str(file),'sha256':hashlib.file_digest(source,'sha256').hexdigest()}
+        nodes[entry['id']] = prepared[key]
+    (request.parent/'profiled-images.json').write_text(json.dumps(nodes),encoding='utf8')
+
+
+if __name__ == '__main__':
+    import sys
+    from pathlib import Path
+    prepare_blender_images(Path(sys.argv[1]))

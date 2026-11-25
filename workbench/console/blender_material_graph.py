@@ -87,7 +87,12 @@ def apply_material_graph(material, config):
             ports = bind(node, dict(uv=node.inputs['Vector']), dict(uv=node.outputs['Vector']))
         elif kind == 'image':
             if p['asset']:
-                node = texture(source,config['assets'][p['asset']],p.get('colorSpace','srgb')=='linear',expected=p['asset'])
+                space = p.get('colorSpace','srgb')
+                if space in ('srgb','linear'):
+                    node = texture(source,config['assets'][p['asset']],space=='linear',expected=p['asset'])
+                else:
+                    staged = config['profiledImages'][source['id']]
+                    node = texture(source,staged['file'],expected=staged['sha256'])
                 bw = new('ShaderNodeRGBToBW',source,'-luminance',-290)
                 tree.links.new(node.outputs['Color'],bw.inputs['Color'])
                 ports = bind(node,dict(uv=node.inputs['Vector']),dict(color=node.outputs['Color'],alpha=node.outputs['Alpha'],value=bw.outputs[0]))

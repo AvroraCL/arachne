@@ -58,7 +58,7 @@ test('PBR map grouping keeps distinct names and asks for ambiguous channels',()=
   const stored=Object.fromEntries(Object.entries(assets).map(([id,asset])=>[id.repeat(64),asset]));
   const graph=mappedLibraryMaterial({color:'a'.repeat(64),roughness:'b'.repeat(64),normal:'c'.repeat(64),alpha:'e'.repeat(64)},stored,{alphaOutput:'alpha'});
   assert.deepEqual(graph.nodes.filter(node=>node.type==='image').map(({id,params})=>[id,params.colorSpace]),[
-    ['map-color','srgb'],['map-roughness','linear'],['map-normal','linear'],['map-alpha','linear']
+    ['map-color','auto'],['map-roughness','linear'],['map-normal','linear'],['map-alpha','linear']
   ]);
   assert.equal(graph.links.find(link=>link.to.port==='alpha').from.port,'alpha');
   assert.equal(graph.links.find(link=>link.to.port==='roughness').from.port,'value');
@@ -98,16 +98,17 @@ with tempfile.TemporaryDirectory() as directory:
     Image.new('RGBA',(2,2),(51,102,204,153)).save(asset)
     assets={config['asset']: asset}
     cache=MaterialImages(assets)
+    image_node=next(n['id'] for n in config['plan']['nodes'] if n['type']=='image')
     a=MaterialGraph(config['plan'],assets,cache)
     b=MaterialGraph(config['plan'],assets,cache)
-    assert cache.memory_bytes==16 and a.images[config['asset']] is b.images[config['asset']]
+    assert cache.memory_bytes==16 and a.images[image_node] is b.images[image_node]
     assert cache.load(config['asset'],'L').shape==(2,2) and cache.memory_bytes==20
     result=a.evaluate(np.zeros((4,14)),np.arange(4),2,2)
     for name,expected in [('metallic',.2),('ao',.4),('roughness',.4)]:
         assert np.allclose(result[:,CHANNELS[name]],expected),result
     with MaterialImages(assets,memory_limit=1) as spill:
         graph=MaterialGraph(config['plan'],assets,spill)
-        assert spill.memory_bytes==0 and graph.images[config['asset']] is spill.load(config['asset'])
+        assert spill.memory_bytes==0 and graph.images[image_node] is spill.load(config['asset'])
         assert np.array_equal(graph.evaluate(np.zeros((4,14)),np.arange(4),2,2),result)
         del graph
     assert not spill.images and spill.spills is None

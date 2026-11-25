@@ -879,7 +879,7 @@ try{
   const materialDoc=await api(project(libraryTarget.id));
   const [mapId,mapped]=Object.entries(materialDoc.paint.materials).find(([,item])=>item.name==='面板贴图材质');
   const imageNodes=mapped.graph.nodes.filter(node=>node.type==='image');
-  assert.deepEqual(imageNodes.map(node=>node.params.colorSpace),['srgb','linear','linear','linear','linear']);
+  assert.deepEqual(imageNodes.map(node=>node.params.colorSpace),['auto','linear','linear','linear','linear']);
   assert.equal(mapped.graph.links.find(link=>link.to.port==='alpha').from.port,'alpha');
   assert.equal(imageNodes.find(node=>node.id==='map-roughness').params.asset,imageNodes.find(node=>node.id==='map-ao').params.asset);
   const materialTile=mapShelf.getByRole('button',{name:'面板贴图材质',exact:true});

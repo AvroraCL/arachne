@@ -78,6 +78,18 @@ async function stageDocument(doc,quality,signal,listBakes){
       await verifyPaintBake(doc,report,out,{draft,binding,signal});
       nodeMaterial=await nativePaintMaterial(doc,report,out,{signal});
     }
+    // Blender opens sRGB or data textures directly. Resolve other source profiles
+    // once per material stage, using the same decoded texels as the native bake.
+    const profiled=nodeMaterial?.plan.nodes.filter(n=>n.type==='image'&&n.params.asset&&!['srgb','linear'].includes(n.params.colorSpace??'srgb'));
+    if(profiled?.length){
+      owned??=await fs.mkdtemp(path.join(directory,'material-'));
+      const input=path.join(owned,'source-profiles.json');
+      await fs.writeFile(input,JSON.stringify(profiled.map(n=>({
+        id:n.id,asset:n.params.asset,file:nodeMaterial.assets[n.params.asset],space:n.params.colorSpace
+      }))));
+      await run(process.env.ARACHNE_PYTHON||'python',['-X','utf8',path.join(ROOT,'material_graph.py'),input],signal);
+      nodeMaterial={...nodeMaterial,profiledImages:JSON.parse(await fs.readFile(path.join(owned,'profiled-images.json'),'utf8'))};
+    }
     ensureRunning(signal);
     const color=path.join(out,'f_16xl_BaseColor.png');
     const stage={owned,source:geometry.source,sourceHash:geometry.report?.modelSha256||doc.source.files[doc.source.reviewSource],

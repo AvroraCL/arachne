@@ -1,3 +1,4 @@
+import {textureColorSpaces} from './image-color-spaces.mjs';
 import {channelSpecs} from './paint-channels.mjs';
 import {libraryNodeTypes,compileLibraryMaterial,defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph,isBrushImage} from './paint-library.mjs';
 import {editMaterialLinks,materialLinkKey,insertMaterialNode,rerouteMaterialLinks,copyMaterialNodes,pasteMaterialNodes,duplicateMaterialNodes,removeMaterialNodes,vacantMaterialPosition,parseMaterialClipboard,materialClipboardPrefix} from './material-graph-edit.mjs';
@@ -222,7 +223,7 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
             input.append(new Option('无',''));
             for(const [id,asset] of Object.entries(read().paint.assets))if(isBrushImage(asset))input.append(new Option(asset.name,id));
           }
-          else if(param==='colorSpace')input.append(new Option('颜色（sRGB）','srgb'),new Option('数据（线性）','linear'));
+          else if(param==='colorSpace')input.append(...textureColorSpaces.map(([id,label])=>new Option(label,id)));
           else for(const [id,text] of Object.entries(operations))input.append(new Option(text,id));
         }else{
           input=el('input');input.type=typeof value==='boolean'?'checkbox':typeof value==='string'?'color':'number';

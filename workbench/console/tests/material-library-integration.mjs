@@ -61,7 +61,8 @@ try{
   const packedFiles=JSON.parse(execFileSync(pythonExecutable(),['-X','utf8','-c',[
     'import base64,io,json',
     'from PIL import Image',
-    'specs={"蓝钢_BaseColor.webp":((28,126,212,255),"WEBP",dict(lossless=True),4096),"蓝钢_ORM.tga":((48,120,200,255),"TGA",dict(compression="tga_rle"),4096),"蓝钢_Normal.png":((128,51,230,255),"PNG",{},4096),"蓝钢_2K_BaseColor.webp":((144,47,39,255),"WEBP",dict(lossless=True),2048),"蓝钢_ORM_1K.tga":((160,40,8,255),"TGA",dict(compression="tga_rle"),1024)}',
+    'from image_color_spaces import profile_bytes',
+    'specs={"蓝钢_BaseColor.webp":((28,126,212,255),"WEBP",dict(lossless=True,icc_profile=profile_bytes("linear-srgb")),4096),"蓝钢_ORM.tga":((48,120,200,255),"TGA",dict(compression="tga_rle"),4096),"蓝钢_Normal.png":((128,51,230,255),"PNG",{},4096),"蓝钢_2K_BaseColor.webp":((144,47,39,255),"WEBP",dict(lossless=True),2048),"蓝钢_ORM_1K.tga":((160,40,8,255),"TGA",dict(compression="tga_rle"),1024)}',
     'files={}',
     'for name,(pixel,kind,settings,size) in specs.items():',
     ' out=io.BytesIO();Image.new("RGBA",(size,size),pixel).save(out,format=kind,**settings);files[name]=base64.b64encode(out.getvalue()).decode()',
@@ -310,8 +311,10 @@ try{
     'import json,sys', 'from pathlib import Path','from PIL import Image',
     'print(json.dumps({Path(f).stem.replace("packed-material-",""): [Image.open(f).size, Image.open(f).getpixel((2048,2048))] for f in sys.argv[1:]}))'
   ].join('\n'),...unpackedFiles],{encoding:'utf8'}));
+  // The tagged linear RGB WebP encodes (28,126,212). Check the baked sRGB appearance.
+  const blueSteelRGB=[93,187,235];
   assert.deepEqual(unpacked,{
-    color:[[4096,4096],[28,126,212]],ao:[[4096,4096],48],roughness:[[4096,4096],120],
+    color:[[4096,4096],blueSteelRGB],ao:[[4096,4096],48],roughness:[[4096,4096],120],
     metallic:[[4096,4096],200],normal:[[4096,4096],[128,204,230]]
   });
   await packedPage.reload();
@@ -374,10 +377,10 @@ try{
     'im=Image.open(sys.argv[1]);print(json.dumps([im.getpixel(p) for p in [(2048,2048),(3072,1024),(512,512)]]))'
   ].join('\n'),painted],{encoding:'utf8'}));
   assert.deepEqual(overlayPixels[1],[22,239,170]);
-  assert.deepEqual(overlayPixels[2],[28,126,212]);
+  assert.deepEqual(overlayPixels[2],blueSteelRGB);
   const decode=byte=>{const s=byte/255;return s<=.04045?s/12.92:((s+.055)/1.055)**2.4;};
   const encode=value=>Math.round((value<=.0031308?value*12.92:1.055*value**(1/2.4)-.055)*255);
-  assert.deepEqual(overlayPixels[0],[220,66,20].map((value,channel)=>encode((decode(value)*128+decode([28,126,212][channel])*127)/255)));
+  assert.deepEqual(overlayPixels[0],[220,66,20].map((value,channel)=>encode((decode(value)*128+decode(blueSteelRGB[channel])*127)/255)));
   assert.equal(overlayBake.paintReport.files['f_16xl_roughness.png'],packBake.paintReport.files['f_16xl_roughness.png']);
   assert.equal(overlayBake.paintReport.uv_unchanged,true);
   await packedPage.reload();
@@ -476,8 +479,8 @@ try{
     'import json,sys','from PIL import Image',
     'im=Image.open(sys.argv[1]);print(json.dumps([im.getpixel((int(x*4096),int(y*4096))) for x,y in ((.024,.75),(.166,.25),(.024,.32))]))'
   ].join('\n'),smartFile],{encoding:'utf8'}));
-  assert.deepEqual(smartPixels.slice(0,2),[[28,126,212],[28,126,212]]);
-  assert.notDeepEqual(smartPixels[2],[28,126,212]);
+  assert.deepEqual(smartPixels.slice(0,2),[blueSteelRGB,blueSteelRGB]);
+  assert.notDeepEqual(smartPixels[2],blueSteelRGB);
 
   const backup=await job(newRoute,'backup',{revision:applied.revision,requestId:'smart-material-portable'});
   const zip=await (await fetch(origin+backup.archiveUrl)).arrayBuffer();

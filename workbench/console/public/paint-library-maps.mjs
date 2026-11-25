@@ -103,7 +103,7 @@ export function mappedLibraryMaterial(maps,assets,{alphaOutput='value',packed=nu
   for(const channel of rows){
     const asset=maps[channel],spec=channelSpecs[channel];
     if(!Object.hasOwn(assets,asset))throw Error(spec.name+'贴图已不存在');
-    const image=add('image',0,y,'map-'+channel,{asset,colorSpace:spec.srgb?'srgb':'linear'});
+    const image=add('image',0,y,'map-'+channel,{asset,colorSpace:spec.srgb?'auto':'linear'});
     const port=spec.type==='color'?'color':channel==='alpha'?alphaOutput:'value';
     if(channel==='normal'&&normalConversion){
       const split=add('separateColor',250,y,'normal-separate');

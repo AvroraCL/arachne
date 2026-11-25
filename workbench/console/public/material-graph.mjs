@@ -1,3 +1,4 @@
+import {textureColorSpaces} from './image-color-spaces.mjs';
 import {paintChannels,legacyChannels,channelSpecs,channelDefaults} from './paint-channels.mjs';
 // Data-only, typed PBR graph. Shared by browser, command validation and workers.
 const scalar={value:'scalar'}, color={color:'color'};
@@ -22,7 +23,7 @@ export const nodeTypes={
 export const portNames={input:'输入',output:'输出',...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),color:'颜色',metallic:'金属度',roughness:'粗糙度',value:'数值',uv:'UV',a:'A',b:'B',factor:'系数',alpha:'透明度',surface:'表面',red:'红色',green:'绿色',blue:'蓝色'};
 export function makeNode(type,x=40,y=40,id=globalThis.crypto.randomUUID()){
   if(!Object.hasOwn(nodeTypes,type))throw Error('不支持的材质节点');
-  return {id,type,x,y,params:{...nodeTypes[type].defaults}};
+  return {id,type,x,y,params:{...nodeTypes[type].defaults,...(type==='image'?{colorSpace:'auto'}:{})}};
 }
 export function defaultMaterialGraph(){
   const nodes=[makeNode('paint',40,90,'paint'),makeNode('pbr',360,60,'pbr'),makeNode('output',680,80,'output')];
@@ -54,7 +55,7 @@ function compileGraph(graph,assets,nodeTypes,domain){
       if(key==='asset'){
         if(value!==''&&(!/^[a-f\d]{64}$/.test(value)||!Object.hasOwn(assets,value)))throw Error('节点图像素材不存在');
       }else if(key==='colorSpace'){
-        if(!['srgb','linear'].includes(value))throw Error('图像颜色空间无效');
+        if(!textureColorSpaces.some(([id])=>id===value))throw Error('图像颜色空间无效');
       }else if(key==='operation'){
         if(!['add','subtract','multiply','divide','minimum','maximum'].includes(value))throw Error('数学运算无效');
       }else if(domain==='brush'&&node.type==='brush'&&brushImageFields.includes(key)){
@@ -120,7 +121,8 @@ export const brushNodeTypes={
 export function graphNodeTypes(graph){return graph?.material==='brush'?brushNodeTypes:nodeTypes;}
 export function compileNodeGraph(graph,assets={}){return graph?.material==='brush'?compileBrushGraph(graph):compileMaterialGraph(graph,assets);}
 export function makeGraphNode(graph,type,x=40,y=40,id=globalThis.crypto.randomUUID()){
-  const spec=graphNodeTypes(graph)[type];if(!spec)throw Error('不支持的节点');return {id,type,x,y,params:{...spec.defaults}};
+  if(graph?.material!=='brush')return makeNode(type,x,y,id);
+  const spec=brushNodeTypes[type];if(!spec)throw Error('不支持的节点');return {id,type,x,y,params:{...spec.defaults}};
 }
 
 // Reroutes unify their two sockets and every adjacent reroute, without conversions.
