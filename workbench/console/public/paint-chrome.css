@@ -24,7 +24,7 @@
 .area-header :is(.area-header-tools,.area-header-controls){height:var(--chrome-control)}
 .area-header .area-caption{font-size:13px;font-weight:500;letter-spacing:0}
 .area-header .library-bar{padding:0;border:0;flex-wrap:nowrap;background:transparent}
-#workspace :is(.editor-toolbar,#surface-tools){
+#workspace :is(.editor-toolbar:not(.area-header-controls),#surface-tools){
   background:var(--chrome-panel-title);border:0;border-bottom:1px solid var(--chrome-line);
 }
 
@@ -363,7 +363,7 @@
   & .area-menu[open]>summary{background:var(--chrome-hover)}
   & .area-editor-picker{width:auto;margin:0}
   & .area-editor-picker>.custom-select-button::after{content:none}
-  & .area-header-controls{gap:4px;background:transparent;border:0}
+  & .area-header-controls{gap:4px}
   & .viewport-camera-bookmarks[aria-haspopup],& .viewport-display-arrow{
     --menu-trigger-width:18px;--menu-trigger-padding:0;--menu-chevron-position:center;
   }
