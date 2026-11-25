@@ -1,0 +1,1 @@
+RGB ICC profiles from [Compact ICC Profiles](https://github.com/saucecontrol/Compact-ICC-Profiles/tree/bdd84663061bc4ae95ca70decff54f581e27f702), released under CC0. AdobeCompat-v2 is compatible with Adobe RGB (1998).

@@ -21,12 +21,7 @@ from image_filters import alpha_bounds, blur_gaussian, gaussian_box
 from image_raster_tools import flood_layer, clone_layer, connected_area, healing_inputs
 
 
-def decode(c):
-    return np.where(c<=.04045,c/12.92,((c+.055)/1.055)**2.4)
-
-
-def encode(c):
-    return np.where(c<=.0031308,c*12.92,1.055*np.maximum(c,0)**(1/2.4)-.055)
+from image_color_spaces import (WIDE, convert_image, decode, encode, image_input, profile_bytes)
 
 
 class ImageSurface(Surface):
@@ -285,7 +280,7 @@ MESH_TRIANGLES = ((0,1,4),(0,4,3),(1,2,5),(1,5,4),(3,4,7),(3,7,6),(4,5,8),(4,8,7
 def smooth_warp_map(warp, inverse):
     u_knots,v_knots = (np.asarray(warp[key]) for key in ('u','v'))
     points = np.asarray(warp['points']).reshape(len(v_knots),len(u_knots),2)
-    if np.array_equal(points[:,:,0],np.broadcast_to(u_knots,points.shape[:2])) and \
+    if np.array_equal(points[:,:,0],np.broadcast_to(u_knots,points.shape[:2])) and\
        np.array_equal(points[:,:,1],np.broadcast_to(v_knots[:,None],points.shape[:2])):
         return warp_map(None,inverse)
 
@@ -447,52 +442,57 @@ def warped_image_tiles(surface, layer, raw):
         yield ids[keep],pixels[keep].astype(np.float32)
 
 
-def read_placed_image(file, linear):
+def read_placed_image(file, space, authored=False):
     with Image.open(file) as im:
-        raw=np.asarray(im.convert('RGBA'),dtype=np.float32)/255
-        source_linear=im.info.get('gamma') == 1 and 'srgb' not in im.info
-        source_srgb='srgb' in im.info
-    if not source_linear and (not linear or source_srgb):raw[:,:,:3]=decode(raw[:,:,:3])
-    raw[:,:,:3]*=raw[:,:,3:]
+        pixels, transfer = image_input(im, space, authored=authored)
+    raw = pixels.astype(np.float32)/255
+    raw[..., :3] = decode(raw[..., :3], transfer)*raw[..., 3:]
     return raw
 
 
-def placed_layer_pixels(layer, assets, linear):
+def placed_layer_pixels(layer, assets, space):
     source = layer.get('embedded')
     if source:
-        return assets[(source['documentId'],source['width'],source['height'])]
-    return read_placed_image(assets[layer['asset']],linear)
+        return assets[(source['documentId'],source['width'],source['height'],space)]
+    return read_placed_image(assets[layer['asset']],space,authored=bool(layer.get('text')))
 
 
-def embedded_image_assets(layers, documents, files):
+def embedded_image_assets(layers, documents, files, space='srgb'):
     if not any(layer.get('embedded') for layer in layers):
         return files
     assets = dict(files)
-    def resolve(layers):
+    def resolve(layers, target):
         for layer in layers:
             source = layer.get('embedded')
             if not source:
                 continue
-            key = (source['documentId'],source['width'],source['height'])
+            key = (source['documentId'],source['width'],source['height'],target)
             if key in assets:
                 continue
             child = documents[key[0]]
-            resolve(child['layers'])
-            pixels = document_pixels(child,assets,4096)
-            if pixels.shape[:2]!=(key[2],key[1]):
-                pixels = np.asarray(Image.fromarray(pixels).resize(key[1:],Image.Resampling.BICUBIC))
-            raw = pixels.astype(np.float32)/255
-            if child['colorSpace']=='srgb':
-                raw[:,:,:3] = decode(raw[:,:,:3])
-            raw[:,:,:3] *= raw[:,:,3:]
+            child_space = child['colorSpace']
+            resolve(child['layers'],child_space)
+            image = Image.fromarray(document_pixels(child,assets,4096))
+            if image.size != key[1:3]:
+                image = image.resize(key[1:3],Image.Resampling.BICUBIC)
+            transfer = child_space
+            if child_space != target and (child_space in WIDE or target in WIDE):
+                if child_space == 'linear':
+                    rgba = np.array(image)
+                    rgba[..., :3] = np.rint(encode(rgba[..., :3]/255)*255)
+                    image = Image.fromarray(rgba)
+                transfer = 'srgb' if target == 'linear' else target
+                image = convert_image(image,profile_bytes('srgb' if child_space=='linear' else child_space),profile_bytes(transfer))
+            raw = np.asarray(image,dtype=np.float32)/255
+            raw[..., :3] = decode(raw[..., :3],transfer)*raw[..., 3:]
             assets[key] = raw
-    resolve(layers)
+    resolve(layers,space)
     return assets
 
 
-def image_pixels(layer,assets,size,linear,sample=None,window=None,raw=None):
+def image_pixels(layer,assets,size,space,sample=None,window=None,raw=None):
     if raw is None:
-        raw = placed_layer_pixels(layer,assets,linear)
+        raw = placed_layer_pixels(layer,assets,space)
     h,w=raw.shape[:2]
     raster=4096 if window else size
     if window:
@@ -522,19 +522,16 @@ def image_pixels(layer,assets,size,linear,sample=None,window=None,raw=None):
     return np.stack([np.asarray(Image.fromarray(raw[:,:,i]).transform(extent,Image.Transform.AFFINE,affine,resample=Image.Resampling.BILINEAR)) for i in range(4)],axis=-1)[::-1].reshape(-1,4)
 
 
-def raster_pixels(file, size, linear, window=None):
+def raster_pixels(file, size, space, window=None):
     with Image.open(file) as image:
+        box = None
         if window:
             x,y,side = window
-            pixels = np.asarray(image.crop((x,y,x+side,y+side)).convert('RGBA'))
-        else:
-            pixels = np.asarray(image.convert('RGBA'))
-        source_linear = image.info.get('gamma') == 1 and 'srgb' not in image.info
-        source_srgb = 'srgb' in image.info
+            box = (x,y,x+side,y+side)
+        pixels, transfer = image_input(image,space,box)
     def premultiply(values):
         result = values.astype(np.float32) / 255
-        if not source_linear and (not linear or source_srgb):
-            result[..., :3] = decode(result[..., :3])
+        result[..., :3] = decode(result[..., :3],transfer)
         result[..., :3] *= result[..., 3:]
         return result
     step = len(pixels) // size
@@ -550,13 +547,11 @@ def raster_pixels(file, size, linear, window=None):
     return result[::-1].reshape(-1, 4)
 
 
-def repair_pixels(file, linear):
+def repair_pixels(file, space):
     with Image.open(file) as image:
-        source_linear = image.info.get('gamma') == 1 and 'srgb' not in image.info
-        source_srgb = 'srgb' in image.info
-        pixels = np.asarray(image.convert('RGBA'))
-    values = np.arange(256, dtype=np.float32) / 255
-    return pixels, decode(values) if not source_linear and (not linear or source_srgb) else values
+        pixels, transfer = image_input(image,space)
+    return pixels, decode(np.arange(256,dtype=np.float32)/255,transfer)
+
 
 
 def gradient_amount(surface,gradient,ids,coords=None):
@@ -680,10 +675,10 @@ def shape_tiles(surface, layer, color):
         yield ids[keep], np.column_stack((premult[keep], alpha[keep]))
 
 
-def apply_adjustment(result, layer, surface, linear, clipped=False):
+def apply_adjustment(result, layer, surface, space, clipped=False):
     params, mode = layer['adjustment'], layer['blend']
     if params['type'] in ('gaussianBlur', 'unsharpMask'):
-        apply_spatial_filter(result, layer, surface, linear, clipped)
+        apply_spatial_filter(result, layer, surface, space, clipped)
         return
     if mode == 'normal' and neutral_adjustment(params):
         return
@@ -696,10 +691,10 @@ def apply_adjustment(result, layer, surface, linear, clipped=False):
         back = result[ids]
         alpha = back[:, 3:]
         base = back[:, :3] / alpha
-        encoded = not linear and params['type'] != 'exposure'
-        adjusted = adjust_rgb(encode(base) if encoded else base, params)
+        encoded = space != 'linear' and params['type'] != 'exposure'
+        adjusted = adjust_rgb(encode(base,space) if encoded else base, params)
         if encoded:
-            adjusted = decode(adjusted)
+            adjusted = decode(adjusted,space)
         mixed = blend_rgb(base, adjusted, mode) * alpha
         opacity = layer['opacity']
         if mask is not None:
@@ -710,21 +705,21 @@ def apply_adjustment(result, layer, surface, linear, clipped=False):
         result[ids, :3] = back[:, :3] + (mixed - back[:, :3]) * opacity
 
 
-def sharpen_tile(back, blurred, params, linear, mode):
+def sharpen_tile(back, blurred, params, space, mode):
     alpha, blurred_alpha = back[:, :, 3:], blurred[:, :, 3:]
     base = np.divide(back[:, :, :3], alpha, out=np.zeros_like(back[:, :, :3]), where=alpha > 0)
     low = np.divide(blurred[:, :, :3], blurred_alpha, out=base.copy(), where=blurred_alpha > 0)
-    signal, smooth = (base, low) if linear else (encode(base), encode(low))
+    signal, smooth = encode(base,space), encode(low,space)
     detail = signal - smooth
     if params['threshold']:
         detail *= np.max(np.abs(detail), axis=2, keepdims=True) >= params['threshold'] / 255
     sharpened = np.clip(signal + detail * (params['amount'] / 100), 0, 1)
-    color = sharpened if linear else decode(sharpened)
+    color = decode(sharpened,space)
     blurred[:, :, :3] = blend_rgb(base, color, mode) * alpha if mode != 'normal' else color * alpha
     blurred[:, :, 3:] = alpha
 
 
-def apply_spatial_filter(result, layer, surface, linear, clipped):
+def apply_spatial_filter(result, layer, surface, space, clipped):
     params = layer['adjustment']
     sharpen = params['type'] == 'unsharpMask'
     height, width = surface.uv_shape
@@ -753,7 +748,7 @@ def apply_spatial_filter(result, layer, surface, linear, clipped):
                 ids = (rows[:, None] * width + columns).ravel()
                 amount = opacity * mask(ids).reshape(*back.shape[:2], 1)
             if sharpen:
-                sharpen_tile(back, pixels, params, linear, mode)
+                sharpen_tile(back, pixels, params, space, mode)
             elif clipped or mode != 'normal':
                 back_alpha, alpha = back[:, :, 3:], pixels[:, :, 3:]
                 base = np.divide(back[:, :, :3], back_alpha, out=np.zeros_like(back[:, :, :3]), where=back_alpha > 0)
@@ -789,13 +784,13 @@ def point_tiles(tiles, sample):
                 return
 
 
-def tone_coverage(pixels, stops, linear):
+def tone_coverage(pixels, stops, space):
     if stops == [0,0,255,255]:
         return 1
     alpha = pixels[:,3:]
     rgb = np.divide(pixels[:,:3],alpha,out=np.zeros_like(pixels[:,:3]),where=alpha>0)
-    if not linear:
-        rgb = encode(rgb)
+    if space != 'linear':
+        rgb = encode(rgb,space)
     gray = (.2126*rgb[:,0]+.7152*rgb[:,1]+.0722*rgb[:,2])*255
     low,full_low,full_high,high = stops
     dark = np.clip((gray-low)/(full_low-low),0,1) if full_low>low else gray>=low
@@ -803,14 +798,14 @@ def tone_coverage(pixels, stops, linear):
     return np.minimum(dark,light)[:,None]
 
 
-def composite_tile(result, ids, pixels, opacity, mode, clipped=False, blend_if=None, linear=False, sample=None):
+def composite_tile(result, ids, pixels, opacity, mode, clipped=False, blend_if=None, space='srgb', sample=None):
     if not len(ids):
         return
     back = result[ids]
     back_alpha = back[:, 3:]
     if blend_if:
-        source = tone_coverage(pixels,blend_if['source'],linear)
-        backdrop = tone_coverage(back,blend_if['backdrop'],linear)
+        source = tone_coverage(pixels,blend_if['source'],space)
+        backdrop = tone_coverage(back,blend_if['backdrop'],space)
         opacity = opacity * source * (1-back_alpha+back_alpha*backdrop)
     source_alpha = pixels[:, 3:]*opacity
     coverage = None
@@ -914,11 +909,11 @@ def clean_edge_colors(pixels, coverage, treatment, color):
     return pixels
 
 
-def composite_layer(result, layer, surface, assets, linear, color, clipped=False, group_base=False, pick=None):
+def composite_layer(result, layer, surface, assets, space, color, clipped=False, group_base=False, pick=None):
     if not layer['visible'] or not layer['opacity']:
         return
     if layer['kind']=='adjustment':
-        apply_adjustment(result, layer, surface, linear, clipped)
+        apply_adjustment(result, layer, surface, space, clipped)
         return
     styles = layer.get('styles',{})
     styled = any(value['enabled'] for value in styles.values())
@@ -935,11 +930,11 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
                 for key in sources:
                     if key and key not in snapshots:
                         file = assets[key[0]]
-                        snapshots[key] = repair_pixels(file,linear) if repair else raster_pixels(file,surface.uv_shape[0],linear)
+                        snapshots[key] = repair_pixels(file,space) if repair else raster_pixels(file,surface.uv_shape[0],space)
                 source,backdrop = (snapshots.get(key) for key in sources)
                 healing = healing_inputs(surface,stroke,source,backdrop) if repair else None
                 return clone_layer(surface, ids, paint, stroke, source, healing)
-            return flood_layer(surface, ids, paint, stroke, color, None if linear else encode)
+            return flood_layer(surface, ids, paint, stroke, color, None if space=='linear' else lambda rgb: encode(rgb,space))
         strokes = layer.get('strokes', [])
         backing = None
         sampler = None
@@ -949,7 +944,7 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
                 sample_ids = np.array([pick[0]], dtype=np.int32)
                 sampler = lambda stroke: surface.stroke_at(stroke,sample_ids)
         if layer.get('raster'):
-            backing = raster_pixels(assets[layer['raster']], surface.uv_shape[0], linear, surface.window)
+            backing = raster_pixels(assets[layer['raster']], surface.uv_shape[0], space, surface.window)
         if backing is not None and not strokes:
             ranges = image_tiles(backing)
         else:
@@ -969,11 +964,11 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
     elif layer['kind']=='shape':
         ranges = shape_tiles(surface, layer, color)
     elif layer.get('warp'):
-        ranges = warped_image_tiles(surface,layer,placed_layer_pixels(layer,assets,linear))
+        ranges = warped_image_tiles(surface,layer,placed_layer_pixels(layer,assets,space))
     elif pick and pick[2] and not styled:
-        ranges = [(np.array([pick[0]]),image_pixels(layer,assets,surface.uv_shape[0],linear,pick[0]))]
+        ranges = [(np.array([pick[0]]),image_pixels(layer,assets,surface.uv_shape[0],space,pick[0]))]
     else:
-        ranges = image_tiles(image_pixels(layer, assets, surface.uv_shape[0], linear, window=surface.window))
+        ranges = image_tiles(image_pixels(layer, assets, surface.uv_shape[0], space, window=surface.window))
     mask = image_mask(layer, surface) if layer['maskEnabled'] else None
     treatment = layer.get('edgeDecontaminate')
     if styled:
@@ -984,12 +979,12 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
                     pixels = clean_edge_colors(pixels.copy(),coverage,treatment,color)
                 buffer[ids] = pixels if coverage is None else pixels*coverage[:,None]
             tiles = styled_tiles(buffer,surface,styles,color)
-            blend_image_tiles(result,layer,tiles,None,linear,clipped,group_base,pick)
+            blend_image_tiles(result,layer,tiles,None,space,clipped,group_base,pick)
     else:
-        blend_image_tiles(result,layer,ranges,mask,linear,clipped,group_base,pick,color)
+        blend_image_tiles(result,layer,ranges,mask,space,clipped,group_base,pick,color)
 
 
-def blend_image_tiles(result, layer, ranges, mask, linear, clipped=False, group_base=False, pick=None, color=None):
+def blend_image_tiles(result, layer, ranges, mask, space, clipped=False, group_base=False, pick=None, color=None):
     if pick and pick[2]:
         ranges = point_tiles(ranges, pick[0])
     for ids, pixels in ranges:
@@ -1003,7 +998,7 @@ def blend_image_tiles(result, layer, ranges, mask, linear, clipped=False, group_
                 pixels = clean_edge_colors(pixels.copy(),coverage,layer['edgeDecontaminate'],color)
             opacity = opacity * coverage[:,None]
         coverage = composite_tile(result, ids, pixels, opacity, 'normal' if group_base else layer['blend'], clipped,
-                                  None if group_base else layer.get('blendIf'), linear, pick[0] if pick else None)
+                                  None if group_base else layer.get('blendIf'), space, pick[0] if pick else None)
         if coverage:
             pick[1].append((layer['id'],coverage))
 
@@ -1023,7 +1018,7 @@ def composite_buffer(result, depth):
         yield np.zeros_like(result)
 
 
-def composite_stack(result, children, surface, assets, linear, color, parent=None, depth=0, pick=None):
+def composite_stack(result, children, surface, assets, space, color, parent=None, depth=0, pick=None):
     layers = children.get(parent, [])
     index = 0
     while index < len(layers):
@@ -1042,13 +1037,13 @@ def composite_stack(result, children, surface, assets, linear, color, parent=Non
             styled = any(value['enabled'] for value in styles.values())
             pass_through = base['blend'] == 'passThrough' and not styled
             if pass_through and opacity == 1 and mask is None:
-                composite_stack(result, children, surface, assets, linear, color, base['id'], depth, pick)
+                composite_stack(result, children, surface, assets, space, color, base['id'], depth, pick)
                 continue
             group_pick = (pick[0],[],pick[2] and not styled) if pick else None
             with composite_buffer(result, depth) as buffer:
                 if pass_through:
                     buffer[:] = result
-                composite_stack(buffer, children, surface, assets, linear, color, base['id'], depth + 1, group_pick)
+                composite_stack(buffer, children, surface, assets, space, color, base['id'], depth + 1, group_pick)
                 if pass_through:
                     spans = (np.arange(start, min(start + 131072, len(result))) for start in range(0,len(result),131072))
                     if pick and pick[2]:
@@ -1072,19 +1067,19 @@ def composite_stack(result, children, surface, assets, linear, color, parent=Non
                 pick[1].extend((key,alpha*weight) for key,alpha in group_pick[1])
             continue
         if not clips or base['kind'] == 'adjustment':
-            composite_layer(result, base, surface, assets, linear, color, pick=pick)
+            composite_layer(result, base, surface, assets, space, color, pick=pick)
             continue
         clip_pick = (pick[0],[],pick[2]) if pick else None
         with composite_buffer(result, depth) as buffer:
-            composite_layer(buffer, base, surface, assets, linear, color, group_base=True, pick=clip_pick)
+            composite_layer(buffer, base, surface, assets, space, color, group_base=True, pick=clip_pick)
             for layer in clips:
-                composite_layer(buffer, layer, surface, assets, linear, color, clipped=True, pick=clip_pick)
+                composite_layer(buffer, layer, surface, assets, space, color, clipped=True, pick=clip_pick)
             tiles = image_tiles(buffer)
             if pick and pick[2]:
                 tiles = point_tiles(tiles, pick[0])
             for ids, pixels in tiles:
                 coverage = composite_tile(result, ids, pixels, base['opacity'], base['blend'],
-                                          blend_if=base.get('blendIf'),linear=linear,sample=pick[0] if pick else None)
+                                          blend_if=base.get('blendIf'),space=space,sample=pick[0] if pick else None)
                 if coverage:
                     pick[1].append((base['id'],coverage))
                     pick[1].extend((key,alpha*coverage) for key,alpha in clip_pick[1] if key!=base['id'])
@@ -1131,10 +1126,10 @@ def exact_stroke_window(document,assets,window,inspect_mask):
 
 def composite_document(document,assets,size=4096,inspect_mask=None,alpha_only=False,window=None):
     surface=ImageSurface(size,assets,window);result=np.zeros((size*size,4),dtype=np.float32)
-    linear=document['colorSpace']=='linear'
+    space=document['colorSpace']
     def color(text):
         c=np.array(list(bytes.fromhex(text[1:])),dtype=np.float32)/255
-        return c if linear else decode(c)
+        return decode(c,space)
     layers = document['layers']
     if inspect_mask:
         for layer in layers:
@@ -1146,17 +1141,17 @@ def composite_document(document,assets,size=4096,inspect_mask=None,alpha_only=Fa
                         result[ids, :3] = 1
                     else:
                         value = mask(ids)[:, None]
-                        result[ids, :3] = value if linear else decode(value)
+                        result[ids, :3] = decode(value,space)
                     result[ids, 3] = 1
                 break
     else:
-        composite_stack(result, document_stack(layers), surface, assets, linear, color)
+        composite_stack(result, document_stack(layers), surface, assets, space, color)
     if alpha_only:
         return result[:,3].reshape(size,size)[::-1].copy()
-    return encode_document_pixels(result,linear).reshape(size,size,4)[::-1]
+    return encode_document_pixels(result,space).reshape(size,size,4)[::-1]
 
 
-def encode_document_pixels(result,linear):
+def encode_document_pixels(result,space):
     # Transparent pixels have zero straight RGB. Limit color conversion to
     # occupied pixels, keeping the same tiles and float32 rounding.
     out = np.zeros((len(result),4),dtype=np.uint8)
@@ -1169,8 +1164,8 @@ def encode_document_pixels(result,linear):
             active = slice(None)
         pixels = part[active]
         rgb = pixels[:,:3]/pixels[:,3:]
-        if not linear:
-            rgb = encode(rgb)
+        if space != 'linear':
+            rgb = encode(rgb,space)
         tile = out[start:start+len(part)]
         tile[active,:3] = np.rint(np.clip(rgb,0,1)*255)
         tile[active,3] = np.rint(np.clip(pixels[:,3],0,1)*255)
@@ -1179,25 +1174,25 @@ def encode_document_pixels(result,linear):
 
 def layout_probe(document, assets, size, probe):
     surface = ImageSurface(size,assets)
-    linear = document['colorSpace'] == 'linear'
+    space = document['colorSpace']
     result = np.zeros((size*size,4), dtype=np.float32)
     by_id = {layer['id']: layer for layer in document['layers']}
     def color(text):
         values = np.array(list(bytes.fromhex(text[1:])), dtype=np.float32)/255
-        return values if linear else decode(values)
+        return decode(values,space)
     point = probe.get('point')
     if point is not None:
         x, y = (min(size-1, int(n*size)) for n in point)
         contributions = []
         local = not any(layer.get('adjustment',{}).get('type') in ('gaussianBlur','unsharpMask')
                         for layer in document['layers'])
-        composite_stack(result, document_stack(document['layers']), surface, assets, linear, color,
+        composite_stack(result, document_stack(document['layers']), surface, assets, space, color,
                         pick=((size-1-y)*size+x,contributions,local))
         return {'hit': next((key for key,alpha in reversed(contributions) if alpha > 1/255), None)}
     def layer_bounds(layer, surface, result):
         size = surface.uv_shape[0]
         result.fill(0)
-        composite_layer(result, layer, surface, assets, linear, color)
+        composite_layer(result, layer, surface, assets, space, color)
         alpha = result[:,3].reshape(size,size)[::-1]
         rows = np.flatnonzero(np.any(alpha > 1/255, axis=1))
         if not len(rows):
@@ -1314,11 +1309,11 @@ def path_selection(vertices, size, feather):
 def edge_pixels(document,assets,size):
     layer = document['layers'][0]
     if layer['kind']=='image' and not layer.get('warp') and size==4096:
-        linear = document['colorSpace']=='linear'
-        raw = placed_layer_pixels(layer,assets,linear)
+        space = document['colorSpace']
+        raw = placed_layer_pixels(layer,assets,space)
         def render(x,y,w,h):
-            pixels = image_pixels(layer,assets,size,linear,window=(x,y,w,h),raw=raw)
-            return encode_document_pixels(pixels,linear).reshape(h,w,4)[::-1]
+            pixels = image_pixels(layer,assets,size,space,window=(x,y,w,h),raw=raw)
+            return encode_document_pixels(pixels,space).reshape(h,w,4)[::-1]
         return render
     rgba = composite_document(document,assets,size)
     return lambda x,y,w,h: rgba[y:y+h,x:x+w]
@@ -1539,7 +1534,7 @@ def png_bytes(pixels, color_space=None):
     elif color_space == 'linear':
         metadata.add(b'gAMA', struct.pack('>I', 100000))
     out = BytesIO()
-    Image.fromarray(pixels).save(out, format='PNG', pnginfo=metadata, compress_level=3)
+    Image.fromarray(pixels).save(out, format='PNG', pnginfo=metadata, icc_profile=profile_bytes(color_space) if color_space in WIDE else None, compress_level=3)
     return out.getvalue()
 
 

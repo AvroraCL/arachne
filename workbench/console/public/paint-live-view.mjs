@@ -1,3 +1,4 @@
+import {writeDisplayRGB} from './image-display-rgb.mjs';
 import {previewDimensions,documentFrame} from './image-document-size.mjs';
 import {renderChannel,liveStride,effectiveValues,channelSpecs,paintChannels} from './paint-channels.mjs';
 const workingSize=256,detailSize=4096;
@@ -137,7 +138,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       canvas.width=width;canvas.height=height;
       image=ctx.createImageData(width,height);
     }
-    if(rgba)image.data.set(pixels);else renderChannel(pixels,size,channel,image.data);
+    if(rgba)writeDisplayRGB(image.data,pixels,request.inspectMask?null:request.colorSpace);else renderChannel(pixels,size,channel,image.data);
     if(channel==='coverage'){
       const stride=liveStride(pixels,size);
       for(let i=0,j=0;i<pixels.length;i+=stride,j+=4){const [r,g,b]=palette[pixels[i+5]&3];image.data[j]=r;image.data[j+1]=g;image.data[j+2]=b;}
@@ -209,7 +210,10 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
           const [left,top,side]=patched.window;
           ctx.putImageData(image,0,0,left-ox,top-oy,side,side);
         }
-        ctx.putImageData(new ImageData(new Uint8ClampedArray(next.buffer),side,side),x-ox,y-oy);
+        const wide=!request.inspectMask&&request.colorSpace&&!['srgb','linear'].includes(request.colorSpace);
+        const tile=wide?ctx.createImageData(side,side):new ImageData(new Uint8ClampedArray(next.buffer),side,side);
+        if(wide)writeDisplayRGB(tile.data,next,request.colorSpace);
+        ctx.putImageData(tile,x-ox,y-oy);
         patched={window,request};
         onFrame({request,pixels:next,window});
         return;

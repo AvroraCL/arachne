@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {test} from 'node:test';
 import {pythonExecutable} from '../python-runtime.mjs';
+import {writeDisplayRGB} from '../public/image-display-rgb.mjs';
 import {createSmoothMesh,smoothMesh,validImageWarp,warpPoint} from '../public/image-warp.mjs';
 
 test('local exact preview uses the 4K pixels for paint, low flow, tip grain, erasure and a soft mask',()=>{
@@ -285,10 +286,10 @@ for density in (0.,.001,.1,1.):
         expected=np.empty(pixels.shape,dtype=np.uint8)
         expected[:,:3]=np.rint(np.clip(rgb,0,1)*255)
         expected[:,3]=np.rint(np.clip(pixels[:,3],0,1)*255)
-        np.testing.assert_array_equal(encode_document_pixels(pixels,linear),expected)
+        np.testing.assert_array_equal(encode_document_pixels(pixels,'linear' if linear else 'srgb'),expected)
     transparent=pixels.copy()
     transparent[:,3]=0
-    assert not encode_document_pixels(transparent,False).any()
+    assert not encode_document_pixels(transparent,'srgb').any()
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8',env:{...process.env,OPENBLAS_NUM_THREADS:'1'}});
 });
 
@@ -335,4 +336,44 @@ del source,pixels
 gc.collect()
 assert bytes(raw)==expected
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8',env:{...process.env,OPENBLAS_NUM_THREADS:'1'}});
+});
+
+test('working RGB preserves native samples and alpha while the canvas matches the embedded PNG profile',()=>{
+  const samples=JSON.parse(execFileSync(pythonExecutable(),['-B','-c',`
+from io import BytesIO
+from PIL import Image, ImageCms
+import json, numpy as np
+from image_documents import composite_document, png_bytes, read_placed_image
+from image_color_spaces import decode
+rows=[]
+for space in ('display-p3','adobe-rgb','prophoto-rgb'):
+    # Midtones, near-black transfer curves and out-of-sRGB primaries.
+    pixels=np.array([[[68,119,170,161],[4,12,3,39],[145,50,99,255],[0,250,32,128],[253,226,241,192]]],np.uint8)
+    data=png_bytes(pixels,space)
+    with Image.open(BytesIO(data)) as im:
+        assert np.array_equal(np.asarray(im),pixels)
+        proof=ImageCms.profileToProfile(im,ImageCms.ImageCmsProfile(BytesIO(im.info['icc_profile'])),
+            ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
+        expected=np.asarray(proof)
+    # Place the tagged export in an sRGB document, including fractional alpha.
+    actual=read_placed_image(BytesIO(data),'srgb')
+    normalized=expected.astype(np.float32)/255
+    np.testing.assert_allclose(actual[:,:,:3],decode(normalized[:,:,:3])*normalized[:,:,3:],atol=.005)
+    np.testing.assert_array_equal(actual[:,:,3],normalized[:,:,3])
+    stroke=lambda color: dict(uv=True,rect=[0,0,1,1],color=color,opacity=1,erase=False)
+    def layer(key,color,opacity):
+        return dict(id=key,kind='pixel',visible=True,opacity=opacity,blend='normal',maskEnabled=False,strokes=[stroke(color)])
+    doc=dict(colorSpace=space,layers=[layer('base','#000000',1),layer('light','#ffffff',.5)])
+    # Half-light in the three actual document transfer functions.
+    middle={'display-p3':188,'adobe-rgb':186,'prophoto-rgb':174}[space]
+    assert list(composite_document(doc,{},16)[8,8])==[middle,middle,middle,255]
+    rows.append([space,pixels.flatten().tolist(),expected.flatten().tolist()])
+print(json.dumps(rows))
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'}));
+  for(const [space,source,expected] of samples){
+    const display=new Uint8ClampedArray(source.length);
+    writeDisplayRGB(display,source,space);
+    for(let i=0;i<display.length;i++)
+      assert.ok(Math.abs(display[i]-expected[i])<=(i%4===3?0:1),space+' '+i+' '+display[i]+' vs '+expected[i]);
+  }
 });

@@ -1,3 +1,4 @@
+import {writeDisplayRGB} from './image-display-rgb.mjs';
 import {previewDimensions} from './image-document-size.mjs';
 const size=64;
 const retryDelays=[150,300,600,1200,2400,4000,4000,4000];
@@ -78,6 +79,7 @@ export function updateImageThumbnail(canvas,{projectId,revision,documentId,color
         const bytes=await response.arrayBuffer();
         if(!current()||bytes.byteLength!==width*height*4)return;
         const pixels=new ImageData(new Uint8ClampedArray(bytes),width,height);
+        if(!mask)writeDisplayRGB(pixels.data,pixels.data,colorSpace);
         cache.delete(slot);
         cache.set(slot,{key,pixels});
         while(cache.size>128)cache.delete(cache.keys().next().value);

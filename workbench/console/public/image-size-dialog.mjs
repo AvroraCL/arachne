@@ -1,3 +1,4 @@
+import {imageColorSpaces} from './image-documents.mjs';
 import {enhanceSelectMenu} from './paint-select.mjs';
 import {editingSide,resizedDocument} from './image-document-size.mjs';
 
@@ -31,14 +32,17 @@ function newImageSettings(form,width,height,defaultName){
       <div role="group" aria-label="方向" class="new-image-orientation">
         <span>方向</span><button type="button">横向</button><button type="button">纵向</button>
       </div>
-      <label>颜色空间<select><option value="srgb">颜色（sRGB）</option><option value="linear">数据（线性）</option></select></label>
+      <label>颜色空间<select></select></label>
+      <p class="new-image-profile-note"></p>
       <label>背景内容<select class="new-image-background"><option value="">透明</option><option value="#ffffff">白色</option><option value="#000000">黑色</option><option value="custom">自定颜色</option></select></label>
       <label class="new-image-color" hidden>背景颜色<input type="color" value="#808080"></label>
     </section>`;
   layout.querySelector('.new-image-size').append(width.parentElement,height.parentElement);
   form.append(layout);
   const name=layout.querySelector('input[type=text]'),space=layout.querySelector('select');
+  for(const [id,label] of imageColorSpaces)space.add(new Option(label,id));
   const background=layout.querySelector('.new-image-background'),color=layout.querySelector('input[type=color]');
+  const profileNote=layout.querySelector('.new-image-profile-note');
   const paper=layout.querySelector('.new-image-paper'),preview=layout.querySelector('.new-image-preview');
   const readColor=()=>background.value==='custom'?color.value:background.value;
   name.value=defaultName;
@@ -60,7 +64,11 @@ function newImageSettings(form,width,height,defaultName){
       paper.querySelector('i').textContent=w+' px';
       paper.querySelector('b').textContent=h+' px';
     }
-    paper.style.background=readColor()||'';
+    const hex=readColor(),profile={'display-p3':'display-p3','adobe-rgb':'a98-rgb','prophoto-rgb':'prophoto-rgb'}[space.value];
+    profileNote.textContent=profile?'画布按 sRGB 预览，导出的 PNG 嵌入此 ICC 配置。'
+      :space.value==='linear'?'保留通道数值，适用于粗糙度、法线和蒙版。':'适用于网页图像和常规彩色贴图。';
+    paper.style.background=hex&&profile
+      ?'color('+profile+' '+hex.slice(1).match(/../g).map(n=>parseInt(n,16)/255).join(' ')+')':hex||'';
     color.parentElement.hidden=background.value!=='custom';
     orientations.forEach((button,i)=>{
       button.disabled=!width.validity.valid||!height.validity.valid||w===h;
@@ -83,7 +91,7 @@ function newImageSettings(form,width,height,defaultName){
     const w=width.valueAsNumber,h=height.valueAsNumber;
     setSize(i===0?Math.max(w,h):Math.min(w,h),i===0?Math.min(w,h):Math.max(w,h));
   });
-  background.onchange=color.oninput=width.oninput=height.oninput=sync;sync();
+  space.onchange=background.onchange=color.oninput=width.oninput=height.oninput=sync;sync();
   return {name,space,readColor};
 }
 

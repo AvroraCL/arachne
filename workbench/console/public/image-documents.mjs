@@ -14,6 +14,10 @@ import {duplicateImageLayerBatch,imageLayerLimit,planImageLayerDelete,planImageL
 import {isStrokeBlock,checkStrokeBlock} from './stroke-blocks.mjs';
 import {imageLayoutTargets,layoutPoint} from './image-layout.mjs';
 import {identityImageSpace,imagePlacement,validImageWarp} from './image-warp.mjs';
+export const imageColorSpaces=[
+  ['srgb','颜色（sRGB）'],['display-p3','Display P3'],['adobe-rgb','Adobe RGB (1998)'],
+  ['prophoto-rgb','ProPhoto RGB'],['linear','数据（线性）']
+];
 const record=o=>o&&typeof o==='object'&&!Array.isArray(o),id=s=>typeof s==='string'&&/^[\w-]{1,100}$/.test(s),unit=n=>Number.isFinite(n)&&n>=0&&n<=1;
 const exact=(o,keys)=>record(o)&&Object.keys(o).every(k=>keys.includes(k));
 const label=s=>typeof s==='string'&&!!s.trim()&&s.length<=100;
@@ -177,7 +181,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
   let stamps=0;
   for(const [key,doc] of Object.entries(documents)){
     const checkCoverage=key=>cloneAsset(key)&&paint.assets[key]?.width===4096&&paint.assets[key]?.height===4096;
-    if(!id(key)||!exact(doc,['name','width','height','frame','colorSpace','layers','selections','paths'])||!label(doc.name)||!validDimensions(doc.width,doc.height)||(doc.frame!==undefined&&!validFrame(doc.frame))||!['srgb','linear'].includes(doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>imageLayerLimit)throw Error('图像文档无效');
+    if(!id(key)||!exact(doc,['name','width','height','frame','colorSpace','layers','selections','paths'])||!label(doc.name)||!validDimensions(doc.width,doc.height)||(doc.frame!==undefined&&!validFrame(doc.frame))||!imageColorSpaces.some(([id])=>id===doc.colorSpace)||!Array.isArray(doc.layers)||doc.layers.length>imageLayerLimit)throw Error('图像文档无效');
     if(doc.selections!==undefined){
       if(!Array.isArray(doc.selections))throw Error('已保存的选区无效');
       const names=new Set();
