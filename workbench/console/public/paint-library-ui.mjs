@@ -15,7 +15,7 @@ export function createPaintLibrary({host,read,write,saveMap,uploadMaps,canEdit,s
   const bar=el('div','library-bar'),tabs=el('div','library-tabs'),tools=el('div','library-actions'),grid=el('div','library-grid');
   enableResourceGridKeys(grid);
   tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','资源库');
-  const search=el('input');search.type='search';search.placeholder='搜索资源';search.setAttribute('aria-label','搜索资源');
+  const search=el('input','editor-search-field');search.type='search';search.placeholder='搜索资源';search.setAttribute('aria-label','搜索资源');
   enableResourceSearchKeys(search);
   function button(text,action,label){const b=el('button','',text);b.type='button';b.onclick=action;if(label)b.setAttribute('aria-label',label);return b;}
   for(const [id,name] of [['materials','材质'],['brushes','笔刷'],['images','图片'],['smartMaterials','智能材质']]){

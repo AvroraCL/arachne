@@ -113,12 +113,7 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .property-editor-pin:hover:not(:disabled){background:#383838;color:#ddd}
 .property-editor-pin[aria-pressed=true]{background:#494949;color:#eee}
 .property-editor-pin:disabled{opacity:.3}
-.property-editor-search{display:flex;align-items:center;min-width:0;height:27px;padding:0 6px;border:1px solid #151515;border-radius:4px;background:#202020}
-.property-editor-search:focus-within{border-color:#777}
-.property-editor-search-icon{display:grid;place-items:center;flex:none;color:#999}
-.property-editor-search-icon .chrome-icon{width:16px;height:16px}
-.property-editor-search input{width:100%;min-width:0;height:24px;padding:2px 5px;border:0;outline:0;background:transparent;font-size:12px;color:#ddd}
-.property-editor-search input::placeholder{color:#858585}
+.property-editor-search{display:flex;align-items:center}
 .property-editor-scroll{padding:0 7px 14px;overflow:auto}
 .property-editor-panel[hidden],.property-editor-empty[hidden],.property-editor-footer[hidden],.render-settings-section[hidden],.render-settings-row[hidden]{display:none}
 .property-editor-panel [hidden]{display:none!important}

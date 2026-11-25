@@ -284,7 +284,7 @@
     <div id="paint-library"></div>
     <div id="image-library">
     <div class="shelf-header">
-      <input id="asset-search" type="search" placeholder="搜索素材" aria-label="搜索素材">
+      <input id="asset-search" class="editor-search-field" type="search" placeholder="搜索素材" aria-label="搜索素材">
       <div class="shelf-actions" id="shelf-actions">
         <button id="asset-view" type="button" title="查看素材大图" aria-label="查看素材大图" disabled>查看</button>
         <button id="uv-add-image" data-drawing-only type="button" disabled>置入图像文档</button>
@@ -317,7 +317,7 @@
         <select id="drawing-layer-blend" aria-label="图层混合模式"><option value="normal">正常</option><option value="multiply">正片叠底</option><option value="screen">滤色</option><option value="overlay">叠加</option></select>
         <label><span id="drawing-opacity-label">不透明度</span> <input id="drawing-layer-opacity" type="number" aria-label="图层不透明度" min="0" max="100" step="1" value="100"> %</label>
       </div>
-      <input id="layer-search" type="search" aria-label="图层名称" placeholder="图层名称" autocomplete="off" hidden>
+      <input id="layer-search" class="editor-search-field" type="search" aria-label="图层名称" placeholder="图层名称" autocomplete="off" hidden>
       <p id="layer-search-empty" role="status" hidden>没有匹配图层</p>
       <div id="layers"></div><button id="base">全 UV 底层</button>
       </div>

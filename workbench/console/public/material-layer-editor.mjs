@@ -23,7 +23,7 @@ export function createMaterialLayerEditor(ctx,bridge){
   const tools=element('div','editor-toolbar editor-material-layer-tools');
   const body=element('div','editor-scroll editor-list editor-material-tree');
   const status=element('output','editor-message');
-  const search=element('input');
+  const search=element('input','editor-search-field');
   search.type='search';
   search.placeholder='搜索';
   search.setAttribute('aria-label','搜索图层');

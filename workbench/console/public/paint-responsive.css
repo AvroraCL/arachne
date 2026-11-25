@@ -13,7 +13,6 @@
   #workspace .editor-area:is([data-editor=imageLayers],[data-editor=imageProperties]) .area-header-controls .custom-select-button{
     width:100%;text-overflow:ellipsis;white-space:nowrap;overflow:hidden
   }
-  #workspace .property-editor-search input:not(:focus)::placeholder{color:transparent}
 
   #workspace #drawing-layer-settings{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;padding:4px 0}
   #workspace #drawing-layer-settings>.custom-select{min-width:0;width:100%}

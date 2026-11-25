@@ -168,6 +168,20 @@ try{
     await page.keyboard.press('Escape');
     await menu.waitFor({state:'hidden'});
   }
+  async function checkSearch(input){
+    const read=()=>input.evaluate(el=>{
+      const field=el.closest('.editor-search-field'),css=getComputedStyle(field);
+      return [field.getBoundingClientRect().height,css.backgroundImage,css.paddingLeft,css.borderTopColor,getComputedStyle(el).outlineStyle];
+    });
+    await input.blur();await page.mouse.move(0,0);
+    const rest=await read();
+    await input.hover();const hover=await read();
+    await input.fill('搜索测试');const focus=await read();
+    assert.notEqual(hover[3],rest[3],await input.getAttribute('aria-label')+' hover');assert.notEqual(focus[3],hover[3]);
+    assert.equal(focus[4],'none','only the search field edge indicates focus');
+    await input.fill('');await input.blur();
+    return [rest,hover,focus];
+  }
   async function menuAndSelection(size){
     await show('modeling');
     const model=page.locator('.editor-area[data-editor=viewport]').first();
@@ -177,6 +191,17 @@ try{
       const style=getComputedStyle(el);
       return [el.getBoundingClientRect().height,style.backgroundColor,style.backgroundImage,style.borderRadius];
     });
+    const more=header.locator('.area-menu>summary');
+    const plain=()=>more.evaluate(el=>[getComputedStyle(el).backgroundColor,getComputedStyle(el).color]);
+    const idle=await plain();assert.equal(idle[0],'rgba(0, 0, 0, 0)');
+    await more.hover();assert.deepEqual(await plain(),idle);
+    await more.click();assert.ok(await more.evaluate(el=>el.parentElement.open));assert.deepEqual(await plain(),idle);
+    await page.keyboard.press('Escape');
+    const outline=page.getByRole('searchbox',{name:'搜索物体',exact:true}),properties=page.getByRole('searchbox',{name:'搜索当前属性',exact:true});
+    const left=input=>input.evaluate(el=>el.closest('.editor-search-field').getBoundingClientRect().left);
+    assert.ok(Math.abs(await left(outline)-await left(properties))<2,'sidebar searches share a leading edge');
+    const searchStyle=await checkSearch(outline);assert.deepEqual(await checkSearch(properties),searchStyle);
+    await properties.focus();await page.screenshot({path:path.join(evidence,size+'-header-search.png')});await properties.blur();
     const strip=await header.locator('.editor-toolbar.area-header-controls').evaluate(el=>{
       const style=getComputedStyle(el);
       return [style.backgroundColor,style.borderBottomWidth];
@@ -213,6 +238,9 @@ try{
     await page.keyboard.press('Escape');
     await show('material');
     const stack=page.locator('.editor-area[data-editor=layers]').first(),filter=trigger(stack,'图层栈通道');
+    assert.deepEqual(await checkSearch(resourceSearch),searchStyle);
+    const layerSearch=page.locator('#layer-search');
+    await page.locator('#toggle-layer-search').click();assert.deepEqual(await checkSearch(layerSearch),searchStyle);await page.locator('#toggle-layer-search').click();
     await exerciseMenu(filter,'颜色','全部通道',size);
     for(const button of [filter,trigger(stack,'图层混合模式')])
       assert.ok(await button.evaluate(el=>el.scrollWidth<=el.clientWidth),
@@ -233,6 +261,9 @@ try{
     assert.equal(await layer.getAttribute('aria-pressed'),'true');
     assert.ok(await hasFocus(layer),'selecting the layer keeps keyboard focus in its row');
     await contextPreview(layer,size,'material');
+    await show('drawing');
+    const imageFilter=page.getByRole('button',{name:'筛选图像图层',exact:true});await imageFilter.click();
+    assert.deepEqual(await checkSearch(page.getByRole('searchbox',{name:'搜索图像图层',exact:true})),searchStyle);await imageFilter.click();
   }
   for(const [size,dimensions] of [['wide',{width:1440,height:940}],['narrow',{width:900,height:630}]]){
     await page.setViewportSize(dimensions);

@@ -254,8 +254,7 @@
 .domain-material-pane>.editor-properties{flex:1;min-height:0}
 .document-panel{flex:1;padding:6px;color:#ddd;font-size:13px}
 .document-layer-filter{display:grid;grid-template-columns:minmax(0,1fr) minmax(64px,92px);align-items:center;gap:4px 6px;flex:none;padding:6px 6px 3px;background:var(--area-bg,#242424)}
-.document-layer-filter input[type=search]{width:100%;min-width:0;height:28px;padding:3px 6px;border:1px solid transparent;border-radius:3px;background:#202020;color:#ddd;font:inherit;font-size:13px}
-.document-layer-filter input[type=search]:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
+.document-layer-filter input[type=search]{width:100%}
 .document-filter-count{grid-column:1/-1;color:#999;font-size:11px;font-variant-numeric:tabular-nums;min-width:0;overflow-wrap:anywhere}
 @container(max-width:185px){.document-layer-filter{grid-template-columns:minmax(0,1fr)}.document-layer-filter>.custom-select{width:100%}}
 .document-layer-controls{display:grid;grid-template-columns:minmax(36px,1fr) auto 25px;gap:4px;align-items:center;margin-bottom:7px}

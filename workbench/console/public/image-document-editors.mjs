@@ -1672,7 +1672,7 @@ export function createImagePanel(type,ctx){
     row.append(input);parent.append(row);return input;
   }
   const picker=choice('图像图层文档',[],'',value=>selectImage(project,{documentId:value||null,layerId:null,target:'pixels'}));tools.append(picker);enhanceSelectMenu(picker);
-  const filters=el('div','document-layer-filter'),search=el('input'),filterCount=el('output','document-filter-count');
+  const filters=el('div','document-layer-filter'),search=el('input','editor-search-field'),filterCount=el('output','document-filter-count');
   const kinds=[['all','全部类型'],['group','图层组'],['pixel','像素层'],['image','图像层'],['gradient','渐变填充'],['adjustment','调整图层'],['shape','形状层'],['text','文字层'],['mask','带蒙版']];
   const kind=choice('筛选图层类型',kinds,kinds.some(([value])=>value===ctx.state?.layerKind)?ctx.state.layerKind:'all',filterChanged);
   let filterOpen=ctx.state?.layerFilterOpen===true;

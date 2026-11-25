@@ -955,7 +955,7 @@ function createLibraryEditor(ctx,bridge){
   const {host,project,state}=ctx,toolbar=el('div','editor-toolbar'),body=el('div','editor-scroll'),status=el('output','editor-message');host.append(toolbar,body,status);
   let key='',kind=state.kind||'materials',query=state.query||'',scope=state.scope==='personal'?'personal':'project',pickedAsset=null,personal,scopeSelect,createResource,savePersonal,selectionGeneration=0,viewGeneration=0,disposed=false;
   enableResourceGridKeys(body);
-  const search=el('input');search.type='search';search.placeholder='搜索';search.setAttribute('aria-label','搜索资源');search.value=query;search.oninput=()=>{query=search.value;key='';sync();ctx.onChange();};toolbar.append(search);
+  const search=el('input','editor-search-field');search.type='search';search.placeholder='搜索资源';search.setAttribute('aria-label','搜索资源');search.value=query;search.oninput=()=>{query=search.value;key='';sync();ctx.onChange();};toolbar.append(search);
   enableResourceSearchKeys(search);
   function execute(ops,origin){return project.commands(ops,origin).catch(error=>{status.textContent=error.message;ctx.error(error);return false;});}
   function matching(doc){
@@ -1087,7 +1087,7 @@ function createLibraryEditor(ctx,bridge){
   const unsub=project.subscribe(event=>{if(event.kind==='resource')selectionGeneration++;sync();});sync();headerControls(ctx,toolbar);return {sync,getState:()=>({query,kind,scope,personalId:personal.selectedId,scroll:body.scrollTop}),dispose(){disposed=true;unsub();browse.remove();mapDialog.dispose();personal.dispose();}};
 }
 function createSceneEditor(ctx){
-  const {host,project,state}=ctx,toolbar=el('div','editor-toolbar editor-scene-tools'),search=el('input'),searchField=el('div','editor-scene-search'),list=el('div','editor-scroll editor-list editor-scene-list'),status=el('output','editor-scene-status');
+  const {host,project,state}=ctx,toolbar=el('div','editor-toolbar editor-scene-tools'),search=el('input'),searchField=el('div','editor-search-field editor-scene-search'),list=el('div','editor-scroll editor-list editor-scene-list'),status=el('output','editor-scene-status');
   const closed=new Set(Array.isArray(state.collapsed)?state.collapsed.slice(0,1000):[]);let rootClosed=state.rootCollapsed===true,structureKey='',treeSelection=null,treeActive=null,restoredScroll=false;
   const empty=[],rowViews=new Map();let sourceItems=null,names=null,items=empty,itemKey='',itemVersion=0,matches=0,lastScene=null,lastTree=null,lastActive=null,sceneRoot=null;
   let renderFlags=null,renderSource=null,renderPending=false,renderDisposed=false,lastRenderKey='',renderRetryAt=0;
@@ -1095,7 +1095,7 @@ function createSceneEditor(ctx){
   search.type='search';search.placeholder='搜索物体';search.setAttribute('aria-label','搜索物体');search.value=state.query||'';
   const clear=button('清除物体搜索',clearSearch);
   chromeButton(clear,'close','清除物体搜索');clear.classList.add('outline-search-clear');
-  searchField.innerHTML=workspaceIcons.search;searchField.append(search,clear);
+  searchField.append(search,clear);
   const show=button('显示全部',()=>project.scene?.showAll?.());chromeButton(show,'eye','显示全部');show.title='显示全部物体';
   const locate=button('定位活动物体',locateActive);chromeButton(locate,'focus','定位活动物体');locate.title='定位活动物体 · .';
   const filters=[['all','全部物体'],['visible','可见物体'],['hidden','隐藏物体'],['selected','选中物体'],['active','活动物体']];

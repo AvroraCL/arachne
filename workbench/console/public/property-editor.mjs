@@ -12,9 +12,9 @@ export function createPropertyEditorFrame({host,searchHost,state={},areaId,onCha
   const contextName=el('span','property-editor-context-name'),pin=el('button','property-editor-pin');
   pin.type='button';pin.innerHTML=workspaceIcons.pin;pin.setAttribute('aria-label','固定当前属性');pin.setAttribute('aria-pressed','false');pin.title='固定当前属性';
   context.append(contextIcon,contextType,contextName,pin);
-  const searchWrap=el('label','property-editor-search'),searchIcon=el('span','property-editor-search-icon'),search=el('input');
-  searchIcon.innerHTML=workspaceIcons.search;search.type='search';search.placeholder='搜索当前属性';search.setAttribute('aria-label','搜索当前属性');
-  searchWrap.append(searchIcon,search);heading.append(context);(searchHost||heading).append(searchWrap);
+  const searchWrap=el('label','editor-search-field property-editor-search'),search=el('input');
+  search.type='search';search.placeholder='搜索当前属性';search.setAttribute('aria-label','搜索当前属性');
+  searchWrap.append(search);heading.append(context);(searchHost||heading).append(searchWrap);
   const scroll=el('div','property-editor-scroll editor-scroll'),panels=new Map(),tabs=new Map();
   const empty=el('p','property-editor-empty');empty.textContent='没有匹配的设置';empty.hidden=true;
   const footer=el('div','property-editor-footer');scroll.append(empty,footer);main.append(heading,scroll);root.append(rail,main);host.append(root);
