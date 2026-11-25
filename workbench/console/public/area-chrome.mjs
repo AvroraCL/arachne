@@ -91,7 +91,12 @@ export function createContextActions(label,onError){
     const buttons=[...menu.querySelectorAll('button:enabled')],index=buttons.indexOf(document.activeElement);
     buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowUp'?-1:1)+buttons.length)%buttons.length]?.focus();
   };
-  return {open(event,title,actions){
+  return {bindTrigger(button){
+    button.classList.add('context-menu-trigger');
+    button.setAttribute('aria-haspopup','menu');
+    button.setAttribute('aria-expanded','false');
+    menu.addEventListener('beforetoggle',event=>button.setAttribute('aria-expanded',String(event.newState==='open')));
+  },open(event,title,actions){
     close();menu.replaceChildren();const heading=document.createElement('div');heading.className='scene-context-title';heading.textContent=title;menu.append(heading);
     for(const item of actions){
       if(!item){menu.append(document.createElement('hr'));continue;}

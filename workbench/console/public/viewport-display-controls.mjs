@@ -11,8 +11,7 @@ const icons={
   wire:icon('<circle cx="10" cy="10" r="7.4"/><ellipse cx="10" cy="10" rx="3.6" ry="7.4"/><path d="M2.8 10h14.4"/>'),
   solid:icon('<circle cx="10" cy="10" r="7.4" fill="currentColor"/>'),
   material:icon('<circle cx="10" cy="10" r="7.4"/><path d="M10 2.6v14.8a7.4 7.4 0 0 1 0-14.8Z" fill="currentColor"/>'),
-  cycles:icon('<circle cx="10" cy="10" r="7.4"/><path d="m4.2 14.5 10.3-10.3M6.8 16.6l9.8-9.8M11.2 17.3l6.1-6.1M2.7 8.8l6.1-6.1m-5.4 9.5 8.8-8.8" opacity=".65"/>'),
-  chevron:icon('<path d="m6 8 4 4 4-4"/>')
+  cycles:icon('<circle cx="10" cy="10" r="7.4"/><path d="m4.2 14.5 10.3-10.3M6.8 16.6l9.8-9.8M11.2 17.3l6.1-6.1M2.7 8.8l6.1-6.1m-5.4 9.5 8.8-8.8" opacity=".65"/>')
 };
 const modes={wire:'线框',solid:'实体',material:'材质预览',cycles:'渲染预览'};
 const el=(tag,cls)=>Object.assign(document.createElement(tag),{className:cls});
@@ -24,7 +23,7 @@ function toggle(label,graphic,click){
 function pressed(button,value){button.setAttribute('aria-pressed',String(value));}
 function menu(group,label){
   const details=el('details','viewport-display-menu'),summary=el('summary','viewport-display-arrow');
-  summary.title=label;summary.setAttribute('aria-label',label);summary.setAttribute('role','button');summary.innerHTML=icons.chevron;
+  summary.title=label;summary.setAttribute('aria-label',label);summary.setAttribute('role','button');
   const content=el('div','viewport-display-popover');
   content.setAttribute('role','group');content.setAttribute('aria-label',label);
   const heading=el('div','viewport-display-heading');heading.textContent=label;content.append(heading);

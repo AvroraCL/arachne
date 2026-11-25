@@ -124,14 +124,14 @@ export function registerAreaEditors(registry,bridge){
         {label:'平滑顶点…',enabled:modeler.canSmooth(),run:()=>smoothing.open()}
       ]);
     });
-    meshButton.setAttribute('aria-haspopup','menu');
+    meshMenu.bindTrigger(meshButton);
     meshButton.hidden=mode!=='edit';
     const selectButton=button('选择',openSelectionMenu,'建模选择');
     selectButton.setAttribute('aria-label','建模选择');
-    selectButton.setAttribute('aria-haspopup','menu');
+    selectionMenu.bindTrigger(selectButton);
     const cursorButton=chromeButton(button('三维游标',openCursorMenu),'pivot');
     cursorButton.title='三维游标 · Shift + S · Shift + 右键放置';
-    cursorButton.setAttribute('aria-haspopup','menu');
+    cursorMenu.bindTrigger(cursorButton);
     let cursorPointer=null,cursorKey='';
     const foreground=el('input');foreground.type='color';foreground.value=bridge.foreground();foreground.setAttribute('aria-label','前景色');
     foreground.oninput=()=>{sampledBrush=null;bridge.setForeground(foreground.value);syncPicker();};
@@ -166,16 +166,15 @@ export function registerAreaEditors(registry,bridge){
         }
       })));
     });
-    chromeButton(bookmarks,'chevron');bookmarks.classList.add('viewport-camera-bookmarks');bookmarks.setAttribute('aria-haspopup','menu');
+    bookmarks.textContent='';bookmarks.setAttribute('aria-label','查看已存机位');bookmarks.classList.add('viewport-camera-bookmarks');bookmarkMenu.bindTrigger(bookmarks);
     cameraGroup.append(frameButton,bookmarks);
     toolbar.append(modes,component,selectButton,meshButton,tool,orientation,transformPivot,cursorButton,boxSelect,foreground,materialPicker,clearSample,maskInk,createPaintLayer,
       button('适应',()=>{markCameraFree();viewport.fit();}),
       button('正交',()=>{markCameraFree();viewport.projection(!viewport.getState().orthographic);onChange();}),cameraGroup);
     const transformIcons={translate:workspaceIcons.move,rotate:workspaceIcons.rotate,scale:workspaceIcons.scale};
     enhanceSelectMenu(tool,{menuClass:'transform-tool-menu',optionIcon:option=>transformIcons[option.value]});
-    tool.parentElement.classList.add('transform-tool-picker');
     transformPivot.dataset.searchable='false';
-    enhanceSelectMenu(transformPivot,{iconOnly:true,triggerIcon:workspaceIcons.pivot});
+    enhanceSelectMenu(transformPivot,{iconOnly:true,triggerIcon:workspaceIcons.transformPivot});
     const numeric=el('form','editor-toolbar');numeric.setAttribute('aria-label','物体变换');const axes=[];
     for(const axis of ['X','Y','Z']){const i=el('input');Object.assign(i,{type:'number',step:'any',value:state.tool==='scale'?'1':'0'});i.setAttribute('aria-label','变换 '+axis);axes.push(i);const l=el('label','',axis);l.append(i);numeric.append(l);}
     const apply=button('应用',()=>{});apply.type='submit';numeric.append(apply);numeric.onsubmit=e=>{e.preventDefault();try{modeler.applyNumeric(axes.map(i=>i.valueAsNumber));view.querySelector('canvas')?.focus({preventScroll:true});}catch(error){ctx.error(error);}};

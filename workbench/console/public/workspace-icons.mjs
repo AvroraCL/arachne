@@ -33,6 +33,7 @@ export const workspaceIcons = {
   filter: svg('<path d="M3 4h14l-5.5 6.5v5L8.5 17v-6.5Z"/>'),
   fit: svg('<path d="M7 3H3v4 M13 3h4v4 M3 13v4h4 M17 13v4h-4 M7 7h6v6H7Z"/>'),
   grid: svg('<rect x="3" y="3" width="14" height="14" rx="1"/><path d="M3 8h14 M3 13h14 M8 3v14 M13 3v14"/>'),
+  transformPivot: svg('<circle cx="6" cy="13" r="3.3"/><circle cx="14" cy="6" r="3.3"/><circle cx="10" cy="9.5" r="1.25" fill="currentColor" stroke="none"/>'),
   pivot: svg('<circle cx="10" cy="10" r="5"/><path d="M10 2v4m0 8v4M2 10h4m8 0h4"/><circle cx="10" cy="10" r="1" fill="currentColor"/>'),
   orthographic: svg('<rect x="4" y="4" width="12" height="12" rx="1"/><path d="M1 7v6 M19 7v6 M7 1h6 M7 19h6"/>'),
   pin: svg('<path d="m7 3 6 0-1 4 3 3v2H5v-2l3-3-1-4Z M10 12v6"/>'),

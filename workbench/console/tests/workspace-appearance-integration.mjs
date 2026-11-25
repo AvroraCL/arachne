@@ -132,6 +132,24 @@ try{
   async function menuAndSelection(size){
     await show('modeling');
     const model=page.locator('.editor-area[data-editor=viewport]').first();
+    const header=model.locator(':scope > .area-header');
+    await page.mouse.move(0,0);
+    const surface=button=>button.evaluate(el=>{
+      const style=getComputedStyle(el);
+      return [el.getBoundingClientRect().height,style.backgroundColor,style.backgroundImage,style.borderRadius];
+    });
+    const reference=await surface(trigger(header,'交互模式'));
+    assert.notEqual(reference[2],'none','Collapsed menus advertise that they can expand');
+    for(const name of ['编辑器类型','建模选择','变换工具','变换坐标系','变换枢轴','三维游标','操纵器设置','叠加层设置','着色设置'])
+      assert.deepEqual(await surface(trigger(header,name)),reference,size+' collapsed '+name);
+    assert.equal(await trigger(header,'框选').evaluate(el=>getComputedStyle(el).backgroundImage),'none');
+    await header.screenshot({path:path.join(evidence,size+'-viewport-header.png'),animations:'disabled'});
+    const selectMenu=trigger(header,'建模选择');
+    await selectMenu.click();
+    assert.equal(await selectMenu.getAttribute('aria-expanded'),'true');
+    assert.equal((await surface(selectMenu))[2],reference[2],'The disclosure arrow persists on hover and open');
+    await page.keyboard.press('Escape');
+    assert.equal(await selectMenu.getAttribute('aria-expanded'),'false');
     await exerciseMenu(trigger(model,'变换工具'),'旋转','移动',size);
     const nodeArea=page.locator('.editor-area[data-editor=shader]').first();
     const id=await nodeArea.getAttribute('data-area-id');

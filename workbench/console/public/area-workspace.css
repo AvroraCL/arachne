@@ -142,7 +142,6 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .source-mark-preview span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .viewport-camera-buttons{display:inline-flex;align-items:center;flex:none}
 .editor-toolbar .viewport-camera-bookmarks{width:16px;min-width:16px;padding:0}
-.viewport-camera-bookmarks svg{width:10px;height:10px;transform:rotate(90deg)}
 .property-editor [data-property-search-miss]{display:none}
 .object-property-editor:focus{outline:none}
 .source-texture-channel{display:flex;align-items:baseline;min-width:0;gap:1px;color:#aaa;font-size:11px;font-weight:normal}
@@ -415,7 +414,6 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .viewport-display-controls .cycles-pause-control .chrome-icon{width:16px;height:16px}
 .viewport-display-arrow{width:19px;list-style:none;cursor:pointer}
 .viewport-display-arrow::-webkit-details-marker{display:none}
-.viewport-display-arrow .chrome-icon{width:14px;height:14px}
 .viewport-display-arrow:hover,.viewport-display-menu[open]>.viewport-display-arrow{background:#ffffff12}
 .viewport-display-popover{
   position:fixed;inset:auto;margin:0;width:min(245px,calc(100vw - 12px));max-height:calc(100vh - 12px);overflow:auto;
