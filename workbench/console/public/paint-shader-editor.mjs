@@ -1,3 +1,4 @@
+import {materialRampEditor} from './material-ramp-editor.mjs';
 import {textureColorSpaces} from './image-color-spaces.mjs';
 import {channelSpecs} from './paint-channels.mjs';
 import {libraryNodeTypes,compileLibraryMaterial,defaultLibraryMaterial,defaultBrushGraph,evaluateBrushGraph,isBrushImage} from './paint-library.mjs';
@@ -111,7 +112,7 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
   function controls(){
     const on=!!graph;enable.hidden=on||!!target?.missing;
     for(const c of [enable,add,frame,focus,actions])c.disabled=!allowed()||(!on&&c!==enable)||(collapsed&&c!==enable);
-    for(const c of world.querySelectorAll('.shader-node input,.shader-node select,.shader-port,.shader-image-open')){
+    for(const c of world.querySelectorAll('.shader-node input,.shader-node select,.shader-port,.shader-image-open,.shader-ramp-editor button')){
       c.disabled=!allowed()||(c.classList.contains('shader-image-open')&&!importImage);
       if(c.tagName==='SELECT')syncSelectMenu(c);
     }
@@ -213,7 +214,17 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
         }else row.append(el('span','shader-unlinked','未连接'));
         params.append(row);
       }
-      for(const [param,value] of Object.entries(values))if(!Object.hasOwn(spec.inputs,param)&&!menuParams.includes(param))params.append(parameterRow(param,value));
+      if(node.type==='ramp'){
+        const expected=structuredClone(origin);
+        params.append(materialRampEditor(values,(patch,saveNow)=>{
+          if(!allowed()||!box.isConnected||!originCurrent(expected))return;
+          const next=structuredClone(graph),n=next.nodes.find(n=>n.id===node.id);
+          Object.assign(n.params,patch);
+          if(!patch.stops.length)delete n.params.stops;
+          if(saveNow){void commit(next,expected);return;}
+          draft(JSON.stringify(next)===JSON.stringify(graph)?null:next,expected);
+        }));
+      }else for(const [param,value] of Object.entries(values))if(!Object.hasOwn(spec.inputs,param)&&!menuParams.includes(param))params.append(parameterRow(param,value));
       function parameterRow(param,value){
         const row=el('div','shader-parameter-row'),caption=el('span','shader-param-name',labels[param]),inputOrigin=origin&&structuredClone(origin);let input;
         if(menuParams.includes(param)){
@@ -425,7 +436,7 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
   },true);
   stage.addEventListener('auxclick',e=>{if(e.button===1){e.preventDefault();e.stopPropagation();}},true);
   stage.addEventListener('pointerdown',e=>{
-    if(!graph||gesture||e.defaultPrevented||e.target.closest('input,select,.custom-select,.workspace-range-field,.shader-image-open,.shader-image-preview'))return;
+    if(!graph||gesture||e.defaultPrevented||e.target.closest('input,select,.custom-select,.workspace-range-field,.shader-image-open,.shader-image-preview,.shader-ramp-editor'))return;
     if(e.button===0&&space){startPan(e);return;}
     if(e.button!==0||!allowed())return;
     cursor=point(e);
@@ -493,7 +504,7 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
   stage.onpointercancel=e=>{if(gesture?.pointer===e.pointerId)cancelGesture();};
   stage.onlostpointercapture=e=>{if(e.target===stage&&gesture?.pointer===e.pointerId)cancelGesture();};
   stage.onkeydown=e=>{
-    if(compositionKey(e)||e.target.closest('input,textarea,select,[contenteditable],.custom-select,.workspace-range-field,.shader-image-open,.shader-image-preview'))return;
+    if(compositionKey(e)||e.target.closest('input,textarea,select,[contenteditable],.custom-select,.workspace-range-field,.shader-image-open,.shader-image-preview,.shader-ramp-editor'))return;
     const k=e.key.toLowerCase(),modifier=e.metaKey||e.ctrlKey;
     if(gesture&&k!=='escape'){if(modifier&&k==='z'){cancelGesture();return;}e.preventDefault();e.stopPropagation();return;}
     if(k===' '){space=true;e.preventDefault();}

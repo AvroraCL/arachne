@@ -100,7 +100,7 @@ class MaterialImages:
 
 class MaterialGraph:
     def __init__(self, plan, assets, image_cache=None):
-        self.plan, self.images = plan, {}
+        self.plan, self.images, self.ramps = plan, {}, {}
         if not plan:
             return
         cache = image_cache if image_cache is not None else MaterialImages(assets)
@@ -110,6 +110,12 @@ class MaterialGraph:
                 space = node['params'].get('colorSpace','srgb')
                 profile = None if space in ('srgb','linear') else space
                 self.images[node['id']] = cache.load(asset,profile=profile)
+            elif node['type'] == 'ramp' and node['params'].get('stops'):
+                p = node['params']
+                positions = [0, *(stop['position'] for stop in p['stops']), 1]
+                colors = [p['low'], *(stop['color'] for stop in p['stops']), p['high']]
+                linear = decode(np.array([list(bytes.fromhex(c[1:])) for c in colors],dtype=np.float32)/255)
+                self.ramps[node['id']] = np.array(positions), linear
 
     def evaluate(self, paint, indices, width, height, uv=None):
         if not self.plan:
@@ -179,9 +185,14 @@ class MaterialGraph:
                 out = dict(value=value)
             elif kind == 'ramp':
                 factor = np.clip(get('value', p['value']), 0, 1)
-                if np.ndim(factor):
-                    factor = factor[:, None]
-                out = dict(color=rgb(p['low']) * (1-factor) + rgb(p['high']) * factor)
+                if node['id'] in self.ramps:
+                    positions, colors = self.ramps[node['id']]
+                    value = np.stack([np.interp(factor,positions,channel) for channel in colors.T],axis=-1)
+                else:
+                    if np.ndim(factor):
+                        factor = factor[:, None]
+                    value = rgb(p['low']) * (1-factor) + rgb(p['high']) * factor
+                out = dict(color=value)
             elif kind == 'pbr':
                 surface = np.empty_like(paint)
                 for name,part in CHANNELS.items():

@@ -126,3 +126,39 @@ with tempfile.TemporaryDirectory() as temp:
 `],{cwd:new URL('../',import.meta.url),input:JSON.stringify(plan),encoding:'utf8'});
   assert.equal(result.status,0,result.stderr);
 });
+
+test('color ramp knots preserve old plans and interpolate linear light across every interval',()=>{
+  const graph=defaultMaterialGraph(),ramp=makeNode('ramp',0,0,'ramp'),driver=makeNode('value',0,0,'driver');
+  graph.nodes.push(ramp,driver);
+  graph.links=graph.links.filter(l=>l.to.port!=='color');
+  graph.links.push({from:{node:'ramp',port:'color'},to:{node:'pbr',port:'color'}},
+    {from:{node:'driver',port:'value'},to:{node:'ramp',port:'value'}});
+  const legacy=compileMaterialGraph(graph);
+  ramp.params.stops=[];
+  assert.deepEqual(compileMaterialGraph(graph),legacy);
+  const stop=(position,color='#ff0000')=>({position,color});
+  for(const invalid of [[stop(0)],[stop(1)],[stop(.8),stop(.2)],[stop(.5),stop(.5)],[stop(.4,'#zzzzzz')],null]){
+    ramp.params.stops=invalid;assert.throws(()=>compileMaterialGraph(graph),/色标/);
+  }
+  ramp.params.stops=[stop(.25),stop(.75,'#00ff00')];
+  const run=spawnSync(pythonExecutable(),['-c',`
+import json,sys,numpy as np
+from material_graph import MaterialGraph
+plan=json.load(sys.stdin)
+ramp=next(n for n in plan['nodes'] if n['id']=='ramp')
+driver=next(n for n in plan['nodes'] if n['id']=='driver')
+paint=np.zeros((7,14))
+points=[-.5,.125,.25,.5,.75,.875,1.5]
+expected=[[0,0,0],[.5,0,0],[1,0,0],[.5,.5,0],[0,1,0],[.5,1,.5],[1,1,1]]
+for v,rgb in zip(points,expected):
+    driver['params']['value']=v
+    out=MaterialGraph(plan,{}).evaluate(paint,np.arange(7),7,1)
+    np.testing.assert_array_equal(out[:,:3],np.broadcast_to(rgb,(7,3)))
+paint[:,4]=points
+ramp['inputs']['value']={'node':'paint','port':'roughness'}
+# Per-pixel factors arriving from another node use the same stop table.
+out=MaterialGraph(plan,{}).evaluate(paint,np.arange(7),7,1)
+np.testing.assert_array_equal(out[:,:3],expected)
+`],{cwd:new URL('../',import.meta.url),input:JSON.stringify(compileMaterialGraph(graph)),encoding:'utf8'});
+  assert.equal(run.status,0,run.stderr);
+});

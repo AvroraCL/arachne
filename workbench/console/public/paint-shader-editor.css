@@ -120,3 +120,11 @@
 .shader-reroute .shader-port[data-direction=out]{left:auto;right:-4px}
 .shader-reroute .shader-port::after{display:none}
 .shader-reroute:has(.shader-port:is(:hover,:focus-visible,[data-link-target]))::before{border-color:#eee}
+.shader-ramp-editor{display:grid;gap:5px;min-width:0}
+.shader-ramp-bar{height:14px;border:1px solid #555;border-radius:2px}
+.shader-ramp-stops{display:grid;gap:3px;max-height:150px;overflow-y:auto}
+.shader-ramp-stops>div{display:flex;align-items:center;gap:4px;min-width:0}
+.shader-ramp-stops span{color:#c6c6c6}
+.shader-params .shader-ramp-stops input[type=color]{flex:0 0 32px;width:32px;height:22px;min-height:22px}
+.shader-params .shader-ramp-stops input[type=number]{flex:1;min-width:0;width:40px}
+.shader-ramp-editor button{min-height:22px;padding:1px 6px;border-radius:3px}

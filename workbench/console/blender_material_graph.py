@@ -122,10 +122,42 @@ def apply_material_graph(material, config):
             node.inputs[0].default_value=p['a'];node.inputs[1].default_value=p['b']
             ports=bind(node,dict(a=node.inputs[0],b=node.inputs[1]),dict(value=node.outputs[0]))
         elif kind == 'ramp':
-            node=new('ShaderNodeValToRGB',source);node.color_ramp.interpolation='LINEAR'
-            node.color_ramp.elements[0].color=color(p['low']);node.color_ramp.elements[1].color=color(p['high'])
-            node.inputs['Fac'].default_value=p['value']
-            ports=bind(node,dict(value=node.inputs['Fac']),dict(color=node.outputs['Color']))
+            stops = [(0,p['low']), *((s['position'],s['color']) for s in p.get('stops',[])), (1,p['high'])]
+            # Each Blender ColorBand has at most 32 elements. Adjacent bands
+            # share a boundary stop and use the same absolute factor.
+            shared = None
+            if len(stops)>32:
+                shared = new('ShaderNodeMath',source,'-factor',180)
+                shared.operation='ADD'
+                shared.inputs[0].default_value=p['value']
+                shared.inputs[1].default_value=0
+            for start in range(0,len(stops)-1,31):
+                band=stops[start:start+32]
+                ramp=new('ShaderNodeValToRGB',source,('-'+str(start)) if start else '',-start//31*220)
+                ramp.color_ramp.interpolation='LINEAR'
+                elements=ramp.color_ramp.elements
+                elements[1].position=band[-1][0]
+                elements[1].color=color(band[-1][1])
+                elements[0].position=band[0][0]
+                elements[0].color=color(band[0][1])
+                for position,swatch in band[1:-1]:
+                    elements.new(position).color=color(swatch)
+                if shared:
+                    tree.links.new(shared.outputs[0],ramp.inputs['Fac'])
+                if start:
+                    gate=new('ShaderNodeMath',source,'-boundary-'+str(start))
+                    gate.operation='GREATER_THAN';gate.inputs[1].default_value=band[0][0]
+                    tree.links.new(shared.outputs[0],gate.inputs[0])
+                    mix=new('ShaderNodeMixRGB',source,'-band-'+str(start))
+                    tree.links.new(gate.outputs[0],mix.inputs[0])
+                    tree.links.new(result,mix.inputs[1])
+                    tree.links.new(ramp.outputs['Color'],mix.inputs[2])
+                    result=mix.outputs[0]
+                else:
+                    node=ramp
+                    ramp.inputs['Fac'].default_value=p['value']
+                    result=ramp.outputs['Color']
+            ports=bind(node,dict(value=shared.inputs[0] if shared else node.inputs['Fac']),dict(color=result))
         elif kind == 'pbr':
             node=original_bsdf or new('ShaderNodeBsdfPrincipled',source)
             node.name='Arachne '+source['id'];node.location=(source['x'],-source['y'])

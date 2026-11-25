@@ -49,10 +49,13 @@ function compileGraph(graph,assets,nodeTypes,domain){
   const nodes=new Map();
   for(const node of graph.nodes){
     const spec=Object.hasOwn(nodeTypes,node?.type)?nodeTypes[node.type]:null;
-    if(!exact(node,['id','type','x','y','params'])||!spec||typeof node.id!=='string'||! /^[\w-]{1,100}$/.test(node.id)||nodes.has(node.id)||!number(node.x)||!number(node.y)||!exact(node.params,Object.keys(spec.defaults))||Object.keys(spec.defaults).some(key=>key!=='colorSpace'&&!(domain==='brush'&&node.type==='brush'&&optionalBrushParams.includes(key))&&!(node.type==='pbr'&&paintChannels.includes(key)&&!legacyChannels.includes(key))&&!Object.hasOwn(node.params,key)))
+    if(!exact(node,['id','type','x','y','params'])||!spec||typeof node.id!=='string'||! /^[\w-]{1,100}$/.test(node.id)||nodes.has(node.id)||!number(node.x)||!number(node.y)||!exact(node.params,node.type==='ramp'?[...Object.keys(spec.defaults),'stops']:Object.keys(spec.defaults))||Object.keys(spec.defaults).some(key=>key!=='colorSpace'&&!(domain==='brush'&&node.type==='brush'&&optionalBrushParams.includes(key))&&!(node.type==='pbr'&&paintChannels.includes(key)&&!legacyChannels.includes(key))&&!Object.hasOwn(node.params,key)))
       throw Error('节点编号或参数无效');
     for(const [key,value] of Object.entries(node.params)){
-      if(key==='asset'){
+      if(node.type==='ramp'&&key==='stops'){
+        if(!Array.isArray(value)||!value.every((stop,i)=>exact(stop,['position','color'])&&hex(stop.color)&&Number.isFinite(stop.position)&&stop.position>(i?value[i-1].position:0)&&stop.position<1))
+          throw Error('渐变中间色标的位置必须在两端之间，按位置排序且不能重合');
+      }else if(key==='asset'){
         if(value!==''&&(!/^[a-f\d]{64}$/.test(value)||!Object.hasOwn(assets,value)))throw Error('节点图像素材不存在');
       }else if(key==='colorSpace'){
         if(!textureColorSpaces.some(([id])=>id===value))throw Error('图像颜色空间无效');
@@ -105,6 +108,7 @@ function compileGraph(graph,assets,nodeTypes,domain){
 function canonicalParams(node){
   const params={...node.params};
   // Omit the compatible default so existing preview fingerprints remain valid.
+  if(node.type==='ramp'&&!params.stops?.length)delete params.stops;
   if(node.type==='image'&&params.colorSpace==='srgb')delete params.colorSpace;
   if(node.type==='pbr')for(const k of paintChannels.slice(3))if(params[k]===channelDefaults[k])delete params[k];
   return params;
