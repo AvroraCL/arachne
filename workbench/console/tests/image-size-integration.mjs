@@ -70,46 +70,50 @@ try{
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
   assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
-  await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
-  await width.fill('63');await height.fill('31');
-  await dialog.getByRole('button',{name:'背景内容',exact:true}).click();
-  await dialog.getByRole('option',{name:'自定颜色',exact:true}).click();
-  await dialog.getByLabel('背景颜色').fill('#4477aa');
-  assert.equal(await paper.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(68, 119, 170)');
-  await dialog.getByRole('button',{name:'颜色空间',exact:true}).click();
-  for(const name of ['Display P3','Adobe RGB (1998)','ProPhoto RGB'])assert.ok(await dialog.getByRole('option',{name,exact:true}).isVisible());
-  await dialog.getByRole('option',{name:'Adobe RGB (1998)',exact:true}).click();
-  await dialog.getByRole('button',{name:'创建',exact:true}).click();await saved('创建带 Adobe RGB 背景的图像');
-  const colored=Object.values(doc.paint.imageDocuments)[0];
-  assert.equal(colored.colorSpace,'adobe-rgb');
-  assert.deepEqual(colored.layers.map(l=>l.kind),['shape','pixel']);
-  await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
-  const backgroundFile=path.join(data,'background.png');
-  const downloadBackground=page.waitForEvent('download');
-  await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();
-  await (await downloadBackground).saveAs(backgroundFile);
-  const expectedDisplay=execFileSync(pythonExecutable(),['-c',`from PIL import Image
+  for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['linear-srgb','线性 sRGB（颜色）','cRGB']]){
+    await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
+    await width.fill('63');await height.fill('31');
+    await dialog.getByRole('button',{name:'背景内容',exact:true}).click();
+    await dialog.getByRole('option',{name:'自定颜色',exact:true}).click();
+    await dialog.getByLabel('背景颜色').fill('#4477aa');
+    assert.equal(await paper.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(68, 119, 170)');
+    await dialog.getByRole('button',{name:'颜色空间',exact:true}).click();
+    for(const name of ['Display P3','Adobe RGB (1998)','ProPhoto RGB','Rec.709','Rec.2020','Rec.2020（Gamma 2.4）','DCI-P3（影院）','线性 sRGB（颜色）'])assert.ok(await dialog.getByRole('option',{name,exact:true}).isVisible());
+    await dialog.getByRole('option',{name:label,exact:true}).click();
+    const swatch=await paper.evaluate(e=>getComputedStyle(e).backgroundColor.match(/\d+/g).map(Number));
+    await dialog.getByRole('button',{name:'创建',exact:true}).click();await saved('创建带 '+label+' 背景的图像');
+    const colored=Object.values(doc.paint.imageDocuments)[0];
+    assert.equal(colored.colorSpace,colorSpace);
+    assert.deepEqual(colored.layers.map(l=>l.kind),['shape','pixel']);
+    await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+    const backgroundFile=path.join(data,'background.png');
+    const downloadBackground=page.waitForEvent('download');
+    await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();
+    await (await downloadBackground).saveAs(backgroundFile);
+    const expectedDisplay=execFileSync(pythonExecutable(),['-c',`from PIL import Image
 import sys
 from PIL import ImageCms
 from io import BytesIO
 im=Image.open(sys.argv[1])
 profile=ImageCms.ImageCmsProfile(BytesIO(im.info['icc_profile']))
-assert ImageCms.getProfileDescription(profile).strip()=='A98C'
+assert ImageCms.getProfileDescription(profile).strip()==sys.argv[2]
 proof=ImageCms.profileToProfile(im,profile,ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
 print(*proof.getpixel((30,15)))
 assert im.size==(63,31)
-assert im.getextrema()==((68,68),(119,119),(170,170),(255,255)),im.getextrema()`,backgroundFile],{encoding:'utf8'}).trim().split(/\s+/).map(Number);
-  async function checkDisplay(){
-    await until(async()=>{
-      const pixel=await canvas.evaluate(c=>[...c.getContext('2d').getImageData(c.width>>1,c.height>>1,1,1).data]);
-      return pixel.every((n,i)=>Math.abs(n-expectedDisplay[i])<=1);
-    },'Adobe RGB 画布与导出 ICC 色块一致');
+assert im.getextrema()==((68,68),(119,119),(170,170),(255,255)),im.getextrema()`,backgroundFile,description],{encoding:'utf8'}).trim().split(/\s+/).map(Number);
+    swatch.forEach((value,i)=>assert.ok(Math.abs(value-expectedDisplay[i])<=1,label+' 新建预览色块'));
+    async function checkDisplay(){
+      await until(async()=>{
+        const pixel=await canvas.evaluate(c=>[...c.getContext('2d').getImageData(c.width>>1,c.height>>1,1,1).data]);
+        return pixel.every((n,i)=>Math.abs(n-expectedDisplay[i])<=1);
+      },label+' 画布与导出 ICC 色块一致');
+    }
+    await checkDisplay();
+    await page.reload();await checkDisplay();
+    assert.equal((await api(route)).paint.imageDocuments[Object.keys(doc.paint.imageDocuments)[0]].colorSpace,colorSpace);
+    await canvas.focus();await page.keyboard.press(mod+'+z');await saved('一次撤销整张图像');
+    assert.equal(Object.keys(doc.paint.imageDocuments??{}).length,0);
   }
-  await checkDisplay();
-  await page.reload();await checkDisplay();
-  assert.equal((await api(route)).paint.imageDocuments[Object.keys(doc.paint.imageDocuments)[0]].colorSpace,'adobe-rgb');
-  await canvas.focus();await page.keyboard.press(mod+'+z');await saved('一次撤销整张图像');
-  assert.equal(Object.keys(doc.paint.imageDocuments??{}).length,0);
   await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
   await dialog.getByRole('button',{name:/横幅/}).click();
   assert.equal(await dialog.getByRole('button',{name:/横幅/}).getAttribute('aria-pressed'),'true');

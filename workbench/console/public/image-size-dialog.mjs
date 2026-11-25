@@ -1,4 +1,5 @@
 import {imageColorSpaces} from './image-documents.mjs';
+import {writeDisplayRGB} from './image-display-rgb.mjs';
 import {enhanceSelectMenu} from './paint-select.mjs';
 import {editingSide,resizedDocument} from './image-document-size.mjs';
 
@@ -64,11 +65,22 @@ function newImageSettings(form,width,height,defaultName){
       paper.querySelector('i').textContent=w+' px';
       paper.querySelector('b').textContent=h+' px';
     }
-    const hex=readColor(),profile={'display-p3':'display-p3','adobe-rgb':'a98-rgb','prophoto-rgb':'prophoto-rgb'}[space.value];
-    profileNote.textContent=profile?'画布按 sRGB 预览，导出的 PNG 嵌入此 ICC 配置。'
+    const hex=readColor(),profiled=!['linear','srgb'].includes(space.value);
+    const usage={
+      'linear-srgb':'按线性光处理颜色，预览会校正亮度。',
+      'rec709':'使用 Rec.709 摄像传递曲线。',
+      'rec2020':'使用 Rec.2020 摄像传递曲线。',
+      'rec2020-g24':'使用 Rec.2020 原色和 2.4 显示伽马。',
+      'dci-p3':'使用影院 P3 白点和 2.6 伽马。'
+    };
+    profileNote.textContent=profiled?(usage[space.value]||'画布按 sRGB 预览。')+' PNG 嵌入此 ICC 配置。'
       :space.value==='linear'?'保留通道数值，适用于粗糙度、法线和蒙版。':'适用于网页图像和常规彩色贴图。';
-    paper.style.background=hex&&profile
-      ?'color('+profile+' '+hex.slice(1).match(/../g).map(n=>parseInt(n,16)/255).join(' ')+')':hex||'';
+    if(hex&&profiled){
+      const rgb=hex.slice(1).match(/../g).map(n=>parseInt(n,16));
+      const display=new Uint8ClampedArray(4);
+      writeDisplayRGB(display,[...rgb,255],space.value);
+      paper.style.background='rgb('+display.slice(0,3).join(' ')+')';
+    }else paper.style.background=hex||'';
     color.parentElement.hidden=background.value!=='custom';
     orientations.forEach((button,i)=>{
       button.disabled=!width.validity.valid||!height.validity.valid||w===h;

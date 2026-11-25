@@ -7,8 +7,15 @@ import numpy as np
 from PIL import Image, ImageCms
 
 PROFILE_FILES = {'srgb':'sRGB-v4.icc','display-p3':'DisplayP3-v4.icc',
-                 'adobe-rgb':'AdobeCompat-v2.icc','prophoto-rgb':'ProPhoto-v4.icc'}
-WIDE = PROFILE_FILES.keys() - {'srgb'}
+                 'adobe-rgb':'AdobeCompat-v2.icc','prophoto-rgb':'ProPhoto-v4.icc',
+                 'rec709':'Rec709-v4.icc','rec2020':'Rec2020-v4.icc',
+                 'rec2020-g24':'Rec2020-g24-v4.icc','dci-p3':'DCI-P3-v4.icc',
+                 'linear-srgb':'scRGB-v2.icc'}
+# Inverse OETF coefficients (a, b) from the packaged BT.709/BT.2020 ICC rTRC tags.
+VIDEO_TRC = {'rec709':(0.909912109375,0.090087890625),
+             'rec2020':(0.90966796875,0.09033203125)}
+POWER_TRC = {'adobe-rgb':563/256,'dci-p3':2.6,'rec2020-g24':2.4}
+PROFILED_RGB = PROFILE_FILES.keys() - {'srgb'}
 
 
 @lru_cache
@@ -36,26 +43,32 @@ def convert_image(image, source, target):
 
 
 def display_pixels(pixels, space):
-    if space not in WIDE:
+    if space not in PROFILED_RGB:
         return pixels
     return np.asarray(convert_image(Image.fromarray(pixels), profile_bytes(space), profile_bytes('srgb')))
 
 
 def decode(c, space='srgb'):
-    if space == 'linear':
+    if space in ('linear','linear-srgb'):
         return c
-    if space == 'adobe-rgb':
-        return np.maximum(c,0)**(563/256)
+    if space in POWER_TRC:
+        return np.maximum(c,0)**POWER_TRC[space]
+    if space in VIDEO_TRC:
+        a,b = VIDEO_TRC[space]
+        return np.where(c < .081, c/4.5, np.maximum(a*c+b,0)**(1/.45))
     if space == 'prophoto-rgb':
         return np.where(c < 1/32, c/16, np.maximum(c,0)**1.8)
     return np.where(c<=.04045,c/12.92,((c+.055)/1.055)**2.4)
 
 
 def encode(c, space='srgb'):
-    if space == 'linear':
+    if space in ('linear','linear-srgb'):
         return c
-    if space == 'adobe-rgb':
-        return np.maximum(c,0)**(256/563)
+    if space in POWER_TRC:
+        return np.maximum(c,0)**(1/POWER_TRC[space])
+    if space in VIDEO_TRC:
+        a,b = VIDEO_TRC[space]
+        return np.where(c < .018, c*4.5, (np.maximum(c,0)**.45-b)/a)
     if space == 'prophoto-rgb':
         return np.where(c < 1/512, c*16, np.maximum(c,0)**(1/1.8))
     return np.where(c<=.0031308,c*12.92,1.055*np.maximum(c,0)**(1/2.4)-.055)
@@ -71,14 +84,11 @@ def image_input(image, space, box=None, authored=False):
     if authored and not source:
         return np.asarray(rgba), space
     if not source and info.get('gamma') == 1 and 'srgb' not in info:
-        if space not in WIDE:
+        if space not in PROFILED_RGB:
             return np.asarray(rgba), 'linear'
-        pixels = np.array(rgba)
-        lookup = np.rint(encode(np.arange(256)/255)*255).astype(np.uint8)
-        pixels[..., :3] = lookup[pixels[..., :3]]
-        rgba = Image.fromarray(pixels)
-    if source or space in WIDE:
-        target = space if space in WIDE else 'srgb'
+        source = profile_bytes('linear-srgb')
+    if source or space in PROFILED_RGB:
+        target = space if space in PROFILED_RGB else 'srgb'
         rgba = convert_image(rgba, source or profile_bytes('srgb'), profile_bytes(target))
         return np.asarray(rgba), target
     return np.asarray(rgba), 'srgb' if 'srgb' in info else space

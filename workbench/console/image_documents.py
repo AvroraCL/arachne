@@ -21,7 +21,7 @@ from image_filters import alpha_bounds, blur_gaussian, gaussian_box
 from image_raster_tools import flood_layer, clone_layer, connected_area, healing_inputs
 
 
-from image_color_spaces import (WIDE, convert_image, decode, encode, image_input, profile_bytes)
+from image_color_spaces import (PROFILED_RGB, convert_image, decode, encode, image_input, profile_bytes)
 
 
 class ImageSurface(Surface):
@@ -476,13 +476,10 @@ def embedded_image_assets(layers, documents, files, space='srgb'):
             if image.size != key[1:3]:
                 image = image.resize(key[1:3],Image.Resampling.BICUBIC)
             transfer = child_space
-            if child_space != target and (child_space in WIDE or target in WIDE):
-                if child_space == 'linear':
-                    rgba = np.array(image)
-                    rgba[..., :3] = np.rint(encode(rgba[..., :3]/255)*255)
-                    image = Image.fromarray(rgba)
-                transfer = 'srgb' if target == 'linear' else target
-                image = convert_image(image,profile_bytes('srgb' if child_space=='linear' else child_space),profile_bytes(transfer))
+            if child_space != target and (child_space in PROFILED_RGB or target in PROFILED_RGB):
+                source_profile = 'linear-srgb' if child_space == 'linear' else child_space
+                transfer = 'linear-srgb' if target == 'linear' else target
+                image = convert_image(image,profile_bytes(source_profile),profile_bytes(transfer))
             raw = np.asarray(image,dtype=np.float32)/255
             raw[..., :3] = decode(raw[..., :3],transfer)*raw[..., 3:]
             assets[key] = raw
@@ -1534,7 +1531,7 @@ def png_bytes(pixels, color_space=None):
     elif color_space == 'linear':
         metadata.add(b'gAMA', struct.pack('>I', 100000))
     out = BytesIO()
-    Image.fromarray(pixels).save(out, format='PNG', pnginfo=metadata, icc_profile=profile_bytes(color_space) if color_space in WIDE else None, compress_level=3)
+    Image.fromarray(pixels).save(out, format='PNG', pnginfo=metadata, icc_profile=profile_bytes(color_space) if color_space in PROFILED_RGB else None, compress_level=3)
     return out.getvalue()
 
 

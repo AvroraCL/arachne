@@ -346,7 +346,7 @@ import json, numpy as np
 from image_documents import composite_document, png_bytes, read_placed_image
 from image_color_spaces import decode
 rows=[]
-for space in ('display-p3','adobe-rgb','prophoto-rgb'):
+for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec2020-g24','dci-p3','linear-srgb'):
     # Midtones, near-black transfer curves and out-of-sRGB primaries.
     pixels=np.array([[[68,119,170,161],[4,12,3,39],[145,50,99,255],[0,250,32,128],[253,226,241,192]]],np.uint8)
     data=png_bytes(pixels,space)
@@ -364,8 +364,9 @@ for space in ('display-p3','adobe-rgb','prophoto-rgb'):
     def layer(key,color,opacity):
         return dict(id=key,kind='pixel',visible=True,opacity=opacity,blend='normal',maskEnabled=False,strokes=[stroke(color)])
     doc=dict(colorSpace=space,layers=[layer('base','#000000',1),layer('light','#ffffff',.5)])
-    # Half-light in the three actual document transfer functions.
-    middle={'display-p3':188,'adobe-rgb':186,'prophoto-rgb':174}[space]
+    # Half-light encoded in each document's working space.
+    middle={'display-p3':188,'adobe-rgb':186,'prophoto-rgb':174,'rec709':180,'rec2020':180,
+            'rec2020-g24':191,'dci-p3':195,'linear-srgb':128}[space]
     assert list(composite_document(doc,{},16)[8,8])==[middle,middle,middle,255]
     rows.append([space,pixels.flatten().tolist(),expected.flatten().tolist()])
 print(json.dumps(rows))
