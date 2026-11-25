@@ -4,6 +4,7 @@ import {matchesSearch,searchTerms} from './search-picker.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createDocumentEditor,createImagePanel} from './image-document-editors.mjs';
 import {isSelectionAsset} from './uv-selection-region.mjs';
+import {mountTextureSets} from './texture-set-editor.mjs';
 import {createMaterialLayerEditor} from './material-layer-editor.mjs';
 import {bindMaterialTile,syncFillAction} from './smart-material-placement.mjs';
 import {paintChannels,channelSpecs,renderChannel,liveStride} from './paint-channels.mjs';
@@ -84,6 +85,12 @@ export function registerAreaEditors(registry,bridge){
     const stage=el('div','editor-viewport-stage'),frameCaption=el('span','camera-frame-caption');
     stage.append(view,frameCaption);frameCaption.hidden=true;
     const controls=surfaceControls(view),elements=controls.elements;elements['brush-uv-radius'].closest('label').hidden=true;
+    for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture']){
+      view.addEventListener(type,event=>{
+        if(!bridge.textureSetBrush?.pointer(event,view,viewport))return;
+        event.preventDefault();event.stopImmediatePropagation();
+      },{capture:true,signal});
+    }
     view.addEventListener('pointermove',event=>{if(event.target.tagName==='CANVAS')lastPointer={clientX:event.clientX,clientY:event.clientY};},{signal});
     view.addEventListener('pointerleave',()=>{lastPointer=null;},{signal});
     view.addEventListener('dragover',event=>{if(hasAssetDrag(event.dataTransfer)){event.preventDefault();event.dataTransfer.dropEffect='copy';}},{signal});
@@ -823,7 +830,8 @@ export function registerAreaEditors(registry,bridge){
       if(!owner.hidden&&name.textContent!==doc.source.material)name.textContent=name.title=doc.source.material;
     }
     const unsubscribe=ctx.project.subscribe(syncOwner);syncOwner();
-    return {...panel,dispose(){unsubscribe();panel.dispose?.();}};
+    const closeSets=mountTextureSets(inner,bridge);
+    return {...panel,dispose(){closeSets();unsubscribe();panel.dispose?.();}};
   }));
   registry.register('imageLayers',ctx=>createImagePanel('layers',{...ctx,busy:bridge.busy,openImageText:bridge.openImageText,
     imageSelection:bridge.imageSelection,sampleLayerSelection:bridge.sampleLayerSelection}));

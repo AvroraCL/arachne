@@ -346,6 +346,20 @@ if __name__=='__main__':
         watch_parent(config.get('ownerPid'))
         if sys.argv[1]=='register':
             register(config)
+        elif sys.argv[1]=='slot-maps':
+            model = Model(config['input'])
+            material = next(m for m in model.scene['materials'] if m['name']==config['name'])
+            pbr = material.setdefault('pbrMetallicRoughness', {})
+            overrides = config['overrides']
+            if 'color' in overrides:
+                encoded = np.array(list(bytes.fromhex(overrides['color'][1:])), dtype=float)/255
+                linear = np.where(encoded <= .04045, encoded/12.92, ((encoded+.055)/1.055)**2.4)
+                pbr['baseColorFactor'] = [*linear.tolist(),pbr.get('baseColorFactor',[1,1,1,1])[3]]
+            for channel in ('roughness','metallic'):
+                if channel in overrides:
+                    pbr[channel+'Factor'] = overrides[channel]
+            maps = extract_texture_maps(model,material,Path(config['out']),{'color','metallic','roughness','alpha'})
+            print(json.dumps(maps))
         elif sys.argv[1]=='topology':
             model = Model(config['baseline'])
             if checksum(config['baseline'])!=config['modelSha256']:

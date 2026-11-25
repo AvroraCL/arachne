@@ -32,8 +32,8 @@ export function saveProjectModel(doc,{revision,modeling}){
 }
 function location(doc,legacyScene){
   const fingerprint=modelFingerprint(doc),native=doc.source.format==='glb';
-  if(!fingerprint&&(!native||doc.source.preservedSurface))return null;
-  if(!fingerprint){
+  if(!doc.textureSetName&&!fingerprint&&(!native||doc.source.preservedSurface))return null;
+  if(!fingerprint&&!doc.textureSetName){
     const folder=path.dirname(doc.source.cacheRun),relative=path.relative(DATA,folder);
     if(relative&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative))
       return {key:folder,folder,fingerprint};

@@ -333,7 +333,96 @@ function checkedSceneCursor(position){
   if(!vector(position,3,1e6))throw Error('三维游标坐标无效');
   return position.slice();
 }
+// The original stack stays in its on-disk location. A secondary stack shares
+// project assets and runs through the same commands, compositor and history.
+export function textureSetDocument(doc,name){
+  if(name===undefined||name===doc.source.material)return doc;
+  if(doc.source.format!=='glb'||typeof name!=='string'||!Object.hasOwn(doc.paint.textureSets??{},name))
+    throw Error('找不到指定的纹理集');
+  const {textureSets,materialGraph,baseChannels,sourceMaterials,...shared}=doc.paint;
+  return {...doc,textureSetName:name,source:{...doc.source,material:name},paint:{...shared,...textureSets[name]}};
+}
+// Decode an existing material only on the first authored edit, before committing
+// any project state. The files become ordinary project assets in the same revision.
+export async function prepareTextureSetMaps(doc,request){
+  const seeds=new Map();
+  if(doc.revision!==request.revision||!Array.isArray(request.operations)||request.operations.length>128)return seeds;
+  const names=new Set(request.operations.filter(o=>o?.op==='textureSet'&&o.edit?.op==='add'&&typeof o.name==='string'&&
+    o.name!==doc.source.material&&!Object.hasOwn(doc.paint.textureSets??{},o.name)).map(o=>o.name));
+  if(!names.size)return seeds;
+  const slots=renderSceneObjects(doc).textureSlots;
+  for(const name of names){
+    if(!slots[name]?.textured||doc.paint.sourceMaterials?.[name]?.mark)continue;
+    const folder=await fsp.mkdtemp(path.join(projectDir(doc.id),'slot-maps-'));
+    try{
+      const file=path.join(folder,'input.json');
+      atomic(file,{input:doc.source.reviewSource,name,out:folder,overrides:doc.paint.sourceMaterials?.[name]??{},ownerPid:process.pid});
+      const {stdout}=await renderTextFile(pythonExecutable(),['-X','utf8',path.join(ROOT,'model_surface.py'),'slot-maps',file],{windowsHide:true,timeout:120000})
+        .catch(error=>{throw Error(error.stderr?.trim()||'源材质贴图读取失败');});
+      const entries=new Map();
+      for(const channel of JSON.parse(stdout)){
+        const bytes=await fsp.readFile(path.join(folder,channel+'.png'));
+        entries.set(channel,describePng(doc,bytes,name+' · '+channelSpecs[channel].name,64));
+      }
+      seeds.set(name,entries);
+    }finally{await fsp.rm(folder,{recursive:true,force:true});}
+  }
+  return seeds;
+}
+function applyTextureSet(doc,operation,compact,seeds){
+  const {name,edit}=fields(operation,['op','name','edit']);
+  if(typeof name!=='string'||['__proto__','constructor','prototype'].includes(name)||
+    !edit||!['add','update','stroke','remove'].includes(edit.op))throw Error('纹理集命令无效');
+  if(edit.op==='add'&&edit.kind!=='fill')throw Error('纹理集面板支持新建填充层');
+  if(edit.op==='update')fields(edit.patch,['name','channels','values','maskEnabled']);
+  if(edit.op==='stroke'&&(edit.target!=='mask'||edit.stroke?.uv!==true))
+    throw Error('请选择纹理集的 UV 蒙版');
+  if(name===doc.source.material){applyOperations(doc,[edit],undefined,{compact});return;}
+  const slots=renderSceneObjects(doc).textureSlots;
+  if(doc.source.format!=='glb'||!Object.hasOwn(slots,name))throw Error('该材质槽没有可绘制的原 UV');
+  if(!Object.hasOwn(doc.paint.textureSets??{},name)){
+    if(edit.op!=='add')throw Error('请先新建纹理集图层');
+    const overrides=doc.paint.sourceMaterials?.[name]??{};
+    if(overrides.mark)throw Error('此槽已有投影标记，请先合并标记或将它选为主涂装材质');
+    const base={...slots[name].base};
+    for(const key of legacyChannels)if(overrides[key]!==undefined)base[key]=overrides[key];
+    const layers=[];
+    if(slots[name].textured){
+      const images=seeds?.get(name);
+      if(!images?.size)throw Error('该槽的原材质贴图未准备好');
+      const maps={};
+      for(const [channel,png] of images){
+        ensurePaintAsset(doc,png);doc.paint.assets[png.entry.id]=png.entry;maps[channel]=png.entry.id;
+      }
+      layers.push({id:crypto.randomUUID(),kind:'fill',name:'源材质贴图',visible:true,opacity:1,blend:'normal',mask:null,
+        x:.5,y:.5,scale:1,rotation:0,channels:{color:false,metallic:false,roughness:false,...Object.fromEntries(Object.keys(maps).map(k=>[k,true]))},
+        values:{...base},maps});
+    }
+    doc.paint.textureSets={...doc.paint.textureSets,[name]:{base,layers}};
+  }
+  const scoped=textureSetDocument(doc,name);
+  applyOperations(scoped,[edit],undefined,{compact});
+  if(scoped.paint.layers.length)doc.paint.textureSets[name]={base:scoped.paint.base,layers:scoped.paint.layers};
+  else{
+    delete doc.paint.textureSets[name];
+    if(!Object.keys(doc.paint.textureSets).length)delete doc.paint.textureSets;
+  }
+}
+
 function validate(doc,{unpackBlocks=false,checkPending=true}={}){
+  if(doc.paint.textureSets!==undefined){
+    const sets=doc.paint.textureSets;
+    if(!sets||typeof sets!=='object'||Array.isArray(sets))throw Error('纹理集数据无效');
+    for(const [name,set] of Object.entries(sets)){
+      if(!name||['__proto__','constructor','prototype',doc.source?.material].includes(name))throw Error('纹理集材质名称无效');
+      fields(set,['base','layers']);
+      if(!Array.isArray(set.layers))throw Error('纹理集图层列表无效');
+      const {textureSets,materialGraph,baseChannels,...shared}=doc.paint;
+      const stack={...shared,...set};
+      validateSurfaceBindings(stack);
+      validateMaterialStack({...doc,paint:stack},{unpackBlocks,checkPending});
+    }
+  }
   if(doc.paint.sceneCursor!==undefined)checkedSceneCursor(doc.paint.sceneCursor);
   validateObjectNames(doc.paint.objectNames);
   for(const {mark} of Object.values(doc.paint.sourceMaterials||{}))if(mark&&(!asset(doc,mark.image)||!asset(doc,mark.coverage)))throw Error('缺少投影标记素材');
@@ -355,6 +444,9 @@ function validate(doc,{unpackBlocks=false,checkPending=true}={}){
   validateImageDocuments(doc.paint,{checkStroke,checkedUVTransform,validateText:value=>isDeepStrictEqual(checkedText(value,textFontRegistry(doc)),value),
     unpackStrokeBlock:unpackBlocks?unpackStrokeBlock:undefined,checkPending});
   compileMaterialGraph(doc.paint.materialGraph,doc.paint.assets);
+  validateMaterialStack(doc,{unpackBlocks,checkPending});
+}
+function validateMaterialStack(doc,{unpackBlocks,checkPending}){
   if(doc.paint.baseChannels!==undefined&&Object.values(fields(doc.paint.baseChannels,channels)).some(v=>typeof v!=='boolean'))throw Error('底层通道开关无效');
   if(!materialValues(doc.paint.base)||doc.paint.layers.length>64)throw Error('底层或图层数量无效');
   const layers=doc.paint.layers,byId=new Map(layers.map(l=>[l.id,l]));
@@ -480,12 +572,15 @@ function checkedUVTransform(value,image=false){
     throw Error('选区变换参数无效');
   return {rect,...uvShapePayload(value),offset,scale,angle,copy,interpolation,...(pivot===undefined?{}:{pivot})};
 }
-function applyOperations(next,operations,sourceVisibility,{compact=false}={}){
+function applyOperations(next,operations,sourceVisibility,{compact=false,textureSeeds}={}){
   if(!Array.isArray(operations)||!operations.length||operations.length>128)throw Error('需要 1–128 条制作命令');
   const p=next.paint,reproject=[];
   for(const o of operations){
     const {op,id,patch}=o;
+    if(op==='textureSet'){applyTextureSet(next,o,compact,textureSeeds);continue;}
     if(op==='sourceMaterial'){
+      if(Object.hasOwn(p.textureSets??{},o.name)&&(!patch||['color','metallic','roughness','mark'].some(k=>Object.hasOwn(patch,k))))
+        throw Error('此材质已使用纹理集，请在材质图层的纹理集中编辑');
       fields(o,['op','name','patch']);
       const registered=renderSceneObjects(next);
       if(next.source.format!=='glb'||!registered.materials.includes(o.name)||o.name===next.source.material)throw Error('无法编辑该模型材质');
@@ -685,7 +780,7 @@ export function applyPlacedMaterial(doc,materialId,placement){
   applyOperations(doc,[libraryFill(doc.paint,materialId,{placement})]);
   return doc.paint.layers.find(layer=>!existing.has(layer.id)).id;
 }
-export function editPaint(doc,{revision,operations,strokeRequestId},sourceVisibility){
+export function editPaint(doc,{revision,operations,strokeRequestId},sourceVisibility,textureSeeds){
   let receipt;
   if(strokeRequestId!==undefined){
     if(typeof strokeRequestId!=='string'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(strokeRequestId)||
@@ -701,7 +796,7 @@ export function editPaint(doc,{revision,operations,strokeRequestId},sourceVisibi
   }
   if(doc.revision!==revision)throw revisionError(doc);
   return commit(doc.id,revision,next=>{
-    const edited=applyOperations(next,operations,sourceVisibility,{compact:true});
+    const edited=applyOperations(next,operations,sourceVisibility,{compact:true,textureSeeds});
     if(receipt)edited.strokeSaveReceipts=[...(next.strokeSaveReceipts||[]),receipt].slice(-strokeReceiptLimit);
     return edited;
   },Array.isArray(operations)?operations.map(o=>({
@@ -716,7 +811,7 @@ export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
     'project_model.py','model-binding.mjs','model_glb.py','model_surface.py',
     '../tools/geometry.py','../tools/prepare_guides.py','../tools/guide_raster.py','../tools/projection_scope.py','../tools/uv_raster.py','../tools/view_select.py'
   ].map(file=>hash(path.join(ROOT,file))))).digest('hex');
-  const {objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,sourceMaterials,...content}=doc.paint;
+  const {objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,sourceMaterials,textureSets,...content}=doc.paint;
   return crypto.createHash('sha256').update(JSON.stringify([compositorFingerprint,binding,content])).digest('hex');
 }
 export function materialFingerprint(doc){
@@ -727,7 +822,8 @@ export function materialFingerprint(doc){
 }
 function fillMaterialPlans(doc){return Object.fromEntries([...new Set(doc.paint.layers.filter(layer=>layer.materialId).map(layer=>layer.materialId))].sort().map(id=>[id,compileLibraryMaterial(doc.paint.materials[id].graph,doc.paint.assets)]));}
 export function paintInput(doc,binding=paintBinding(doc)){
-  return {activeChannels:activePaintChannels(doc.paint),fillMaterialPlans:fillMaterialPlans(doc),materialPlan:compileMaterialGraph(doc.paint.materialGraph,doc.paint.assets),materialFingerprint:materialFingerprint(doc),source:doc.source,paint:doc.paint,revision:doc.revision,bindingFingerprint:binding,...(modelFingerprint(doc)?{modelFingerprint:modelFingerprint(doc)}:{}),
+  const {textureSets,...paint}=doc.paint;
+  return {activeChannels:activePaintChannels(paint),fillMaterialPlans:fillMaterialPlans(doc),materialPlan:compileMaterialGraph(doc.paint.materialGraph,doc.paint.assets),materialFingerprint:materialFingerprint(doc),source:doc.source,paint,revision:doc.revision,bindingFingerprint:binding,...(modelFingerprint(doc)?{modelFingerprint:modelFingerprint(doc)}:{}),
     assets:Object.fromEntries(Object.keys(doc.paint.assets).map(id=>[id,assetPath(doc,id)]))};
 }
 function liveOperationAllowed(doc,operation){
@@ -1489,7 +1585,7 @@ export async function restorePaint(archive,scratch){
      (!projectOnly&&(typeof manifest.previewId!=='string'||!/^[\w-]{1,100}$/.test(manifest.previewId)||
        !sha256(geometry.uvSha256))))
     throw Error('涂装 ZIP 的可编辑清单无效');
-  const {base,baseChannels,layers,assets,textFonts:projectFonts,surfaceBindings,materialGraph,materials,brushes,imageDocuments,objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,sourceMaterials}=fields(manifest.paint,['base','baseChannels','layers','assets','textFonts','surfaceBindings','materialGraph','materials','brushes','imageDocuments','objectNames','sceneCursor','renderCamera','renderBookmarks','renderAppearance','renderLighting','renderOptics','renderPreset','renderRegion','renderVisibility','sourceMaterials']);
+  const {base,baseChannels,layers,assets,textFonts:projectFonts,surfaceBindings,materialGraph,materials,brushes,imageDocuments,objectNames,sceneCursor,renderCamera,renderBookmarks,renderAppearance,renderLighting,renderOptics,renderPreset,renderRegion,renderVisibility,sourceMaterials,textureSets}=fields(manifest.paint,['base','baseChannels','layers','assets','textFonts','surfaceBindings','materialGraph','materials','brushes','imageDocuments','objectNames','sceneCursor','renderCamera','renderBookmarks','renderAppearance','renderLighting','renderOptics','renderPreset','renderRegion','renderVisibility','sourceMaterials','textureSets']);
   validateRestoredLayers(layers);
   const paint={base,...(projectFonts?{textFonts:projectFonts}:{}),...(imageDocuments?{imageDocuments}:{}),...(baseChannels!==undefined?{baseChannels}:{}),layers,assets:{},...(materials?{materials}:{}),...(brushes?{brushes}:{}),...(materialGraph?{materialGraph}:{}),...(surfaceBindings?{surfaceBindings}:{})};
   for(const [id,item] of Object.entries(assets)){
@@ -1501,6 +1597,10 @@ export async function restorePaint(archive,scratch){
     const png=describePng({paint},fs.readFileSync(file),item.name,64);
     if(png.entry.id!==id)throw Error('交付包素材指纹变化');
     paint.assets[id]={...png.entry,...(item.purpose?{purpose:item.purpose}:{})};
+  }
+  if(textureSets!==undefined){
+    for(const set of Object.values(textureSets))validateRestoredLayers(set.layers);
+    paint.textureSets=textureSets;
   }
   if(sourceMaterials!==undefined)paint.sourceMaterials=sourceMaterials;
   if(objectNames!==undefined){validateObjectNames(objectNames);paint.objectNames=objectNames;}
@@ -1531,6 +1631,10 @@ export async function restorePaint(archive,scratch){
     break;
   }
   const restore=async source=>{
+    if(textureSets){
+      const slots=renderSceneObjects(source).textureSlots;
+      if(Object.keys(textureSets).some(name=>name===source.source.material||!Object.hasOwn(slots,name)))throw Error('纹理集与登记的材质槽不匹配');
+    }
     if(sourceMaterials)checkSourceMaterials(sourceMaterials,source.source.material,renderSceneObjects(source));
     if(source.source.format==='glb')for(const [key,state] of Object.entries(paint.surfaceBindings||{})){
       const sha=state?.modelSha256??(key==='original'?geometry.modelSha256:key);
@@ -1582,7 +1686,7 @@ async function prepareEditableFiles(doc,out,files){
       layer.cloneSources?.length||layer.strokes?.some(isStrokeBlock)||layer.maskStrokes?.some(isStrokeBlock));
   const manifest={
     format:archiveFormat,version:needsModernImageLayers?2:1,name:doc.name,revision:doc.revision,geometry,...(doc.modeling?{modeling:doc.modeling}:{}),
-    paint:{base:doc.paint.base,...(doc.paint.sourceMaterials?{sourceMaterials:doc.paint.sourceMaterials}:{}),...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.sceneCursor?{sceneCursor:doc.paint.sceneCursor}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.textFonts?{textFonts:doc.paint.textFonts}:{}),...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
+    paint:{base:doc.paint.base,...(doc.paint.textureSets?{textureSets:doc.paint.textureSets}:{}),...(doc.paint.sourceMaterials?{sourceMaterials:doc.paint.sourceMaterials}:{}),...(doc.paint.objectNames?{objectNames:doc.paint.objectNames}:{}),...(doc.paint.sceneCursor?{sceneCursor:doc.paint.sceneCursor}:{}),...(doc.paint.renderCamera?{renderCamera:doc.paint.renderCamera}:{}),...(doc.paint.renderBookmarks?{renderBookmarks:doc.paint.renderBookmarks}:{}),...(doc.paint.renderAppearance?{renderAppearance:doc.paint.renderAppearance}:{}),...(doc.paint.renderLighting?{renderLighting:doc.paint.renderLighting}:{}),...(doc.paint.renderOptics?{renderOptics:doc.paint.renderOptics}:{}),...(doc.paint.renderPreset?{renderPreset:doc.paint.renderPreset}:{}),...(doc.paint.renderRegion?{renderRegion:doc.paint.renderRegion}:{}),...(doc.paint.renderVisibility?{renderVisibility:doc.paint.renderVisibility}:{}),...(doc.paint.imageDocuments?{imageDocuments:doc.paint.imageDocuments}:{}),...(doc.paint.baseChannels!==undefined?{baseChannels:doc.paint.baseChannels}:{}),layers:doc.paint.layers,assets,...(doc.paint.textFonts?{textFonts:doc.paint.textFonts}:{}),...(doc.paint.materials?{materials:doc.paint.materials}:{}),...(doc.paint.brushes?{brushes:doc.paint.brushes}:{}),...(doc.paint.materialGraph?{materialGraph:doc.paint.materialGraph}:{}),...(doc.paint.surfaceBindings?{surfaceBindings:doc.paint.surfaceBindings}:{})}
   };
   const metadata=JSON.stringify(manifest)+'\n';
   if(Buffer.byteLength(metadata)>64*1024*1024)throw Error('可编辑工程清单超过 64 MiB，无法生成可恢复的 ZIP');
@@ -1932,6 +2036,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
 // A mark on a secondary material uses the same surface projector, then keeps
 // its alpha in that material's own UV space. Its mesh and source PNG stay editable.
 export async function placeSourceMark(doc,{revision,name,image,projector},{signal}={}){
+  if(Object.hasOwn(doc.paint.textureSets??{},name))throw Error('此槽已使用纹理集，请在纹理集中绘制蒙版');
   if(revision!==doc.revision)throw revisionError(doc);
   if(doc.source.format!=='glb'||doc.source.material===name||!renderSceneObjects(doc).materials.includes(name)||!asset(doc,image))
     throw Error('请选择原生 GLB 的附属材质和工程中的 PNG');

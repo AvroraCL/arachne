@@ -101,7 +101,7 @@ def texture_rows(model, info, color):
     return size, rows()
 
 
-def extract_texture_maps(model, material, out):
+def extract_texture_maps(model, material, out, channels=None):
     pbr = material.get('pbrMetallicRoughness', {})
     rgba = np.asarray(pbr.get('baseColorFactor', [1, 1, 1, 1]), dtype=np.float32)
     emissive = np.asarray(material.get('emissiveFactor', [0, 0, 0]), dtype=np.float32)
@@ -133,7 +133,9 @@ def extract_texture_maps(model, material, out):
     )
     maps = []
     for info, color, outputs in plans:
-        if info is None:
+        if channels is not None:
+            outputs = {name: convert for name, convert in outputs.items() if name in channels}
+        if info is None or not outputs:
             continue
         (width, height), rows = texture_rows(model, info, color)
         converted = {name: np.empty((height, width, 3) if count == 3 else (height, width), dtype=np.uint8)

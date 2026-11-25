@@ -28,7 +28,16 @@ export function renderSceneObjects(doc){
     .map(node=>[node.name,metadata.render_visibility?.[node.name]!==false])));
   const materials=(gltf.materials||[]).filter(material=>material.name&&!material.extensions?.KHR_materials_unlit).map(material=>material.name);
   const transmissionMaterials=(gltf.materials||[]).filter(material=>material.extensions?.KHR_materials_transmission).map(material=>material.name);
-  const result={sourceSha256:metadata.source_sha256,visibility,materials,transmissionMaterials};
+  const textureSlots=Object.create(null);
+  const uvMaterials=new Set((gltf.meshes||[]).flatMap(mesh=>mesh.primitives.filter(p=>p.attributes?.TEXCOORD_0!==undefined).map(p=>p.material)));
+  for(const [index,m] of (gltf.materials||[]).entries()){
+    if(!materials.includes(m.name)||!uvMaterials.has(index))continue;
+    const pbr=m.pbrMetallicRoughness||{},rgb=(pbr.baseColorFactor||[1,1,1]).slice(0,3);
+    const srgb=x=>Math.round(255*(x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055)).toString(16).padStart(2,'0');
+    textureSlots[m.name]={base:{color:'#'+rgb.map(srgb).join(''),roughness:pbr.roughnessFactor??1,metallic:pbr.metallicFactor??1},
+      textured:!!(pbr.baseColorTexture||pbr.metallicRoughnessTexture)};
+  }
+  const result={textureSlots,sourceSha256:metadata.source_sha256,visibility,materials,transmissionMaterials};
   cache.set(key,result);
   while(cache.size>8)cache.delete(cache.keys().next().value);
   return result;

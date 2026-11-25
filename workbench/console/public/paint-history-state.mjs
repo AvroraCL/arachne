@@ -98,6 +98,8 @@ export function describePaintChange(before,after){
   if(changedGlbSource(before.source,after.source))labels.push('更新工程模型');
   if(json(before.modeling)!==json(after.modeling))labels.push('模型编辑');
   if(json(a.renderPreset)!==json(b.renderPreset))labels.push(b.renderPreset?'保存工程渲染预设':'移除工程渲染预设');
+  for(const name of new Set([...Object.keys(a.textureSets??{}),...Object.keys(b.textureSets??{})]))
+    if(json(a.textureSets?.[name])!==json(b.textureSets?.[name]))labels.push('编辑纹理集 · '+name);
   if(json(a.sourceMaterials)!==json(b.sourceMaterials))labels.push('调整模型材质');
   if(json(a.renderVisibility)!==json(b.renderVisibility))labels.push('调整物体渲染显隐');
   if(json(a.renderOptics)!==json(b.renderOptics))labels.push('调整相机景深');

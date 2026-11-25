@@ -289,6 +289,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if (!model) return;
     objectOutline?.clear();outlineCount=0;setOutlineStatus();
     releaseLivePaint();
+    for(const name of slotTextures.keys())removeSlotTextures(name);
     clearChannelPreview();
     previewModel?.removeFromParent();
     previewModel = null;
@@ -335,12 +336,50 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       paintMaterials(name);
     };
   }
+  const slotTextures=new Map();
+  function removeSlotTextures(name){
+    const entry=slotTextures.get(name);
+    entry?.request?.abort();
+    for(const map of Object.values(entry?.maps??{}))map.dispose();
+    slotTextures.delete(name);
+  }
+  function syncSlotTextures(){
+    const sets=doc.paint.textureSets??{};
+    for(const name of slotTextures.keys())if(!Object.hasOwn(sets,name)){removeSlotTextures(name);paintMaterials(name);}
+    for(const [name,set] of Object.entries(sets)){
+      let entry=slotTextures.get(name);
+      if(!entry){entry={};slotTextures.set(name,entry);}
+      const key=JSON.stringify([set,doc.modeling]);
+      if(entry.key===key){entry.request?.abort();entry.pending=null;continue;}
+      if(entry.pending===key&&entry.revision===doc.revision)continue;
+      entry.request?.abort();
+      const controller=new AbortController(),revision=doc.revision;
+      Object.assign(entry,{request:controller,pending:key,revision});
+      void (async()=>{
+        const size=512;
+        const response=await fetch('/api/projects/'+doc.id+'/paint/live',{method:'POST',signal:controller.signal,
+          headers:{'Content-Type':'application/json'},body:JSON.stringify({textureSet:name,revision,resolution:size,format:'pbr8'})});
+        if(response.status===204)return;
+        if(!response.ok)throw Error((await response.json()).error);
+        const pixels=new Uint8Array(await response.arrayBuffer());
+        if(controller.signal.aborted)return;
+        if(pixels.length!==size*size*15)throw Error('纹理集预览尺寸无效');
+        const {maps}=updateLivePaintTextures(entry.maps,size,activePaintChannels(set),space=>createLiveTexture(space,size));
+        fillLivePaintTextures(pixels,size,maps);
+        for(const map of Object.values(maps))map.needsUpdate=true;
+        Object.assign(entry,{maps,key});
+        paintMaterials(name);
+      })().catch(error=>{if(!controller.signal.aborted)state(name+' · '+error.message,'error');})
+        .finally(()=>{if(entry.request===controller)entry.pending=null;});
+    }
+  }
   function paintMaterials(onlyName) {
     const projected=hasProjectedFill();
     const enabled=new Set(livePaint?activePaintChannels(doc.paint):manifest?.activeChannels||activePaintChannels(doc?.paint));
     const liveMap=key=>livePaint?.[key==='ao'?'scalar':key==='height'||key==='alpha'?'detail':key];
     for (const [name, list] of materials) {
       if(onlyName&&onlyName!==name)continue;
+      const slotMaps=slotTextures.get(name)?.maps;
       const saved=doc.paint?.sourceMaterials?.[name];
       const factors=sourcePreview?.name===name?{...saved,...sourcePreview.patch}:saved;
       const coverage=markedMaps.get(name);
@@ -360,13 +399,13 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
         material.wireframe = wireframe;
         const sourcePbr=!isTarget&&original.sourcePbr;
         const inspecting=!!inspectionChannel&&(isTarget||sourcePbr);
-        material.map = isTarget ? maskPreview||inspectionMap||livePaint?.color||texture||original.map : mark||original.map;
-        material.color.copy(isTarget && (maskPreview||livePaint||texture) ? new THREE.Color(0xffffff) : original.color);
+        material.map = isTarget ? maskPreview||inspectionMap||livePaint?.color||texture||original.map : slotMaps?.color||mark||original.map;
+        material.color.copy(slotMaps || isTarget && (maskPreview||livePaint||texture) ? new THREE.Color(0xffffff) : original.color);
         const extra=k=>isTarget&&enabled.has(k)?(liveMap(k)||scalarTextures[k]):null;
-        const alpha=extra('alpha');
+        const alpha=extra('alpha')||slotMaps?.detail;
         if('metalness' in material){
-          const metallic=isTarget?(livePaint?.scalar||scalarTextures.metallic):null;
-          const roughness=isTarget?(livePaint?.scalar||scalarTextures.roughness):null;
+          const metallic=isTarget?(livePaint?.scalar||scalarTextures.metallic):slotMaps?.scalar;
+          const roughness=isTarget?(livePaint?.scalar||scalarTextures.roughness):slotMaps?.scalar;
           material.metalnessMap=metallic||original.metalnessMap;
           material.roughnessMap=roughness||original.roughnessMap;
           material.metalness=metallic?1:original.metalness;
@@ -380,7 +419,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
         }
         if(!isTarget){
           if(original.transmission!==undefined&&factors?.transmission===undefined)material.transmission=original.transmission;
-          applySourceFactors(material,factors,!!mark);
+          applySourceFactors(material,slotMaps?{transmission:factors?.transmission}:factors,!!mark);
         }
         if(contactMaterials.has(material)){
           material.defines??={};
@@ -400,7 +439,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
             material.defines.PAINT_INSPECT_COMPONENT=scalarInspectionComponent[inspectionChannel];
           else delete material.defines.PAINT_INSPECT_COMPONENT;
         }
-        if(sourcePbr)inspectSourceChannel(material,sourcePbr,factors,inspectionChannel);
+        if(sourcePbr)inspectSourceChannel(material,slotMaps?{...sourcePbr,metalnessMap:slotMaps.scalar,roughnessMap:slotMaps.scalar,roughness:1,metalness:1}:sourcePbr,slotMaps?null:factors,inspectionChannel);
         material.needsUpdate = true;
       }
     }
@@ -482,7 +521,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       if(doc.modeling?.steps?.length&&doc.modeling.modelSha256!==next.modelSha256)throw Error('工程建模绑定与当前模型不一致，无法重放');
       applyModelState(model,doc.modeling);
       measureModelBounds(model);const box=modelBounds;box.getCenter(center);radius=Math.max(box.getSize(new THREE.Vector3()).length()*.5,.001);topUp.fromArray(next.topUp);host.dataset.meshes=String(next.metadata.mesh_count);host.dataset.uvUnchanged=String(next.metadata.uv_unchanged);environment.sync();model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
-      onMaterials(next.metadata.materials);if(unlit)shade(true);await applyTexture(resolvedTexture(next),token);if(token!==sequence)return;if(previousCamera)applyCamera(previousCamera);else fit();host.dataset.state='ready';
+      onMaterials(next.metadata.materials);if(unlit)shade(true);await applyTexture(resolvedTexture(next),token);if(token!==sequence)return;if(previousCamera)applyCamera(previousCamera);else fit();host.dataset.state='ready';syncSlotTextures();
     }catch(e){if(token!==sequence)return;host.dataset.state='error';state('三维视口：'+e.message,'error');}
   }
   // Only the changed material's original-UV image depends on its pigment and
@@ -525,6 +564,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     if(model&&!previewModel&&JSON.stringify(previous.modeling)!==JSON.stringify(next.modeling)){
       applyModelState(model,doc.modeling);updateModelBounds();request();
     }
+    if(model&&host.dataset.state==='ready')syncSlotTextures();
     textureStatus();
   }
   function fit(direction=new THREE.Vector3(1,.75,1),bounds=null,upVector=new THREE.Vector3(0,1,0)){
@@ -733,15 +773,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
       paintFrame={revision:metadata.revision,size,draft:metadata.draft===true};
       request();return;
     }
-    const create=colorSpace=>{
-      const map=new THREE.DataTexture(new Uint8Array(size*size*4),size,size,THREE.RGBAFormat);
-      map.colorSpace=colorSpace;
-      map.magFilter=THREE.LinearFilter;
-      map.minFilter=THREE.LinearMipmapLinearFilter;
-      map.generateMipmaps=true;
-      map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
-      return map;
-    };
+    const create=colorSpace=>createLiveTexture(colorSpace,size);
     const channels=activePaintChannels(doc.paint);
     const {maps,changed}=updateLivePaintTextures(livePaint,size,channels,create);
     livePaint=maps;
@@ -750,6 +782,15 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     for(const map of Object.values(livePaint))map.needsUpdate=true;
     const usage=JSON.stringify([channels,hasProjectedFill()]);
     if(changed||usage!==liveUsageKey){liveUsageKey=usage;paintMaterials();}else request();
+  }
+  function createLiveTexture(colorSpace,size){
+    const map=new THREE.DataTexture(new Uint8Array(size*size*4),size,size,THREE.RGBAFormat);
+    map.colorSpace=colorSpace;
+    map.magFilter=THREE.LinearFilter;
+    map.minFilter=THREE.LinearMipmapLinearFilter;
+    map.generateMipmaps=true;
+    map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
+    return map;
   }
   function showMaskCanvas(canvas){
     if(!canvas){maskPreview?.dispose();maskPreview=null;if(model)paintMaterials();return;}

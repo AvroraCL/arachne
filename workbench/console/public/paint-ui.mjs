@@ -1660,6 +1660,9 @@ function renderDelivery(j,active,last){
   $('export-textures').disabled=!ready||!!active;
   $('export-glb').disabled=!ready||!!active;
   $('export-glb').title='导出建模结果和内嵌 4K PBR 贴图';
+  const scope=$('delivery-set-scope');
+  scope.hidden=!Object.keys(doc.paint.textureSets??{}).length;
+  if(!scope.hidden)scope.textContent='当前贴图、GLB 和正式出图使用主纹理集「'+doc.source.material+'」。可编辑工程 ZIP 保存全部纹理集。';
   const preset=$('delivery-texture-preset');
   preset.disabled=isPaintExport(active);
   syncSelectMenu(preset);

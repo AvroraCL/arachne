@@ -495,3 +495,19 @@
 .image-crop-preview [data-edge*=w]{left:0}.image-crop-preview [data-edge*=e]{left:100%}
 .image-crop-preview :is([data-edge=n],[data-edge=s]){left:50%;cursor:ns-resize}
 .image-crop-preview :is([data-edge=e],[data-edge=w]){top:50%;cursor:ew-resize}
+
+.texture-set-editor{flex:none;padding:3px 6px;color:var(--paint-text)}
+.texture-set-editor[data-open]{overflow:auto;flex:1;min-height:0}
+.domain-material-pane:has(>.texture-set-editor[data-open])>:not(.texture-set-editor){display:none!important}
+.texture-set-toggle{font:inherit}
+.texture-set-body,.texture-set-body fieldset{display:grid;gap:5px}
+.texture-set-body[hidden]{display:none}
+.texture-set-body{margin-top:5px}
+.texture-set-body fieldset{border:0;margin:0;padding:0;min-width:0}
+.texture-set-body label{display:grid;grid-template-columns:minmax(5em,35%) minmax(0,1fr);align-items:center}
+.texture-set-body :is(select,input){width:100%;min-width:0;box-sizing:border-box}
+.texture-set-actions{display:flex;gap:4px}
+.texture-set-body canvas{width:min(100%,224px);height:auto;aspect-ratio:1;touch-action:none;cursor:crosshair;justify-self:center;background:#383838}
+.texture-set-body output{color:var(--paint-muted)}
+.editor-area[data-editor=layers]:has(.texture-set-editor[data-open])>.area-header .area-header-controls{display:none}
+.texture-set-body [data-surface][aria-pressed=true]{background:var(--paint-selected,#40566b);color:white}

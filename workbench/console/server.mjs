@@ -6,7 +6,7 @@ import {embedGltf} from './gltf-embed.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
-import {placeSourceMark,PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,meshMapOperation,livePaintInput,savePaintText,previewImageText,importPaintFont,paintFontFile,restorePaint,imageDocumentInput,imageEdgeViewInput,imageClipboardInput,imageExportInput,imageLayoutProbeInput,bakeImageLayers,captureImageCloneSource,sampleImageSelection,checkPaintPreview,validateProjectPaint} from './paint.mjs';
+import {prepareTextureSetMaps,textureSetDocument,placeSourceMark,PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,meshMapOperation,livePaintInput,savePaintText,previewImageText,importPaintFont,paintFontFile,restorePaint,imageDocumentInput,imageEdgeViewInput,imageClipboardInput,imageExportInput,imageLayoutProbeInput,bakeImageLayers,captureImageCloneSource,sampleImageSelection,checkPaintPreview,validateProjectPaint} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {assetPreview} from './asset-preview.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
@@ -406,7 +406,8 @@ const server=http.createServer(async(req,res)=>{
       if(operation==='commands'){
         const changesRenderVisibility=b.revision===doc.revision&&Array.isArray(b.operations)&&b.operations.length<=128&&b.operations.some(op=>op?.op==='renderVisibility');
         const sourceVisibility=changesRenderVisibility?(renderSceneObjects(doc)).visibility:undefined;
-        send(res,200,editPaint(changesRenderVisibility?read(id):doc,b,sourceVisibility));return;
+        const seeds=await prepareTextureSetMaps(doc,b);
+        send(res,200,editPaint(changesRenderVisibility||seeds.size?read(id):doc,b,sourceVisibility,seeds));return;
       }
       if(operation==='render-session'){
         updateCyclesSession(doc,b,()=>listJobs(id));send(res,202,{accepted:true});return;
@@ -460,13 +461,14 @@ const server=http.createServer(async(req,res)=>{
       }
       if(operation==='live'){
         if(b.revision!==doc.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
-        const input=livePaintInput(doc,b);
+        const scoped=textureSetDocument(doc,b.textureSet);
+        const input=livePaintInput(scoped,b);
         const controller=new AbortController();
         const disconnect=()=>{if(!res.writableEnded)controller.abort();};
         res.on('close',disconnect);
         try{
           if(res.destroyed)return;
-          const geometry=await preparePaintGeometry(doc,{signal:controller.signal});
+          const geometry=await preparePaintGeometry(scoped,{signal:controller.signal});
           if(res.destroyed||controller.signal.aborted)return;
           if(read(id).revision!==b.revision){res.writeHead(204);res.end();return;}
           input.source=geometry.source;input.surfaceSources=geometry.surfaceSources;

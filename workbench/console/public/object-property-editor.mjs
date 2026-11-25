@@ -11,6 +11,8 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
   sourceControls.tabIndex=-1;
   sourceControls.setAttribute('role','group');
   sourceControls.setAttribute('aria-label','原模型材质参数');
+  const setHint=el('p','object-property-hint','颜色、金属度与粗糙度由「材质图层 → 纹理集」控制。');
+  setHint.hidden=true;sourceControls.append(setHint);
   const users=el('details','source-material-users'),count=el('summary'),names=el('ul');
   users.hidden=true;users.append(count,names);sourceControls.append(users);
   const inputs={},labels={};
@@ -81,6 +83,8 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
       if(users.open)listUsers();
     }
     const patch=project.document?.paint.sourceMaterials?.[target?.name];
+    const hasSet=Object.hasOwn(project.document?.paint.textureSets??{},target?.name);
+    setHint.hidden=!hasSet;
     const locked=pending||!target||target.locked;
     for(const [key,input] of Object.entries(inputs)){
       if(changed){
@@ -96,12 +100,12 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
         item.dataset.search=map?detail.title:title;
       }
       if(target?.[key]!==undefined&&(force||changed||document.activeElement!==input))input.value=patch?.[key]??target[key];
-      input.disabled=!!locked||target?.[key]===undefined;
+      input.disabled=!!locked||target?.[key]===undefined||hasSet&&key!=='transmission';
     }
     markButton.parentElement.hidden=removeMark.hidden=!patch?.mark;
     markName.textContent=project.document?.paint.assets[patch?.mark?.image]?.name||'';
     markButton.title='查看原图 · '+markName.textContent;
-    removeMark.disabled=!!locked;restore.disabled=!!locked||!Object.keys(inputs).some(key=>patch?.[key]!==undefined);
+    removeMark.disabled=!!locked;restore.disabled=!!locked||hasSet||!Object.keys(inputs).some(key=>patch?.[key]!==undefined);
   }
   async function save(patch){
     if(pending)return;
