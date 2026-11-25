@@ -65,7 +65,7 @@ async function decode(file){
   }
 }
 
-export async function prepareDrawingImage(file){
+export async function prepareDrawingImage(file,{preserveProfile=false}={}){
   if(!acceptsDrawingImage(file))throw Error('请选择 PNG、JPEG 或 WebP 图片');
   if(file.size>maxBytes)throw Error('图片不能超过 24 MiB');
   const header=new Uint8Array(await file.slice(0,32).arrayBuffer());
@@ -78,8 +78,10 @@ export async function prepareDrawingImage(file){
   try{decoded=await decode(file);}
   catch{throw Error('浏览器无法解码这张图片');}
   try{
-    const {image,width,height}=decoded,canvas=document.createElement('canvas');
+    const {image,width,height}=decoded;
     if(!validSize([width,height]))throw Error('图片宽高不能超过 8192 像素');
+    if(preserveProfile)return {file,size:[width,height],format:header[0]===0xff?'jpeg':'webp'};
+    const canvas=document.createElement('canvas');
     canvas.width=width;canvas.height=height;
     const context=canvas.getContext('2d',{alpha:true,colorSpace:'srgb'});
     if(!context)throw Error('浏览器无法创建图片画布');

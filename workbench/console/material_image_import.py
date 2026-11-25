@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
-from image_color_spaces import profile_bytes
+from image_color_spaces import profile_bytes, rgb_transform
 
 
 MIB = 1024 * 1024
@@ -31,18 +31,24 @@ def convert(item):
             if orientation.mode == 'CMYK' and profile:
                 # PNG cannot carry CMYK samples; interpret their profile while they
                 # still have four color channels.
-                target = profile_bytes('srgb')
+                space = item.get('workingSpace', 'srgb')
+                target = profile_bytes('srgb' if space == 'linear' else space)
                 normalized = ImageCms.profileToProfile(orientation,BytesIO(profile),BytesIO(target),
                     outputMode='RGB',renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC)
                 profile = target
             else:
+                if profile and item.get('workingSpace') not in (None, 'linear'):
+                    # A placed photo must remain convertible when the document reopens.
+                    rgb_transform(profile,profile_bytes(item['workingSpace']))
                 normalized = orientation.convert(mode)
             # Preserve the tag without transforming RGB or packed-channel bytes.
             normalized.info.clear()
             destination = Path(item['destination'])
             normalized.save(destination, format='PNG', compress_level=3, icc_profile=profile)
             return destination
-    except (OSError, UnidentifiedImageError, Image.DecompressionBombError, ImageCms.PyCMSError):
+    except ImageCms.PyCMSError:
+        raise ValueError('图片的 ICC 配置无效或与通道类型不匹配：' + name) from None
+    except (OSError, UnidentifiedImageError, Image.DecompressionBombError):
         raise ValueError('无法读取贴图：' + name) from None
     except ValueError as error:
         raise ValueError(str(error) + '：' + name) from None

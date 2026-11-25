@@ -6,7 +6,7 @@ import {embedGltf} from './gltf-embed.mjs';
 import {createPersonalLibrary} from './personal-library-store.mjs';
 import {APP_VERSION,PACKAGE_VERSION} from './public/app-version.mjs';
 import {saveProjectModel,preparePaintGeometry,prepareModelGeometry,modelGeometry,modelGeometryStatus,modelGeometryLog,stopModelGeometry} from './project-model.mjs';
-import {prepareTextureSetMaps,textureSetDocument,placeSourceMark,PAINT,createPaint,savePaintCopy,editPaint,importPaint,importPaintMaps,meshMapOperation,livePaintInput,savePaintText,previewImageText,importPaintFont,paintFontFile,restorePaint,imageDocumentInput,imageEdgeViewInput,imageClipboardInput,imageExportInput,imageLayoutProbeInput,bakeImageLayers,captureImageCloneSource,sampleImageSelection,checkPaintPreview,validateProjectPaint} from './paint.mjs';
+import {prepareTextureSetMaps,textureSetDocument,placeSourceMark,PAINT,createPaint,savePaintCopy,editPaint,importPaint,importDocumentPhoto,importPaintMaps,meshMapOperation,livePaintInput,savePaintText,previewImageText,importPaintFont,paintFontFile,restorePaint,imageDocumentInput,imageEdgeViewInput,imageClipboardInput,imageExportInput,imageLayoutProbeInput,bakeImageLayers,captureImageCloneSource,sampleImageSelection,checkPaintPreview,validateProjectPaint} from './paint.mjs';
 import {livePaint,stopLivePaint} from './paint-live.mjs';
 import {assetPreview} from './asset-preview.mjs';
 import {cyclesDevices,stopCyclesDeviceProbe} from './blender-runtime.mjs';
@@ -528,7 +528,7 @@ const server=http.createServer(async(req,res)=>{
       }
       if(operation==='model-prepare'){void preparePaintGeometry(doc).catch(()=>{});send(res,202,modelGeometryStatus(doc));return;}
       if(operation==='model'){send(res,200,saveProjectModel(doc,b));return;}
-      if(operation==='assets')send(res,201,importPaint(doc,b));
+      if(operation==='assets')send(res,201,b.inputFormat?await importDocumentPhoto(doc,b):importPaint(doc,b));
       else if(operation==='fonts'&&parts.length===5)send(res,201,await importPaintFont(doc,b));
       else if(operation==='text')send(res,201,await savePaintText(doc,b));
       else if(['undo','redo'].includes(operation))send(res,200,travel(id,b.revision,operation,b.steps));

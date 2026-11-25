@@ -996,15 +996,16 @@ try{
 
   const importDoc='drawing-import';
   const importSeed=await api(paintRoute+'/commands',{revision:unlockedAlpha.revision,operations:[
-    {op:'image',action:'create',documentId:importDoc,patch:{name:'图片导入验收'}}
+    {op:'image',action:'create',documentId:importDoc,patch:{name:'图片导入验收',colorSpace:'display-p3'}}
   ]});
   const jpeg=path.join(data,'photo.jpg'),webp=path.join(data,'transparent.webp');
   execFileSync(pythonExecutable(),['-c',[
-    'from PIL import Image','import sys',
-    'photo=Image.new("RGB",(312,196),(56,111,174))','exif=photo.getexif();exif[274]=6',
-    'photo.save(sys.argv[1],quality=99,exif=exif)',
-    'Image.new("RGBA",(96,64),(204,109,43,143)).save(sys.argv[2],lossless=True)'
-  ].join('\n'),jpeg,webp]);
+    'from PIL import Image','import sys','from image_color_spaces import profile_bytes',
+    'icc=profile_bytes("display-p3")',
+    'photo=Image.new("RGB",(312,196),(0,255,0))','exif=photo.getexif();exif[274]=6',
+    'photo.save(sys.argv[1],quality=99,exif=exif,icc_profile=icc)',
+    'Image.new("RGBA",(96,64),(252,3,5,143)).save(sys.argv[2],lossless=True,icc_profile=icc)'
+  ].join('\n'),jpeg,webp],{cwd:root});
   await page.reload();
   await canvas.waitFor();
   await editor.locator('select[aria-label="图像文档"]').selectOption(importDoc,{force:true});
@@ -1037,17 +1038,23 @@ try{
   assert.deepEqual([webpAsset.width,webpAsset.height],[96,64]);
   assert.equal(webpLayer.scale,96/4096);
   assert.ok(Math.abs(webpLayer.x-.72)<.005&&Math.abs(webpLayer.y-.32)<.005);
+  // Inspect the project assets themselves as well as the composited PNG.
+  for(const asset of [photoAsset,webpAsset]){
+    execFileSync(pythonExecutable(),['-B','-c',
+      'from PIL import Image;from image_color_spaces import profile_bytes;import sys;assert Image.open(sys.argv[1]).info["icc_profile"]==profile_bytes("display-p3")',
+      path.join(data,'projects',importedWebp.id,'assets',asset.file)],{cwd:root});
+  }
   const [,inputPixels]=rgba(await imagePng('imported-images.png',importedWebp.revision,importDoc),
     [xy(.5,.5),xy(webpLayer.x,webpLayer.y)]);
-  assert.ok(inputPixels[0].slice(0,3).every((channel,i)=>Math.abs(channel-[56,111,174][i])<=2));
+  assert.ok(inputPixels[0].slice(0,3).every((channel,i)=>Math.abs(channel-[0,255,0][i])<=2));
   assert.equal(inputPixels[0][3],255);
-  assert.ok(inputPixels[1].slice(0,3).every((channel,i)=>Math.abs(channel-[204,109,43][i])<=1));
+  assert.ok(inputPixels[1].slice(0,3).every((channel,i)=>Math.abs(channel-[252,3,5][i])<=1));
   assert.equal(inputPixels[1][3],143);
   await page.reload();
   await canvas.waitFor();
   const reopenedImport=await api(projectRoute);
   assert.equal(importedLayers(reopenedImport).length,2);
-  console.log('PASS JPEG chooser and EXIF orientation, WebP drag and drop, original pixel size and preserved alpha');
+  console.log('PASS P3 JPEG chooser and EXIF orientation, lossless P3 WebP drop, wide colors and alpha');
 
   const polyDoc='polygon-selection',polyLayer='polygon-pixels';
   const polySeed=await api(paintRoute+'/commands',{revision:reopenedImport.revision,operations:[

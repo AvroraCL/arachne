@@ -1310,21 +1310,24 @@ export async function meshMapOperation(doc,request,operation,signal,highModel){
   }finally{await fsp.rm(scratch,{recursive:true,force:true});}
 }
 
-export async function importPaintMaps(doc,revision,files,scratch){
-  if(doc.revision!==revision)throw revisionError(doc);
+async function normalizeImageFiles(files,scratch){
   const manifest=path.join(scratch,'maps.json');
   await fsp.writeFile(manifest,JSON.stringify(files),{flag:'wx'});
-  let converted;
   try{
     const {stdout}=await renderTextFile(process.env.ARACHNE_PYTHON||'python',
       ['-X','utf8',path.join(ROOT,'material_image_import.py'),manifest],{windowsHide:true,timeout:90000,maxBuffer:64*1024});
-    converted=JSON.parse(stdout);
+    const converted=JSON.parse(stdout);
     if(!Array.isArray(converted)||converted.length!==files.length||converted.some((file,i)=>file!==files[i].source&&file!==files[i].destination))
       throw Error('贴图转换结果不完整');
+    return converted;
   }catch(error){
     const reason=error.stderr?.trim().split(/\r?\n/).at(-1);
-    throw Error(reason&&/^[\u4e00-\u9fff]/.test(reason)?reason:'无法完成整批贴图导入');
+    throw Error(reason&&/^[\u4e00-\u9fff]/.test(reason)?reason:'图片转换失败');
   }
+}
+export async function importPaintMaps(doc,revision,files,scratch){
+  if(doc.revision!==revision)throw revisionError(doc);
+  const converted=await normalizeImageFiles(files,scratch);
   const current=read(doc.id);
   if(current.revision!==revision)throw revisionError(current);
   const pictures=[];
@@ -1342,7 +1345,25 @@ export async function importPaintMaps(doc,revision,files,scratch){
   }
   return {document:saved,uploaded:pictures.map((png,index)=>({id:png.entry.id,name:files[index].name}))};
 }
-export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId,materialId,imageLayer}){
+export async function importDocumentPhoto(doc,request){
+  const {revision,imageLayer,inputFormat,name,data}=request;
+  if(doc.revision!==revision)throw revisionError(doc);
+  const documents=doc.paint.imageDocuments??{};
+  if(!Object.hasOwn(documents,imageLayer?.documentId)||!['jpeg','webp'].includes(inputFormat)||typeof data!=='string'||typeof name!=='string')
+    throw Error('请选择图像文档以及有效的 JPEG 或 WebP 图片');
+  const bytes=Buffer.from(data,'base64');
+  if(!bytes.length||bytes.length>24*1024*1024)throw Error('图片大小须在 24 MiB 以内');
+  const folder=await fsp.mkdtemp(path.join(projectDir(doc.id),'photo-import-'));
+  try{
+    const source=path.join(folder,'source'),destination=path.join(folder,'picture.png');
+    await fsp.writeFile(source,bytes);
+    const [output]=await normalizeImageFiles([{source,destination,name:'photo.'+inputFormat,workingSpace:documents[imageLayer.documentId].colorSpace}],folder);
+    const current=read(doc.id);
+    if(current.revision!==revision)throw revisionError(current);
+    return importPaint(current,{...request,name:(name.replace(/\.[^.]*$/,'')||'导入图片')+'.png'},await fsp.readFile(output));
+  }finally{await fsp.rm(folder,{recursive:true,force:true});}
+}
+export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId,materialId,imageLayer},decodedBytes){
   if(doc.revision!==revision)throw revisionError(doc);
   const image=imageLayer===undefined?null:fields(imageLayer,['documentId','layerId','x','y','scale','index','parentId']);
   if(image&&(image.x!==undefined||image.y!==undefined)&&(!unit(image.x)||!unit(image.y)))throw Error('图像图层放置参数无效');
@@ -1357,7 +1378,7 @@ export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId
   const target=maskLayerId===undefined?null:doc.paint.layers.find(layer=>layer.id===maskLayerId);
   if(maskLayerId!==undefined&&!target)throw Error('蒙版图层不存在');
   requireUnlocked(doc.paint.layers,target);
-  const png=describePng(doc,typeof data==='string'?Buffer.from(data,'base64'):Buffer.alloc(0),name);
+  const png=describePng(doc,decodedBytes??(typeof data==='string'?Buffer.from(data,'base64'):Buffer.alloc(0)),name);
   const {entry,existing,label}=png;
   if(existing&&!image&&!place&&(!target||target.mask===entry.id)&&(!imageNode||imageNode.params.asset===entry.id)){
     ensurePaintAsset(doc,png);

@@ -180,13 +180,13 @@ export function setupPaintAreas(hooks){
       return result.asset;
     },
     importProjectMaps:hooks.importProjectMaps,
-    importDocumentAsset:async(file,origin,layerId,position)=>{
+    importDocumentAsset:async(file,origin,layerId,position,inputFormat)=>{
       const data=await hooks.pngData(file);
       const check=()=>{
         if(project.document?.id!==origin.id)throw Error('工程已切换，未导入图片');
         if(project.document.revision!==origin.revision)throw Error('工程修订已变化，请重新导入图片');
       };
-      check();return write(()=>{check();return hooks.api('/api/projects/'+origin.id+'/paint/assets',{revision:origin.revision,name:file.name||'粘贴图像',data,imageLayer:{documentId:origin.documentId,layerId,...position}});});
+      check();return write(()=>{check();return hooks.api('/api/projects/'+origin.id+'/paint/assets',{revision:origin.revision,name:file.name||'粘贴图像',data,...(inputFormat?{inputFormat}:{}),imageLayer:{documentId:origin.documentId,layerId,...position}});});
     },
     legacy:{
       image:ctx=>{

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {test} from 'node:test';
 import {pythonExecutable} from '../python-runtime.mjs';
@@ -454,4 +455,29 @@ for x,y in [(13,4065),(4043,0)]:
     np.testing.assert_array_equal(image[:,:,3],mask[:,:,0])
     assert np.all(mask[:,:,3]==255)
 `],{cwd:new URL('..',import.meta.url)});
+});
+
+const cmykProfile=process.env.ARACHNE_TEST_CMYK_PROFILE||'/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc';
+test('a tagged CMYK photo converts directly into the working RGB space while its four ink channels are intact',
+  {skip:existsSync(cmykProfile)?false:'requires a local CMYK ICC profile'},()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+from io import BytesIO
+from pathlib import Path
+import sys,tempfile
+from PIL import Image,ImageCms
+from image_color_spaces import profile_bytes
+from material_image_import import convert
+with tempfile.TemporaryDirectory() as folder:
+    source=Path(folder)/'inks.jpg'
+    colors=Image.new('CMYK',(3,1));colors.putdata([(220,100,0,20),(0,163,207,33),(0,0,0,140)])
+    colors.save(source,quality=100,icc_profile=Path(sys.argv[1]).read_bytes())
+    for space in ('srgb','display-p3','acescg'):
+        target=profile_bytes(space);dest=Path(folder)/'converted.png'
+        convert(dict(name='照片.jpeg',source=source,destination=dest,workingSpace=space))
+        with Image.open(source) as im:
+            proof=ImageCms.profileToProfile(im,BytesIO(im.info['icc_profile']),BytesIO(target),
+                outputMode='RGB',renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC)
+        with Image.open(dest) as out:
+            assert out.info['icc_profile']==target and out.tobytes()==proof.tobytes()
+`,cmykProfile],{cwd:new URL('..',import.meta.url)});
 });

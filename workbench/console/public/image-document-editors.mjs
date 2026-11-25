@@ -1275,12 +1275,12 @@ export function createDocumentEditor(ctx,bridge){
     syncClipboard();
     void run(async()=>{
       if(!origin.documentId)throw Error('请先新建图像');
-      const prepared=await prepareDrawingImage(file);
+      const prepared=await prepareDrawingImage(file,{preserveProfile:true});
       if(disposed)return;
       const [width,height]=prepared.size;
       const placement=position?.scale!==undefined?position:imageClipboardPlacement(width,height,position&&[position.x,position.y]);
       if(!pixelSize&&position?.scale===undefined)placement.scale=Math.min(1,placement.scale);
-      await bridge.importDocumentAsset(prepared.file,origin,layerId,{...placement,...insertion});
+      await bridge.importDocumentAsset(prepared.file,origin,layerId,{...placement,...insertion},prepared.format);
       if(!disposed)selectAddedLayer(project,origin,layerId);
     }).finally(()=>{importing=false;if(!disposed)sync();});
   }
