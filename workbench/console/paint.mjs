@@ -2,7 +2,7 @@ import {previewDimensions} from './public/image-document-size.mjs';
 import {libraryFill,insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
 import {textDefaults,textFonts,textEffects,checkStyleFields,hasImageStyle,paragraphOrigin} from './public/image-text-style.mjs';
-import {validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
+import {embeddedDependencies,validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
 import {layoutKinds} from './public/image-layout.mjs';
 import {imagePlacement,warpPoint} from './public/image-warp.mjs';
 import {imageLayersThrough,isolateImageLayer} from './public/image-layer-tree.mjs';
@@ -722,7 +722,7 @@ export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
 export function materialFingerprint(doc){
   const plan=compileMaterialGraph(doc.paint.materialGraph,doc.paint.assets),fills=fillMaterialPlans(doc),bindings=doc.paint.layers.filter(l=>Object.keys(l.documentMaps??{}).length).map(l=>({id:l.id,documentMaps:l.documentMaps}));
   let input=Object.keys(fills).length?{output:plan,fills}:plan;
-  if(bindings.length){const ids=[...new Set(bindings.flatMap(l=>Object.values(l.documentMaps)))].sort();input={output:plan,fills,bindings,imageDocuments:Object.fromEntries(ids.map(id=>[id,doc.paint.imageDocuments[id]]))};}
+  if(bindings.length){const ids=[...new Set(bindings.flatMap(l=>Object.values(l.documentMaps)))].sort();input={output:plan,fills,bindings,imageDocuments:{...Object.fromEntries(ids.map(id=>[id,doc.paint.imageDocuments[id]])),...embeddedDependencies(doc.paint.imageDocuments,ids.flatMap(id=>doc.paint.imageDocuments[id].layers))}};}
   return input?crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex'):undefined;
 }
 function fillMaterialPlans(doc){return Object.fromEntries([...new Set(doc.paint.layers.filter(layer=>layer.materialId).map(layer=>layer.materialId))].sort().map(id=>[id,compileLibraryMaterial(doc.paint.materials[id].graph,doc.paint.assets)]));}
@@ -817,8 +817,11 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
       ...(maskWarpSteps?{maskWarpSteps}:{}),...(brushSources?{brushSources}:{})
     }))
     :visibleImageLayers(selected);
+  const embedded=embeddedDependencies(next.paint.imageDocuments,image.layers);
+  const embeddedAssets=Object.fromEntries(Object.values(embedded).flatMap(source=>source.layers.flatMap(imageLayerAssets)).map(id=>[id,assetPath(next,id)]));
   const assetIds=new Set(layers.flatMap(imageLayerAssets));
   return {
+    ...(Object.keys(embedded).length?{embeddedDocuments:embedded,embeddedAssets}:{}),
     paint:{imageDocuments:{[documentId]:{width:image.width,height:image.height,...(image.frame?{frame:image.frame}:{}),colorSpace:image.colorSpace,layers}}},
     assets:Object.fromEntries([...assetIds].map(id=>[id,assetPath(next,id)])),
     revision:next.revision,
@@ -1117,7 +1120,7 @@ export async function bakeImageLayers(doc,request,{signal}={}){
     const raster=png.entry.id;
     if(rasterize){
       const layer=target.layers.find(item=>item.id===plan.bottom);
-      for(const field of ['asset','text','textOrigin','shape','x','y','scale','rotation','stretch','warp','styles','strokes','edgeDecontaminate'])delete layer[field];
+      for(const field of ['asset','embedded','text','textOrigin','shape','x','y','scale','rotation','stretch','warp','styles','strokes','edgeDecontaminate'])delete layer[field];
       if(plan.styled)clearImageLayerMask(layer);
       if(layer.blend==='passThrough')layer.blend='normal';
       if(plan.children.length){

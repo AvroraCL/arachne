@@ -89,7 +89,7 @@ export function validImageWarp(warp){
 }
 
 export function imagePlacement(layer,assets){
-  const dimensions=layer.kind==='shape'?layer.shape:assets[layer.asset];
+  const dimensions=layer.kind==='shape'?layer.shape:layer.embedded??assets[layer.asset];
   if(!dimensions)return null;
   const ratio=layer.scale/Math.max(dimensions.width,dimensions.height);
   const width=dimensions.width*ratio*layer.stretch[0],height=dimensions.height*ratio*layer.stretch[1];

@@ -67,9 +67,17 @@ function selectImage(project,patch,{reveal=false}={}){
   const selection={...project.imageContext,...patch};
   if(!Object.hasOwn(patch,'layerIds')&&(patch.documentId!==undefined&&patch.documentId!==project.imageContext?.documentId||
      patch.layerId!==undefined&&patch.layerId!==project.imageContext?.layerId||patch.target==='mask'))delete selection.layerIds;
+  if(patch.documentId!==undefined&&patch.documentId!==project.imageContext?.documentId&&!Object.hasOwn(patch,'sourceTrail'))delete selection.sourceTrail;
   if(selection.target!=='mask'||patch.target&&!patch.inspectMask)delete selection.inspectMask;
   project.selectImage(selection,undefined,{force:true,reveal});
   if(!project.isImageEditorActive||project.isImageEditorActive())project.setEditorDomain('image');
+}
+function openEmbeddedSource(project,item){
+  if(!item?.embedded)return;
+  const source=project.document.paint.imageDocuments[item.embedded.documentId],current=project.imageContext;
+  const trail=[...(current.sourceTrail??[]),{documentId:current.documentId,layerId:item.id}];
+  selectImage(project,{documentId:item.embedded.documentId,layerId:(source.layers.find(l=>l.text)??source.layers.at(-1))?.id??null,
+    target:'pixels',sourceTrail:trail},{reveal:true});
 }
 async function command(project,op){return project.commands([{op:'image',documentId:project.imageContext?.documentId,...op}]);}
 async function commandAt(project,origin,op){return project.commands([{op:'image',documentId:origin.documentId,...op}],origin);}
@@ -173,7 +181,13 @@ export function createDocumentEditor(ctx,bridge){
       if(patch)await commandAt(project,origin,{action,patch});
     });
   });
-  header.append(picker,create,dimensions,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
+  const backToParent=button('返回原稿',()=>{
+    const trail=project.imageContext?.sourceTrail;
+    if(!trail?.length)return;
+    selectImage(project,{...trail.at(-1),target:'pixels',sourceTrail:trail.slice(0,-1)},{reveal:true});
+  });
+  backToParent.hidden=true;
+  header.append(backToParent,picker,create,dimensions,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const editTarget=el('span','document-edit-target'),targetLayerName=el('span'),targetKind=el('span');
   editTarget.append(targetLayerName,' · ',targetKind);
@@ -802,7 +816,7 @@ export function createDocumentEditor(ctx,bridge){
     context:()=>{
       const layer=editableImageLayer(project),origin=imageOrigin(),editable=!!layer&&layer.visible&&!layer.locked&&!writing();
       const pixels=project.imageContext?.target!=='mask';
-      const asset=layer?.kind==='image'?project.document.paint.assets[layer.asset]:layer?.shape;
+      const asset=layer?.kind==='image'?(layer.embedded??project.document.paint.assets[layer.asset]):layer?.shape;
       const image=asset?{x:layer.x,y:layer.y,scale:layer.scale,rotation:layer.rotation,
         stretch:layer.stretch,size:[asset.width,asset.height]}:null;
       return {...origin,id:layer?.id,projectId:origin.id,active:!!currentDocument(project),interactive:!writing()&&!drawingGesture()&&!nav,image,
@@ -1495,6 +1509,22 @@ export function createDocumentEditor(ctx,bridge){
     if(selection.repositionMarquee(false)){event.preventDefault();event.stopPropagation();return;}
     strokePan=null;holdHand(false);
   },{signal});window.addEventListener('blur',()=>{strokePan=null;holdHand(false);finishNavigation(true);edgeTool.cancel();penTool.cancelDrag();gradientTool.cancel();shapeTool.cancel();moveTool.cancel();warpTool.cancel();painter.cancel({preserveMode:true});selection.cancel();},{signal});
+  stage.addEventListener('dblclick',event=>{
+    if(mode!=='move'||(event.target!==canvas&&event.target!==stage)||writing()||!currentDocument(project)?.layers.some(l=>l.embedded))return;
+    const bounds=canvas.getBoundingClientRect();
+    if(event.clientX<bounds.left||event.clientX>=bounds.right||event.clientY<bounds.top||event.clientY>=bounds.bottom)return;
+    const origin=imageSelectionOrigin(project),point=canvasPoint(canvas,event);
+    if(point.some(value=>value<0||value>1))return;
+    void run(async()=>{
+      const response=await fetch('/api/projects/'+origin.id+'/paint/image-layout-probe',{method:'POST',signal,
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:origin.revision,documentId:origin.documentId,point,layerIds:[],resolution:512})});
+      if(response.status===204||disposed)return;
+      const result=await response.json();
+      if(!response.ok)throw Error(result.error);
+      if(project.document?.id===origin.id&&project.document.revision===origin.revision&&project.imageContext?.documentId===origin.documentId)
+        openEmbeddedSource(project,currentDocument(project).layers.find(l=>l.id===result.hit));
+    });
+  },{signal});
   const resize=new ResizeObserver(layout);resize.observe(stage);resize.observe(parameters);
   function sync(reselect=false){
     if(disposed||!shown||!project.document)return;const doc=project.document;
@@ -1528,6 +1558,8 @@ export function createDocumentEditor(ctx,bridge){
     const documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}
     const next=JSON.stringify([doc.id,doc.revision]);if(sourceKey!==next){sourceKey=next;syncDestination();}else if(destinationDocument!==c?.documentId)syncDestination();
     picker.value=c?.documentId||'';syncSelectMenu(picker);
+    backToParent.hidden=!c?.sourceTrail?.length;
+    backToParent.disabled=writing();backToParent.title='返回 '+(doc.paint.imageDocuments?.[c?.sourceTrail?.at(-1)?.documentId]?.name??'原稿');
     dimensions.disabled=!image||writing();syncSelectMenu(dimensions);
     syncBind();textTool.disabled=!image||writing()||c?.target==='mask'||(!canInsertImage(project)&&!(layer?.text&&!layerLockOwner(image.layers,layer)));
     const locked=layer&&layerLockOwner(image.layers,layer);
@@ -2028,7 +2060,7 @@ export function createImagePanel(type,ctx){
     const move=(label,icon,shortcut,direction)=>guarded(label,icon,shortcut,()=>imageLayerMoveStep(layers,ids,direction),async placement=>{
       await moveLayerSelection(origin,ids,placement,count);
     });
-    const duplicate=guarded('复制','copy','⌘ / Ctrl + J',()=>checkImageLayerDuplicate(layers,ids),async plan=>{
+    const duplicate=guarded(item.embedded&&!multi?'放置关联实例':'复制','copy','⌘ / Ctrl + J',()=>checkImageLayerDuplicate(layers,ids),async plan=>{
       const copyIds=plan.roots.map(()=>crypto.randomUUID());
       await apply('duplicateLayers',{copyIds});
       if(sameImage()&&project.imageContext?.layerId===origin.layerId){
@@ -2121,6 +2153,9 @@ export function createImagePanel(type,ctx){
     menu.open(position,item.name,[
       {label:'重命名',icon:'pen',shortcut:'F2',enabled:editable,run:()=>startRename(view)},
       {label:'将所选图层成组',icon:'folder',shortcut:'⌘ / Ctrl + G',enabled:editable,run:()=>createGroup(true)},
+      ...(item.embedded?[{label:'编辑内嵌源稿',icon:'image',run:()=>openEmbeddedSource(project,item)}]:
+        [{label:'转换为内嵌对象',icon:'image',enabled:editable&&item.kind!=='adjustment',
+          run:()=>commandAt(project,origin,{action:'embedLayer',layerId:item.id,newDocumentId:crypto.randomUUID()})}]),
       ...(item.kind==='group'?[{label:'解散图层组',icon:'folder',shortcut:'⌘ / Ctrl + Shift + G',enabled:editable,run:()=>ungroup(item,origin)}]:[]),
       ...(item.text?[{label:'编辑文字…',icon:'text',enabled:editable,run:()=>editText(item,origin)}]:[]),
       ...(['image','shape'].includes(item.kind)||hasImageStyle(item)||item.edgeDecontaminate?[combine('rasterize',[item.id])]:[]),
@@ -2184,14 +2219,14 @@ export function createImagePanel(type,ctx){
     });
     select.className='document-layer-select';
     select.append(preview,textThumb,effectThumb,folderThumb);
-    select.ondblclick=event=>event.target.closest('.document-text-thumbnail')?editText(view.item):startRename(view);
+    select.ondblclick=event=>view.item.embedded?openEmbeddedSource(project,view.item):event.target.closest('.document-text-thumbnail')?editText(view.item):startRename(view);
     name.setAttribute('aria-hidden','true');
     name.onclick=event=>{
       if(select.disabled)return;
       select.focus({preventScroll:true});
       selectRow(view.item,event);
     };
-    name.ondblclick=()=>startRename(view);
+    name.ondblclick=()=>view.item.embedded?openEmbeddedSource(project,view.item):startRename(view);
     const mask=button('',event=>{
       const layer=view.item;
       if(hasImageLayerMask(layer)&&loadThumbnail(event,'mask'))return;
@@ -2247,6 +2282,7 @@ export function createImagePanel(type,ctx){
     row.toggleAttribute('data-selected',selected);
     row.toggleAttribute('data-active',active);
     row.toggleAttribute('data-group',group);
+    row.toggleAttribute('data-embedded',!!item.embedded);
     row.toggleAttribute('data-inherited-hidden',item.visible&&!visible);
     row.style.setProperty('--image-layer-depth',depth);
     row.toggleAttribute('data-has-mask',hasMask);
@@ -2278,6 +2314,7 @@ export function createImagePanel(type,ctx){
       name.title=item.name;
     }
     labelButton(select,item.name);
+    if(item.embedded)select.title=item.name+' · 内嵌对象，双击编辑源稿';
     labelButton(eye,(item.visible?'隐藏 ':'显示 ')+item.name,item.visible?'eye':'hidden');
     labelButton(lock,inheritedLock?'由「'+lockOwner.name+'」锁定':(item.locked?'解锁 ':'锁定 ')+item.name,lockOwner?'lock':'unlock');
     labelButton(mask,'选择蒙版 '+item.name);
@@ -2705,7 +2742,8 @@ export function createImagePanel(type,ctx){
       duplicate.disabled=busy||documents.length>=imageDocumentLimit;
       duplicate.title=documents.length>=imageDocumentLimit?'工程最多包含 16 个图像文档':'复制贴图的全部图层和蒙版';
       const remove=button('删除贴图',()=>void run(()=>command(project,{action:'remove'})),'删除图像文档');
-      remove.disabled=!!refs.length;remove.title=refs.length?'请先解除材质通道引用':'删除图像文档';
+      const embeddedUsers=Object.values(doc.paint.imageDocuments).some(source=>source.layers.some(l=>l.embedded?.documentId===c.documentId));
+      remove.disabled=!!refs.length||embeddedUsers;remove.title=embeddedUsers?'源稿仍被内嵌实例引用':refs.length?'请先解除材质通道引用':'删除图像文档';
       documentActions.append(duplicate,remove);
       body.append(el('div','document-muted',`${image.width} × ${image.height} · RGBA`),documentActions);
       if(layer){addControl(body,'图层名称','text',layer.name,name=>command(project,{action:'updateLayer',layerId:layer.id,patch:{name}}),{disabled:!!lockOwner});addControl(body,'锁定图层','checkbox',layer.locked,locked=>command(project,{action:'updateLayer',layerId:layer.id,patch:{locked}}),{disabled:!!lockOwner&&lockOwner!==layer});

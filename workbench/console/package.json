@@ -12,6 +12,7 @@
     "package:win": "node scripts/package-windows.mjs",
     "package:win:installer": "node scripts/package-windows-installer.mjs",
     "verify:demo": "node tests/demo-integration.mjs",
+    "verify:image-embedded": "node tests/image-embedded-integration.mjs",
     "verify:image-size": "node tests/image-size-integration.mjs",
     "verify:drawing": "node tests/drawing-integration.mjs",
     "verify:drawing-batch": "node tests/image-layer-batch-integration.mjs",

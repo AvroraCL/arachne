@@ -15,7 +15,7 @@ from paint_surface import Surface, registered_surface
 from fill_projection import projection_geometry, projected_channels, extend_uv_gutter
 from paint_mask_generators import preview_generator, smooth
 from material_graph import MaterialGraph, MaterialImages, PreviewImages
-from image_documents import document_pixels,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
+from image_documents import embedded_image_assets,document_pixels,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
 
 
 def decode(srgb):
@@ -426,7 +426,9 @@ def composite_layers(cfg, step, material_images):
         maps = {} if material_id else {name: art(asset_id,name) for name,asset_id in layer.get('maps',{}).items() if name in opacity}
         for name,document_id in layer.get('documentMaps',{}).items():
             if name not in opacity:continue
-            maps[name]={'document':document_pixels(paint['imageDocuments'][document_id],cfg['assets'],shape[0]),'colorSpace':paint['imageDocuments'][document_id]['colorSpace']}
+            image_doc=paint['imageDocuments'][document_id]
+            assets=embedded_image_assets(image_doc['layers'],paint['imageDocuments'],cfg['assets'])
+            maps[name]={'document':document_pixels(image_doc,assets,shape[0]),'colorSpace':image_doc['colorSpace']}
         mask = prepare_mask(layer, inspection)
         has_generator |= mask[-1]
         projector = layer.get('projector')
@@ -707,6 +709,11 @@ def live_pixels(cfg):
         return uv_layout(cfg)
     if cfg.get('imageDocumentId'):
         doc=cfg['paint']['imageDocuments'][cfg['imageDocumentId']]
+        layers = doc['layers']
+        clip_base = cfg.get('imageSelectionSample',{}).get('alphaInput',{}).get('base')
+        if clip_base:
+            layers = layers + clip_base
+        cfg={**cfg,'assets':embedded_image_assets(layers,cfg.get('embeddedDocuments',{}),cfg['assets'])}
         if 'imageLayoutProbe' in cfg:
             return json.dumps(layout_probe(doc,cfg['assets'],cfg['liveResolution'],cfg['imageLayoutProbe'])).encode()
         if 'imageEdgeView' in cfg:

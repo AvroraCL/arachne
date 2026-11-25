@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {imageDocumentOperation,validateImageDocuments,surfaceToImageCommand,hasImageLayerMask,imageDocumentLimit,imageClippingBase} from '../public/image-documents.mjs';
-import {imageDocumentInput} from '../paint.mjs';
+import {imageDocumentInput,materialFingerprint} from '../paint.mjs';
 import {newImageAdjustment,checkImageAdjustment,imageBlendModes} from '../public/image-adjustments.mjs';
 import {mapImageMaskPoint} from '../public/image-warp.mjs';
 test('sparse replay keeps opacity, erasing, and transform order across batch flushes',()=>{
@@ -433,4 +433,27 @@ expected[30:32,24:32]=0
 assert np.array_equal(mask,expected)`;
  const result=spawnSync(process.env.ARACHNE_PYTHON||'python',['-B','-c',script],{cwd:new URL('../',import.meta.url),encoding:'utf8'});
  assert.equal(result.status,0,result.stderr);
+});
+
+test('nested embedded edits invalidate a bound material and referenced sources survive removal attempts',()=>{
+ const paint=defaults();
+ edit(paint,'create',{patch:{width:512,height:128}});
+ edit(paint,'addLayer',{layerId:'ink',kind:'pixel'});
+ edit(paint,'embedLayer',{layerId:'ink',newDocumentId:'inner'});
+ edit(paint,'embedLayer',{layerId:'ink',newDocumentId:'outer'});
+ edit(paint,'bind',{channel:'color',newLayerId:'banner'});
+ const project={revision:1,paint};
+ const original=materialFingerprint(project);
+ edit(paint,'updateLayer',{documentId:'inner',layerId:'ink',patch:{opacity:.375}});
+ assert.notEqual(materialFingerprint(project),original);
+ const config=imageDocumentInput(project,{revision:1,documentId:'doc'});
+ assert.deepEqual(Object.keys(config.embeddedDocuments),['inner','outer']);
+ assert.equal(config.embeddedDocuments.inner.layers[0].opacity,.375);
+ assert.throws(()=>edit(paint,'remove',{documentId:'inner'}),/仍被内嵌实例引用/);
+ validateImageDocuments(paint,checks);
+ const invalid=structuredClone(paint);
+ invalid.imageDocuments.outer.layers[0].embedded.documentId='doc';
+ assert.throws(()=>validateImageDocuments(invalid,checks),/循环引用/);
+ delete paint.imageDocuments.inner;
+ assert.throws(()=>validateImageDocuments(paint,checks),/找不到内嵌对象源稿/);
 });

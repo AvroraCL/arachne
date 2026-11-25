@@ -39,7 +39,7 @@ export function pauseImageThumbnail(canvas){
 
 export function updateImageThumbnail(canvas,{projectId,revision,documentId,colorSpace,geometry},layer,mask=false){
   const slot=JSON.stringify([projectId,documentId,layer.id,mask]);
-  const key=thumbnailKey(slot,[colorSpace,geometry],layer,mask);
+  const key=thumbnailKey(slot,[colorSpace,geometry,layer.embedded&&!mask?revision:null],layer,mask);
   const [width,height]=previewDimensions(geometry,size);
   let state=canvases.get(canvas);
   if(!state){state={shown:null,request:null};canvases.set(canvas,state);}

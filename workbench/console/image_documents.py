@@ -457,9 +457,42 @@ def read_placed_image(file, linear):
     return raw
 
 
+def placed_layer_pixels(layer, assets, linear):
+    source = layer.get('embedded')
+    if source:
+        return assets[(source['documentId'],source['width'],source['height'])]
+    return read_placed_image(assets[layer['asset']],linear)
+
+
+def embedded_image_assets(layers, documents, files):
+    if not any(layer.get('embedded') for layer in layers):
+        return files
+    assets = dict(files)
+    def resolve(layers):
+        for layer in layers:
+            source = layer.get('embedded')
+            if not source:
+                continue
+            key = (source['documentId'],source['width'],source['height'])
+            if key in assets:
+                continue
+            child = documents[key[0]]
+            resolve(child['layers'])
+            pixels = document_pixels(child,assets,4096)
+            if pixels.shape[:2]!=(key[2],key[1]):
+                pixels = np.asarray(Image.fromarray(pixels).resize(key[1:],Image.Resampling.BICUBIC))
+            raw = pixels.astype(np.float32)/255
+            if child['colorSpace']=='srgb':
+                raw[:,:,:3] = decode(raw[:,:,:3])
+            raw[:,:,:3] *= raw[:,:,3:]
+            assets[key] = raw
+    resolve(layers)
+    return assets
+
+
 def image_pixels(layer,assets,size,linear,sample=None,window=None,raw=None):
     if raw is None:
-        raw = read_placed_image(assets[layer['asset']],linear)
+        raw = placed_layer_pixels(layer,assets,linear)
     h,w=raw.shape[:2]
     raster=4096 if window else size
     if window:
@@ -936,7 +969,7 @@ def composite_layer(result, layer, surface, assets, linear, color, clipped=False
     elif layer['kind']=='shape':
         ranges = shape_tiles(surface, layer, color)
     elif layer.get('warp'):
-        ranges = warped_image_tiles(surface,layer,read_placed_image(assets[layer['asset']],linear))
+        ranges = warped_image_tiles(surface,layer,placed_layer_pixels(layer,assets,linear))
     elif pick and pick[2] and not styled:
         ranges = [(np.array([pick[0]]),image_pixels(layer,assets,surface.uv_shape[0],linear,pick[0]))]
     else:
@@ -1282,7 +1315,7 @@ def edge_pixels(document,assets,size):
     layer = document['layers'][0]
     if layer['kind']=='image' and not layer.get('warp') and size==4096:
         linear = document['colorSpace']=='linear'
-        raw = read_placed_image(assets[layer['asset']],linear)
+        raw = placed_layer_pixels(layer,assets,linear)
         def render(x,y,w,h):
             pixels = image_pixels(layer,assets,size,linear,window=(x,y,w,h),raw=raw)
             return encode_document_pixels(pixels,linear).reshape(h,w,4)[::-1]
@@ -1532,13 +1565,17 @@ def framed_pixels(pixels, document, limit=None, target=None):
 
 _cache=OrderedDict()
 def document_pixels(document,assets,size):
-    key=hashlib.sha256(json.dumps([document,size],sort_keys=True).encode()).hexdigest()
+    # A parent can have the same layer records while its source pixels change.
+    shared=any(layer.get('embedded') for layer in document['layers'])
+    key=None if shared else hashlib.sha256(json.dumps([document,size],sort_keys=True).encode()).hexdigest()
     if key not in _cache:
         width,height = document.get('width',4096),document.get('height',4096)
         frame = document_frame(document)
-        # Match the document pixel density in the visible part of the working grid.
         scale = min(1,size/max(width,height))
         resolution = 4096 if scale==1 else min(4096,max(1,math.ceil(4096*scale*max(width/frame[2],height/frame[3]))))
-        _cache[key]=framed_pixels(composite_document(document,assets,resolution),document,size)
+        pixels=framed_pixels(composite_document(document,assets,resolution),document,size)
+        if shared:
+            return pixels
+        _cache[key]=pixels
         while len(_cache)>1:_cache.popitem(last=False)
     return _cache[key]

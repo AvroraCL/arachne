@@ -42,6 +42,7 @@ export function livePaint(config,options={}){
   if(!config.imageDocumentId){
     for(const [file,digest] of Object.entries(config.source.files))checkFile(file,digest);
   }
+  if(config.embeddedAssets)config={...config,assets:{...config.embeddedAssets,...config.assets}};
   for(const [id,file] of Object.entries(config.assets))checkFile(file,id);
   if(config.liveResolution===4096)return livePaintDetail(config,options);
   const queue=config.imageLayoutProbe?layoutQueue:fastQueue;

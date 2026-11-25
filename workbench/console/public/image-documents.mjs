@@ -1,4 +1,4 @@
-import {documentClip,validDimensions,validFrame,resizedDocument} from './image-document-size.mjs';
+import {documentFrame,editingSide,documentClip,validDimensions,validFrame,resizedDocument} from './image-document-size.mjs';
 import {checkImageStyles} from './image-text-style.mjs';
 import {validPenPath} from './image-pen-path.mjs';
 import {isBrushImage} from './paint-library.mjs';
@@ -7,7 +7,7 @@ import {paintChannels} from './paint-channels.mjs';
 import {maxUVFeather,imageSelectionFields as uvShapeFields,uvShapePayload,validSelectionOutline} from './uv-selection-region.mjs';
 import {checkImageAdjustment,imageBlendModes} from './image-adjustments.mjs';
 import {validImageShape} from './image-shapes.mjs';
-import {layerChildren,layerLockOwner,layerParent} from './paint-layer-tree.mjs';
+import {layerChildren,layerLockOwner,layerParent,layerTreeOrder} from './paint-layer-tree.mjs';
 import {arrangeImageLayer,duplicateImageLayer,followingClips,groupImageLayers,imageGroupBlend,imageGroupTarget,imageLayersBefore,
   imageStackBase,removeImageLayer,repairImageClips,ungroupImageLayer,validateImageLayerTree} from './image-layer-tree.mjs';
 import {duplicateImageLayerBatch,imageLayerLimit,planImageLayerDelete,planImageLayerMove} from './image-layer-batch.mjs';
@@ -133,9 +133,47 @@ export function surfaceToImageCommand(op,documentId){
   if(op.op==='clearUV')return {op:'image',action:'clear',documentId,layerId:op.id,rect:op.rect,...uvShapePayload(op)};
   throw Error('图像编辑命令无效');
 }
+// The same closure feeds image previews, material fingerprints and archive validation.
+export function embeddedDependencies(documents,layers){
+  const found=new Map(),visiting=new Set();
+  function visit(items){
+    for(const layer of items){
+      if(!layer?.embedded)continue;
+      const key=layer.embedded.documentId;
+      if(visiting.has(key))throw Error('内嵌对象不能循环引用');
+      if(found.has(key))continue;
+      const source=Object.hasOwn(documents,key)&&documents[key];
+      if(!Array.isArray(source?.layers))throw Error('找不到内嵌对象源稿');
+      visiting.add(key);visit(source.layers);visiting.delete(key);found.set(key,source);
+    }
+  }
+  visit(layers);return Object.fromEntries(found);
+}
+
+function embedLayer(paint,doc,layer,newId){
+  const documents=paint.imageDocuments;
+  if(!id(newId)||Object.hasOwn(documents,newId))throw Error('内嵌源稿编号无效或重复');
+  if(Object.keys(documents).length>=imageDocumentLimit)throw Error('工程图像文档已满');
+  if(layer.kind==='adjustment')throw Error('请先将调整图层与受影响的图层编组');
+  const children=layer.kind==='group'?layerTreeOrder(doc.layers,layer.id):[];
+  if(children.some(child=>child.locked))throw Error('请先解锁组内图层');
+  const {parentId,clipped,blendIf,...root}=layer;
+  const frame=documentFrame(doc),[x,y,w,h]=frame;
+  const width=Math.max(1,Math.round(w)),height=Math.max(1,Math.round(h));
+  const source={name:(layer.name.slice(0,94)+' · 源稿'),width,height,frame:[...frame],colorSpace:doc.colorSpace,
+    layers:[{...root,visible:true,opacity:1,blend:layer.kind==='group'?imageGroupBlend:'normal'},...children]};
+  const scale=Math.max(width,height)/editingSide;
+  const instance={...imageLayerDefaults,id:layer.id,kind:'image',name:layer.name,visible:layer.visible,opacity:layer.opacity,
+    blend:layer.blend===imageGroupBlend?'normal':layer.blend,...(parentId?{parentId}:{}),...(clipped?{clipped}:{}),...(blendIf?{blendIf}:{}),
+    x:(x+w/2)/editingSide,y:(y+h/2)/editingSide,scale,stretch:[w/width,h/height],rotation:0,embedded:{documentId:newId,width,height}};
+  paint.imageDocuments={...documents,[newId]:source};
+  const members=new Set(children);
+  doc.layers=doc.layers.filter(item=>!members.has(item)).map(item=>item===layer?instance:item);
+}
 export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,validateText,unpackStrokeBlock,checkPending=true}){
   const documents=paint.imageDocuments??{};
   if(!record(documents)||Object.keys(documents).length>imageDocumentLimit)throw Error('工程最多包含 16 个图像文档');
+  embeddedDependencies(documents,Object.values(documents).flatMap(doc=>Array.isArray(doc?.layers)?doc.layers:[]));
   let stamps=0;
   for(const [key,doc] of Object.entries(documents)){
     const checkCoverage=key=>cloneAsset(key)&&paint.assets[key]?.width===4096&&paint.assets[key]?.height===4096;
@@ -164,7 +202,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
     }
     const ids=new Set();
     for(const [index,layer] of doc.layers.entries()){
-      if(!exact(layer,['id','kind','parentId',...layerFields,'strokes','maskStrokes','maskWarpSteps','text','textOrigin','raster','cloneSources','selectionSources','brushSources'])||!id(layer.id)||ids.has(layer.id)||typeof layer.kind!=='string'||!Object.hasOwn(layerNames,layer.kind)||!label(layer.name)||typeof layer.visible!=='boolean'||typeof layer.locked!=='boolean'||!unit(layer.opacity)||!(imageBlendModes.includes(layer.blend)||layer.kind==='group'&&layer.blend===imageGroupBlend)||typeof layer.maskEnabled!=='boolean'||!unit(layer.maskBase))throw Error('图像图层无效');
+      if(!exact(layer,['id','kind','parentId',...layerFields,'strokes','maskStrokes','maskWarpSteps','text','textOrigin','embedded','raster','cloneSources','selectionSources','brushSources'])||!id(layer.id)||ids.has(layer.id)||typeof layer.kind!=='string'||!Object.hasOwn(layerNames,layer.kind)||!label(layer.name)||typeof layer.visible!=='boolean'||typeof layer.locked!=='boolean'||!unit(layer.opacity)||!(imageBlendModes.includes(layer.blend)||layer.kind==='group'&&layer.blend===imageGroupBlend)||typeof layer.maskEnabled!=='boolean'||!unit(layer.maskBase))throw Error('图像图层无效');
       if(layer.brushSources!==undefined&&(!Array.isArray(layer.brushSources)||layer.brushSources.some(key=>!cloneAsset(key)||!isBrushImage(paint.assets[key]))))
         throw Error('图层笔刷图片无效');
       if(layer.selectionSources!==undefined&&(!Array.isArray(layer.selectionSources)||!layer.selectionSources.every(checkCoverage)))
@@ -214,7 +252,12 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
       if(layer.textOrigin!==undefined&&(!layer.text||!pair(layer.textOrigin,n=>Number.isFinite(n)&&n>=0&&n<=8192)))
         throw Error('文字锚点无效');
       if(layer.text!==undefined&&(layer.kind!=='image'||!validateText?.(layer.text)))throw Error('图像文字参数无效');
-      if(layer.kind==='image'&&!Object.hasOwn(paint.assets,layer.asset))throw Error('图像素材无效');
+      if(layer.embedded!==undefined){
+        const source=layer.embedded;
+        if(layer.kind!=='image'||layer.asset!==undefined||layer.text!==undefined||
+          !exact(source,['documentId','width','height'])||!id(source.documentId)||!Object.hasOwn(documents,source.documentId)||
+          !validDimensions(source.width,source.height))throw Error('内嵌对象源稿无效');
+      }else if(layer.kind==='image'&&!Object.hasOwn(paint.assets,layer.asset))throw Error('图像素材无效');
       if(['image','shape'].includes(layer.kind)&&(![layer.x,layer.y,layer.scale,layer.rotation].every(Number.isFinite)||Math.abs(layer.x)>8||Math.abs(layer.y)>8||layer.scale<1/4096||layer.scale>4||Math.abs(layer.rotation)>360||!Array.isArray(layer.stretch)||layer.stretch.length!==2||!layer.stretch.every(n=>Number.isFinite(n)&&Math.abs(n)>=.05&&Math.abs(n)<=8)))throw Error('图像层变换无效');
       for(const [field,mask] of [['strokes',false],['maskStrokes',true]]){
         const strokes=layer[field]??[];if(!Array.isArray(strokes)||field==='strokes'&&layer.kind!=='pixel'&&strokes.length)throw Error('图像笔触无效');
@@ -357,6 +400,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     return;
   }
   if(o.action==='remove'){
+    if(Object.values(documents).some(d=>d.layers.some(l=>l.embedded?.documentId===o.documentId)))throw Error('源稿仍被内嵌实例引用');
     if(paint.layers.some(l=>Object.values(l.documentMaps??{}).includes(o.documentId)))throw Error('图像文档仍被材质引用，请先解除绑定');delete documents[o.documentId];return;
   }
   if(o.action==='bind'){
@@ -442,6 +486,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
   const owner=layerLockOwner(doc.layers,layer);
   if(owner&&!(owner===layer&&o.action==='updateLayer'&&Object.keys(o.patch??{}).every(k=>['locked','visible'].includes(k))))
     throw Object.assign(Error('图像图层或上级组已锁定'),{status:423});
+  if(o.action==='embedLayer'){embedLayer(paint,doc,layer,o.newDocumentId);return;}
   retainCoverage(layer,imageCoverageSources(o));
   if(o.action==='updateLayer'){
     if(!exact(o.patch,layerFields)||Object.hasOwn(o.patch,'clipped'))throw Error('图像图层参数无效');
