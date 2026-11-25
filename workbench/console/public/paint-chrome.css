@@ -6,10 +6,10 @@
   --chrome-selected:#4a4a4a;--chrome-text:#d8d8d8;--chrome-radius:3px;
   --chrome-item-hover:#2f2f2f;--chrome-item-selected:#383838;
   --chrome-active-marker:#87b1d8;--chrome-focus:#b8cbde;
-  --chrome-control:28px;--chrome-header-height:34px;--chrome-section-height:30px;
+  --chrome-status-height:26px;--chrome-control:28px;--chrome-header-height:34px;--chrome-section-height:30px;
 }
 :root[data-ui-density=comfortable]{
-  --chrome-control:32px;--chrome-header-height:38px;--chrome-section-height:34px;
+  --chrome-status-height:30px;--chrome-control:32px;--chrome-header-height:38px;--chrome-section-height:34px;
 }
 #workspace.modular-workspace{
   --area-bar:var(--chrome-header);--area-active:var(--chrome-header);
@@ -264,6 +264,15 @@
   flex:1;min-width:0;min-height:0;padding:0;border:0;background:none;color:#b9b9b9;
   font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
+/* Status text lines up across adjacent editors, including the image canvas. */
+#workspace :is(.editor-preview-status,.document-status-bar,.editor-scene-footer,.shader-status){
+  box-sizing:border-box;height:var(--chrome-status-height);min-height:var(--chrome-status-height);flex:none;
+  padding:0 8px;border-top:1px solid var(--chrome-line);background:#292929;
+  font-size:var(--paint-font-caption);font-variant-numeric:tabular-nums;color:#b9b9b9
+}
+#workspace .document-status-bar>.editor-message{margin:0;padding:0;color:inherit}
+#workspace .document-status-bar>.document-clipboard-notice{padding:0;margin-inline-end:8px}
+#workspace .area-content .shader-status .shader-hint{font-size:var(--paint-font-caption);opacity:1;color:var(--ui-muted)}
 #workspace .editor-scene-footer .area-icon-button{
   display:grid;place-items:center;flex:none;width:26px;height:24px;min-height:24px;
   padding:0;border:0;border-radius:2px;color:#b8b8b8;background:none;

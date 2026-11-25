@@ -189,6 +189,7 @@ try{
   for(const [size,dimensions] of [['wide',{width:1440,height:940}],['narrow',{width:900,height:630}]]){
     await page.setViewportSize(dimensions);
     await menuAndSelection(size);
+    const statusHeights=[];
     for(const workspace of ['modeling','material','drawing']){
       await show(workspace);
       if(workspace==='drawing')assert.equal(await shelf('图片').getAttribute('aria-selected'),'true');
@@ -196,8 +197,57 @@ try{
       await checkVisiblePickers(page.locator('#workspace'));
       const widths=await page.evaluate(()=>({document:document.documentElement.scrollWidth,window:innerWidth}));
       assert.ok(widths.document<=widths.window);
+      const statuses=page.locator(':is(.document-status-bar,.editor-preview-status,.shader-status,.editor-scene-footer):visible');
+      statusHeights.push(...await statuses.evaluateAll(bars=>bars.map(bar=>bar.getBoundingClientRect().height)));
+      if(workspace==='drawing'){
+        const fit=await page.locator('.document-layer-actions:visible').first().evaluate(bar=>{
+          const bounds=bar.getBoundingClientRect();
+          return [...bar.querySelectorAll('button')].every(button=>{
+            const r=button.getBoundingClientRect();
+            return r.width>0&&r.left>=bounds.left&&r.right<=bounds.right+.5&&r.bottom<=bounds.bottom+.5;
+          });
+        });
+        assert.ok(fit,'all eight layer actions fit inside the footer');
+        await page.getByRole('button',{name:'图像尺寸操作',exact:true}).click();
+        await page.getByRole('option',{name:'画布尺寸…',exact:true}).click();
+        const dialog=page.getByRole('dialog',{name:'画布尺寸',exact:true});
+        const left=dialog.getByRole('button',{name:'左中',exact:true});
+        await left.click();
+        assert.equal(await left.getAttribute('aria-pressed'),'true');
+        await dialog.getByLabel('宽度（像素）').focus();
+        await page.mouse.move(0,0);
+        const footer=await dialog.locator('footer').boundingBox(),apply=await dialog.getByRole('button',{name:'应用',exact:true}).boundingBox();
+        assert.ok(apply.y>footer.y&&apply.y+apply.height<footer.y+footer.height,'dialog actions fit inside the footer');
+        const fills=await dialog.locator('.image-anchor-grid button').evaluateAll(buttons=>new Set(buttons.map(b=>getComputedStyle(b).backgroundColor)).size);
+        assert.ok(fills>1,'selected anchor has a visible fill');
+        await dialog.screenshot({path:path.join(evidence,'canvas-size-'+size+'.png')});
+        await dialog.getByRole('button',{name:'取消',exact:true}).click();
+      }else if(workspace==='material'){
+        const settings=page.locator('#drawing-layer-settings:visible');
+        const mode=await settings.locator('.custom-select-button').boundingBox();
+        const opacity=await settings.locator('label').boundingBox();
+        assert.ok(Math.abs((mode.y+mode.height/2)-(opacity.y+opacity.height/2))<2,'blend and opacity share one row');
+        const sets=page.locator('.texture-set-editor:visible').first(),toggle=sets.getByRole('button',{name:'纹理集',exact:true});
+        await toggle.click();
+        await sets.getByRole('button',{name:'纹理集材质槽',exact:true}).waitFor();
+        const fields=sets.locator('fieldset');
+        await fields.waitFor();
+        const mask=fields.locator('details').filter({has:page.locator('canvas')});
+        await mask.locator('summary').click();
+        assert.equal(await mask.locator('canvas').isVisible(),false);
+        await mask.locator('summary').press('Enter');
+        await mask.locator('canvas').scrollIntoViewIfNeeded();
+        const title=await toggle.boundingBox(),body=await sets.locator('.texture-set-body').boundingBox();
+        assert.ok(title.y+title.height<=body.y+1,'active material slot stays visible while scrolling settings');
+        assert.ok((await sets.locator('[data-slot-caption]').innerText()).trim());
+        await sets.locator('.texture-set-body').evaluate(el=>{el.scrollTop=0;});
+        await sets.screenshot({path:path.join(evidence,'texture-sets-'+size+'.png')});
+        await toggle.click();
+      }
       await page.screenshot({path:path.join(evidence,workspace+'-'+size+'.png')});
     }
+    assert.ok(statusHeights.length>=4);
+    assert.equal(new Set(statusHeights).size,1,'status bars have the same rendered height');
   }
   const imageEditor=page.locator('.editor-area[data-editor=image]').first();
   const toolOptions=imageEditor.getByRole('group',{name:'图像工具选项',exact:true});

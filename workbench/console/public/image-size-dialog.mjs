@@ -25,7 +25,8 @@ export function editDocumentSize(action,doc,{canvas,signal}={}){
       b.title=name;b.setAttribute('aria-label',name);b.setAttribute('aria-pressed',String(i===anchor));
       b.onclick=()=>{grid.children[anchor].setAttribute('aria-pressed','false');anchor=i;b.setAttribute('aria-pressed','true');};grid.append(b);
     }
-    form.append(grid);
+    const row=document.createElement('div'),caption=document.createElement('span');
+    row.className='image-anchor-row';caption.textContent='保留位置';row.append(caption,grid);form.append(row);
   }
   if(resize){
     const ratio=document.createElement('input'),label=document.createElement('label');ratio.type='checkbox';ratio.checked=true;
@@ -79,7 +80,7 @@ export function editDocumentSize(action,doc,{canvas,signal}={}){
   const error=document.createElement('output'),actions=document.createElement('footer');
   const cancel=document.createElement('button'),ok=document.createElement('button');
   cancel.type='button';cancel.textContent='取消';cancel.onclick=()=>dialog.close();
-  ok.type='submit';ok.textContent=action==='create'?'创建':'应用';actions.append(cancel,ok);form.append(error,actions);
+  ok.type='submit';ok.className='primary';ok.textContent=action==='create'?'创建':'应用';actions.append(cancel,ok);form.append(error,actions);
   return new Promise(resolve=>{
     let result;
     const close=()=>dialog.close();signal?.addEventListener('abort',close,{once:true});

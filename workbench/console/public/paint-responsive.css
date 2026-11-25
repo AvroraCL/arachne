@@ -15,8 +15,9 @@
   }
   #workspace .property-editor-search input:not(:focus)::placeholder{color:transparent}
 
-  #workspace #drawing-layer-settings{flex-wrap:wrap;gap:5px;padding:4px 0}
-  #workspace #drawing-layer-settings>.custom-select{flex:1 1 4em;min-width:calc(4em + 25px)}
+  #workspace #drawing-layer-settings{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;padding:4px 0}
+  #workspace #drawing-layer-settings>.custom-select{min-width:0;width:100%}
+  #workspace #drawing-layer-settings label{gap:3px;font-size:var(--paint-font-caption)}
   #workspace #drawing-layer-settings .workspace-range-field{width:47px;min-width:47px}
   #workspace #layers .layer-row{
     grid-template-columns:21px minmax(0,1fr) 18px 27px;gap:2px
@@ -57,7 +58,7 @@
 }
 .material-stroke-recovery{inset:auto 12px 12px;max-width:760px;z-index:30}
 
-@container (max-width:175px){
+@container (max-width:200px){
   #workspace #drawing-opacity-label{display:none}
 }
 

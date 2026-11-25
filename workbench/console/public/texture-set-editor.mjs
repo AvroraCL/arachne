@@ -1,4 +1,5 @@
 import {layerLockOwner} from './paint-layer-tree.mjs';
+import {workspaceIcons} from './workspace-icons.mjs';
 import {syncSelectMenu} from './paint-select.mjs';
 
 // Every edit captures its material name. Browsing slots has no project history.
@@ -6,22 +7,27 @@ export function mountTextureSets(ctx,bridge){
   const {host,project}=ctx;
   const root=document.createElement('section');
   root.className='texture-set-editor';
-  root.innerHTML=`<button class="texture-set-toggle" type="button" aria-expanded="false">纹理集</button>
+  root.innerHTML=`<button class="texture-set-toggle" type="button" aria-expanded="false">${workspaceIcons.chevron}纹理集<span data-slot-caption aria-hidden="true"></span></button>
     <div class="texture-set-body" hidden>
       <label>材质槽<select aria-label="纹理集材质槽"></select></label>
-      <div class="texture-set-actions"><button type="button" data-add>新建填充层</button><button type="button" data-remove>删除图层</button></div>
-      <label>图层<select aria-label="纹理集图层"></select></label>
-      <fieldset><label>图层名称<input name="layerName"></label><label>颜色<input name="color" type="color"></label>
-      <label>粗糙度<input name="roughness" type="number" min="0" max="1" step=".01"></label>
-      <label>UV 蒙版<select name="ink"><option value="0">遮盖</option><option value="1">恢复</option></select></label>
-      <label>笔刷半径（像素）<input name="radius" required type="number" min="1" max="512" value="160"></label>
-      <button type="button" data-surface aria-pressed="false">视口画蒙版</button>
-      <canvas width="256" height="256" aria-label="纹理集 UV 蒙版" tabindex="0"></canvas></fieldset>
+      <label data-layer-row>图层<select aria-label="纹理集图层"></select></label>
+      <div class="texture-set-actions"><button type="button" data-add>${workspaceIcons.plus}新建填充层</button><button type="button" data-remove aria-label="删除图层" title="删除图层">${workspaceIcons.trash}</button></div>
+      <fieldset hidden><details open><summary>图层属性</summary><div class="texture-set-parameters">
+        <label>名称<input aria-label="图层名称" name="layerName"></label><label>颜色<span class="texture-set-color"><input aria-label="颜色" name="color" type="color"><span data-hex aria-hidden="true"></span></span></label>
+        <label>粗糙度<input name="roughness" type="number" min="0" max="1" step=".01"></label>
+      </div></details>
+      <details open><summary>蒙版</summary><div class="texture-set-parameters">
+        <label>笔刷模式<select name="ink" aria-label="UV 蒙版"><option value="0">遮盖</option><option value="1">恢复</option></select></label>
+        <label>半径 (px)<input aria-label="笔刷半径（像素）" name="radius" required type="number" min="1" max="512" value="160"></label>
+        <button type="button" data-surface aria-pressed="false">${workspaceIcons.mask}视口画蒙版</button>
+        <canvas width="256" height="256" aria-label="纹理集 UV 蒙版" tabindex="0"></canvas>
+      </div></details></fieldset>
       <output role="status"></output></div>`;
   host.prepend(root);
   const toggle=root.firstElementChild,body=toggle.nextElementSibling;
   const [slots,layers]=root.querySelectorAll('label>select'),canvas=root.querySelector('canvas'),context=canvas.getContext('2d');
   const field=name=>root.querySelector('[name="'+name+'"]'),status=root.querySelector('output');
+  const slotCaption=root.querySelector('[data-slot-caption]'),layerRow=root.querySelector('[data-layer-row]');
   const surface=root.querySelector('[data-surface]');
   const add=root.querySelector('[data-add]'),remove=root.querySelector('[data-remove]'),fields=root.querySelector('fieldset');
   let slot,projectId,modelKey,available,key,ink,maskRequest,slotRequest,writing=false,disposed=false;
@@ -82,7 +88,8 @@ export function mountTextureSets(ctx,bridge){
     const source=doc.id+':'+doc.source.files[doc.source.reviewSource];
     if(source!==modelKey){modelKey=source;available=null;void readSlots(doc);}
     slots.disabled=writing||!!ink||!available;toggle.disabled=writing||!!ink;
-    if(!available){add.disabled=remove.disabled=fields.disabled=layers.disabled=true;return;}
+    slotCaption.textContent=available?slot:'';slotCaption.title=slotCaption.textContent;
+    if(!available){layerRow.hidden=fields.hidden=true;add.disabled=remove.disabled=fields.disabled=layers.disabled=true;return;}
     const stackLayers=stack()?.layers??[];
     if(!stackLayers.some(l=>l.id===currentLayer.get(slot)))currentLayer.set(slot,stackLayers.at(-1)?.id);
     const layer=item(),next=JSON.stringify([doc.id,doc.revision,slot,layer?.id]);
@@ -91,11 +98,13 @@ export function mountTextureSets(ctx,bridge){
       '此槽已有投影标记。导入时选为主涂装材质即可编辑。':'';
     add.disabled=writing||!!ink||!!reason;remove.disabled=writing||!!ink||!layer||!!locked;
     layers.disabled=writing||!!ink||!stackLayers.length;fields.disabled=writing||!layer||!!locked;
+    layerRow.hidden=fields.hidden=!layer;
     if(next===key)return;key=next;
     layers.replaceChildren(...[...stackLayers].reverse().map(l=>new Option(l.name,l.id)));layers.value=layer?.id??'';syncSelectMenu(layers);
     field('color').disabled=!layer?.values||!!layer.maps?.color;
     field('roughness').disabled=!layer?.values||!!layer.maps?.roughness;
-    if(layer){field('layerName').value=layer.name;field('color').value=layer.values?.color??'#808080';field('roughness').value=layer.values?.roughness??.5;}
+    if(layer){field('layerName').value=layer.name;field('color').value=layer.values?.color??'#808080';field('roughness').value=layer.values?.roughness??.5;
+      root.querySelector('[data-hex]').textContent=field('color').value.toUpperCase();}
     status.textContent=reason||(!layer?'在当前材质槽新建第一层。':'');
     void readMask(doc,layer);
   }

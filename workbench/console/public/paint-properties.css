@@ -9,12 +9,19 @@
 .property-target-name{flex:1;min-width:0;font-size:13px;font-weight:500;color:#e2e2e2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .property-target-scope{flex:none;font-size:11px;color:#aaa;border:1px solid #ffffff12;padding:1px 5px;border-radius:2px}
 :is(#properties,form.editor-properties).property-inspector .property-section{margin:0;padding:0;border:0;border-bottom:1px solid #191919;border-radius:0;background:transparent}
-:is(#properties,form.editor-properties).property-inspector .property-section-title{display:flex;align-items:center;gap:7px;min-height:28px;padding:3px 10px;list-style:none;background:#2d2d2d;color:#ddd;font-weight:500;cursor:pointer;user-select:none;box-shadow:none}
-.property-section-title::-webkit-details-marker{display:none}
-.property-section-title::before{content:'';width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid #aaa;transform-origin:2px 4px;transition:transform 100ms ease}
-.property-section[open]>.property-section-title::before{transform:rotate(90deg)}
-.property-section-title:hover{background:#343434}
-.property-section-title:focus-visible{outline:1px solid var(--paint-focus,#8a8a8a);outline-offset:-1px}
+/* Object, material, texture and image inspectors share one disclosure control. */
+:is(.property-section,.render-settings-section,.document-blend-if,.texture-set-body details)>summary{
+  display:flex;align-items:center;gap:8px;min-height:var(--chrome-control);padding:3px 8px;
+  list-style:none;background:var(--chrome-panel-title);color:var(--chrome-text);font-size:var(--paint-font-ui);
+  font-weight:500;cursor:pointer;user-select:none
+}
+:is(.property-section,.render-settings-section,.document-blend-if,.texture-set-body details)>summary::-webkit-details-marker{display:none}
+:is(.property-section,.render-settings-section,.document-blend-if,.texture-set-body details)>summary::before{
+  content:'';box-sizing:border-box;flex:none;width:6px;height:6px;border:solid currentColor;
+  border-width:1px 1px 0 0;color:var(--ui-secondary);transform:rotate(45deg)
+}
+:is(.property-section,.render-settings-section,.document-blend-if,.texture-set-body details)[open]>summary::before{transform:rotate(135deg)}
+:is(.property-section,.render-settings-section,.document-blend-if,.texture-set-body details)>summary:hover{background:var(--chrome-hover)}
 .property-section-hint{margin-left:auto;font-size:11px;font-weight:400;color:#999}
 :is(#properties,form.editor-properties).property-inspector .property-section-body{padding:6px 10px 8px;--property-label-width:clamp(64px,28%,110px)}
 :is(#properties,form.editor-properties).property-inspector .property-section-body>small{display:block;color:#999;line-height:1.6}
@@ -90,7 +97,7 @@
 .property-inspector .mask-stroke-order{margin-top:5px}
 @container (max-width: 270px){.mask-effect-mode,.mask-effects-heading>small{display:none}}
 :is(#properties,form.editor-properties).property-inspector .property-lock-note{display:block;margin:0;padding:7px 12px;background:#303030;color:#bbb}
-@media(prefers-reduced-motion:reduce){.property-section-title::before{transition:none}}
+
 
 :is(#properties,form.editor-properties).property-inspector .property-channel :is(select,.custom-select-button){min-height:26px;font-size:13px}
 @container(max-width:280px){:is(#properties,form.editor-properties).property-inspector .property-channel-switches{grid-template-columns:repeat(3,minmax(0,1fr))}}

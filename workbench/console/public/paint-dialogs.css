@@ -1,24 +1,28 @@
 /* Project, history, settings and export dialogs share the editor controls. */
-:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog){
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog,.image-size-dialog){
   --paint-control-height:var(--chrome-control);--select-height:var(--chrome-control);
   padding:0;border:1px solid var(--chrome-line);border-radius:4px;
   background:#282828;color:var(--chrome-text);box-shadow:0 6px 20px #0007;
   max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);
 }
-:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog)::backdrop{background:#0007}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog,.image-size-dialog)::backdrop{background:#0007}
 :is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog)>header,:is(#new-paint-dialog,#project-copy-dialog)>form>header{
   flex:none;min-height:38px;gap:8px;padding:4px 10px;
   border:0;border-bottom:1px solid var(--chrome-line);background:var(--chrome-header);
 }
 :is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) header :is(strong,h2){margin:0;font-size:13px;font-weight:600}
-:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) button:not(.custom-select-button){
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) button:not(.custom-select-button),
+.image-size-dialog button:not(.custom-select-button){
   min-height:var(--chrome-control);padding:3px 10px;border:1px solid transparent;
   border-radius:var(--chrome-radius);background:var(--chrome-button);color:var(--chrome-text);
   box-shadow:none;font-size:13px;font-weight:400;
 }
-:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) button:not(.custom-select-button):hover:not(:disabled){background:var(--chrome-hover);border-color:transparent}
-:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) button.primary{background:var(--chrome-selected);border-color:transparent;color:#eee}
-:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) button.primary:hover:not(:disabled){background:#525252}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) button:not(.custom-select-button):hover:not(:disabled),
+.image-size-dialog button:not(.custom-select-button):hover:not(:disabled){background:var(--chrome-hover);border-color:transparent}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) button.primary,
+.image-size-dialog button.primary{background:var(--chrome-selected);border-color:transparent;color:#eee}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) button.primary:hover:not(:disabled),
+.image-size-dialog button.primary:hover:not(:disabled){background:#525252}
 :is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) header button{min-height:var(--chrome-control);height:auto;padding:2px 7px;background:transparent;font-size:13px}
 :is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) .custom-select{
   --select-height:var(--chrome-control);--select-start-padding:7px;
@@ -31,8 +35,10 @@
 }
 :is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) .custom-select>.custom-select-button:hover:not(:disabled),
 :is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) .custom-select.open>.custom-select-button{background-color:var(--chrome-hover);border-color:transparent}
-:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) :is(button,input):focus-visible{outline:1px solid var(--paint-focus);outline-offset:-2px}
-:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) input[type=checkbox]{width:14px;height:14px;margin:0;flex:none}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) :is(button,input):focus-visible,
+.image-size-dialog :is(button,input):focus-visible{outline:1px solid var(--paint-focus);outline-offset:-2px}
+:is(#settings-dialog,#delivery-dialog,#new-paint-dialog,#project-copy-dialog,#project-dialog,#history-dialog) input[type=checkbox],
+.image-size-dialog input[type=checkbox]{width:14px;height:14px;margin:0;flex:none}
 #settings-dialog>footer,#delivery-dialog>.delivery-footer,:is(#new-paint-dialog,#project-copy-dialog) .paint-form-footer{
   flex:none;min-height:44px;gap:8px;padding:7px 10px;
   border:0;border-top:1px solid var(--chrome-line);background:transparent;

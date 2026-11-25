@@ -153,11 +153,6 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .material-resource-properties button{min-height:26px;margin-top:5px;padding:3px 10px}
 .material-resource-linked{color:#999;font-size:12px}
 .render-settings-section{max-width:600px;margin:0 0 4px;overflow:hidden;border:1px solid #ffffff10;border-radius:4px;background:#292929}
-.render-settings-section>summary{display:flex;align-items:center;gap:7px;min-height:29px;padding:4px 8px;list-style:none;background:#333;color:#ddd;font-size:13px;font-weight:500;cursor:pointer}
-.render-settings-section>summary::-webkit-details-marker{display:none}
-.render-settings-section>summary::before{content:'▸';color:#aaa;font-size:12px;transition:transform .12s ease}
-.render-settings-section[open]>summary::before{transform:rotate(90deg)}
-.render-settings-section>summary:hover{background:#3a3a3a}
 .render-settings-body{padding:5px 8px 8px 18px}
 .render-settings-row{display:grid;grid-template-columns:minmax(72px,1fr) minmax(85px,1.25fr);gap:8px;align-items:center;min-height:28px;margin:2px 0;font-size:var(--paint-font-ui,13px)}
 .render-settings-row>span:first-child{color:var(--ui-text,#ddd)}
@@ -193,7 +188,6 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .property-editor-footer button{min-height:26px;padding:3px 12px}
 @container(max-width:250px){.property-editor-rail{width:33px}.property-editor-tab{width:27px;min-width:27px}.render-settings-body{padding-left:9px}.render-settings-row{grid-template-columns:minmax(58px,1fr) minmax(65px,1.15fr);gap:6px}}
 @container(max-width:175px){.render-settings-row{grid-template-columns:minmax(0,1fr);gap:2px}.render-settings-check input{margin-bottom:3px}}
-@media(prefers-reduced-motion:reduce){.render-settings-section>summary::before{transition:none}}
 .editor-list{display:flex;flex-direction:column;gap:2px}
 .editor-list button{display:flex;align-items:center;gap:7px;min-height:30px;padding:4px 7px;text-align:left;font-size:13px;border:1px solid transparent;border-radius:3px;background:transparent}
 .editor-list button[aria-pressed=true]{background:#414141;border-color:#555}
