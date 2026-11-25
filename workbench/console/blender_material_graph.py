@@ -25,6 +25,10 @@ def apply_material_graph(material, config):
         node.location = (source['x'], -source['y'] + dy)
         node.width = 210
         return node
+    def default_uv(source,instruction,node):
+        if 'uv' not in instruction['inputs']:
+            texcoord=new('ShaderNodeTexCoord',source,'-uv',-220)
+            tree.links.new(texcoord.outputs['UV'],node.inputs['Vector'])
     def color(text):
         values = [n/255 for n in bytes.fromhex(text[1:])]
         return tuple(n/12.92 if n <= .04045 else ((n+.055)/1.055)**2.4 for n in values) + (1,)
@@ -81,10 +85,26 @@ def apply_material_graph(material, config):
             ports = bind(node, {}, dict(uv=node.outputs['UV']))
         elif kind == 'mapping':
             node = new('ShaderNodeMapping',source);node.vector_type = 'POINT'
+            default_uv(source,instruction,node)
             node.inputs['Location'].default_value = (p['x'],p['y'],0)
             node.inputs['Rotation'].default_value = (0,0,math.radians(p['rotation']))
             node.inputs['Scale'].default_value = (p['scale'],p['scale'],1)
             ports = bind(node, dict(uv=node.inputs['Vector']), dict(uv=node.outputs['Vector']))
+        elif kind == 'wave':
+            node=new('ShaderNodeTexWave',source)
+            pattern=p['pattern']
+            node.wave_type='RINGS' if pattern=='rings' else 'BANDS'
+            if pattern=='rings':
+                node.rings_direction='Z'
+            else:
+                node.bands_direction={'bands-x':'X','bands-y':'Y','diagonal':'DIAGONAL'}[pattern]
+            node.wave_profile={'sine':'SIN','triangle':'TRI','saw':'SAW'}[p['profile']]
+            node.inputs['Scale'].default_value=p['scale']
+            node.inputs['Phase Offset'].default_value=p['phase']
+            node.inputs['Distortion'].default_value=0
+            default_uv(source,instruction,node)
+            ports=bind(node,dict(uv=node.inputs['Vector'],scale=node.inputs['Scale'],phase=node.inputs['Phase Offset']),
+                       dict(value=node.outputs['Fac'],color=node.outputs['Color']))
         elif kind == 'noise':
             node=new('ShaderNodeTexNoise',source)
             node.noise_dimensions='2D';node.noise_type='FBM';node.normalize=True
@@ -92,9 +112,7 @@ def apply_material_graph(material, config):
                 node.inputs[key.title()].default_value=p[key]
             node.inputs['Lacunarity'].default_value=2
             node.inputs['Distortion'].default_value=0
-            if 'uv' not in instruction['inputs']:
-                texcoord=new('ShaderNodeTexCoord',source,'-uv',-220)
-                tree.links.new(texcoord.outputs['UV'],node.inputs['Vector'])
+            default_uv(source,instruction,node)
             ports=bind(node,dict(uv=node.inputs['Vector'],scale=node.inputs['Scale']),dict(value=node.outputs['Fac']))
         elif kind == 'image':
             if p['asset']:

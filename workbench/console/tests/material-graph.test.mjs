@@ -191,3 +191,30 @@ np.testing.assert_array_equal(uv_noise(uv,0,15,1),np.full(6,.5))
 `],{cwd:new URL('../',import.meta.url),encoding:'utf8'});
   assert.equal(run.status,0,run.stderr);
 });
+
+test('wave mode, profile, linked scale and phase match fixed Cycles samples',()=>{
+  const graph=defaultMaterialGraph(),wave=makeNode('wave',0,0,'wave');
+  graph.nodes.push(wave);
+  for(const [name,value] of [['profile','square'],['pattern','toString']]){
+    const invalid=structuredClone(graph);invalid.nodes.at(-1).params[name]=value;
+    assert.throws(()=>compileMaterialGraph(invalid),/波纹/);
+  }
+  const run=spawnSync(pythonExecutable(),['-c',`
+import numpy as np
+from material_graph import uv_wave
+# Expected shader inputs were independently compared via paired CPU Cycles
+# float EXRs for these twelve configurations (linear RGB error below 2e-6).
+expected=[[.3928533,.0757643,.8601367],[.6527259,.124147,.5886862],
+          [.6644662,.3214835,.3638324],[.7633468,.5113132,.2762169]]
+for i,pattern in enumerate(('bands-x','bands-y','diagonal','rings')):
+    for j,profile in enumerate(('sine','triangle','saw')):
+        uv=np.array([[-.37+i*.11,.23+j*.12]])
+        value=uv_wave(uv,-.92+j,.83-i,pattern,profile)
+        np.testing.assert_allclose(value,[expected[i][j]],rtol=0,atol=2e-6)
+uv=np.array([[.1,.2],[.5,.7],[-.2,.4]])
+scale=np.array([2.3,0,-1.5]);phase=np.array([.3,-1.7,2.8])
+scalar=[uv_wave(p[None,:],s,h,'rings','triangle')[0] for p,s,h in zip(uv,scale,phase)]
+np.testing.assert_array_equal(uv_wave(uv,scale,phase,'rings','triangle'),scalar)
+`],{cwd:new URL('../',import.meta.url),encoding:'utf8'});
+  assert.equal(run.status,0,run.stderr);
+});

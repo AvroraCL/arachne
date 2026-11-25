@@ -15,6 +15,26 @@ def decode(c):
     return np.where(c <= .04045, c / 12.92, ((c + .055) / 1.055) ** 2.4)
 
 
+def uv_wave(uv, scale, phase, pattern, profile):
+    # Blender's Wave Texture uses radians, and a small coordinate bias at exact
+    # period boundaries. Unconnected vectors in Arachne use the model's UVs.
+    coords = np.asarray(uv,dtype=np.float32)*np.asarray(scale,dtype=np.float32).reshape(-1,1)
+    u,v = ((coords+1e-6)*.999999).T
+    if pattern == 'rings':
+        angle = 20*np.hypot(u,v)
+    elif pattern == 'diagonal':
+        angle = 10*(u+v+1e-6*.999999)
+    else:
+        angle = 20*(u if pattern=='bands-x' else v)
+    angle += np.asarray(phase,dtype=np.float32)
+    if profile == 'sine':
+        return .5-.5*np.cos(angle)
+    cycles = angle/(2*np.pi)
+    if profile == 'saw':
+        return cycles-np.floor(cycles)
+    return 2*np.abs(cycles-np.floor(cycles+.5))
+
+
 def decode_image(file, mode, max_edge=None, profile=None):
     with Image.open(file) as image:
         source = None
@@ -147,6 +167,9 @@ class MaterialGraph:
                 angle = p['rotation'] * np.pi / 180
                 matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
                 out = dict(uv=coords @ matrix.T + [p['x'], p['y']])
+            elif kind == 'wave':
+                value = uv_wave(get('uv',uv),get('scale',p['scale']),get('phase',p['phase']),p['pattern'],p['profile'])
+                out = dict(value=value,color=np.broadcast_to(value[:,None],(len(value),3)))
             elif kind == 'noise':
                 out = dict(value=uv_noise(get('uv',uv),get('scale',p['scale']),p['detail'],p['roughness']))
             elif kind == 'image':

@@ -76,13 +76,14 @@ try{
   await ramp.locator('.shader-node-title').click();
   await shader.getByRole('button',{name:'聚焦所选节点'}).click();
   await ramp.screenshot({path:path.join(data,'渐变节点.png')});
-  const doc=await api(route);
-  const job=await api(paint+'/preview',{revision:doc.revision,requestId:'ramp-bake'},202);
-  const baked=await until(async()=>{
-    const result=await api(route+'/jobs/'+job.id);
-    if(result.status==='failed')throw Error(result.error);
-    return result.status==='completed'&&result;
-  },'渐变烘焙');
+  async function bake(doc,requestId){
+    const job=await api(paint+'/preview',{revision:doc.revision,requestId},202);
+    return until(async()=>{
+      const j=await api(route+'/jobs/'+job.id);
+      if(j.status==='failed')throw Error(j.error);return j.status==='completed'&&j;
+    },requestId);
+  }
+  const baked=await bake(await api(route),'ramp-bake');
   const file=path.join(data,'色标-4K.png');
   await fs.writeFile(file,Buffer.from(await (await fetch(base+baked.colorUrl)).arrayBuffer()));
   execFileSync(pythonExecutable(),['-c',`from PIL import Image
@@ -95,14 +96,21 @@ with Image.open(sys.argv[1]) as im:
   await changed(()=>page.getByRole('option',{name:'噪声纹理',exact:true}).click());
   const noise=shader.locator('[data-type=noise].shader-node');
   await stage.focus();await page.keyboard.press('Home');
-  async function wire(target,port){
-    const from=await noise.locator('[data-direction=out][data-port=value]').boundingBox();
-    const to=await target.locator('[data-direction=in][data-port='+port+']').boundingBox();
+  async function wire(source,output,target,port){
+    async function socketBox(node,direction,name){
+      const socket=node.locator('[data-direction='+direction+'][data-port='+name+']');
+      assert.ok(await socket.evaluate(el=>{
+        const r=el.getBoundingClientRect();
+        return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));
+      }),direction+' '+name+' socket is visible for drag');
+      return socket.boundingBox();
+    }
+    const from=await socketBox(source,'out',output),to=await socketBox(target,'in',port);
     await page.mouse.move(from.x+from.width/2,from.y+from.height/2);await page.mouse.down();
     await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:8});await page.mouse.up();
   }
-  await changed(()=>wire(ramp,'value'));
-  await changed(()=>wire(shader.locator('[data-node=pbr]'),'roughness'));
+  await changed(()=>wire(noise,'value',ramp,'value'));
+  await changed(()=>wire(noise,'value',shader.locator('[data-node=pbr]'),'roughness'));
   async function preview(file){
     const current=await api(route);
     const response=await fetch(base+paint+'/live',{method:'POST',headers,body:JSON.stringify({revision:current.revision,resolution:256,format:'pbr8'})});
@@ -120,11 +128,7 @@ with Image.open(sys.argv[1]) as im:
   await page.reload();assert.equal(await scale.inputValue(),'11');
   const reopened=await api(route);
   assert.deepEqual(reopened.paint.materialGraph,scaled.paint.materialGraph);
-  const noiseJob=await api(paint+'/preview',{revision:reopened.revision,requestId:'noise-bake'},202);
-  const noiseBake=await until(async()=>{
-    const j=await api(route+'/jobs/'+noiseJob.id);
-    if(j.status==='failed')throw Error(j.error);return j.status==='completed'&&j;
-  },'噪声 4K 烘焙');
+  const noiseBake=await bake(reopened,'noise-bake');
   for(const [key,url] of [['color',noiseBake.colorUrl],['roughness',noiseBake.materialUrls.roughness]]){
     const response=await fetch(base+url);assert.ok(response.ok);
     await fs.writeFile(path.join(data,key+'.png'),Buffer.from(await response.arrayBuffer()));
@@ -148,6 +152,51 @@ dr=abs(rough[8::16,8::16]-new[:,:,4])
 assert dr.max()<=2,(dr.mean(),dr.max())
 `,data]);
   console.log('PASS 单个噪声分支驱动渐变颜色和粗糙度，修改尺度、撤销重做、重开及同 UV 的实时与 4K 像素。');
+  await shader.getByRole('button',{name:'添加材质节点'}).click();
+  await changed(()=>page.getByRole('option',{name:'波纹纹理',exact:true}).click());
+  await stage.focus();await page.keyboard.press('Control+Space');
+  const wave=shader.locator('.shader-node[data-type=wave]'),pbr=shader.locator('[data-node=pbr]');
+  await stage.focus();await page.keyboard.press('Home');
+  await changed(()=>wire(wave,'color',pbr,'color'));
+  await changed(()=>wire(wave,'value',pbr,'roughness'));
+  await preview('bands.raw');
+  async function option(node,label,value){
+    await node.getByRole('button',{name:label,exact:true}).click();
+    await changed(()=>page.getByRole('option',{name:value,exact:true}).click());
+  }
+  await option(wave,'波纹纹理 图案','条纹 · 沿 V');
+  await preview('v.raw');
+  await option(wave,'波纹纹理 图案','同心环');
+  await option(wave,'波纹纹理 波形','三角');
+  const phase=wave.getByLabel('波纹纹理 相位（弧度）');
+  await changed(async()=>{await phase.fill('1.5');await phase.press('Enter');});
+  const rings=await preview('rings.raw');
+  await changed(()=>editMenu('undo'),'undo');assert.equal(await phase.inputValue(),'0');
+  await changed(()=>editMenu('redo'),'redo');await page.reload();
+  assert.equal(await phase.inputValue(),'1.5');
+  assert.deepEqual((await api(route)).paint.materialGraph,rings.paint.materialGraph);
+  const ringBake=await bake(await api(route),'rings-bake');
+  for(const [key,url] of [['rings-color',ringBake.colorUrl],['rings-rough',ringBake.materialUrls.roughness]]){
+    const response=await fetch(base+url);assert.ok(response.ok);
+    await fs.writeFile(path.join(data,key+'.png'),Buffer.from(await response.arrayBuffer()));
+  }
+  execFileSync(pythonExecutable(),['-c',`import sys
+from pathlib import Path
+import numpy as np
+from PIL import Image
+root=Path(sys.argv[1])
+read=lambda name: np.fromfile(root/name,dtype=np.uint8).reshape(256,256,15)
+u,v,rings=map(read,['bands.raw','v.raw','rings.raw'])
+assert np.array_equal(u[0,:,4],u[127,:,4]) and np.ptp(u[0,:,4])>240
+assert np.array_equal(v[:,0,4],v[:,127,4]) and np.ptp(v[:,0,4])>240
+rough=np.asarray(Image.open(root/'rings-rough.png')).astype(int)
+color=np.asarray(Image.open(root/'rings-color.png')).astype(int)
+assert color.shape==(4096,4096,3) and rough.shape==(4096,4096)
+assert np.max(abs(rough[8::16,8::16]-rings[:,:,4]))<=2
+assert np.percentile(abs(color[8::16,8::16]-rings[:,:,:3]),99)<=3
+assert np.array_equal(color[...,0],color[...,1]) and np.array_equal(color[...,1],color[...,2])
+`,data]);
+  console.log('PASS 波纹沿 U/V 切换，环纹相位及波形可编辑，双通道 4K 像素、撤销重做和重开。');
   assert.deepEqual(errors,[]);
   console.log('PASS 添加、调色、移动并重排色标，移除、撤销、重做和重开。4K 烘焙中心为 (198,48,24)。');
 }finally{

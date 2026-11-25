@@ -5,13 +5,13 @@ import {libraryNodeTypes,compileLibraryMaterial,defaultLibraryMaterial,defaultBr
 import {editMaterialLinks,materialLinkKey,insertMaterialNode,rerouteMaterialLinks,copyMaterialNodes,pasteMaterialNodes,duplicateMaterialNodes,removeMaterialNodes,vacantMaterialPosition,parseMaterialClipboard,materialClipboardPrefix} from './material-graph-edit.mjs';
 import {polylinesIntersect,closestPolylinePoint,polylineCrossing} from './node-link-geometry.mjs';
 import {scrubNumber} from './studio-fields.mjs';
-import {nodeTypes as materialNodeTypes,portNames as materialPortNames,makeGraphNode,defaultMaterialGraph as defaultOutputGraph,compileNodeGraph,resolveGraphSockets,brushParamRanges,brushImageFields} from './material-graph.mjs';
+import {wavePatterns,waveProfiles,nodeTypes as materialNodeTypes,portNames as materialPortNames,makeGraphNode,defaultMaterialGraph as defaultOutputGraph,compileNodeGraph,resolveGraphSockets,brushParamRanges,brushImageFields} from './material-graph.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
 import {workspaceIcons} from './workspace-icons.mjs';
 import {compositionKey} from './text-input.mjs';
 import {readNodeClipboard,writeNodeClipboard} from './node-clipboard.mjs';
 
-const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',detail:'细节',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',flow:'流量',spacing:'间距',smoothing:'平滑',tipAngle:'笔尖角度',roundness:'圆度',scatter:'散布',grain:'纹理深度',tipAsset:'图片笔尖',textureAsset:'笔刷纹理',pressure:'压感不透明度',pressureSize:'压感大小',mirror:'镜像 X',red:'红色',green:'绿色',blue:'蓝色'};
+const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',detail:'细节',phase:'相位（弧度）',pattern:'图案',profile:'波形',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',flow:'流量',spacing:'间距',smoothing:'平滑',tipAngle:'笔尖角度',roundness:'圆度',scatter:'散布',grain:'纹理深度',tipAsset:'图片笔尖',textureAsset:'笔刷纹理',pressure:'压感不透明度',pressureSize:'压感大小',mirror:'镜像 X',red:'红色',green:'绿色',blue:'蓝色'};
 const operations={add:'加',subtract:'减',multiply:'乘',divide:'除',minimum:'最小值',maximum:'最大值'};
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 export function createShaderEditor({host,read,save,draft:onDraft,busy,importImage,viewAsset,readTarget=()=>null,onIdle=()=>{},viewKey='',initialView=null,onViewChange=()=>{}}){
@@ -202,7 +202,7 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
       }
       if(outputs.children.length)box.append(outputs);
       const params=el('div','shader-params'),incoming=new Map(graph.links.filter(link=>link.to.node===node.id).map(link=>[link.to.port,link.from]));
-      const menuParams=['operation','asset','colorSpace','tipAsset','textureAsset'];
+      const menuParams=['pattern','profile','operation','asset','colorSpace','tipAsset','textureAsset'];
       for(const param of menuParams)if(Object.hasOwn(values,param))params.append(parameterRow(param,values[param]));
       for(const [port,type] of Object.entries(spec.inputs)){
         if(!incoming.has(port)&&Object.hasOwn(values,port)){params.append(parameterRow(port,values[port]));continue;}
@@ -235,7 +235,10 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
             for(const [id,asset] of Object.entries(read().paint.assets))if(isBrushImage(asset))input.append(new Option(asset.name,id));
           }
           else if(param==='colorSpace')input.append(...textureColorSpaces.map(([id,label])=>new Option(label,id)));
-          else for(const [id,text] of Object.entries(operations))input.append(new Option(text,id));
+          else{
+            const options=param==='pattern'?wavePatterns:param==='profile'?waveProfiles:operations;
+            for(const [id,text] of Object.entries(options))input.append(new Option(text,id));
+          }
         }else{
           input=el('input');input.type=typeof value==='boolean'?'checkbox':typeof value==='string'?'color':'number';
           if(input.type==='number'){

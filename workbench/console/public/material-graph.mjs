@@ -4,6 +4,8 @@ import {paintChannels,legacyChannels,channelSpecs,channelDefaults} from './paint
 const scalar={value:'scalar'}, color={color:'color'};
 const rgb={red:'scalar',green:'scalar',blue:'scalar'};
 const imagePixelLimit=64*1024*1024;
+export const wavePatterns={'bands-x':'条纹 · 沿 U','bands-y':'条纹 · 沿 V','diagonal':'条纹 · 对角','rings':'同心环'};
+export const waveProfiles={sine:'正弦',triangle:'三角',saw:'锯齿'};
 export const nodeTypes={
   reroute:{name:'重定向',inputs:{input:'any'},outputs:{output:'any'},defaults:{}},
   paint:{name:'涂装结果',inputs:{},outputs:Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].type==='color'?'color':'scalar'])),defaults:{}},
@@ -11,6 +13,8 @@ export const nodeTypes={
   value:{name:'数值',inputs:{},outputs:scalar,defaults:{value:.5}},
   uv:{name:'UV 坐标',inputs:{},outputs:{uv:'vector'},defaults:{}},
   mapping:{name:'映射',inputs:{uv:'vector'},outputs:{uv:'vector'},defaults:{x:0,y:0,scale:1,rotation:0}},
+  wave:{name:'波纹纹理',inputs:{uv:'vector',scale:'scalar',phase:'scalar'},outputs:{value:'scalar',color:'color'},
+    defaults:{pattern:'bands-x',profile:'sine',scale:5,phase:0}},
   noise:{name:'噪声纹理',inputs:{uv:'vector',scale:'scalar'},outputs:scalar,defaults:{scale:5,detail:2,roughness:.5}},
   image:{name:'图像纹理',inputs:{uv:'vector'},outputs:{color:'color',alpha:'scalar',value:'scalar'},defaults:{asset:'',colorSpace:'srgb'}},
   separateColor:{name:'分离 RGB',inputs:color,outputs:rgb,defaults:{color:'#000000'}},
@@ -21,7 +25,7 @@ export const nodeTypes={
   pbr:{name:'基础 PBR',inputs:Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].type==='color'?'color':'scalar'])),outputs:{surface:'surface'},defaults:{...channelDefaults,color:'#808080',roughness:.5}},
   output:{name:'材质输出',inputs:{surface:'surface'},outputs:{},defaults:{}}
 };
-export const portNames={input:'输入',output:'输出',...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),color:'颜色',metallic:'金属度',roughness:'粗糙度',value:'数值',uv:'UV',scale:'缩放',a:'A',b:'B',factor:'系数',alpha:'透明度',surface:'表面',red:'红色',green:'绿色',blue:'蓝色'};
+export const portNames={input:'输入',output:'输出',...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),color:'颜色',metallic:'金属度',roughness:'粗糙度',value:'数值',uv:'UV',scale:'缩放',phase:'相位',a:'A',b:'B',factor:'系数',alpha:'透明度',surface:'表面',red:'红色',green:'绿色',blue:'蓝色'};
 export function makeNode(type,x=40,y=40,id=globalThis.crypto.randomUUID()){
   if(!Object.hasOwn(nodeTypes,type))throw Error('不支持的材质节点');
   return {id,type,x,y,params:{...nodeTypes[type].defaults,...(type==='image'?{colorSpace:'auto'}:{})}};
@@ -56,6 +60,8 @@ function compileGraph(graph,assets,nodeTypes,domain){
       if(node.type==='ramp'&&key==='stops'){
         if(!Array.isArray(value)||!value.every((stop,i)=>exact(stop,['position','color'])&&hex(stop.color)&&Number.isFinite(stop.position)&&stop.position>(i?value[i-1].position:0)&&stop.position<1))
           throw Error('渐变中间色标的位置必须在两端之间，按位置排序且不能重合');
+      }else if(node.type==='wave'&&(key==='pattern'||key==='profile')){
+        if(typeof value!=='string'||!Object.hasOwn(key==='pattern'?wavePatterns:waveProfiles,value))throw Error('波纹模式或波形无效');
       }else if(key==='asset'){
         if(value!==''&&(!/^[a-f\d]{64}$/.test(value)||!Object.hasOwn(assets,value)))throw Error('节点图像素材不存在');
       }else if(key==='colorSpace'){
