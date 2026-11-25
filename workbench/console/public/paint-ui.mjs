@@ -14,7 +14,7 @@ import {setupCommandPicker} from './paint-command-picker.mjs';
 import {setupRenderCameraBatch} from './render-camera-batch.mjs';
 import {setupPaintColorPicker} from './paint-color-picker.mjs';
 import {setupProjectPicker} from './paint-project-picker.mjs';
-import {paintChannels,channelSpecs,effectiveValues,baseChannelEnabled,channelBlendChoices,layerChannelBlend} from './paint-channels.mjs';
+import {paintChannels,channelSpecs,effectiveValues,channelBlendChoices,layerChannelBlend} from './paint-channels.mjs';
 import {installPaintTooltips} from './paint-tooltips.mjs';
 import {setupPaintAreas} from './paint-area-adapter.mjs';
 import {createContextActions} from './area-chrome.mjs';
@@ -381,16 +381,14 @@ $('asset-view').onclick=()=>showAsset(selectedAsset,$('asset-view'));
 function maskOptions(l){return {projectId:doc.id,revision:doc.revision,layer:l,source:l.mask?assetUrl(l.mask):null};}
 function command(operations){return post('commands',{operations});}
 function post(action,extra={}){return api(route()+'/'+action,{revision:doc.revision,...extra});}
-function edit(patch){const l=layer();return command([l?{op:'update',id:l.id,patch}:{op:'base',patch}]);}
+function edit(patch){return command([{op:'update',id:layer().id,patch}]);}
 function clearPropertyDraft(){
   if(!propertyDraft)return;
   propertyDraft=null;
   updatePaintDraft(null);
 }
 function livePropertyField(text,type,value,makePatch,options={},selectedLayer=layer()){
-  const operation=value=>selectedLayer
-    ? {op:'update',id:selectedLayer.id,patch:makePatch(value)}
-    : {op:'base',patch:makePatch(value)};
+  const operation=value=>({op:'update',id:selectedLayer.id,patch:makePatch(value)});
   return field(text,type,value,null,{...options,previewOperation:operation});
 }
 function field(text,type,value,change,options={}){
@@ -876,12 +874,13 @@ function renderProperties(form=$('properties'),scope=null){
   if(scoped&&(scope.projectId!==doc.id||scope.layerId!=null&&!l)){
     form.replaceChildren(element('p','固定的材质图层不可用'));return;
   }
+  if(!l){form.replaceChildren(element('p','请选择材质图层'));return;}
   const revision=doc.revision,projectId=doc.id;
   const checkTarget=()=>{
     if(!form.isConnected||doc?.id!==projectId||doc.revision!==revision||scope?.layerId!=null&&!doc.paint.layers.some(item=>item.id===scope.layerId))throw Error('属性目标或工程修订已变化，请重新编辑');
   };
   const commandTarget=scoped?operations=>{checkTarget();return api('/api/projects/'+projectId+'/paint/commands',{revision,operations});}:command;
-  const editTarget=scoped?patch=>commandTarget([l?{op:'update',id:l.id,patch}:{op:'base',patch}]):edit;
+  const editTarget=scoped?patch=>commandTarget([{op:'update',id:l.id,patch}]):edit;
   const liveField=(text,type,value,makePatch,options)=>livePropertyField(text,type,value,makePatch,options,l||null);
   const showActions=()=>{
     const section=propertySection(form,'actions','图层操作',{open:false});
@@ -889,7 +888,7 @@ function renderProperties(form=$('properties'),scope=null){
     section.append(layerActions(l,{issue:commandTarget,add:scoped?(...operations)=>{checkTarget();return addAndSelect(...operations);}:addAndSelect}));
   };
   const ensureSelected=()=>{if(scoped&&l&&(selected!==l.id||selection.size!==1)){setSelection([l.id]);render();}};
-  const values=effectiveValues(l?.values||doc.paint.base);
+  const values=effectiveValues(l.values||doc.paint.base);
   const choices=Object.values(doc.paint.assets).filter(asset=>!isSelectionAsset(asset)).map(a=>[a.id,a.name]);
   form.replaceChildren();
   if(!scoped&&selection.size>1){
@@ -908,7 +907,7 @@ function renderProperties(form=$('properties'),scope=null){
     section.append(actions);return;
   }
   const maskTarget=(scoped?scope.target:paintTarget)==='mask'&&!!l;
-  propertyHeading(form,{name:l?.name||'全 UV 底层',
+  propertyHeading(form,{name:l.name,
     type:maskTarget?'蒙版':({fill:'填充',paint:'绘制',decal:'投影',group:'文件夹'}[l?.kind]||'填充'),
     icon:maskTarget?'mask':({paint:'brush',decal:'image',group:'fillLayer'}[l?.kind]||'fillLayer'),
     scope:undefined});
@@ -965,8 +964,8 @@ function renderProperties(form=$('properties'),scope=null){
   }
   for(const key of paintChannels){
     if(!material)break;
-    const enabled=l?l.channels[key]===true:baseChannelEnabled(doc.paint,key);
-    const toggle=field('启用'+names[key],'checkbox',enabled,value=>l?editTarget({channels:{...l.channels,[key]:value}}):commandTarget([{op:'baseChannels',patch:{[key]:value}}]));
+    const enabled=l.channels[key]===true;
+    const toggle=field('启用'+names[key],'checkbox',enabled,value=>editTarget({channels:{...l.channels,[key]:value}}));
     channels.append(propertyChannelSwitch(toggle,names[key]));
     if(!enabled||l?.materialId)continue;
     const section=element('fieldset');section.className='property-channel';section.dataset.channel=key;
@@ -974,7 +973,7 @@ function renderProperties(form=$('properties'),scope=null){
     section.append(element('legend',names[key]));
     if(!l?.materialId&&!(key==='color'&&l?.kind==='decal')&&!l?.maps?.[key]){
       const type=channelSpecs[key].type==='color'?'color':'number',range={min:0,max:1};
-      const patch=value=>l?{values:{...values,[key]:value}}:{[key]:value};
+      const patch=value=>({values:{...values,[key]:value}});
       if(l?.kind==='paint'&&key==='color'&&(workArea==='drawing'||areaSystem)){
         const control=field('前景色',type,paintColors.pair('paint').foreground,
           value=>changePaintColors(()=>paintColors.set('paint','foreground',value),'paint'),range);
@@ -1014,7 +1013,6 @@ function renderProperties(form=$('properties'),scope=null){
       if(documentId)drawings.append(localButton('编辑'+names[key]+'贴图',()=>areaSystem.openImage(documentId)));
     }
   }
-  if(!l)return;
   if(!maskTarget&&(areaSystem||workArea==='material')&&l.kind==='paint')material.append(localButton('在三维视口中绘制',()=>{
     ensureSelected();
     if(areaSystem){areaSystem.openMaterialPainting();return;}else if(!selectWorkArea('drawing'))return;
@@ -1164,8 +1162,8 @@ async function renderTexture(){
   $('live-uv').hidden=true;
   liveView.clear();
   const original='/api/projects/'+doc.id+'/viewport/base';
-  const url=mode==='original'?original:mode==='base'?j?.baseUrl||original:j?.colorUrl||original;
-  const materialUrls=mode==='preview'?j?.materialUrls:mode==='base'?j?.baseMaterialUrls:null;
+  const url=mode==='original'?original:j?.colorUrl||original;
+  const materialUrls=mode==='preview'?j?.materialUrls:null;
   const inspectionUrl=channel==='color'?url:channel==='coverage'?(mode==='preview'?j?.coverageUrl:null):materialUrls?.[channel];
   const reference=previews().find(job=>job.id===$('compare-preview').value);
   const uvUrl=reference?(channel==='color'?reference.colorUrl:channel==='coverage'?reference.coverageUrl:reference.materialUrls?.[channel]):inspectionUrl;
@@ -1177,7 +1175,7 @@ async function renderTexture(){
   $('uv-wipe-overlay').hidden=!wiping;
   if(wiping&&$('uv-wipe-texture').getAttribute('src')!==inspectionUrl)$('uv-wipe-texture').src=inspectionUrl;
   $('uv-version').textContent=reference?`对照 · ${previewLabel(reference)} r${reference.revision}${wiping?' / 当前':''}`:
-    mode==='original'?'原贴图':mode==='base'?'全 UV 底层':j?`${previewLabel(j)} r${j.revision}`:'原贴图';
+    mode==='original'?'原贴图':j?`${previewLabel(j)} r${j.revision}`:'原贴图';
   $('inspect-channel').disabled=!inspectionUrl;
   const solo=inspectChannel&&!!inspectionUrl;
   $('inspect-channel').setAttribute('aria-pressed',String(solo));
@@ -1207,7 +1205,6 @@ function syncLayerSelection(){
     const mask=row.querySelector('.layer-mask[aria-pressed]');
     if(mask)mask.setAttribute('aria-pressed',String(maskId===layerId));
   }
-  $('base').setAttribute('aria-pressed',String(!layer()));
   $('exit-layer-isolation').hidden=!isolatedLayerId;
   maskThumbnails.sync();
 }
@@ -1311,7 +1308,8 @@ const layerPlacementView={
   openFolder:id=>{if(collapsedFolders.delete(id)){saveCollapsedFolders();renderLayers();}},
   revealPlaced:revealPlacedLayer
 };
-materialLayerDrag.bindBase($('base'),layerPlacementView);
+const stackBlank=$('layers').nextElementSibling;
+materialLayerDrag.bindStackEnd(stackBlank,layerPlacementView);
 function renderLayers(){
   if(revealedDrop!==selected)revealedDrop=null;
   const pending=endLayerRename();
@@ -1833,7 +1831,8 @@ async function load(id,{initialLayer}={}){
     if(Array.isArray(stored))collapsedFolders=new Set(stored);
   }catch{}
   let savedTarget;try{savedTarget=JSON.parse(localStorage.getItem('arachne-material-target:'+id));}catch{}
-  const active=next.paint.layers.find(item=>item.id===(initialLayer??savedTarget?.layerId));
+  const active=initialLayer===undefined&&!savedTarget?layerChildren(next.paint.layers,null).at(-1):
+    next.paint.layers.find(item=>item.id===(initialLayer??savedTarget?.layerId));
   setSelection(active?[active.id]:[],{followMaterial:initialLayer!==undefined});
   if(initialLayer===undefined&&savedTarget?.target==='mask'&&active&&hasLayerMask(active))paintTarget='mask';
   selectedAsset=null;jobs=[];$('asset-search').value='';setSelectValue($('compare-preview'),'');inspectChannel=false;viewport.setUnlit(false);resetUV();textureKey='';approvedPreviewId=null;
@@ -1996,7 +1995,7 @@ $('create-paint-backup').onclick=()=>run(async()=>{
   pendingBackupId=job.id;
   $('status').textContent='正在生成工程副本…';
 });
-$('base').onclick=()=>{setSelection();render();areaSystem?.materialSelectionChanged();};
+stackBlank.onclick=()=>{setSelection();render();areaSystem?.materialSelectionChanged();};
 $('exit-mask-inspection').onclick=clearMaterialInspection;
 function saveCollapsedFolders(){
   try{localStorage.setItem('arachne-paint-folders-'+doc.id,JSON.stringify([...collapsedFolders]));}catch{}
@@ -3238,7 +3237,7 @@ areaSystem=setupPaintAreas({read:()=>doc,initial:workArea,restoreActive:preferen
   },layer),
   draft:op=>liveView.update(op),preferences:()=>preferences,
   selectLayer:id=>{setSelection(id?[id]:[]);render();},layerId:()=>selected,
-  applyLibraryFill,fillDestination,prepareSmartApply,travelWithLayerSelection,layerPlacementView,mountLayerList,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialBaseDrop:materialLayerDrag.bindBase,
+  applyLibraryFill,fillDestination,prepareSmartApply,travelWithLayerSelection,layerPlacementView,mountLayerList,layerSelection:()=>[...selection],openMaterialLayerMenu,bindMaterialLayerDrag:materialLayerDrag.bind,bindMaterialStackEnd:materialLayerDrag.bindStackEnd,
   selectMaterialLayer:selectMaterialLayerById,selectSurfaceTarget,materialLayerOperation,canAddMaterialLayer:canAddLayer,
   selectResource:t=>libraryUI.select(t.library,t.id),resource:()=>libraryUI.target(),
   mountLibraryView:libraryUI.mountView,libraryView:libraryUI.getView,

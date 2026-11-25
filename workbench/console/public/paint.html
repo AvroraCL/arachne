@@ -150,7 +150,7 @@
         <button id="model-outliner-toggle" type="button" aria-controls="model-outliner" aria-expanded="false">大纲</button>
         <button id="model-export" type="button" title="导出当前模型及原始材质" disabled>导出 GLB</button>
       </div>
-      <select id="source" aria-label="贴图对照"><option value="live">实时制作</option><option value="preview">烘焙预览</option><option value="base">全 UV 底层</option><option value="original">原贴图</option></select>
+      <select id="source" aria-label="贴图对照"><option value="live">实时制作</option><option value="preview">烘焙预览</option><option value="original">原贴图</option></select>
       <select id="channel" aria-label="检查通道"><option value="color">颜色</option><option value="metallic">金属度</option><option value="roughness">粗糙度</option><option value="normal">法线</option><option value="height">高度</option><option value="emission">自发光</option><option value="alpha">不透明度</option><option value="ao">环境遮蔽</option><option value="coverage">写入诊断</option></select>
       <select id="compare-preview" aria-label="贴图版本对照"><option value="">版本对照</option></select>
       <button id="inspect-channel" data-outside-drawing aria-pressed="false" title="将所选通道显示在三维模型上">三维通道</button>
@@ -319,7 +319,7 @@
       </div>
       <input id="layer-search" class="editor-search-field" type="search" aria-label="图层名称" placeholder="图层名称" autocomplete="off" hidden>
       <p id="layer-search-empty" role="status" hidden>没有匹配图层</p>
-      <div id="layers"></div><button id="base">全 UV 底层</button>
+      <div id="layers"></div><div class="material-stack-blank"></div>
       </div>
       <div id="drawing-layer-actions" data-drawing-only role="group" aria-label="新建图层"><button id="add-layer-mask" type="button" aria-label="添加图层蒙版" title="添加白色蒙版并直接绘制" disabled>蒙版</button></div>
     </section>

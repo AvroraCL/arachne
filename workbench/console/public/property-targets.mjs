@@ -21,7 +21,7 @@ export function capturePropertyTarget(category,project,materialSelection){
     const selected=materialSelection?.()||{layerId:project.layerId};
     if(selected.kind==='source')return {kind:'source',projectId:doc.id,binding:selected.binding,name:selected.name,objectName:selected.objectName};
     if(selected.kind==='resource'&&selected.resourceId)return {projectId:doc.id,kind:'resource',resourceId:selected.resourceId};
-    return {projectId:doc.id,layerId:selected.layerId??null,target:selected.target==='mask'?'mask':'material'};
+    return selected.layerId==null?null:{projectId:doc.id,layerId:selected.layerId,target:selected.target==='mask'?'mask':'material'};
   }
   if(category==='drawing'){
     const selected=project.imageContext;if(!selected?.documentId)return null;
@@ -33,7 +33,7 @@ export function capturePropertyTarget(category,project,materialSelection){
 export function propertyTargetStatus(category,project,target,inspectSource){
   const doc=project.document;
   if(!doc)return {available:false,reason:'请先打开工程'};
-  if(!target)return {available:false,reason:category==='object'?'请在物体模式中选择物体':category==='drawing'?'请选择图像文档或绘制图层':'没有可用的属性目标'};
+  if(!target)return {available:false,reason:category==='object'?'请在物体模式中选择物体':category==='drawing'?'请选择图像文档或绘制图层':category==='material'?'请选择材质图层':'没有可用的属性目标'};
   if(!validPropertyTarget(category,target))return {available:false,reason:'属性目标无效，请取消固定后重新选择'};
   if(target.projectId!==doc.id)return {available:false,reason:'固定的属性属于其他工程'};
   if(category==='render'||category==='output')return {available:true,type:'场景',name:doc.name};
@@ -54,9 +54,10 @@ export function propertyTargetStatus(category,project,target,inspectSource){
       const resource=doc.paint.materials?.[target.resourceId];
       return resource?{available:true,type:'材质资源',name:resource.name,resource}:{available:false,reason:'固定的材质资源已不存在'};
     }
-    const layer=target.layerId==null?null:doc.paint.layers.find(item=>item.id===target.layerId);
-    if(target.layerId!=null&&!layer)return {available:false,reason:'固定的材质图层已不存在'};
-    return {available:true,type:target.target==='mask'?'材质蒙版':'材质图层',name:layer?.name||'全 UV 底层',layer};
+    if(target.layerId==null)return {available:false,reason:'请选择材质图层'};
+    const layer=doc.paint.layers.find(item=>item.id===target.layerId);
+    if(!layer)return {available:false,reason:'固定的材质图层已不存在'};
+    return {available:true,type:target.target==='mask'?'材质蒙版':'材质图层',name:layer.name,layer};
   }
   if(category==='drawing'){
     const image=doc.paint.imageDocuments?.[target.documentId];

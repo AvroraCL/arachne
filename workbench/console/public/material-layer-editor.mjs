@@ -42,9 +42,10 @@ export function createMaterialLayerEditor(ctx,bridge){
   const collapsedByProject=new Map(Object.entries(state.collapsedByProject||{}).slice(-12)
     .filter(([,ids])=>Array.isArray(ids)).map(([id,ids])=>[id,new Set(ids)]));
   const views=new Map();
-  const base=action('全 UV 底层',()=>project.selectLayer(null),'editor-layer-base');
+  const blank=element('div','material-stack-blank');
+  blank.onclick=()=>project.selectLayer(null);
   const empty=element('p','document-muted','没有匹配的图层');
-  body.append(empty,base);
+  body.append(empty,blank);
   let activeProject,structureKey='',selectionKey='',visibleRows=[],rename=null,disposed=false,selectionGeneration=0;
 
   function execute(operations,origin=project.origin()){
@@ -72,7 +73,7 @@ export function createMaterialLayerEditor(ctx,bridge){
       views.get(placed)?.row.scrollIntoView({block:'nearest',inline:'nearest'});
     }
   };
-  bridge.bindMaterialBaseDrop(base,placementView);
+  bridge.bindMaterialStackEnd(blank,placementView);
   search.oninput=()=>{revealedDrop=null;changed();};
   search.onkeydown=event=>{
     if(event.key!=='Escape'||!search.value)return;
@@ -258,7 +259,6 @@ export function createMaterialLayerEditor(ctx,bridge){
     selectionKey=nextSelection;
     add.disabled=busy||!bridge.canAddMaterialLayer();
     syncSelectMenu(add);
-    base.setAttribute('aria-pressed',String(active==null));
     const selectedAncestors=new Set();
     const byId=new Map(doc.paint.layers.map(layer=>[layer.id,layer]));
     for(const id of selected){

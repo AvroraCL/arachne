@@ -17,10 +17,11 @@ test('property targets retain identity and never fall back after deletion or pro
   for(const [category,target] of [['object',object],['material',material],['drawing',drawing]])assert.match(propertyTargetStatus(category,project,target).reason,/其他工程/);
 });
 
-test('base and image-document targets remain distinct from selected layers',()=>{
+test('empty material selections have no editable target and image documents remain selectable',()=>{
   const project={document:{id:'p',name:'工程',paint:{layers:[{id:'a',name:'层'}],materials:{coat:{name:'共享材质'}},imageDocuments:{image:{name:'文档',layers:[]}}}},layerId:'a',imageContext:{documentId:'image',layerId:null,target:'pixels'}};
   const base=capturePropertyTarget('material',project,()=>({layerId:null})),image=capturePropertyTarget('drawing',project);
-  assert.equal(propertyTargetStatus('material',project,base).name,'全 UV 底层');assert.equal(propertyTargetStatus('drawing',project,image).name,'文档');
+  assert.equal(base,null);
+  assert.equal(propertyTargetStatus('material',project,{projectId:'p',layerId:null,target:'material'}).available,false);assert.equal(propertyTargetStatus('drawing',project,image).name,'文档');
   const material=capturePropertyTarget('material',project,()=>({kind:'resource',resourceId:'coat'}));assert.equal(propertyTargetStatus('material',project,material).name,'共享材质');
   delete project.document.paint.materials.coat;assert.match(propertyTargetStatus('material',project,material).reason,/不存在/);
   assert.match(propertyTargetStatus('material',project,{projectId:'p',target:'material'}).reason,/无效/,'an invalid pin cannot fall back to the base');

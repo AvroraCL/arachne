@@ -202,7 +202,7 @@ export function createObjectPropertyEditor({host,project,state={},onChange,error
       sourceControls.hidden=painted;paintControls.hidden=!painted;
       if(painted){
         const selected=getPaintSelection(),layer=project.document.paint.layers.find(layer=>layer.id===selected.layerId);
-        paintLayer.textContent=(layer?.name||'全 UV 底层')+(selected.target==='mask'?' · 蒙版':'');
+        paintLayer.textContent=layer?layer.name+(selected.target==='mask'?' · 蒙版':''):'未选择材质图层';
         editLayer.textContent=selected.openWorkspace?'打开材质工作区':'查看图层属性';
       }
       slot.disabled=scene?.dragging||scene?.mode!=='object'||slots.length===1;

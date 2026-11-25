@@ -403,7 +403,8 @@ async function verifyOriginalTextureChannels(texturedFile){
   const doc=await created.json();assert.ok(created.ok,JSON.stringify(doc));
   await api('/api/projects/'+doc.id+'/paint/commands',{revision:doc.revision,operations:[
     {op:'base',patch:{metallic:.2,roughness:.8,ao:.4}},
-    {op:'baseChannels',patch:{ao:true}}
+    {op:'baseChannels',patch:{ao:true}},
+    {op:'add',kind:'fill',patch:{name:'AO 调节',channels:{color:false,metallic:false,roughness:false,ao:true},values:{...doc.paint.base,ao:.4}}}
   ]});
   const page=await browser.newPage({viewport:{width:1400,height:900}});
   try{
@@ -470,6 +471,11 @@ async function verifyOriginalTextureChannels(texturedFile){
 }
 
 async function verifyObjectMaterialNavigation(id){
+  const originalProject=await api('/api/projects/'+id);
+  const withFill=await api('/api/projects/'+id+'/paint/commands',{revision:originalProject.revision,operations:[
+    {op:'add',kind:'fill',patch:{name:'遮挡面涂层',channels:{color:true,metallic:false,roughness:true},values:originalProject.paint.base}}
+  ]});
+  const coat=withFill.paint.layers.at(-1);
   const page=await browser.newPage({viewport:{width:1400,height:900}});
   try{
     await page.goto(origin+'/paint.html?project='+id);
@@ -588,16 +594,16 @@ async function verifyObjectMaterialNavigation(id){
     const readyPigment=properties.locator('form:focus[aria-busy=false]').getByLabel('颜色',{exact:true});
     async function colorSettled(color){
       await until(async()=>await readyPigment.count()&&await readyPigment.inputValue()===color,5000);
-      assert.equal((await api('/api/projects/'+id)).paint.base.color,color);
+      assert.equal((await api('/api/projects/'+id)).paint.layers.find(l=>l.id===coat.id).values.color,color);
     }
     await colorSettled('#e12462');
     await page.keyboard.press('Control+z');
-    await colorSettled(colorState.paint.base.color);
+    await colorSettled(coat.values.color);
     await until(async()=>String(await pigmentPixel())===String(originalPixel),12000);
     await page.keyboard.press('Control+Shift+z');
     await colorSettled('#e12462');
     await page.keyboard.press('Control+z');
-    await colorSettled(colorState.paint.base.color);
+    await colorSettled(coat.values.color);
     console.log('PASS painted color preview, cancel and keyboard undo/redo from the property that committed it');
     await canvas.press('m');
     await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
@@ -610,7 +616,7 @@ async function verifyObjectMaterialNavigation(id){
     await properties.locator('.editor-properties').waitFor();
     await page.locator('.paint-menu summary').getByText('编辑',{exact:true}).click();await page.locator('#undo').click();
     await until(async()=>JSON.stringify((await api('/api/projects/'+id)).paint)===JSON.stringify(before.paint));
-    await page.getByRole('button',{name:'全 UV 底层',exact:true}).click();
+    await page.getByRole('button',{name:coat.name,exact:true}).click();
     await properties.locator('.editor-properties').waitFor();
     assert.equal(await original.isVisible(),false);
     await pickSurface(.55,.48);
@@ -624,6 +630,9 @@ async function verifyObjectMaterialNavigation(id){
     await page.locator('[data-area-mode=modeling]').click();
     await inspector.getByText('遮挡材料',{exact:true}).filter({visible:true}).waitFor();
     assert.deepEqual((await api('/api/projects/'+id)).paint,before.paint);
+    const end=await api('/api/projects/'+id);
+    const cleared=await api('/api/projects/'+id+'/paint/commands',{revision:end.revision,operations:[{op:'remove',id:coat.id}]});
+    assert.deepEqual(cleared.paint,originalProject.paint);
     console.log('PASS switching workspaces follows the single object into its material and back to the newly picked object');
     console.log('PASS clicking a source in the material workspace edits that material and preserves the paint-layer target on undo');
   }finally{await page.close();}
@@ -688,7 +697,7 @@ async function verifyMultiMaterialPick(){
     const changed=await api('/api/projects/'+doc.id);
     assert.equal(changed.paint.sourceMaterials['遮挡材料'].roughness,.24);
     assert.deepEqual(changed.paint.layers,doc.paint.layers);
-    await hit(.36);await inspector.getByRole('button',{name:'查看图层属性'}).waitFor();assert.equal(await slot.innerText(),'表面材料');
+    await hit(.36);await inspector.getByRole('button',{name:'打开材质工作区'}).waitFor();assert.equal(await slot.innerText(),'表面材料');
     await hit(.775);await workspace('material');await view.waitFor();
     const picked=page.locator('.surface-properties:visible').getByLabel('模型材质粗糙度');
     await picked.waitFor();assert.equal(Number(await picked.inputValue()),.24);
@@ -705,9 +714,9 @@ async function verifyMultiMaterialPick(){
     await until(async()=>Number(await rough.inputValue())===.7,10000);
     assert.deepEqual((await api('/api/projects/'+doc.id)).paint,doc.paint);
     await slot.click();await page.getByRole('option',{name:'表面材料',exact:true}).click();
-    await workspace('material');await view.waitFor();
-    await page.locator('.editor-area[data-editor=properties] .editor-properties:visible').waitFor();
-    await workspace('modeling');await inspector.getByRole('button',{name:'查看图层属性'}).waitFor();
+    await inspector.getByRole('button',{name:'打开材质工作区'}).click();await view.waitFor();
+    await page.locator('.editor-area[data-editor=properties]').getByText('请选择材质图层',{exact:true}).filter({visible:true}).waitFor();
+    await workspace('modeling');await inspector.getByRole('button',{name:'打开材质工作区'}).waitFor();
     assert.equal(await slot.innerText(),'表面材料');
     console.log('PASS face picking and manual slot choice edit the correct material on a multi-material object across both workspaces');
     await page.locator('[data-scene-object-id] .editor-layer-name').getByText('饰片',{exact:true}).click();
@@ -808,7 +817,7 @@ async function verifyMarkedMaterialInspection(){
     try{
       const loading=page.waitForRequest('**/model.glb*');
       await page.reload({waitUntil:'domcontentloaded'});await loading;
-      await page.getByRole('button',{name:'全 UV 底层',exact:true}).click();
+      await page.getByRole('button',{name:'机壳罩漆',exact:true}).click();
     }finally{gate.resolve();}
     await view.waitFor();await view.and(page.locator('[data-inspected-channel=color]')).waitFor();
     await shows(0,mark);

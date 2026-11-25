@@ -56,7 +56,7 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
     names.textContent=folders.join(' › ')||'图层栈顶层';
     path.append(names);
     slot.textContent=drop.zone==='inside'?'放入文件夹顶部':
-      (drop.zone==='above'?'上方':'下方')+' · '+(target?.name||'全 UV 底层');
+      target?(drop.zone==='above'?'上方':'下方')+' · '+target.name:'图层栈底部';
     location.append(path,slot);header.append(location);
   }
   function cancel(){
@@ -186,5 +186,5 @@ export function createMaterialLayerDrag({read,selection,canDrag,commit,applyShel
       });
     };
   }
-  return {bind,bindBase:(row,view)=>bindTarget(row,null,view,row.parentElement)};
+  return {bind,bindStackEnd:(row,view)=>bindTarget(row,null,view,row.parentElement)};
 }

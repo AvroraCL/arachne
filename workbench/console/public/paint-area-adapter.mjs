@@ -117,7 +117,12 @@ export function setupPaintAreas(hooks){
         visibleEditors.find(editor=>editor.kind==='viewport'&&editor.isReady());
       return view?.viewport.sourceMaterial(target)||null;
     },
-    saveStateChanged:hooks.saveStateChanged,legacyCameraProject:hooks.legacyCameraProject,renderSettings:hooks.renderSettings,renderResults:hooks.renderResults,openMaterial:layerId=>{if(areas.switchWorkspace('material')){project.selectLayer(layerId);project.setEditorDomain('material');}},renderProperties:hooks.renderProperties,propertyKey:hooks.propertyKey,propertyTarget:hooks.propertyTarget,parking,busy:hooks.busy,foreground:hooks.foreground,setForeground:hooks.setForeground,maskInk:hooks.maskInk,setMaskInk:hooks.setMaskInk,colorKey:hooks.colorKey,colorPair:hooks.colorPair,setColor:hooks.setColor,preferences:hooks.preferences,viewAsset:hooks.viewAsset,
+    saveStateChanged:hooks.saveStateChanged,legacyCameraProject:hooks.legacyCameraProject,renderSettings:hooks.renderSettings,renderResults:hooks.renderResults,
+    openMaterial(layerId){
+      if(layerId==null){switchWorkspace('material');return;}
+      if(areas.switchWorkspace('material'))project.selectLayer(layerId);
+    },
+    renderProperties:hooks.renderProperties,propertyKey:hooks.propertyKey,propertyTarget:hooks.propertyTarget,parking,busy:hooks.busy,foreground:hooks.foreground,setForeground:hooks.setForeground,maskInk:hooks.maskInk,setMaskInk:hooks.setMaskInk,colorKey:hooks.colorKey,colorPair:hooks.colorPair,setColor:hooks.setColor,preferences:hooks.preferences,viewAsset:hooks.viewAsset,
     importPersonal:async(item,libraryRevision,placement)=>{const origin=project.origin();if(!origin)throw Error('请先打开工程');const result=await write(()=>hooks.api('/api/projects/'+origin.id+'/paint/library-import',{revision:origin.revision,libraryRevision,id:item.id,placement}));if(project.document?.id!==origin.id)throw Error('资源已导入原工程，请打开原工程查看');project.publish(result.document);return result;},
     createSelection:createUVSelection,openImageText:hooks.openImageText,
     async saveImageText(origin,layer,placement,text){
@@ -154,7 +159,7 @@ export function setupPaintAreas(hooks){
       for(const editor of areas.editors())editor.previewAdjustment?.(origin,operation);
       project.draft(operation);
     },
-    layerSelection:hooks.layerSelection,selectMaterialLayer:hooks.selectMaterialLayer,openMaterialLayerMenu:hooks.openMaterialLayerMenu,bindMaterialLayerDrag:hooks.bindMaterialLayerDrag,bindMaterialBaseDrop:hooks.bindMaterialBaseDrop,cameraChanged:hooks.cameraChanged,viewportDisplayChanged:updateMaterialDemand,
+    layerSelection:hooks.layerSelection,selectMaterialLayer:hooks.selectMaterialLayer,openMaterialLayerMenu:hooks.openMaterialLayerMenu,bindMaterialLayerDrag:hooks.bindMaterialLayerDrag,bindMaterialStackEnd:hooks.bindMaterialStackEnd,cameraChanged:hooks.cameraChanged,viewportDisplayChanged:updateMaterialDemand,
     selectSurfaceTarget:hooks.selectSurfaceTarget,
     materialPreview:()=>({inspection,frame:inspectionFrame||project.frame,status:inspection?inspectionStatus:project.previewStatus}),
     clearMaterialInspection:hooks.clearMaterialInspection,toggleMaterialIsolation:hooks.toggleMaterialIsolation,
@@ -233,8 +238,8 @@ export function setupPaintAreas(hooks){
     },onWorkspace:()=>{project.setEditorDomain(areas.name==='drawing'?'image':'material');syncWorkspaceButtons();hooks.workspaceChanged?.(areas.name);hooks.remember();}
   });
   function syncWorkspaceButtons(){for(const b of document.querySelectorAll('[data-area-mode]'))b.setAttribute('aria-pressed',String(b.dataset.areaMode===areas.name));}
-  for(const b of document.querySelectorAll('[data-area-mode]'))b.onclick=()=>{
-    const next=b.dataset.areaMode,scene=project.scene;
+  function switchWorkspace(next){
+    const scene=project.scene;
     const surface=areas.name==='material'&&next==='modeling'?bridge.pickedSurface():null;
     let material=null;
     if(areas.name==='modeling'&&next==='material'&&scene?.mode==='object'&&scene.selectedIds.length===1){
@@ -246,7 +251,8 @@ export function setupPaintAreas(hooks){
     if(material&&view?.inspectModelSurface(material,scene.activeLabel,scene.activeId)){preferredViewport=view;project.notifyView('surfacePick');}
     if(surface?.objectId!=null)void view?.selectPickedObject(surface);
     syncWorkspaceButtons();hooks.remember();
-  };
+  }
+  for(const b of document.querySelectorAll('[data-area-mode]'))b.onclick=()=>switchWorkspace(b.dataset.areaMode);
   $('open-render-settings').onclick=()=>areas.openEditor('renderSettings',{placement:'sidebar'});
   $('open-render-results').onclick=()=>areas.openEditor('renderResult');
   $('reset-docks').onclick=()=>areas.reset();for(const label of $('window-menu').querySelectorAll('label'))label.hidden=true;

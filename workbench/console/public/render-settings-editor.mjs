@@ -549,9 +549,9 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   }
   const objectHost=el('div','property-editor-object');frame.panel('object').append(objectHost);
   const objectEditor=createObjectPropertyEditor({host:objectHost,project,state:state.object,onChange,error:ctx.error,
-    beginSourcePreview:adapters.beginSourcePreview,viewAsset:adapters.viewAsset,getTarget:()=>target('object'),getPaintSelection:()=>({...adapters.propertyTarget(),openWorkspace:!!pins.material}),
+    beginSourcePreview:adapters.beginSourcePreview,viewAsset:adapters.viewAsset,getTarget:()=>target('object'),getPaintSelection:()=>({...adapters.propertyTarget(),openWorkspace:!!pins.material||!project.layerId}),
     openPaintLayers(){
-      if(pins.material){adapters.openMaterial(project.layerId);return;}
+      if(pins.material||!project.layerId){adapters.openMaterial(project.layerId);return;}
       materialResource=null;
       frame.search.value='';
       frame.select('material',{focus:true});

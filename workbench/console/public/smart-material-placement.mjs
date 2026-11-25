@@ -42,7 +42,7 @@ export function insertMaterialLayers(layers,copies,placement){
   const target=smartMaterialPlacement(layers,placement?.targetId,placement?.zone);
   if(!target)throw Error('材质的放置位置已变化或被锁定');
   copies[0].parentId=target.parentId;
-  let index=0; // A null target is the permanent UV base, below every editable layer.
+  let index=0; // Dropping in the blank space places the material below all root layers.
   if(target.zone==='inside')index=layers.length;
   else if(target.targetId!==null)index=layers.findIndex(layer=>layer.id===target.targetId)+(target.zone==='above'?1:0);
   layers.splice(index,0,...copies);

@@ -249,9 +249,9 @@ button[aria-pressed=true]{background:#393939;color:#eee;box-shadow:none}
 footer:empty{display:none}
 footer{border-top:1px solid #2b2b2b;color:#eee}
 #layers{display:grid;gap:3px;margin:7px 0 3px}
-#layers button,#base{width:100%;justify-content:flex-start;text-align:left;min-width:0;background:#202020;padding:4px 7px}
-#layers button:hover,#base:hover{background:#2d2d2d}
-#layers button[aria-pressed=true],#base[aria-pressed=true]{background:#363636;color:#fff}
+#layers button{width:100%;justify-content:flex-start;text-align:left;min-width:0;background:#202020;padding:4px 7px}
+#layers button:hover{background:#2d2d2d}
+#layers button[aria-pressed=true]{background:#363636;color:#fff}
 #layers button>span:not(.layer-thumb){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .layer-thumb{width:24px;height:24px;flex:none;object-fit:contain;border-radius:4px;background:#333}
 :is(#properties,.editor-properties)>strong{display:block;padding:7px 0;font-size:var(--paint-font-body,14px)}

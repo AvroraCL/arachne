@@ -109,7 +109,6 @@
 #workspace .property-inspector .property-channel-switch:hover>span{border-color:transparent;background:var(--chrome-hover)}
 #workspace .property-inspector :is(.property-image-slot,.property-linked-material){border-color:transparent;border-radius:var(--chrome-radius)}
 #workspace .property-inspector .property-image-slot:hover:not(:disabled){border-color:transparent;background:var(--chrome-hover)}
-#workspace #base{border-color:transparent;border-radius:var(--chrome-radius)}
 .paint-menubar .app-menus .paint-menu>summary{border:0;border-radius:var(--chrome-radius)}
 /* Preserve focus even on controls with their own contextual CSS. */
 #workspace :is(button,summary,input[type=search]:where(:not(.editor-search-field,.editor-search-field>input))):focus-visible{
@@ -129,6 +128,7 @@
 }
 #workspace :is(#layers .layer-select[aria-pressed=true],.editor-layer-name[aria-pressed=true]){color:#eee}
 #workspace :is(#layers .layer-row,.editor-list .editor-layer-row)>button:hover:not(:disabled){background:transparent;color:#eee}
+.material-stack-blank{flex:1 0 22px;min-height:22px}
 #workspace .editor-material-tree{padding:6px}
 #workspace .editor-material-tree .editor-layer-row{gap:2px;min-height:28px;padding-right:3px}
 #workspace .editor-material-tree .editor-visibility{width:23px;min-width:23px;min-height:28px;padding:2px}
@@ -149,11 +149,10 @@
   overflow:hidden;overflow-wrap:anywhere;line-height:14px;text-align:start;white-space:normal
 }
 #workspace :is(.editor-material-tree .editor-layer-row[data-active-layer],#layers .layer-row[data-active-layer],
-  .document-layer-row[data-active],#base[aria-pressed=true],.editor-layer-base[aria-pressed=true]){box-shadow:inset 2px 0 var(--chrome-active-marker)}
+  .document-layer-row[data-active]){box-shadow:inset 2px 0 var(--chrome-active-marker)}
 #workspace .editor-material-tree .editor-layer-row[data-folded-selection] .material-tree-icon{color:#eee}
 #workspace .editor-material-tree .editor-layer-row[data-inherited-hidden] .material-tree-name{color:#999}
 #workspace .editor-material-tree .layer-inline-name{flex:1;min-height:26px;padding:2px 4px}
-#workspace .editor-material-tree .editor-layer-base{min-height:28px;padding-inline:8px;text-align:left;justify-content:flex-start}
 #workspace :is(#layers,.editor-material-tree) [data-dragging]{opacity:.55}
 #workspace :is(.layer-stack,.editor-material-tree) [data-layer-drop]{position:relative}
 .material-drop-location{
@@ -288,9 +287,6 @@
 .scene-rename-form input{width:100%;min-height:28px;padding:3px 7px;border:1px solid #555;border-radius:3px;background:#202020;color:#eee;font:inherit}
 .scene-rename-form p,.scene-rename-preview{margin:0;max-width:300px;font-size:12px;color:#999;overflow-wrap:anywhere}
 .scene-rename-actions{display:flex;justify-content:flex-end;gap:5px}.scene-rename-actions button{min-height:27px;padding:3px 9px;border:0;border-radius:3px;background:#3b3b3b;color:#ddd;font:inherit}.scene-rename-actions button:hover{background:#4a4a4a}
-#workspace :is(#base,.editor-layer-base){background:transparent;border-color:transparent;border-radius:2px;font-weight:400}
-#workspace :is(#base,.editor-layer-base):hover{background:var(--chrome-item-hover)}
-#workspace :is(#base,.editor-layer-base)[aria-pressed=true]{background:var(--chrome-item-selected);color:#eee}
 /* The material/mask target is independent of whole-layer selection. */
 #workspace #layers .layer-mask[aria-pressed=true]{box-shadow:none;background:transparent}
 #workspace #layers .layer-mask[aria-pressed=true] :is(canvas,img){outline:1px solid #aaa;outline-offset:1px}

@@ -221,7 +221,6 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .modular-workspace #layers :is(.layer-mask,.layer-visibility,.layer-lock,.layer-disclosure){min-height:32px;padding:2px}
 .modular-workspace #layers .layer-thumb{width:24px;height:24px}
 .modular-workspace #layers .layer-mask :is(canvas,img){width:26px;height:26px}
-.modular-workspace #base{min-height:32px;padding:4px 8px;background:#303030;border:1px solid #414141;border-radius:3px;font-size:13px}
 #workspace .layer-stack>.dock-content{padding-block-start:0;scroll-padding-block-start:44px}
 .modular-workspace #drawing-layer-settings{
   position:sticky;top:0;z-index:2;flex:none;background:var(--area-bg);gap:6px;padding:4px 0 8px;

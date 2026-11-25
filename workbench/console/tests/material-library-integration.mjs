@@ -150,8 +150,9 @@ try{
   const blueTile=packedShelf.getByRole('button',{name:'蓝钢',exact:true});
   const emptyStack=await api(packRoute);
   assert.equal(emptyStack.paint.layers.length,0);
+  assert.equal(await packedPage.getByRole('button',{name:'全 UV 底层'}).count(),0);
   const firstDrop=packedPage.waitForResponse(r=>r.url().endsWith('/paint/commands')&&r.request().method()==='POST');
-  await blueTile.dragTo(packedPage.locator('#base'));
+  await blueTile.dragTo(packedPage.locator('.layer-stack .material-stack-blank'));
   assert.ok((await firstDrop).ok());
   const firstLayer=(await api(packRoute)).paint.layers[0];
   assert.equal(firstLayer.materialId,await blueTile.getAttribute('data-resource-id'));
@@ -574,7 +575,7 @@ try{
   await swatchInLockedFolder.dblclick();
   await packedPage.locator('#status').filter({hasText:'「'+parent.name+'」已锁定'}).waitFor();
   assert.equal((await api(newRoute)).revision,locked.revision);
-  await packedPage.locator('#base').click();
+  await packedPage.locator('.layer-stack .material-stack-blank').click();
   assert.ok(await createFill.isEnabled());
   console.log('PASS dragging smart materials into a folder with atomic placement and lock checks');
 
