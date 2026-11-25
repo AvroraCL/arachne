@@ -202,8 +202,26 @@ assert im.getpixel((30,15))==ref,(im.getpixel((30,15)),ref)`,fileName,profile,mo
         assert.equal((await api(route)).revision,revisionBefore);
         console.log('PASS 选择 ICC 导出',mode,ext);
       }
-
-
+      if(profiles.some(([,mode])=>mode==='CMYK')){
+        const fileName=path.join(data,'proof-CMYK.tif');
+        const [chooser]=await Promise.all([page.waitForEvent('filechooser'),editor.getByRole('button',{name:'导入图片至画布'}).click()]);
+        await chooser.setFiles(fileName);await saved('将印刷 TIFF 回置到同一份原稿');
+        const placed=Object.values(doc.paint.imageDocuments)[0].layers.find(l=>l.kind==='image');
+        assert.equal(placed.scale,63/4096);
+        const asset=doc.paint.assets[placed.asset];
+        execFileSync(pythonExecutable(),['-B','-c',`import sys
+from io import BytesIO
+from PIL import Image,ImageCms
+from image_color_spaces import profile_bytes
+im=Image.open(sys.argv[1]);result=Image.open(sys.argv[2]);target=profile_bytes('acescg')
+expected=ImageCms.profileToProfile(im,BytesIO(im.info['icc_profile']),BytesIO(target),outputMode='RGB',renderingIntent=1)
+assert result.size==(63,31) and result.info['icc_profile']==target and result.tobytes()==expected.tobytes()`,
+          fileName,path.join(data,'projects',doc.id,'assets',asset.file)],{cwd:new URL('..',import.meta.url)});
+        await page.reload();await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+        await canvas.focus();await page.keyboard.press(mod+'+z');await saved('撤销置入印刷 TIFF');
+        assert.ok(!Object.values(doc.paint.imageDocuments)[0].layers.some(l=>l.id===placed.id));
+        console.log('PASS 实际导出的 CMYK TIFF 回置至 ACEScg、原尺寸、独立转换像素与撤销重开');
+      }
     }
     await checkDisplay();
     await page.reload();await checkDisplay();

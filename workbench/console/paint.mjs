@@ -1356,11 +1356,11 @@ export async function importPaintMaps(doc,revision,files,scratch){
   return {document:saved,uploaded:pictures.map((png,index)=>({id:png.entry.id,name:files[index].name}))};
 }
 export async function importDocumentPhoto(doc,request){
-  const {revision,imageLayer,inputFormat,name,data}=request;
+  const {revision,imageLayer,inputFormat,name,data,pixelSize=false}=request;
   if(doc.revision!==revision)throw revisionError(doc);
   const documents=doc.paint.imageDocuments??{};
-  if(!Object.hasOwn(documents,imageLayer?.documentId)||!['jpeg','webp'].includes(inputFormat)||typeof data!=='string'||typeof name!=='string')
-    throw Error('请选择图像文档以及有效的 JPEG 或 WebP 图片');
+  if(!Object.hasOwn(documents,imageLayer?.documentId)||!['jpeg','webp','tiff'].includes(inputFormat)||typeof data!=='string'||typeof name!=='string'||typeof pixelSize!=='boolean')
+    throw Error('请选择图像文档以及有效的 JPEG、WebP 或 TIFF 图片');
   const bytes=Buffer.from(data,'base64');
   if(!bytes.length||bytes.length>24*1024*1024)throw Error('图片大小须在 24 MiB 以内');
   const folder=await fsp.mkdtemp(path.join(projectDir(doc.id),'photo-import-'));
@@ -1370,7 +1370,10 @@ export async function importDocumentPhoto(doc,request){
     const [output]=await normalizeImageFiles([{source,destination,name:'photo.'+inputFormat,workingSpace:documents[imageLayer.documentId].colorSpace}],folder);
     const current=read(doc.id);
     if(current.revision!==revision)throw revisionError(current);
-    return importPaint(current,{...request,name:(name.replace(/\.[^.]*$/,'')||'导入图片')+'.png'},await fsp.readFile(output));
+    const png=await fsp.readFile(output);
+    const nativeScale=Math.max(png.readUInt32BE(16),png.readUInt32BE(20))/4096;
+    return importPaint(current,{...request,imageLayer:{...imageLayer,scale:imageLayer.scale??(pixelSize?nativeScale:Math.min(1,nativeScale))},
+      name:(name.replace(/\.[^.]*$/,'')||'导入图片')+'.png'},png);
   }finally{await fsp.rm(folder,{recursive:true,force:true});}
 }
 export function importPaint(doc,{revision,name,data,maskLayerId,placement,nodeId,materialId,imageLayer},decodedBytes){

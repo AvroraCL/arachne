@@ -9,7 +9,8 @@ from image_color_spaces import profile_bytes, rgb_transform
 
 
 MIB = 1024 * 1024
-FORMATS = {'.png': 'PNG', '.jpg': 'JPEG', '.jpeg': 'JPEG', '.webp': 'WEBP', '.tga': 'TGA'}
+FORMATS = {'.png': 'PNG', '.jpg': 'JPEG', '.jpeg': 'JPEG', '.webp': 'WEBP', '.tga': 'TGA',
+           '.tif':'TIFF', '.tiff':'TIFF'}
 
 
 def convert(item):
@@ -26,8 +27,9 @@ def convert(item):
                 image.verify()
                 return source
             orientation = ImageOps.exif_transpose(image)
-            mode = 'L' if orientation.mode == 'L' else 'RGBA' if orientation.has_transparency_data else 'RGB'
             profile = orientation.info.get('icc_profile')
+            if expected=='TIFF' and orientation.mode=='CMYK' and not profile:
+                raise ValueError('CMYK TIFF 缺少 ICC 配置，请在原软件中嵌入印刷配置再置入')
             if orientation.mode == 'CMYK' and profile:
                 # PNG cannot carry CMYK samples; interpret their profile while they
                 # still have four color channels.
@@ -40,7 +42,18 @@ def convert(item):
                 if profile and item.get('workingSpace') not in (None, 'linear'):
                     # A placed photo must remain convertible when the document reopens.
                     rgb_transform(profile,profile_bytes(item['workingSpace']))
-                normalized = orientation.convert(mode)
+                if orientation.mode.startswith('I;16'):
+                    import numpy as np
+                    normalized=Image.new('L',orientation.size)
+                    for top in range(0,orientation.height,256):
+                        box=(0,top,orientation.width,min(top+256,orientation.height))
+                        values=np.asarray(orientation.crop(box),dtype=np.uint32)
+                        normalized.paste(Image.fromarray(((values+128)//257).astype(np.uint8)),(0,top))
+                elif orientation.mode in ('I','F'):
+                    raise ValueError('请先将整数或浮点 TIFF 转为 8 位或 16 位图像')
+                else:
+                    mode='L' if orientation.mode=='L' else 'RGBA' if orientation.has_transparency_data else 'RGB'
+                    normalized=orientation.convert(mode)
             # Preserve the tag without transforming RGB or packed-channel bytes.
             normalized.info.clear()
             destination = Path(item['destination'])

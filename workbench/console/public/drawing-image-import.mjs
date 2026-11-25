@@ -1,8 +1,9 @@
 import {clipboardImageLimit,clipboardPngSize} from './image-clipboard.mjs';
 
-export const drawingImageTypes='image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp';
+export const brushImageTypes='image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp';
+export const drawingImageTypes=brushImageTypes+',image/tiff,.tif,.tiff';
 const maxBytes=clipboardImageLimit,maxSide=8192;
-const supportedTypes=new Set(['image/png','image/jpeg','image/webp']);
+const supportedTypes=new Set(['image/png','image/jpeg','image/webp','image/tiff','image/x-tiff']);
 const pngSignature=[137,80,78,71,13,10,26,10];
 const matches=(bytes,offset,signature)=>signature.every((value,index)=>bytes[offset+index]===value);
 const ascii=(bytes,offset,length)=>String.fromCharCode(...bytes.subarray(offset,offset+length));
@@ -10,7 +11,7 @@ const validSize=([width,height])=>width>0&&height>0&&width<=maxSide&&height<=max
 
 export function acceptsDrawingImage(file){
   return !!file&&(supportedTypes.has(file.type)||
-    (!file.type||file.type==='application/octet-stream')&&/\.(png|jpe?g|webp)$/i.test(file.name));
+    (!file.type||file.type==='application/octet-stream')&&/\.(png|jpe?g|webp|tiff?)$/i.test(file.name));
 }
 
 function jpegSize(bytes){
@@ -66,10 +67,19 @@ async function decode(file){
 }
 
 export async function prepareDrawingImage(file,{preserveProfile=false}={}){
-  if(!acceptsDrawingImage(file))throw Error('请选择 PNG、JPEG 或 WebP 图片');
+  if(!acceptsDrawingImage(file))throw Error('请选择 PNG、JPEG、WebP 或 TIFF 图片');
   if(file.size>maxBytes)throw Error('图片不能超过 24 MiB');
   const header=new Uint8Array(await file.slice(0,32).arrayBuffer());
   if(matches(header,0,pngSignature))return {file,size:await clipboardPngSize(file)};
+  if(preserveProfile){
+    let format;
+    if(matches(header,0,[0xff,0xd8,0xff]))format='jpeg';
+    else if(ascii(header,0,4)==='RIFF'&&ascii(header,8,4)==='WEBP')format='webp';
+    else if(matches(header,0,[0x49,0x49,42,0])||matches(header,0,[0x4d,0x4d,0,42]))format='tiff';
+    if(!format)throw Error('无法读取图片格式');
+    // The importer places the oriented image using the same decode that reads its ICC.
+    return {file,format};
+  }
   const size=matches(header,0,[0xff,0xd8,0xff])?jpegSize(new Uint8Array(await file.arrayBuffer())):
     ascii(header,0,4)==='RIFF'&&ascii(header,8,4)==='WEBP'?webpSize(header):null;
   if(!size)throw Error('无法读取图片格式或尺寸');
@@ -80,7 +90,6 @@ export async function prepareDrawingImage(file,{preserveProfile=false}={}){
   try{
     const {image,width,height}=decoded;
     if(!validSize([width,height]))throw Error('图片宽高不能超过 8192 像素');
-    if(preserveProfile)return {file,size:[width,height],format:header[0]===0xff?'jpeg':'webp'};
     const canvas=document.createElement('canvas');
     canvas.width=width;canvas.height=height;
     const context=canvas.getContext('2d',{alpha:true,colorSpace:'srgb'});

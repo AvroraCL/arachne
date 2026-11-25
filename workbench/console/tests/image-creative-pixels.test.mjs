@@ -458,6 +458,35 @@ for x,y in [(13,4065),(4043,0)]:
 });
 
 const cmykProfile=process.env.ARACHNE_TEST_CMYK_PROFILE||'/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc';
+test('placing TIFF artwork respects its gray sample range, transparency and embedded working profile',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`import tempfile
+from pathlib import Path
+from PIL import Image
+import numpy as np
+from image_color_spaces import profile_bytes
+from material_image_import import convert
+with tempfile.TemporaryDirectory() as folder:
+    source=Path(folder)/'原稿.tif'; dest=source.with_suffix('.png')
+    args=dict(name=source.name,source=source,destination=dest,workingSpace='display-p3')
+    for order in ('<','>'):
+        Image.fromarray(np.array([[0,256,16384,32768,49152,65535]],dtype=order+'u2')).save(source)
+        convert(args)
+        with Image.open(dest) as im:
+            assert list(im.getdata())==[0,1,64,128,191,255]
+    photo=Image.new('RGBA',(7,3),(238,0,88,97));p3=profile_bytes('display-p3')
+    photo.save(source,icc_profile=p3,compression='tiff_deflate');convert(args)
+    with Image.open(dest) as im:
+        assert im.mode=='RGBA' and im.info['icc_profile']==p3 and im.tobytes()==photo.tobytes()
+    photo.save(source,save_all=True,append_images=[photo])
+    try: convert(args)
+    except ValueError as e: assert '单帧' in str(e)
+    else: raise AssertionError('multipage TIFF dropped a page')
+    Image.new('CMYK',(1,1)).save(source)
+    try: convert(args)
+    except ValueError as e: assert '缺少 ICC' in str(e)
+    else: raise AssertionError('untagged ink silently assigned a printing condition')
+`],{cwd:new URL('..',import.meta.url)});
+});
 test('a tagged CMYK photo converts directly into the working RGB space while its four ink channels are intact',
   {skip:existsSync(cmykProfile)?false:'requires a local CMYK ICC profile'},()=>{
   execFileSync(pythonExecutable(),['-B','-c',`

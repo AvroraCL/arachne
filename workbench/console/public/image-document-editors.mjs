@@ -11,7 +11,7 @@ import {createImageUVGuide} from './image-uv-guide.mjs';
 import {canvasCoordinates,canvasPoint,orientImageCanvas} from './image-canvas-coordinates.mjs';
 import {copyImagePixels,copiedImage,onImageClipboardChange,imageClipboardPlacement} from './image-clipboard.mjs';
 import {compositionKey} from './text-input.mjs';
-import {drawingImageTypes,acceptsDrawingImage,prepareDrawingImage} from './drawing-image-import.mjs';
+import {drawingImageTypes,brushImageTypes,acceptsDrawingImage,prepareDrawingImage} from './drawing-image-import.mjs';
 import {headerControls,chromeButton,chromeMenu,createContextActions} from './area-chrome.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
@@ -173,7 +173,7 @@ export function createDocumentEditor(ctx,bridge){
   importInput.type='file';importInput.accept=drawingImageTypes;importInput.hidden=true;
   importInput.setAttribute('aria-label','选择要导入的图片');
   const importButton=chromeButton(button('导入图片至画布',()=>importInput.click()),'importImage');
-  importButton.title='导入 PNG、JPEG 或 WebP 至当前画布';
+  importButton.title='导入 PNG、JPEG、WebP 或 TIFF 至当前画布';
   importInput.onchange=()=>{
     const file=importInput.files[0];
     importInput.value='';
@@ -326,7 +326,7 @@ export function createDocumentEditor(ctx,bridge){
       syncBrushImages();
     });
     field.append(select);brushPopup.append(field);enhanceSelectMenu(select);
-    const file=el('input');file.type='file';file.accept=drawingImageTypes;file.hidden=true;
+    const file=el('input');file.type='file';file.accept=brushImageTypes;file.hidden=true;
     file.setAttribute('aria-label','选择'+title+'文件');host.append(file);
     const upload=button('导入'+title+'…',()=>file.click());
     upload.title='导入不超过 1024 × 1024 的图片';
@@ -1295,10 +1295,12 @@ export function createDocumentEditor(ctx,bridge){
       if(!origin.documentId)throw Error('请先新建图像');
       const prepared=await prepareDrawingImage(file,{preserveProfile:true});
       if(disposed)return;
-      const [width,height]=prepared.size;
-      const placement=position?.scale!==undefined?position:imageClipboardPlacement(width,height,position&&[position.x,position.y]);
-      if(!pixelSize&&position?.scale===undefined)placement.scale=Math.min(1,placement.scale);
-      await bridge.importDocumentAsset(prepared.file,origin,layerId,{...placement,...insertion},prepared.format);
+      let placement=position??{x:.5,y:.5};
+      if(prepared.size&&placement.scale===undefined){
+        placement=imageClipboardPlacement(...prepared.size,[placement.x,placement.y]);
+        if(!pixelSize)placement.scale=Math.min(1,placement.scale);
+      }
+      await bridge.importDocumentAsset(prepared.file,origin,layerId,{...placement,...insertion},prepared.format,pixelSize);
       if(!disposed)selectAddedLayer(project,origin,layerId);
     }).finally(()=>{importing=false;if(!disposed)sync();});
   }
@@ -1398,7 +1400,7 @@ export function createDocumentEditor(ctx,bridge){
     if(!position){ctx.error(Error('请将图片放到画布内'));return;}
     if(transfer.types.includes('Files')){
       const files=[...transfer.files],file=files[0];
-      if(files.length!==1||!acceptsDrawingImage(file)){ctx.error(Error('每次可拖入一张 PNG、JPEG 或 WebP 图片'));return;}
+      if(files.length!==1||!acceptsDrawingImage(file)){ctx.error(Error('每次可拖入一张 PNG、JPEG、WebP 或 TIFF 图片'));return;}
       importFile(file,position);return;
     }
     const dragged=readAssetDrag(transfer,project.document);if(!dragged){ctx.error(Error('素材所属工程或修订已变化，请重新拖动'));return;}
