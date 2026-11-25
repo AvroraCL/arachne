@@ -338,6 +338,29 @@ assert bytes(raw)==expected
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8',env:{...process.env,OPENBLAS_NUM_THREADS:'1'}});
 });
 
+test('PNG export converts the completed image once while preserving straight alpha and leaving raw numerical maps untouched',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+from io import BytesIO
+import numpy as np
+from PIL import Image,ImageCms
+from image_documents import png_bytes
+from image_color_spaces import profile_bytes
+rgba=np.array([[[120,80,20,0],[8,121,239,79],[84,89,94,255]]],dtype=np.uint8)
+for source,target in [('acescg','display-p3'),('display-p3','srgb'),('srgb','aces2065-1')]:
+    image=Image.open(BytesIO(png_bytes(rgba,source,target)))
+    if target=='srgb': assert image.info['srgb']==0 and 'icc_profile' not in image.info
+    else: assert image.info['icc_profile']==profile_bytes(target)
+    expected=ImageCms.profileToProfile(Image.fromarray(rgba),BytesIO(profile_bytes(source)),BytesIO(profile_bytes(target)),
+                                       outputMode='RGBA',renderingIntent=1)
+    np.testing.assert_array_equal(np.asarray(image),np.asarray(expected))
+    np.testing.assert_array_equal(np.asarray(image)[:,:,3],rgba[:,:,3])
+    assert not np.array_equal(np.asarray(image)[:,:,:3],rgba[:,:,:3])
+raw=Image.open(BytesIO(png_bytes(rgba,'linear','linear')))
+np.testing.assert_array_equal(np.asarray(raw),rgba)
+assert raw.info['gamma']==1.0 and 'icc_profile' not in raw.info
+`],{cwd:new URL('..',import.meta.url)});
+});
+
 test('packaged ACES colorants implement the published AP0 to AP1 matrix',()=>{
   execFileSync(pythonExecutable(),['-B','-c',`
 import numpy as np

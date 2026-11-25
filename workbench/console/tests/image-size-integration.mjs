@@ -108,6 +108,22 @@ assert im.getextrema()==((68,68),(119,119),(170,170),(255,255)),im.getextrema()`
         return pixel.every((n,i)=>Math.abs(n-expectedDisplay[i])<=1);
       },label+' 画布与导出 ICC 色块一致');
     }
+    if(colorSpace==='acescg'){
+      const revisionBefore=(await api(route)).revision;
+      await editor.getByRole('button',{name:'选择 PNG 输出颜色空间',exact:true}).click();
+      const asSRGB=page.waitForEvent('download');
+      await page.getByRole('menuitem',{name:'颜色（sRGB）',exact:true}).click();
+      const copy=await asSRGB;
+      assert.ok(copy.suggestedFilename().endsWith('-srgb.png'));
+      const converted=path.join(data,'acescg-to-srgb.png');
+      await copy.saveAs(converted);
+      const png=execFileSync(pythonExecutable(),['-c',`import sys
+from PIL import Image
+im=Image.open(sys.argv[1]);assert im.size==(63,31) and im.info['srgb']==0
+print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).map(Number);
+      assert.ok(png.every((v,i)=>Math.abs(v-expectedDisplay[i])<=1),'sRGB 输出副本与受色彩管理的原稿预览一致');
+      assert.equal((await api(route)).revision,revisionBefore);
+    }
     await checkDisplay();
     await page.reload();await checkDisplay();
     assert.equal((await api(route)).paint.imageDocuments[Object.keys(doc.paint.imageDocuments)[0]].colorSpace,colorSpace);

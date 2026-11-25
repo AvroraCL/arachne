@@ -1524,14 +1524,18 @@ def image_edge_view(document,assets,size,options):
     return png_bytes(np.asarray(background),document['colorSpace'])
 
 
-def png_bytes(pixels, color_space=None):
+def png_bytes(pixels, color_space=None, output_space=None):
+    image = Image.fromarray(pixels)
+    if output_space and output_space!=color_space:
+        image = convert_image(image,profile_bytes(color_space),profile_bytes(output_space))
+        color_space = output_space
     metadata = PngImagePlugin.PngInfo()
     if color_space == 'srgb':
         metadata.add(b'sRGB', bytes([0]))
     elif color_space == 'linear':
         metadata.add(b'gAMA', struct.pack('>I', 100000))
     out = BytesIO()
-    Image.fromarray(pixels).save(out, format='PNG', pnginfo=metadata, icc_profile=profile_bytes(color_space) if color_space in PROFILED_RGB else None, compress_level=3)
+    image.save(out, format='PNG', pnginfo=metadata, icc_profile=profile_bytes(color_space) if color_space in PROFILED_RGB else None, compress_level=3)
     return out.getvalue()
 
 

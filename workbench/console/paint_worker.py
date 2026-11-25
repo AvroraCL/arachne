@@ -733,7 +733,7 @@ def live_pixels(cfg):
         if cfg.get('exportDocument') or cfg.get('imageViewSize'):
             pixels=framed_pixels(pixels,doc,target=cfg.get('imageViewSize'))
         if cfg.get('imagePng'):
-            return png_bytes(pixels,doc['colorSpace'])
+            return png_bytes(pixels,doc['colorSpace'],cfg.get('exportColorSpace'))
         # Row reversal leaves a strided view. Copy rows once into a contiguous
         # buffer and let stdout/base64 consume it without another bytes copy.
         return memoryview(np.ascontiguousarray(pixels)).cast('B')

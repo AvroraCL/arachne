@@ -177,7 +177,25 @@ export function createDocumentEditor(ctx,bridge){
     importInput.value='';
     if(file)importFile(file);
   };
-  const download=chromeButton(button('导出当前图像 PNG',downloadDocument),'download');
+  const download=chromeButton(button('导出当前图像 PNG',()=>downloadDocument()),'download');
+  const exportMenu=createContextActions('PNG 输出颜色空间',error=>ctx.error(error));
+  const exportOptions=chromeButton(button('选择 PNG 输出颜色空间',()=>{
+    const image=currentDocument(project),origin=imageSelectionOrigin(project);
+    if(!image)return;
+    const rect=exportOptions.getBoundingClientRect();
+    const label=imageColorSpaces.find(([space])=>space===image.colorSpace)[1];
+    const choices=imageColorSpaces.filter(([space])=>space!=='linear').map(([space,label])=>({
+      label,shortcut:space===image.colorSpace?'原稿':'',run:()=>{
+        const current=imageSelectionOrigin(project);
+        if(current.id!==origin.id||current.documentId!==origin.documentId)throw Error('图像已切换，请重新选择导出空间');
+        return downloadDocument(space);
+      }
+    }));
+    exportMenu.open({clientX:rect.left,clientY:rect.bottom},'导出 PNG · 原稿 '+label,choices);
+  }),'chevron','选择 PNG 输出颜色空间');
+  exportMenu.bindTrigger(exportOptions);
+  const exportGroup=el('span','document-export-controls');
+  exportGroup.append(download,exportOptions);
   download.classList.add('document-export-button');
   download.title='导出当前图像 PNG';
   chromeButton(copy,'copy');chromeButton(paste,'paste');
@@ -198,7 +216,7 @@ export function createDocumentEditor(ctx,bridge){
     selectImage(project,{...trail.at(-1),target:'pixels',sourceTrail:trail.slice(0,-1)},{reveal:true});
   });
   backToParent.hidden=true;
-  header.append(backToParent,picker,create,dimensions,channel,destination,bind,copy,paste,importButton,download);headerControls(ctx,header);
+  header.append(backToParent,picker,create,dimensions,channel,destination,bind,copy,paste,importButton,exportGroup);headerControls(ctx,header);
   const options=el('div','document-tool-options'),toolName=el('strong','document-current-tool','抓手');
   const editTarget=el('span','document-edit-target'),targetLayerName=el('span'),targetKind=el('span');
   editTarget.append(targetLayerName,' · ',targetKind);
@@ -1195,9 +1213,11 @@ export function createDocumentEditor(ctx,bridge){
     download.disabled=!canPaste()||!!exportRequest;
     download.setAttribute('aria-busy',String(!!exportRequest));
     const doc=currentDocument(project);
+    exportOptions.disabled=download.disabled||doc?.colorSpace==='linear';
+    exportOptions.title=doc?.colorSpace==='linear'?'数据贴图按原始通道数值导出':'选择 PNG 输出颜色空间';
     download.title=exportRequest?'正在导出 PNG…':doc?`导出当前图像 · ${doc.width} × ${doc.height} PNG`:'导出当前图像 PNG';
   }
-  async function downloadDocument(){
+  async function downloadDocument(outputSpace){
     const image=currentDocument(project);
     if(!image||exportRequest||!canPaste())return;
     const {id,revision,documentId}=imageSelectionOrigin(project);
@@ -1206,7 +1226,7 @@ export function createDocumentEditor(ctx,bridge){
     try{
       const response=await fetch('/api/projects/'+id+'/paint/image-export',{
         method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-        body:JSON.stringify({revision,documentId})
+        body:JSON.stringify({revision,documentId,outputSpace})
       });
       if(response.status===204)throw Error('图像已变化，请重新导出');
       if(!response.ok)throw Error((await response.json()).error||'导出 PNG 失败');
@@ -1214,7 +1234,7 @@ export function createDocumentEditor(ctx,bridge){
       if(controller.signal.aborted)return;
       const url=URL.createObjectURL(png),link=el('a');
       const name=image.name.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g,'_').replace(/[ .]+$/,'')||'贴图';
-      link.href=url;link.download=name+'.png';
+      link.href=url;link.download=name+(outputSpace&&outputSpace!==image.colorSpace?'-'+outputSpace:'')+'.png';
       host.append(link);link.click();link.remove();
       setTimeout(()=>URL.revokeObjectURL(url),10000);
     }catch(error){
@@ -1623,7 +1643,7 @@ export function createDocumentEditor(ctx,bridge){
       if(!visible){stopAdjustmentPick();edgeTool.cancel();penTool.cancelDrag();canvasText.cancel();gradientTool.cancel();shapeTool.cancel();moveTool.cancel();warpTool.cancel();}
       if(visible)sync();
     },
-    dispose(){disposed=true;clearClipboardNotice();stopAdjustmentPick();exportRequest?.abort();unsub();stopClipboard();gradientTool.cancel();cloneTool.dispose();shapeTool.cancel();moveTool.dispose();warpTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.dispose();uvGuide.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
+    dispose(){disposed=true;clearClipboardNotice();stopAdjustmentPick();exportRequest?.abort();exportMenu.dispose();unsub();stopClipboard();gradientTool.cancel();cloneTool.dispose();shapeTool.cancel();moveTool.dispose();warpTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.dispose();uvGuide.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
 }
 
 export function createImagePanel(type,ctx){

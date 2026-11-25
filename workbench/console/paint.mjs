@@ -2,7 +2,7 @@ import {previewDimensions} from './public/image-document-size.mjs';
 import {libraryFill,insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
 import {textDefaults,textFonts,textEffects,checkStyleFields,hasImageStyle,paragraphOrigin} from './public/image-text-style.mjs';
-import {embeddedDependencies,validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
+import {imageColorSpaces,embeddedDependencies,validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
 import {layoutKinds} from './public/image-layout.mjs';
 import {imagePlacement,warpPoint} from './public/image-warp.mjs';
 import {imageLayersThrough,isolateImageLayer} from './public/image-layer-tree.mjs';
@@ -955,8 +955,15 @@ export function imageClipboardInput(doc,request){
   return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
 }
 export function imageExportInput(doc,request){
-  const {revision,documentId}=fields(request,['revision','documentId']);
-  return {...imageDocumentInput(doc,{revision,documentId,resolution:4096}),imagePng:true,exportDocument:true};
+  const {revision,documentId,outputSpace}=fields(request,['revision','documentId','outputSpace']);
+  const input=imageDocumentInput(doc,{revision,documentId,resolution:4096});
+  if(outputSpace!==undefined){
+    const source=doc.paint.imageDocuments[documentId].colorSpace;
+    if(!imageColorSpaces.some(([space])=>space===outputSpace))throw Error('请选择有效的 PNG 输出颜色空间');
+    if((source==='linear')!==(outputSpace==='linear'))throw Error('数据贴图须保留原始通道数值');
+    input.exportColorSpace=outputSpace;
+  }
+  return {...input,imagePng:true,exportDocument:true};
 }
 export function imageLayoutProbeInput(doc,request){
   const {revision,documentId,layerIds,point,resolution=256}=fields(request,['revision','documentId','layerIds','point','resolution']);

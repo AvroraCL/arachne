@@ -393,6 +393,9 @@
 .document-colors input::-webkit-color-swatch-wrapper{padding:0}.document-colors input::-webkit-color-swatch{border:0;border-radius:0}.document-colors input::-moz-color-swatch{border:0;border-radius:0}
 .document-colors input:focus-visible{z-index:2;outline:1px solid var(--drawing-tool-marker);outline-offset:1px}
 
+.document-export-controls{display:inline-flex;align-items:center;gap:0;flex:none}
+.document-export-controls .context-menu-trigger{min-width:18px;padding-inline:2px}
+.document-export-controls .context-menu-trigger .chrome-icon{width:12px;transform:rotate(90deg)}
 .document-export-button[aria-busy=true] .chrome-icon{opacity:.45}
 .document-adjustment-ramp{height:13px;border-radius:2px;margin:3px 0 5px}
 .document-hue-range{background:var(--hue-range-shading),linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
