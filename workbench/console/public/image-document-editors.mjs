@@ -550,7 +550,8 @@ export function createDocumentEditor(ctx,bridge){
       if(sampleNotice.dataset.pending&&sampleFrame(imageOrigin()))showSampleNotice();
       const [pw,ph]=previewDimensions(currentDocument(project),size);
       const actual=size?`实际预览 ${pw} × ${ph}${size===4096&&pw===4096&&ph===4096?' · 4K':''}`:'等待实时预览',suffix=phase==='refining'?(currentDocument(project)?.width===4096&&currentDocument(project)?.height===4096?' · 正在提升到 4K…':' · 正在细化至文档尺寸…'):phase==='retrying'?' · 预览暂不可用，正在重试…':phase==='error'?` · ${failedSize===4096?'全尺寸更新失败':'预览更新失败'} · 点击重试`:'';
-      previewCaption=actual+suffix;status.tabIndex=phase==='error'?0:-1;if(phase==='error')status.setAttribute('role','button');else status.removeAttribute('role');layout();}});
+      const target=detail.displaySpace==='display-p3'?'Display P3':detail.displaySpace==='srgb'?'sRGB':'';
+      previewCaption=actual+(target?' · '+target+' 预览':'')+suffix;status.tabIndex=phase==='error'?0:-1;if(phase==='error')status.setAttribute('role','button');else status.removeAttribute('role');layout();}});
   let brushPreview=[],brushPreviewRevision=null;
   function syncStrokePreview(){
     if(disposed||!shown)return;

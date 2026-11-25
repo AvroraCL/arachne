@@ -1,5 +1,5 @@
 import {imageColorSpaces} from './image-documents.mjs';
-import {writeDisplayRGB} from './image-display-rgb.mjs';
+import {imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
 import {enhanceSelectMenu} from './paint-select.mjs';
 import {editingSide,resizedDocument} from './image-document-size.mjs';
 
@@ -75,13 +75,17 @@ function newImageSettings(form,width,height,defaultName){
       'rec2020-g24':'使用 Rec.2020 原色和 2.4 显示伽马。',
       'dci-p3':'使用影院 P3 白点和 2.6 伽马。'
     };
-    profileNote.textContent=profiled?(usage[space.value]||'画布按 sRGB 预览。')+' PNG 嵌入此 ICC 配置。'
+    const displaySpace=imageDisplaySpace(space.value,preferredDisplaySpace());
+    profileNote.textContent=profiled?(usage[space.value]||('画布按 '+(displaySpace==='display-p3'?'Display P3':'sRGB')+' 预览。'))+' PNG 嵌入此 ICC 配置。'
       :space.value==='linear'?'保留通道数值，适用于粗糙度、法线和蒙版。':'适用于网页图像和常规彩色贴图。';
     if(hex&&profiled){
       const rgb=hex.slice(1).match(/../g).map(n=>parseInt(n,16));
       const display=new Uint8ClampedArray(4);
-      writeDisplayRGB(display,[...rgb,255],space.value);
-      paper.style.background='rgb('+display.slice(0,3).join(' ')+')';
+      writeDisplayRGB(display,[...rgb,255],space.value,false,displaySpace);
+      const values=[...display.subarray(0,3)];
+      paper.style.background=displaySpace==='display-p3'
+        ?'color(display-p3 '+values.map(v=>v/255).join(' ')+')'
+        :'rgb('+values.join(' ')+')';
     }else paper.style.background=hex||'';
     color.parentElement.hidden=background.value!=='custom';
     orientations.forEach((button,i)=>{
@@ -150,7 +154,7 @@ export function editDocumentSize(action,doc,{canvas,signal,defaultName}={}){
     const preview=document.createElement('div'),view=document.createElement('canvas'),box=document.createElement('div');
     preview.className='image-crop-preview';view.width=Math.max(1,Math.round(w*Math.min(1,768/w,440/h)));
     view.height=Math.max(1,Math.round(h*Math.min(1,768/w,440/h)));view.style.aspectRatio=w+'/'+h;
-    view.getContext('2d').drawImage(canvas,0,0,view.width,view.height);
+    view.getContext('2d',{colorSpace:preferredDisplaySpace()}).drawImage(canvas,0,0,view.width,view.height);
     preview.append(view,box);form.insertBefore(preview,width.parentNode);
     for(const edge of ['nw','n','ne','e','se','s','sw','w']){
       const handle=document.createElement('i');handle.dataset.edge=edge;box.append(handle);

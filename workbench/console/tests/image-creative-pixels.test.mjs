@@ -384,7 +384,7 @@ from io import BytesIO
 from PIL import Image, ImageCms
 import json, numpy as np
 from image_documents import composite_document, png_bytes, read_placed_image
-from image_color_spaces import decode
+from image_color_spaces import decode,profile_bytes
 rows=[]
 for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec2020-g24','dci-p3','acescg','aces2065-1','linear-srgb'):
     # Midtones, near-black transfer curves and out-of-sRGB primaries.
@@ -395,6 +395,8 @@ for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec202
         proof=ImageCms.profileToProfile(im,ImageCms.ImageCmsProfile(BytesIO(im.info['icc_profile'])),
             ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
         expected=np.asarray(proof)
+        wide=np.asarray(ImageCms.profileToProfile(im,ImageCms.ImageCmsProfile(BytesIO(im.info['icc_profile'])),
+            ImageCms.ImageCmsProfile(BytesIO(profile_bytes('display-p3'))),outputMode='RGBA',renderingIntent=1))
     # Place the tagged export in an sRGB document, including fractional alpha.
     actual=read_placed_image(BytesIO(data),'srgb')
     normalized=expected.astype(np.float32)/255
@@ -408,14 +410,16 @@ for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec202
     middle={'display-p3':188,'adobe-rgb':186,'prophoto-rgb':174,'rec709':180,'rec2020':180,
             'rec2020-g24':191,'dci-p3':195,'acescg':128,'aces2065-1':128,'linear-srgb':128}[space]
     assert list(composite_document(doc,{},16)[8,8])==[middle,middle,middle,255]
-    rows.append([space,pixels.flatten().tolist(),expected.flatten().tolist()])
+    rows.append([space,pixels.flatten().tolist(),expected.flatten().tolist(),wide.flatten().tolist()])
 print(json.dumps(rows))
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8'}));
-  for(const [space,source,expected] of samples){
+  for(const [space,source,expected,wide] of samples){
     const display=new Uint8ClampedArray(source.length);
-    writeDisplayRGB(display,source,space);
-    for(let i=0;i<display.length;i++)
-      assert.ok(Math.abs(display[i]-expected[i])<=(i%4===3?0:1),space+' '+i+' '+display[i]+' vs '+expected[i]);
+    for(const [target,reference] of [['srgb',expected],['display-p3',wide]]){
+      writeDisplayRGB(display,source,space,false,target);
+      for(let i=0;i<display.length;i++)
+        assert.ok(Math.abs(display[i]-reference[i])<=(i%4===3?0:1),space+' to '+target+' '+i+' '+display[i]+' vs '+reference[i]);
+    }
   }
 });
 
@@ -431,4 +435,23 @@ test('sRGB proof warning marks wide-gamut visible colors and preserves neutral, 
     writeDisplayRGB(warning,source,space,true);
     assert.deepEqual(warning,display);
   }
+});
+
+test('a small off-center document thumbnail preserves opaque details and its soft mask at either canvas edge',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import numpy as np
+from image_documents import thumbnail_pixels
+for x,y in [(13,4065),(4043,0)]:
+    rect=lambda left,top,right,bottom:[(x+left)/4096,(y+top)/4096,(x+right)/4096,(y+bottom)/4096]
+    layer=dict(id='badge',kind='pixel',opacity=1,visible=True,blend='normal',
+               strokes=[dict(uv=True,rect=rect(0,0,53,31),color='#00ff00',opacity=1,erase=False)],
+               maskEnabled=True,maskBase=1,maskStrokes=[dict(uv=True,rect=rect(1,0,3,31),value=0,opacity=.5)])
+    doc=dict(width=53,height=31,frame=[x,y,53,31],colorSpace='display-p3',layers=[layer])
+    image=thumbnail_pixels(doc,{},[53,31])
+    assert image.shape==(31,53,4)
+    assert image[20,1].tolist()==[0,255,0,128] and image[20,3].tolist()==[0,255,0,255]
+    mask=thumbnail_pixels(doc,{},[53,31],'badge')
+    np.testing.assert_array_equal(image[:,:,3],mask[:,:,0])
+    assert np.all(mask[:,:,3]==255)
+`],{cwd:new URL('..',import.meta.url)});
 });

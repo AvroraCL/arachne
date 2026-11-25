@@ -1,5 +1,5 @@
 // D50-adapted RGB colorants of the bundled ICC profiles, multiplied by the
-// inverse sRGB colorant matrix. Only the display copy is gamut-clipped.
+// inverse sRGB colorant matrix. Clipping applies only after conversion to the display target.
 const rec2020=[1.66036035,-.58746738,-.07289297,-.12439522,1.13276038,-.00836516,-.01812828,-.10059072,1.118719];
 const toSRGB={
   'rec709':[.99991849,.00009716,-.00001566,.00008821,.9999266,-.00001481,.00001097,.00000809,.99998095],
@@ -11,15 +11,41 @@ const toSRGB={
   'adobe-rgb':[1.3982751,-.3982212,-.0000539,.0001025,.9998916,.0000059,.0000325,-.0429497,1.0429172],
   'prophoto-rgb':[2.0342011,-.7274671,-.306734,-.2286419,1.2316059,-.002964,-.0085179,-.1532819,1.1617999]
 };
+// Linear sRGB to Display P3 from those same packaged ICC colorants.
+const srgbToP3=[.822495627,.177482652,.00002172,.03311608,.966864215,.000019705,.01706429,.072398638,.910537071];
+const toP3=Object.fromEntries(Object.entries(toSRGB).map(([space,m])=>[space,
+  Array.from({length:9},(_,i)=>{
+    const row=Math.floor(i/3)*3,column=i%3;
+    return srgbToP3[row]*m[column]+srgbToP3[row+1]*m[column+3]+srgbToP3[row+2]*m[column+6];
+  })
+]));
+
+export function preferredDisplaySpace(){
+  return globalThis.matchMedia?.('(color-gamut: p3)').matches?'display-p3':'srgb';
+}
+
+// Raw data, masks and sRGB samples go to the browser as tagged sRGB ImageData.
+export function imageDisplaySpace(space,canvasSpace){
+  return hasWideGamut(space)&&canvasSpace==='display-p3'?'display-p3':'srgb';
+}
 const decoders=new Map();
 let encoded;
 export function hasWideGamut(space){
   return Boolean(toSRGB[space])&&space!=='rec709'&&space!=='linear-srgb';
 }
 
-export function writeDisplayRGB(target,pixels,space,warnGamut=false){
-  const m=toSRGB[space];
-  if(!m){if(target!==pixels)target.set(pixels);return;}
+function outsideSRGB(m,r,g,b){
+  for(let row=0;row<9;row+=3){
+    const value=m[row]*r+m[row+1]*g+m[row+2]*b;
+    // Ignore tiny excursions from rounding ICC matrix tags (signed 16.16).
+    if(value<-.0002||value>1.0002)return true;
+  }
+  return false;
+}
+
+export function writeDisplayRGB(target,pixels,space,warnGamut=false,outputSpace='srgb'){
+  const p3=outputSpace==='display-p3',m=(p3?toP3:toSRGB)[space];
+  if(!m||p3&&space==='display-p3'&&!warnGamut){if(target!==pixels)target.set(pixels);return;}
   if(!encoded)encoded=Uint8Array.from({length:65536},(_,i)=>{
     const x=i/65535;
     return Math.round(255*(x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055));
@@ -42,11 +68,10 @@ export function writeDisplayRGB(target,pixels,space,warnGamut=false){
   for(let i=0;i<pixels.length;i+=4){
     const r=linear[pixels[i]],g=linear[pixels[i+1]],b=linear[pixels[i+2]];
     const red=m[0]*r+m[1]*g+m[2]*b,green=m[3]*r+m[4]*g+m[5]*b,blue=m[6]*r+m[7]*g+m[8]*b;
-    // Ignore tiny excursions from rounding ICC matrix tags (signed 16.16).
-    const outside=warnGamut&&pixels[i+3]>0&&(Math.min(red,green,blue)<-.0002||Math.max(red,green,blue)>1.0002);
-    target[i]=outside?255:byte(red);
-    target[i+1]=outside?173:byte(green);
-    target[i+2]=outside?54:byte(blue);
+    const outside=warnGamut&&pixels[i+3]>0&&outsideSRGB(toSRGB[space],r,g,b);
+    target[i]=outside?(p3?243:255):byte(red);
+    target[i+1]=outside?(p3?177:173):byte(green);
+    target[i+2]=outside?(p3?80:54):byte(blue);
     target[i+3]=pixels[i+3];
   }
 }

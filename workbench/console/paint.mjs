@@ -1,5 +1,5 @@
 import {defaultExrSpace,exrSpaces} from './public/render-exr-color.mjs';
-import {previewDimensions} from './public/image-document-size.mjs';
+import {previewDimensions,thumbnailDimensions} from './public/image-document-size.mjs';
 import {libraryFill,insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
 import {textDefaults,textFonts,textEffects,checkStyleFields,hasImageStyle,paragraphOrigin} from './public/image-text-style.mjs';
@@ -906,6 +906,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
   const before=beforeImageLayer===undefined?null:imageLayersBeforeAdjustment(image.layers,beforeImageLayer);
   if(beforeImageLayer!==undefined&&!before)throw Error('图像调整图层不存在');
 
+  const thumbnail=documentView&&Boolean(isolatedImageLayer)&&resolution===64;
   const selected=isolatedImageLayer
     ?isolateImageLayer(image.layers,isolatedImageLayer)
     :before??image.layers;
@@ -925,7 +926,8 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
     assets:Object.fromEntries([...assetIds].map(id=>[id,assetPath(next,id)])),
     revision:next.revision,
     imageDocumentId:documentId,
-    ...(documentView?{imageViewSize:previewDimensions(image,resolution)}:{}),
+    ...(thumbnail?{imageThumbnail:true,imageViewSize:thumbnailDimensions(image,resolution)}:
+      documentView?{imageViewSize:previewDimensions(image,resolution)}:{}),
     imageInspectMask:inspectMask,...(window?{imageWindow:window}:{}),
     liveResolution:resolution,
     liveFormat:'rgba'

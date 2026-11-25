@@ -1539,7 +1539,7 @@ def png_bytes(pixels, color_space=None, output_space=None):
     return out.getvalue()
 
 
-def framed_pixels(pixels, document, limit=None, target=None):
+def framed_pixels(pixels, document, limit=None, target=None, window=None):
     width, height = document.get('width',4096), document.get('height',4096)
     x,y,w,h = document_frame(document)
     if limit is not None:
@@ -1547,8 +1547,10 @@ def framed_pixels(pixels, document, limit=None, target=None):
         width,height = max(1,round(width*scale)),max(1,round(height*scale))
     if target is not None:
         width,height=target
-    factor = pixels.shape[0]/4096
-    box = [max(0,x*factor),max(0,y*factor),min(pixels.shape[1],(x+w)*factor),min(pixels.shape[0],(y+h)*factor)]
+    factor = 1 if window else pixels.shape[0]/4096
+    ox,oy = window[:2] if window else (0,0)
+    box = [max(0,x*factor-ox),max(0,y*factor-oy),
+           min(pixels.shape[1],(x+w)*factor-ox),min(pixels.shape[0],(y+h)*factor-oy)]
     if all(value.is_integer() for value in map(float,box)):
         left,top,right,bottom=map(int,box)
         cropped=pixels[top:bottom,left:right]
@@ -1557,6 +1559,21 @@ def framed_pixels(pixels, document, limit=None, target=None):
         return np.asarray(Image.fromarray(cropped).resize((width,height),Image.Resampling.BICUBIC))
     image=Image.fromarray(pixels)
     return np.asarray(image.resize((width,height),Image.Resampling.BICUBIC,box=tuple(box)))
+
+
+def thumbnail_pixels(document, assets, target, inspect_mask=None):
+    x,y,w,h = document_frame(document)
+    resolution = min(4096,max(1,math.ceil(4096*max(target[0]/w,target[1]/h))))
+    left,top = math.floor(x),math.floor(y)
+    side = max(math.ceil(x+w)-left,math.ceil(y+h)-top)
+    # The exact brush window already accounts for stroke/filter neighborhoods.
+    # Use it when the local tile costs less than sampling the whole editing grid.
+    if side <= min(2048,resolution):
+        window = (min(left,4096-side),min(top,4096-side),side)
+        pixels = exact_stroke_window(document,assets,window,inspect_mask)
+        if pixels is not None:
+            return framed_pixels(pixels,document,target=target,window=window)
+    return framed_pixels(composite_document(document,assets,resolution,inspect_mask),document,target=target)
 
 
 _cache=OrderedDict()

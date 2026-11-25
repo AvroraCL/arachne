@@ -1,5 +1,5 @@
-import {writeDisplayRGB} from './image-display-rgb.mjs';
-import {previewDimensions} from './image-document-size.mjs';
+import {imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
+import {thumbnailDimensions} from './image-document-size.mjs';
 const size=64;
 const retryDelays=[150,300,600,1200,2400,4000,4000,4000];
 const cache=new Map();
@@ -40,8 +40,10 @@ export function pauseImageThumbnail(canvas){
 
 export function updateImageThumbnail(canvas,{projectId,revision,documentId,colorSpace,geometry},layer,mask=false){
   const slot=JSON.stringify([projectId,documentId,layer.id,mask]);
-  const key=thumbnailKey(slot,[colorSpace,geometry,layer.embedded&&!mask?revision:null],layer,mask);
-  const [width,height]=previewDimensions(geometry,size);
+  const ctx=canvas.getContext('2d',{colorSpace:preferredDisplaySpace()});
+  const displaySpace=imageDisplaySpace(mask?null:colorSpace,ctx.getContextAttributes?.().colorSpace);
+  const key=thumbnailKey(slot,[colorSpace,displaySpace,geometry,layer.embedded&&!mask?revision:null],layer,mask);
+  const [width,height]=thumbnailDimensions(geometry,size);
   let state=canvases.get(canvas);
   if(!state){state={shown:null,request:null};canvases.set(canvas,state);}
   if(state.request?.key===key){state.request.revision=revision;return;}
@@ -78,8 +80,8 @@ export function updateImageThumbnail(canvas,{projectId,revision,documentId,color
         if(!response.ok||response.status===204)return;
         const bytes=await response.arrayBuffer();
         if(!current()||bytes.byteLength!==width*height*4)return;
-        const pixels=new ImageData(new Uint8ClampedArray(bytes),width,height);
-        if(!mask)writeDisplayRGB(pixels.data,pixels.data,colorSpace);
+        const pixels=new ImageData(new Uint8ClampedArray(bytes),width,height,{colorSpace:displaySpace});
+        if(!mask)writeDisplayRGB(pixels.data,pixels.data,colorSpace,false,displaySpace);
         cache.delete(slot);
         cache.set(slot,{key,pixels});
         while(cache.size>128)cache.delete(cache.keys().next().value);

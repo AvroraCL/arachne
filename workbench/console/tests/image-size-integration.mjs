@@ -135,6 +135,36 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
       assert.ok(png.every((v,i)=>Math.abs(v-expectedDisplay[i])<=1),'sRGB 输出副本与受色彩管理的原稿预览一致');
       assert.equal((await api(route)).revision,revisionBefore);
       await viewButton.click();await warning.uncheck();await viewButton.click();
+      // A wide display must retain colors outside sRGB in the backing surface.
+      // Reopen under a P3 display and read the canvas explicitly in P3.
+      const session=await page.context().newCDPSession(page);
+      await session.send('Emulation.setEmulatedMedia',{features:[{name:'color-gamut',value:'p3'}]});
+      await page.reload();
+      assert.equal(await page.evaluate(()=>matchMedia('(color-gamut: p3)').matches),true);
+      await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+      const sampleP3=()=>canvas.evaluate(c=>{
+        const ctx=c.getContext('2d');
+        return [ctx.getContextAttributes().colorSpace,...ctx.getImageData(c.width>>1,c.height>>1,1,1,{colorSpace:'display-p3'}).data];
+      });
+      assert.deepEqual(await sampleP3(),['display-p3',0,255,0,255]);
+      assert.match(await editor.locator('.editor-message').innerText(),/Display P3 预览/);
+      const backdrop=stack.locator('.document-layer-row').filter({hasText:'背景'}).locator('canvas.document-layer-thumb');
+      let thumbnailPixel;
+      await until(async()=>{
+        thumbnailPixel=await backdrop.evaluate(c=>{
+          if(c.width===300&&c.height===150)return null;
+          const ctx=c.getContext('2d');
+          return [c.width,c.height,ctx.getContextAttributes().colorSpace,...ctx.getImageData(c.width>>1,c.height>>1,1,1,{colorSpace:'display-p3'}).data];
+        });
+        return thumbnailPixel?.join(',')==='63,31,display-p3,0,255,0,255';
+      },'P3 图层缩略图保留超色域颜色').catch(error=>{throw Error(error.message+' '+JSON.stringify(thumbnailPixel));});
+      await viewButton.click();await warning.check();
+      assert.deepEqual(await sampleP3(),['display-p3',243,177,80,255]);
+      await warning.uncheck();await viewButton.click();
+      await session.send('Emulation.setEmulatedMedia',{features:[{name:'color-gamut',value:'srgb'}]});
+      await page.reload();await session.detach();
+      console.log('PASS P3 画布保留超出 sRGB 的绿色，切换色域警告可恢复');
+
     }
     await checkDisplay();
     await page.reload();await checkDisplay();
@@ -197,7 +227,7 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
     await dialog.getByRole('button',{name:'应用',exact:true}).click();await saved(menu);
   }
   const thumbnail=stack.locator('[data-image-layer-id="'+pixelId+'"] .document-layer-thumb');
-  await until(()=>thumbnail.evaluate(c=>c.width===32&&c.height===8),'横幅图层缩略图');
+  await until(()=>thumbnail.evaluate(c=>c.width===64&&c.height===16),'横幅图层缩略图');
   await png('original');
   await size('画布尺寸…',[['宽度',2304]],'左中');await png('extended');
   await editor.getByRole('button',{name:'图像尺寸操作',exact:true}).click();

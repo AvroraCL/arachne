@@ -53,3 +53,9 @@ export function previewDimensions(doc,resolution){
   const scale=Math.min(1,resolution/editingSide*Math.max(w,h)/Math.max(doc.width,doc.height));
   return [Math.max(1,Math.round(doc.width*scale)),Math.max(1,Math.round(doc.height*scale))];
 }
+
+export function thumbnailDimensions(doc,limit){
+  const width=doc?.width??editingSide,height=doc?.height??editingSide;
+  const scale=Math.min(1,limit/Math.max(width,height));
+  return [Math.max(1,Math.round(width*scale)),Math.max(1,Math.round(height*scale))];
+}

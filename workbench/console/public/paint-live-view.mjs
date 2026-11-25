@@ -1,4 +1,4 @@
-import {hasWideGamut,writeDisplayRGB} from './image-display-rgb.mjs';
+import {hasWideGamut,imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
 import {previewDimensions,documentFrame} from './image-document-size.mjs';
 import {renderChannel,liveStride,effectiveValues,channelSpecs,paintChannels} from './paint-channels.mjs';
 const workingSize=256,detailSize=4096;
@@ -58,11 +58,12 @@ function strokeWindow(edits,visible,bleed=0){
 }
 
 export function createLiveView({viewport,canvas,guide,context:readContext,onStatus,onFrame=()=>{},renderCanvas=true,rgba=false,retryDelays=defaultRetryDelays}){
-  const ctx=canvas.getContext('2d',{alpha:rgba});
+  const ctx=canvas.getContext('2d',{alpha:rgba,...(rgba?{colorSpace:preferredDisplaySpace()}:{})});
+  const canvasSpace=ctx.getContextAttributes?.().colorSpace??'srgb';
   const guideContext=guide.getContext('2d');
   const page=canvas.ownerDocument;
   let intent=null,inFlight=null,queued=null,detailInFlight=null,baseFrame=null,frame=null,drawn=null;
-  let image=null,guideFrame=null,detailTimer=null,retryTimer=null,retrying=null;
+  let image=null,imageSpace=null,guideFrame=null,detailTimer=null,retryTimer=null,retrying=null;
   let detailFailure=null,fastFailure=null,visible=true,disposed=false,patched=null;
   const context=()=>visible&&!disposed&&!page?.hidden?readContext():null;
   const fastSize=state=>rgba&&[512,1024].includes(state?.fastSize)?state.fastSize:workingSize;
@@ -104,7 +105,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     }
     const refining=detailInFlight?.key===state.key&&detailInFlight.group===intent?.group&&!detailInFlight.controller.signal.aborted;
     phase??=size===detailSize&&request?.key===state.key?'ready':refining?'refining':'fast';
-    onStatus(failed?message:request?'实时材质 · r'+revision:'正在准备实时预览…',failed,{size,revision,phase,message,...(failedSize?{failedSize}:{})});
+    onStatus(failed?message:request?'实时材质 · r'+revision:'正在准备实时预览…',failed,{size,revision,phase,message,...(rgba&&hasWideGamut(request?.colorSpace)&&!request.inspectMask?{displaySpace:imageSpace}:{}),...(failedSize?{failedSize}:{})});
   }
 
   function retryTransient(request,error){
@@ -134,11 +135,12 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     if(drawn?.pixels===pixels&&drawn.channel===channel&&drawn.solo===solo&&drawn.preview3D===preview3D&&
        (!patched||intent?.operation&&intent.key===request.key))return;
     const [width,height]=previewDimensions(request.imageGeometry,size);
-    if(!image||canvas.width!==width||canvas.height!==height){
+    const displaySpace=imageDisplaySpace(request.inspectMask?null:request.colorSpace,canvasSpace);
+    if(!image||canvas.width!==width||canvas.height!==height||imageSpace!==displaySpace){
       canvas.width=width;canvas.height=height;
-      image=ctx.createImageData(width,height);
+      image=ctx.createImageData(width,height,{colorSpace:displaySpace});imageSpace=displaySpace;
     }
-    if(rgba)writeDisplayRGB(image.data,pixels,request.inspectMask?null:request.colorSpace,state.gamutWarning);else renderChannel(pixels,size,channel,image.data);
+    if(rgba)writeDisplayRGB(image.data,pixels,request.inspectMask?null:request.colorSpace,state.gamutWarning,displaySpace);else renderChannel(pixels,size,channel,image.data);
     if(channel==='coverage'){
       const stride=liveStride(pixels,size);
       for(let i=0,j=0;i<pixels.length;i+=stride,j+=4){const [r,g,b]=palette[pixels[i+5]&3];image.data[j]=r;image.data[j+1]=g;image.data[j+2]=b;}
@@ -158,8 +160,9 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     const [ox,oy]=documentFrame(request.imageGeometry);
     const space=request.inspectMask?null:request.colorSpace;
     const wide=space&&!['srgb','linear'].includes(space);
-    const tile=wide?ctx.createImageData(side,side):new ImageData(new Uint8ClampedArray(pixels.buffer,pixels.byteOffset,pixels.byteLength),side,side);
-    if(wide)writeDisplayRGB(tile.data,pixels,space,warnGamut);
+    const displaySpace=imageDisplaySpace(space,canvasSpace);
+    const tile=wide?ctx.createImageData(side,side,{colorSpace:displaySpace}):new ImageData(new Uint8ClampedArray(pixels.buffer,pixels.byteOffset,pixels.byteLength),side,side);
+    if(wide)writeDisplayRGB(tile.data,pixels,space,warnGamut,displaySpace);
     ctx.putImageData(tile,x-ox,y-oy);
   }
 
@@ -337,7 +340,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     displayChanged(){
       const state=context();
       if(!rgba||!hasWideGamut(drawn?.colorSpace)||!image||!state)return;
-      writeDisplayRGB(image.data,drawn.pixels,drawn.colorSpace,state.gamutWarning);
+      writeDisplayRGB(image.data,drawn.pixels,drawn.colorSpace,state.gamutWarning,imageSpace);
       ctx.putImageData(image,0,0);
       if(patched?.pixels)drawPatch(patched,state.gamutWarning);
     },

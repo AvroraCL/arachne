@@ -16,7 +16,7 @@ from fill_projection import projection_geometry, projected_channels, extend_uv_g
 from paint_mask_generators import preview_generator, smooth
 from material_graph import MaterialGraph, MaterialImages, PreviewImages
 from image_color_spaces import display_pixels
-from image_documents import embedded_image_assets,document_pixels,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
+from image_documents import embedded_image_assets,document_pixels,thumbnail_pixels,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
 
 
 def decode(srgb):
@@ -727,6 +727,9 @@ def live_pixels(cfg):
             window = exact_stroke_window(doc,cfg['assets'],cfg['imageWindow'],cfg.get('imageInspectMask'))
             if window is not None:
                 return b'W'+window.tobytes()
+        if cfg.get('imageThumbnail'):
+            pixels=thumbnail_pixels(doc,cfg['assets'],cfg['imageViewSize'],cfg.get('imageInspectMask'))
+            return memoryview(np.ascontiguousarray(pixels)).cast('B')
         pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
         if cfg.get('clipboardRegion'):
             return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'],cfg['assets'])
