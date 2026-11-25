@@ -56,7 +56,7 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
   sourceControls.append(removeMark);
   restore.type='button';restore.title='恢复模型原始材质参数';
   restore.onclick=()=>save(Object.fromEntries(Object.keys(inputs).filter(key=>shown?.[key]!==undefined).map(key=>[key,null])));sourceControls.append(restore,materialMessage);
-  let shown=null,pending=false,scrub=null,aliases;
+  let shown=null,pending=null,scrub=null,aliases;
   function listUsers(){
     names.replaceChildren(...(shown?.users||[]).map(name=>el('li','',aliases?.[name]||name)));
   }
@@ -83,6 +83,7 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
       if(users.open)listUsers();
     }
     const patch=project.document?.paint.sourceMaterials?.[target?.name];
+    const pendingPatch=sameTarget(target,pending?.target)?pending.patch:null;
     const hasSet=Object.hasOwn(project.document?.paint.textureSets??{},target?.name);
     setHint.hidden=!hasSet;
     const locked=pending||!target||target.locked;
@@ -99,7 +100,10 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
         }else input.removeAttribute('aria-description');
         item.dataset.search=map?detail.title:title;
       }
-      if(target?.[key]!==undefined&&(force||changed||document.activeElement!==input))input.value=patch?.[key]??target[key];
+      if(target?.[key]!==undefined&&(force||changed||document.activeElement!==input)){
+        const value=pendingPatch&&Object.hasOwn(pendingPatch,key)?pendingPatch[key]:patch?.[key];
+        input.value=value??target[key];
+      }
       input.disabled=!!locked||target?.[key]===undefined||hasSet&&key!=='transmission';
     }
     markButton.parentElement.hidden=removeMark.hidden=!patch?.mark;
@@ -113,14 +117,14 @@ export function createSourceMaterialFields(sourceControls,project,readTarget,err
     if(!sameTarget(target,shown)||target.locked||target.projectId!==origin?.id||(scrub&&!currentScrub(target))){
       endScrub();sync(true);error(Error('材质目标已变化，请重新选择'));return;
     }
-    pending=true;
+    pending={target,patch};
     // Disabling the edited control otherwise sends focus outside the workspace
     // and the very next undo shortcut never reaches the project history.
     if(sourceControls.contains(document.activeElement))sourceControls.focus({preventScroll:true});
     sync();materialMessage.textContent='正在保存…';
     try{await project.commands([{op:'sourceMaterial',name:target.name,patch}],origin);materialMessage.textContent='';}
     catch(failure){materialMessage.textContent=failure.message;error(failure);}
-    finally{endScrub();pending=false;sync(true);}
+    finally{endScrub();pending=null;sync(true);}
   }
   return {sync,dispose:endScrub};
 }

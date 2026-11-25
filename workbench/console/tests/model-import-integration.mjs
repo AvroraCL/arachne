@@ -563,8 +563,19 @@ async function verifyObjectMaterialNavigation(id){
     assert.ok((await addToPrimary.getAttribute('title')).includes(before.source.material));
     assert.ok((await original.innerText()).includes('表面材料'));
     assert.equal(await properties.locator('.editor-properties').isVisible(),false);
-    await sourceRough.fill('0.22');await sourceRough.press('Enter');
-    await until(async()=>(await api('/api/projects/'+id)).paint.sourceMaterials?.['表面材料']?.roughness===.22);
+    // Hold the response after the real commit to inspect the value while saving.
+    const release=Promise.withResolvers();
+    const delayed=async route=>{
+      const response=await route.fetch();
+      await release.promise;await route.fulfill({response});
+    };
+    await page.route('**/paint/commands',delayed,{times:1});
+    try{
+      await sourceRough.fill('0.22');await sourceRough.press('Enter');
+      await until(async()=>(await api('/api/projects/'+id)).paint.sourceMaterials?.['表面材料']?.roughness===.22);
+      assert.equal(await sourceRough.inputValue(),'0.22');
+    }finally{release.resolve();}
+    await until(async()=>sourceRough.isEnabled());
     assert.deepEqual((await api('/api/projects/'+id)).paint.base,before.paint.base);
     // Hover over a different object after the edit; inspection must not pick it.
     await page.mouse.move(materialBox.x+.55*materialBox.width,materialBox.y+.48*materialBox.height);
