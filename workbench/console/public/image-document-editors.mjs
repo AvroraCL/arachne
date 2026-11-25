@@ -1,6 +1,6 @@
 import {menuShortcut} from './menu-shortcut.mjs';
 import {documentClip,documentFrame,editingSide,imageViewGeometry,previewDimensions} from './image-document-size.mjs';
-import {hasWideGamut} from './image-display-rgb.mjs';
+import {hasWideGamut,setWorkingSwatch} from './image-display-rgb.mjs';
 import {chooseOutputProfile} from './image-profile-dialog.mjs';
 import {editDocumentSize} from './image-size-dialog.mjs';
 import {textEffects,imageStyleKinds,outlinePositions,hasImageStyle} from './image-text-style.mjs';
@@ -971,7 +971,10 @@ export function createDocumentEditor(ctx,bridge){
   function syncColors(){
     const target=colorTarget(),pair=bridge.colorPair(target);
     front.value=pair.foreground;back.value=pair.background;
-    for(const input of [front,back])input.toggleAttribute('data-color-gray',target==='mask');
+    for(const input of [front,back]){
+      input.toggleAttribute('data-color-gray',target==='mask');
+      setWorkingSwatch(input,target==='mask'?null:currentDocument(project)?.colorSpace);
+    }
     gradientTool?.sync();
   }
   front.oninput=()=>{bridge.setColor(colorTarget(),'foreground',front.value);syncColors();};back.oninput=()=>{bridge.setColor(colorTarget(),'background',back.value);syncColors();};
@@ -1697,6 +1700,7 @@ export function createImagePanel(type,ctx){
   function addControl(parent,label,type,value,change,extra={},preview){
     const row=el('label','document-property',label),input=el('input');
     Object.assign(input,{type,value,...extra});
+    if(type==='color')setWorkingSwatch(input,currentDocument(project)?.colorSpace);
     if(type==='checkbox')input.checked=value;
     if(type==='number'){input.dataset.scrubNumber='';input.dataset.scrubSpeed='.01';}
     input.setAttribute('aria-label',label);
@@ -1708,6 +1712,7 @@ export function createImagePanel(type,ctx){
       delete input.dataset.documentDirty;
     };
     input.oninput=()=>{
+      if(type==='color')setWorkingSwatch(input,currentDocument(project)?.colorSpace);
       origin??=imageSelectionOrigin(project);
       input.dataset.documentDirty='';
       if(input.validity.valid)preview?.(read(),origin);

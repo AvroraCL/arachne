@@ -28,6 +28,23 @@ export function preferredDisplaySpace(){
 export function imageDisplaySpace(space,canvasSpace){
   return hasWideGamut(space)&&canvasSpace==='display-p3'?'display-p3':'srgb';
 }
+export function displayColorCss(hex,space){
+  if(!Object.hasOwn(toSRGB,space))return hex;
+  const target=imageDisplaySpace(space,preferredDisplaySpace());
+  const rgb=hex.slice(1).match(/../g).map(n=>parseInt(n,16));
+  const display=new Uint8ClampedArray(4);
+  writeDisplayRGB(display,[...rgb,255],space,false,target);
+  const values=[...display.subarray(0,3)];
+  return target==='display-p3'?'color(display-p3 '+values.map(v=>v/255).join(' ')+')':'rgb('+values.join(' ')+')';
+}
+
+export function setWorkingSwatch(input,space){
+  if(!Object.hasOwn(toSRGB,space)){
+    delete input.dataset.workingSpace;input.style.removeProperty('--working-swatch');return;
+  }
+  input.dataset.workingSpace=space;
+  input.style.setProperty('--working-swatch',displayColorCss(input.value,space));
+}
 const decoders=new Map();
 let encoded;
 export function hasWideGamut(space){

@@ -1,4 +1,6 @@
 import {grayColor,normalizePaintHex,paintHsv,paintHex} from './paint-colors.mjs';
+import {displayColorCss,imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
+import {imageColorSpaces} from './image-color-spaces.mjs';
 
 const paletteKey='arachne-recent-colors-v1',maxRecent=10;
 const clamp=n=>Math.min(1,Math.max(0,n));
@@ -6,15 +8,12 @@ const el=(tag,cls='',text='')=>Object.assign(document.createElement(tag),{classN
 
 export function setupPaintColorPicker(root=document){
   let active=null,recent=[];
-  try{
-    const entries=JSON.parse(localStorage.getItem(paletteKey));
-    if(Array.isArray(entries))recent=[...new Set(entries.map(normalizePaintHex).filter(Boolean))].slice(0,maxRecent);
-  }catch{}
   const popover=el('div','paint-color-picker');
   if(typeof popover.showPopover!=='function')return;
   popover.popover='auto';popover.setAttribute('role','dialog');
   const header=el('div','paint-color-heading'),title=el('strong'),sample=el('span','paint-color-sample');
   sample.setAttribute('aria-hidden','true');header.append(title,sample);
+  const spaceLabel=el('span','paint-color-space');
   const field=el('div','paint-color-sv'),marker=el('span','paint-color-marker');
   field.tabIndex=0;field.setAttribute('aria-label','饱和度和明度，方向键调节');field.setAttribute('role','group');
   marker.setAttribute('aria-hidden','true');field.append(marker);
@@ -26,6 +25,19 @@ export function setupPaintColorPicker(root=document){
   const textRow=el('label','paint-color-text','HEX'),hex=el('input');
   hex.type='text';hex.maxLength=7;hex.autocomplete='off';hex.spellcheck=false;hex.setAttribute('aria-label','HEX 颜色');
   textRow.append(hex);
+  const rgbRow=el('div','paint-color-rgb');
+  const components=['R','G','B'].map((name,i)=>{
+    const label=el('label','',name),input=el('input');
+    input.type='number';input.min='0';input.max='255';input.step='1';
+    input.setAttribute('aria-label',['红色通道 R','绿色通道 G','蓝色通道 B'][i]);
+    input.oninput=()=>{
+      if(!active)return;
+      const invalid=components.find(part=>part.value===''||!part.validity.valid);
+      if(invalid){invalid.setAttribute('aria-invalid','true');error.textContent='通道数值须为 0 至 255 的整数。';apply.disabled=true;return;}
+      editHex('#'+components.map(part=>part.valueAsNumber.toString(16).padStart(2,'0')).join(''),true);
+    };
+    label.append(input);rgbRow.append(label);return input;
+  });
   const swatches=el('div','paint-color-recent');
   swatches.setAttribute('aria-label','最近颜色');swatches.setAttribute('role','group');
   const footer=el('div','paint-color-footer'),error=el('span','paint-color-error');
@@ -33,7 +45,7 @@ export function setupPaintColorPicker(root=document){
   const cancel=el('button','','取消'),apply=el('button','primary','确定');
   cancel.type=apply.type='button';
   footer.append(error,cancel,apply);
-  popover.append(header,field,hue,brightness,textRow,swatches,footer);
+  popover.append(header,spaceLabel,field,hue,brightness,rgbRow,textRow,swatches,footer);
 
   function position(){
     if(!active)return;
@@ -61,6 +73,24 @@ export function setupPaintColorPicker(root=document){
   popover.addEventListener('toggle',event=>{
     if(event.newState==='closed'&&!popover.matches(':popover-open')&&active)dismissed(active,false);
   });
+  function renderField(h){
+    const surface=active.surface;
+    if(!surface||active.lastHue===h)return;
+    active.lastHue=h;
+    const pure=paintHex({h,s:1,v:1}).slice(1).match(/../g).map(n=>parseInt(n,16));
+    const {width,height}=surface.canvas,output=surface.createImageData(width,height,{colorSpace:active.display});
+    const pixels=output.data;
+    for(let y=0,i=0;y<height;y++){
+      const value=1-y/(height-1);
+      for(let x=0;x<width;x++,i+=4){
+        const saturation=x/(width-1);
+        for(let c=0;c<3;c++)pixels[i+c]=Math.round(value*(255+(pure[c]-255)*saturation));
+        pixels[i+3]=255;
+      }
+    }
+    writeDisplayRGB(pixels,pixels,active.space,false,active.display);
+    surface.putImageData(output,0,0);
+  }
   function render(updateText=true){
     if(!active)return;
     const {h,s,v}=active.color,chosen=paintHex(active.color);
@@ -68,9 +98,13 @@ export function setupPaintColorPicker(root=document){
       active.lastColor=chosen;active.preview(chosen);
     }
     if(updateText)hex.value=chosen;
+    for(const [i,input] of components.entries()){
+      input.value=String(parseInt(chosen.slice(1+i*2,3+i*2),16));input.removeAttribute('aria-invalid');
+    }
     field.style.setProperty('--picker-hue',String(h));
+    renderField(h);
     marker.style.left=s*100+'%';marker.style.top=(1-v)*100+'%';
-    marker.style.background=chosen;sample.style.background=chosen;
+    marker.style.background=sample.style.background=displayColorCss(chosen,active.space);
     field.setAttribute('aria-description',`饱和度 ${Math.round(s*100)}%，明度 ${Math.round(v*100)}%`);
     hue.value=String(Math.round(h));brightness.value=String(Math.round(v*255));
     apply.disabled=active.input.disabled;
@@ -85,7 +119,7 @@ export function setupPaintColorPicker(root=document){
   function recentButtons(){
     swatches.replaceChildren(...recent.filter(color=>!active.gray||grayColor(color)===color).map(color=>{
       const button=el('button','paint-color-swatch');
-      button.type='button';button.style.background=color;button.title=color.toUpperCase();
+      button.type='button';button.style.background=displayColorCss(color,active.space);button.title=color.toUpperCase();
       button.setAttribute('aria-label','使用 '+color.toUpperCase());
       button.onclick=()=>editHex(color,true);
       return button;
@@ -100,11 +134,30 @@ export function setupPaintColorPicker(root=document){
     const observer=new MutationObserver(()=>{if(input.disabled||!input.isConnected)dismiss(false);});
     const state={input,gray,color:paintHsv(gray?grayColor(color):color),events,observer,pointer:null,lastColor:color};
     active=state;
+    state.space=input.dataset.workingSpace;
+    state.palette=state.space?paletteKey+'-'+state.space:paletteKey;
+    recent=[];
+    try{
+      const entries=JSON.parse(localStorage.getItem(state.palette));
+      if(Array.isArray(entries))recent=[...new Set(entries.map(normalizePaintHex).filter(Boolean))].slice(0,maxRecent);
+    }catch{}
+    spaceLabel.hidden=!state.space;
+    spaceLabel.textContent=imageColorSpaces.find(([key])=>key===state.space)?.[1]??'';
+    field.querySelector('canvas')?.remove();
+    if(state.space&&!gray){
+      const canvas=el('canvas');canvas.width=256;canvas.height=133;canvas.setAttribute('aria-hidden','true');
+      field.prepend(canvas);
+      const display=imageDisplaySpace(state.space,preferredDisplaySpace());
+      state.surface=canvas.getContext('2d',{colorSpace:display});
+      state.display=state.surface.getContextAttributes?.().colorSpace??'srgb';
+      const stops=Array.from({length:37},(_,i)=>displayColorCss(paintHex({h:10*i,s:1,v:1}),state.space));
+      hue.style.setProperty('--color-track','linear-gradient(90deg,'+stops.join(',')+')');
+    }else hue.style.removeProperty('--color-track');
     state.preview=input.beginColorPreview?.(()=>{if(active===state)dismiss(false);});
     input.setAttribute('data-color-open','');
     title.textContent=input.getAttribute('aria-label')||input.title||'颜色';
     popover.setAttribute('aria-label',title.textContent+'选色');
-    field.hidden=hue.hidden=gray;brightness.hidden=!gray;
+    field.hidden=hue.hidden=rgbRow.hidden=gray;brightness.hidden=!gray;
     (input.closest('dialog[open]')||document.body).append(popover);
     recentButtons();render();popover.showPopover();
     position();hex.focus({preventScroll:true});hex.select();
@@ -115,16 +168,17 @@ export function setupPaintColorPicker(root=document){
   }
   function commit(){
     if(!active)return;
+    if(components.some(input=>input.hasAttribute('aria-invalid')))return;
     if(!editHex(hex.value,true)){
       hex.setAttribute('aria-invalid','true');error.textContent='请输入有效的 HEX 颜色。';
       hex.focus();return;
     }
-    const {input}=active,value=paintHex(active.color);
+    const {input,palette}=active,value=paintHex(active.color);
     if(input.disabled||!input.isConnected){dismiss(false);return;}
     const changed=input.value!==value;
     dismiss(true,changed);
     recent=[value,...recent.filter(color=>color!==value)].slice(0,maxRecent);
-    try{localStorage.setItem(paletteKey,JSON.stringify(recent));}catch{}
+    try{localStorage.setItem(palette,JSON.stringify(recent));}catch{}
     if(!changed)return;
     input.value=value;
     input.dispatchEvent(new Event('input',{bubbles:true}));
@@ -162,7 +216,7 @@ export function setupPaintColorPicker(root=document){
   apply.onclick=commit;
   popover.addEventListener('keydown',event=>{
     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();dismiss();}
-    if(event.key==='Enter'&&event.target===hex){event.preventDefault();event.stopPropagation();commit();}
+    if(event.key==='Enter'&&(event.target===hex||components.includes(event.target))){event.preventDefault();event.stopPropagation();commit();}
   });
   root.addEventListener('click',event=>{
     const input=event.target;

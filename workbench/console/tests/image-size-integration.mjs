@@ -114,6 +114,24 @@ assert im.getextrema()==tuple((n,n) for n in rgba),im.getextrema()`,backgroundFi
     if(colorSpace==='acescg'){
       const revisionBefore=(await api(route)).revision;
       await checkDisplay();
+      const front=editor.getByLabel('图像前景色',{exact:true});
+      const originalForeground=await front.inputValue();
+      await front.click();const picker=page.locator('.paint-color-picker:popover-open');
+      await picker.getByRole('textbox',{name:'HEX 颜色'}).fill('#808080');
+      const chip=await picker.locator('.paint-color-sample').evaluate(el=>getComputedStyle(el).backgroundColor);
+      assert.equal(chip,'rgb(188, 188, 188)','ACEScg 线性中灰在拾色器中应与画布相同');
+      assert.deepEqual(await picker.locator('.paint-color-sv canvas').evaluate(c=>[...c.getContext('2d').getImageData(0,66,1,1).data]),[188,188,188,255]);
+      const red=picker.getByLabel('红色通道 R');
+      await red.fill('256');assert.ok(await picker.getByRole('button',{name:'确定',exact:true}).isDisabled());
+      await red.fill('131');assert.equal(await picker.getByRole('textbox',{name:'HEX 颜色'}).inputValue(),'#838080');
+      await red.fill('128');await red.press('Enter');
+      assert.equal(await front.inputValue(),'#808080');
+      const swatchFile=path.join(data,'aces-foreground-chip.png');await front.screenshot({path:swatchFile});
+      execFileSync(pythonExecutable(),['-c',`import sys
+from PIL import Image
+im=Image.open(sys.argv[1]).convert('RGB');assert im.getpixel((im.width//2,im.height//2))==(188,188,188)`,swatchFile]);
+      await front.click();await picker.getByRole('textbox',{name:'HEX 颜色'}).fill(originalForeground);
+      await picker.getByRole('button',{name:'确定',exact:true}).click();
       const viewButton=editor.getByRole('button',{name:'画布视图',exact:true});
       await viewButton.click();
       const warning=editor.getByRole('checkbox',{name:'sRGB 色域警告'});

@@ -1,5 +1,5 @@
 import {imageColorSpaces} from './image-documents.mjs';
-import {imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
+import {displayColorCss,imageDisplaySpace,preferredDisplaySpace,setWorkingSwatch} from './image-display-rgb.mjs';
 import {enhanceSelectMenu} from './paint-select.mjs';
 import {editingSide,resizedDocument} from './image-document-size.mjs';
 
@@ -78,15 +78,8 @@ function newImageSettings(form,width,height,defaultName){
     const displaySpace=imageDisplaySpace(space.value,preferredDisplaySpace());
     profileNote.textContent=profiled?(usage[space.value]||('画布按 '+(displaySpace==='display-p3'?'Display P3':'sRGB')+' 预览。'))+' PNG 嵌入此 ICC 配置。'
       :space.value==='linear'?'保留通道数值，适用于粗糙度、法线和蒙版。':'适用于网页图像和常规彩色贴图。';
-    if(hex&&profiled){
-      const rgb=hex.slice(1).match(/../g).map(n=>parseInt(n,16));
-      const display=new Uint8ClampedArray(4);
-      writeDisplayRGB(display,[...rgb,255],space.value,false,displaySpace);
-      const values=[...display.subarray(0,3)];
-      paper.style.background=displaySpace==='display-p3'
-        ?'color(display-p3 '+values.map(v=>v/255).join(' ')+')'
-        :'rgb('+values.join(' ')+')';
-    }else paper.style.background=hex||'';
+    setWorkingSwatch(color,space.value);
+    paper.style.background=hex?displayColorCss(hex,space.value):'';
     color.parentElement.hidden=background.value!=='custom';
     orientations.forEach((button,i)=>{
       button.disabled=!width.validity.valid||!height.validity.valid||w===h;
