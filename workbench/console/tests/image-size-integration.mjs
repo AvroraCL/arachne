@@ -180,6 +180,31 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
         await until(async()=>(await profileDialog.locator('output').textContent()).includes('不完整'),'损坏配置提示');
         assert.ok(await confirm.isDisabled());
         await chooser.setInputFiles(profile);
+        await profileDialog.getByRole('button',{name:'预览校样'}).click();
+        const comparison=profileDialog.locator('figure img');
+        await comparison.waitFor();
+        async function readProof(){
+          return comparison.evaluate(img=>{
+            const canvas=document.createElement('canvas');canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+            const context=canvas.getContext('2d');context.drawImage(img,0,0);
+            return [canvas.width,canvas.height,...[.25,.75].map(x=>[...context.getImageData(Math.floor(x*canvas.width),Math.floor(canvas.height/2),1,1).data])];
+          });
+        }
+        const initialProof=await readProof();
+        assert.deepEqual(initialProof.slice(0,2),[126,31]);
+        let paperProof;
+        if(mode==='CMYK'){
+          const url=await comparison.getAttribute('src');
+          await profileDialog.getByLabel('模拟纸白').check();
+          await until(async()=>await comparison.isVisible()&&(await comparison.getAttribute('src'))!==url,'纸白模拟图更新');
+          paperProof=await readProof();
+          await profileDialog.screenshot({path:path.join(data,'icc-proof-wide.png')});
+          const desktop=page.viewportSize();await page.setViewportSize({width:1000,height:680});
+          const bounds=await profileDialog.boundingBox();
+          assert.ok(bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=1000&&bounds.y+bounds.height<=680);
+          await profileDialog.screenshot({path:path.join(data,'icc-proof-compact.png')});
+          await page.setViewportSize(desktop);
+        }else assert.equal(await profileDialog.getByLabel('模拟纸白').isVisible(),false);
         const fileName=path.join(data,'proof-'+mode+'.'+ext);
         const result=page.waitForEvent('download');
         await confirm.click();
@@ -200,6 +225,19 @@ if mode=='LA': ref=(ref,255)
 if mode=='RGBA': ref=(*ref,255)
 assert im.getpixel((30,15))==ref,(im.getpixel((30,15)),ref)`,fileName,profile,mode],{cwd:new URL('..',import.meta.url)});
         assert.equal((await api(route)).revision,revisionBefore);
+        const expectedProof=JSON.parse(execFileSync(pythonExecutable(),['-B','-c',`import json,sys
+from io import BytesIO
+from PIL import Image,ImageCms
+from image_color_spaces import profile_bytes
+file=Image.open(sys.argv[1]); target=profile_bytes('srgb')
+def screen(im,source,intent):
+ return [*ImageCms.profileToProfile(im,BytesIO(source),BytesIO(target),outputMode='RGB',renderingIntent=intent).getpixel((0,0)),255]
+original=screen(Image.new('RGB',(1,1),(0,255,0)),profile_bytes('acescg'),1)
+device=file.crop((30,15,31,16)).convert({'CMYK':'CMYK','RGBA':'RGB','LA':'L'}[file.mode])
+print(json.dumps([original,screen(device,file.info['icc_profile'],1),screen(device,file.info['icc_profile'],3)]))`,
+            fileName],{encoding:'utf8',cwd:new URL('..',import.meta.url)}));
+        assert.deepEqual(initialProof.slice(2),expectedProof.slice(0,2));
+        if(paperProof)assert.deepEqual(paperProof.slice(2),[expectedProof[0],expectedProof[2]]);
         console.log('PASS 选择 ICC 导出',mode,ext);
       }
       if(profiles.some(([,mode])=>mode==='CMYK')){

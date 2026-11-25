@@ -731,6 +731,10 @@ def live_pixels(cfg):
         if cfg.get('imageThumbnail'):
             pixels=thumbnail_pixels(doc,cfg['assets'],cfg['imageViewSize'],cfg.get('imageInspectMask'))
             return memoryview(np.ascontiguousarray(pixels)).cast('B')
+        if cfg.get('imageProof'):
+            pixels=thumbnail_pixels(doc,cfg['assets'],cfg['imageViewSize'])
+            profile=cfg['exportProfile']
+            return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'],cfg['imageProof'])
         pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
         if cfg.get('clipboardRegion'):
             return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'],cfg['assets'])

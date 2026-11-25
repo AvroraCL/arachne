@@ -959,8 +959,9 @@ export function imageClipboardInput(doc,request){
   return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
 }
 export function imageExportInput(doc,request){
-  const {revision,documentId,outputSpace,outputProfile}=fields(request,['revision','documentId','outputSpace','outputProfile']);
+  const {revision,documentId,outputSpace,outputProfile,proof}=fields(request,['revision','documentId','outputSpace','outputProfile','proof']);
   const input=imageDocumentInput(doc,{revision,documentId,resolution:4096});
+  if(proof!==undefined&&outputProfile===undefined)throw Error('请选择校样的目标 ICC');
   if(outputSpace!==undefined){
     const source=doc.paint.imageDocuments[documentId].colorSpace;
     if(!imageColorSpaces.some(([space])=>space===outputSpace))throw Error('请选择有效的 PNG 输出颜色空间');
@@ -974,6 +975,12 @@ export function imageExportInput(doc,request){
     if(typeof data!=='string'||data.length>4*Math.ceil(outputProfileLimit/3)||!['perceptual','relative'].includes(intent))
       throw Error('ICC 文件或渲染意图无效');
     const bytes=Buffer.from(data,'base64'),mode=outputProfileMode(bytes,bytes.length);
+    if(proof!==undefined){
+      const {space,paper}=fields(proof,['space','paper']);
+      if(!['srgb','display-p3'].includes(space)||typeof paper!=='boolean'||paper&&mode!=='CMYK')throw Error('校样显示设置无效');
+      return {...input,imagePng:true,exportProfile:{data,mode,intent},imageProof:{space,paper},
+        imageViewSize:thumbnailDimensions(doc.paint.imageDocuments[documentId],512)};
+    }
     return {...input,exportProfile:{data,mode,intent},exportDocument:true,...(mode==='CMYK'?{imageTiff:true}:{imagePng:true})};
   }
   return {...input,imagePng:true,exportDocument:true};

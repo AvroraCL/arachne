@@ -94,7 +94,7 @@ def image_input(image, space, box=None, authored=False):
     return np.asarray(rgba), 'srgb' if 'srgb' in info else space
 
 
-def profiled_copy(pixels, space, target, mode, intent):
+def profiled_copy(pixels, space, target, mode, intent, proof=None):
     """Convert the composited document once; CMYK output represents ink on white paper."""
     image = Image.fromarray(pixels)
     rgb = image.convert('RGB')
@@ -112,8 +112,26 @@ def profiled_copy(pixels, space, target, mode, intent):
         converted = ImageCms.profileToProfile(rgb,BytesIO(profile_bytes(space)),BytesIO(target),
             outputMode={'RGB':'RGB','GRAY':'L','CMYK':'CMYK'}[mode],
             renderingIntent=ImageCms.Intent.PERCEPTUAL if intent=='perceptual' else ImageCms.Intent.RELATIVE_COLORIMETRIC)
+        if proof:
+            display=profile_bytes(proof['space'])
+            # Display exactly the device codes used in the exported file, including
+            # its quantization. Absolute colorimetry retains the target paper white.
+            right=ImageCms.profileToProfile(converted,BytesIO(target),BytesIO(display),outputMode='RGB',
+                renderingIntent=ImageCms.Intent.ABSOLUTE_COLORIMETRIC if proof['paper'] else ImageCms.Intent.RELATIVE_COLORIMETRIC)
+            left=convert_image(rgb.convert('RGBA'),profile_bytes(space),display)
+            if mode!='CMYK':
+                alpha=image.getchannel('A')
+                left.putalpha(alpha)
+                right.putalpha(alpha)
+            pair=Image.new('RGBA',(image.width*2,image.height))
+            pair.paste(left,(0,0))
+            pair.paste(right,(image.width,0))
+            out=BytesIO()
+            pair.save(out,format='PNG',compress_level=3,icc_profile=display)
+            return out.getvalue()
     except (ImageCms.PyCMSError, OSError) as error:
-        raise ValueError('ICC 配置不支持所选输出转换，请使用有效的目标设备配置') from error
+        message='此 ICC 缺少校样所需的颜色转换，可直接尝试导出副本' if proof else 'ICC 配置不支持所选输出转换，请使用有效的目标设备配置'
+        raise ValueError(message) from error
     out = BytesIO()
     if mode == 'CMYK':
         converted.save(out,format='TIFF',compression='tiff_deflate',icc_profile=target)

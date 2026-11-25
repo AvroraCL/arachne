@@ -544,5 +544,11 @@ for key,intent in [('relative',1),('perceptual',0)]:
     with Image.open(BytesIO(profiled_copy(rgba,'acescg',target,'RGB',key))) as actual:
         expected=ImageCms.profileToProfile(Image.fromarray(rgba),BytesIO(source),BytesIO(target),outputMode='RGBA',renderingIntent=intent)
         assert actual.info['icc_profile']==target and actual.tobytes()==expected.tobytes()
+        # This output device uses P3 itself. The right-hand proof should display
+        # the RGB values delivered to it unchanged, including fully hidden RGB.
+        with Image.open(BytesIO(profiled_copy(rgba,'acescg',target,'RGB',key,{'space':'display-p3','paper':False}))) as pair:
+            assert pair.size==(6,1) and pair.info['icc_profile']==target
+            assert pair.crop((3,0,6,1)).tobytes()==actual.tobytes()
+            assert list(pair.getchannel('A').getdata())==[0,47,255]*2
 `],{cwd:new URL('..',import.meta.url)});
 });

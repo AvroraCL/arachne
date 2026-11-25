@@ -194,7 +194,8 @@ export function createDocumentEditor(ctx,bridge){
       }
     }));
     choices.push({label:'按 ICC 导出副本…',run:async()=>{
-      const profile=await chooseOutputProfile(image,label,signal);
+      const profile=await chooseOutputProfile(image,label,signal,(profile,proof,previewSignal)=>
+        documentOutput(origin,{profile,proof},previewSignal));
       if(!profile)return;
       const current=imageSelectionOrigin(project);
       if(current.id!==origin.id||current.documentId!==origin.documentId||current.revision!==origin.revision)
@@ -1238,6 +1239,23 @@ export function createDocumentEditor(ctx,bridge){
     exportOptions.title=doc?.colorSpace==='linear'?'数据贴图按原始通道数值导出':'选择导出颜色空间';
     download.title=exportRequest?'正在导出图像…':doc?`导出当前图像 · ${doc.width} × ${doc.height} PNG`:'导出当前图像 PNG';
   }
+  async function documentOutput({id,revision,documentId},{outputSpace,profile,proof},signal){
+    let outputProfile;
+    if(profile){
+      const data=await new Promise((resolve,reject)=>{
+        const reader=new FileReader();reader.onerror=()=>reject(Error('无法读取 ICC 配置文件'));
+        reader.onload=()=>resolve(reader.result.split(',')[1]);reader.readAsDataURL(profile.file);
+      });
+      outputProfile={data,intent:profile.intent};
+    }
+    const response=await fetch('/api/projects/'+id+'/paint/image-export',{
+      method:'POST',headers:{'Content-Type':'application/json'},signal,
+      body:JSON.stringify({revision,documentId,outputSpace,outputProfile,proof})
+    });
+    if(response.status===204)throw Error('图像已变化，请重新选择输出配置');
+    if(!response.ok)throw Error((await response.json()).error||'图像输出失败');
+    return response.blob();
+  }
   async function downloadDocument(outputSpace,profile){
     const image=currentDocument(project);
     if(!image||exportRequest||!canPaste())return;
@@ -1245,21 +1263,7 @@ export function createDocumentEditor(ctx,bridge){
     const controller=exportRequest=new AbortController();
     syncClipboard();
     try{
-      let outputProfile;
-      if(profile){
-        const data=await new Promise((resolve,reject)=>{
-          const reader=new FileReader();reader.onerror=()=>reject(Error('无法读取 ICC 配置文件'));
-          reader.onload=()=>resolve(reader.result.split(',')[1]);reader.readAsDataURL(profile.file);
-        });
-        outputProfile={data,intent:profile.intent};
-      }
-      const response=await fetch('/api/projects/'+id+'/paint/image-export',{
-        method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-        body:JSON.stringify({revision,documentId,outputSpace,outputProfile})
-      });
-      if(response.status===204)throw Error('图像已变化，请重新导出');
-      if(!response.ok)throw Error((await response.json()).error||'导出图像失败');
-      const result=await response.blob();
+      const result=await documentOutput({id,revision,documentId},{outputSpace,profile},controller.signal);
       if(controller.signal.aborted)return;
       const url=URL.createObjectURL(result),link=el('a');
       const name=image.name.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g,'_').replace(/[ .]+$/,'')||'贴图';
