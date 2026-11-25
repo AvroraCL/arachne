@@ -9,7 +9,7 @@
 #render-background-status[data-sampling]::after{
   position:absolute;content:"";height:1px;bottom:0;inset-inline:6px;
   transform:scaleX(var(--cycles-progress,0));transform-origin:left;
-  background:var(--paint-focus,#6e9cd1);pointer-events:none
+  background:var(--paint-focus,#969696);pointer-events:none
 }
 #paint-render-dialog{
   width:min(880px,calc(100vw - 24px));max-height:calc(100dvh - 24px);padding:0;

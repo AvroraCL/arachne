@@ -34,7 +34,7 @@
 .shader-world{position:absolute;inset:0;transform-origin:0 0;overflow:visible}
 .shader-wires{position:absolute;left:-10000px;top:-10000px;width:20000px;height:20000px;overflow:visible;pointer-events:none}
 .shader-wires path{fill:none;stroke:#c1b778;stroke-width:1.6;opacity:.76;vector-effect:non-scaling-stroke;transform:translate(10000px,10000px)}
-.shader-wires path[data-type=scalar]{stroke:#aeb4bc}.shader-wires path[data-type=surface]{stroke:#91b59a}.shader-wires path[data-type=vector]{stroke:#a799bf}
+.shader-wires path[data-type=scalar]{stroke:#b3b3b3}.shader-wires path[data-type=surface]{stroke:#91b59a}.shader-wires path[data-type=vector]{stroke:#bf94ab}
 .shader-wires path.selected{stroke-width:2;opacity:1}
 .shader-wires path.pending{stroke:#eee;stroke-width:2;opacity:1;stroke-dasharray:5 4}
 .shader-wires path.cut{stroke:#eee;opacity:1;stroke-dasharray:3 3}
@@ -72,7 +72,7 @@
   width:20px;height:26px;min-width:20px!important;min-height:26px!important;margin:0;
   top:50%;transform:translateY(-50%);padding:0!important;background:transparent!important;border:0!important;border-radius:0;box-shadow:none!important;cursor:crosshair;
 }
-.shader-port[data-type=scalar]{--socket:#abb2bb}.shader-port[data-type=surface]{--socket:#91b59a}.shader-port[data-type=vector]{--socket:#a799bf}
+.shader-port[data-type=scalar]{--socket:#b1b1b1}.shader-port[data-type=surface]{--socket:#91b59a}.shader-port[data-type=vector]{--socket:#bf94ab}
 .shader-port::after{content:'';box-sizing:border-box;width:9px;height:9px;border:1.5px solid var(--socket);border-radius:50%;background:#303030;box-shadow:0 0 0 1px #1d1d1d}
 .shader-port[data-linked]::after{background:var(--socket)}
 .shader-port:hover::after,.shader-port:focus-visible::after{box-shadow:none;border-color:#ddd}

@@ -219,6 +219,13 @@ try{
     for(const name of ['建模选择','变换工具','变换坐标系','变换枢轴','三维游标','操纵器设置','叠加层设置','着色设置'])
       assert.deepEqual(await surface(trigger(header,name)),reference,size+' collapsed '+name);
     assert.equal(await trigger(header,'框选').evaluate(el=>getComputedStyle(el).backgroundImage),'none');
+    const pressed=header.locator('.viewport-display-button[aria-pressed=true]').first();
+    const chrome=await pressed.evaluate(button=>({
+      pressed:getComputedStyle(button).backgroundColor,
+      textSelection:getComputedStyle(button,'::selection').backgroundColor
+    }));
+    for(const [state,color] of Object.entries(chrome))
+      assert.match(color,/^rgba?\((\d+), \1, \1(?:, [\d.]+)?\)$/,size+' '+state+' '+color);
     await header.screenshot({path:path.join(evidence,size+'-viewport-header.png'),animations:'disabled'});
     await contextPreview(page.getByRole('button',{name:'立方体',exact:true}),size,'modeling');
     const selectMenu=trigger(header,'建模选择');

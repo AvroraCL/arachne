@@ -304,7 +304,7 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .area-selection-overlay :is(polygon,path){fill:transparent;fill-rule:evenodd;stroke:#fff;stroke-width:1;stroke-dasharray:4 3;filter:drop-shadow(0 0 1px #111)}
 .area-selection-overlay[data-polygon]:not([data-transforming])>.uv-selection-border{display:none}
 .area-selection-overlay[data-move-selection]>:is(.uv-selection-border,.uv-lasso-border){pointer-events:fill;cursor:move}
-.area-selection-overlay[data-combining]>:is(.uv-selection-border,.uv-lasso-border){stroke:#82bbf0}
+.area-selection-overlay[data-combining]>:is(.uv-selection-border,.uv-lasso-border){stroke:#b3b3b3}
 .area-selection-overlay[data-transforming]>.uv-selection-border{stroke-dasharray:none;pointer-events:all;cursor:move}
 .area-selection-overlay circle{pointer-events:all;cursor:nwse-resize;fill:#ddd;stroke:#222;stroke-width:1}
 .editor-image-stage[data-uv-brush-cursor]{cursor:none}
@@ -389,8 +389,8 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .viewport-display-controls{display:flex;align-items:center;gap:7px;flex:none;color:#d5d5d5}
 .viewport-display-group{display:flex;align-items:center;flex:none;border-radius:4px;background:#ffffff08}
 #workspace .area-header .viewport-display-controls .viewport-display-button,.viewport-display-arrow{display:grid;place-items:center;width:25px;height:25px;min-height:25px;padding:0;border:0;border-radius:4px;color:inherit;background:transparent}
-.viewport-display-button[aria-pressed=true]{--chrome-selected:#416f9f;--chrome-hover:#416f9f}
-.viewport-display-button[aria-pressed=true]:hover{--chrome-selected:#5181b2;--chrome-hover:#5181b2}
+.viewport-display-button[aria-pressed=true]{--chrome-selected:#545454;--chrome-hover:#545454}
+.viewport-display-button[aria-pressed=true]:hover{--chrome-selected:#636363;--chrome-hover:#636363}
 #workspace .area-header .viewport-display-controls .viewport-display-button:disabled{opacity:.32}
 .viewport-display-controls .chrome-icon{width:17px;height:17px}
 .viewport-display-menu{flex:none}
@@ -415,9 +415,9 @@ body[data-area-resizing=y],body[data-area-resizing=y] *{cursor:row-resize!import
 .viewport-display-field>span{display:flex;align-items:center;gap:5px;width:56%}
 .viewport-display-field>.custom-select{width:56%;--select-height:24px}
 .viewport-display-field>select{width:56%;min-height:24px;background:#232323;border:1px solid #3d3d3d;color:inherit;border-radius:3px}
-.viewport-display-field input[type=range]{width:100%;min-width:0;accent-color:#6089b5}
+.viewport-display-field input[type=range]{width:100%;min-width:0;accent-color:var(--chrome-active-marker)}
 .viewport-display-field output{width:30px;flex:none;text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
-.viewport-display-check input{accent-color:#6089b5}
+.viewport-display-check input{accent-color:var(--chrome-active-marker)}
 .viewport-display-fields>button,.viewport-display-render-settings:not([hidden]){display:flex;align-items:center;gap:6px;text-align:left}
 .editor-viewport .vp-axis[hidden]{display:none}
 @container(max-width:410px){

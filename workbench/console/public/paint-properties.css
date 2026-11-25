@@ -68,7 +68,7 @@
 .mask-effect+.mask-effect{margin-top:2px}
 .mask-effect-row{position:relative;min-height:27px;gap:1px}
 .mask-effect-row[data-effect-drop]::after{
-  content:'';position:absolute;inset-inline:4px;block-size:2px;background:var(--accent,#7296bc);pointer-events:none
+  content:'';position:absolute;inset-inline:4px;block-size:2px;background:var(--accent,#919191);pointer-events:none
 }
 .mask-effect-row[data-effect-drop=above]::after{top:0}
 .mask-effect-row[data-effect-drop=below]::after{bottom:0}

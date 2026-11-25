@@ -1,3 +1,4 @@
+import {enhanceSelectMenu} from './paint-select.mjs';
 import {editingSide,resizedDocument} from './image-document-size.mjs';
 
 const presets=[
@@ -32,7 +33,7 @@ function newImageSettings(form,width,height,defaultName){
       </div>
       <label>颜色空间<select><option value="srgb">颜色（sRGB）</option><option value="linear">数据（线性）</option></select></label>
       <label>背景内容<select class="new-image-background"><option value="">透明</option><option value="#ffffff">白色</option><option value="#000000">黑色</option><option value="custom">自定颜色</option></select></label>
-      <label class="new-image-color" hidden>背景颜色<input type="color" value="#7892ad"></label>
+      <label class="new-image-color" hidden>背景颜色<input type="color" value="#808080"></label>
     </section>`;
   layout.querySelector('.new-image-size').append(width.parentElement,height.parentElement);
   form.append(layout);
@@ -180,6 +181,8 @@ export function editDocumentSize(action,doc,{canvas,signal,defaultName}={}){
       try{if(doc)resizedDocument(doc,action,patch);}catch(e){error.textContent=e.message;return;}
       result=patch;dialog.close();
     };
-    document.body.append(dialog);dialog.showModal();const first=creation?.name??width;first.focus();first.select();
+    document.body.append(dialog);
+    if(creation)for(const select of dialog.querySelectorAll('select'))enhanceSelectMenu(select);
+    dialog.showModal();const first=creation?.name??width;first.focus();first.select();
   });
 }

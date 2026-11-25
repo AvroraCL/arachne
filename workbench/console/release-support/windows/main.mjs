@@ -180,7 +180,7 @@ async function start(){
   const {bounds,minWidth,minHeight,maximized}=restoreWindowState(state.window,
     screen.getAllDisplays().map(display=>display.workArea),screen.getPrimaryDisplay().workArea);
   const win=main=new BrowserWindow({title:appName,icon,...bounds,minWidth,minHeight,
-    backgroundColor:'#202124',show:false,webPreferences:{preload:path.join(import.meta.dirname,'preload.cjs'),
+    backgroundColor:'#212121',show:false,webPreferences:{preload:path.join(import.meta.dirname,'preload.cjs'),
       contextIsolation:true,sandbox:true,nodeIntegration:false,webviewTag:false,navigateOnDragDrop:false}});
   win.on('page-title-updated',event=>event.preventDefault());
   let recoveringRenderer=false;

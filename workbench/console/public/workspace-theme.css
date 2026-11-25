@@ -20,12 +20,16 @@
   --ui-shadow:0 0 0 .5px #ffffff0a,0 1px 2px #0005,0 10px 30px #0003;
   --ui-field:#222222; --ui-line:#ffffff0f; --ui-line-soft:#ffffff08;
   --ui-text:#f2f2f2; --ui-secondary:#c9c9c9; --ui-muted:#8f8f8f;
-  --line:var(--ui-line); color-scheme:dark;
+  --line:var(--ui-line); color-scheme:dark; accent-color:#d0d0d0;
   --ui-font:'Sarasa UI SC','Source Han Sans SC','Microsoft YaHei UI','Segoe UI',sans-serif;
   font-family:var(--ui-font);font-weight:400;
   font-size:13px; line-height:1.5; font-synthesis:none;
   color:var(--ui-text);background:var(--ui-shell);
 }
+input[type=search]::-webkit-search-cancel-button {filter:grayscale(1)}
+::selection {background:#565656;color:#fff}
+a:any-link {color:var(--ui-text)}
+:where(a,summary,[tabindex]):focus-visible {outline:2px solid #b5b5b5;outline-offset:2px}
 body {background:var(--ui-shell);color:var(--ui-text)}
 button,input,select,textarea {font-family:inherit}
 strong,b {font-weight:600}

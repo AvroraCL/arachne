@@ -51,6 +51,10 @@ try{
   await dialog.getByRole('button',{name:'纵向'}).click();
   assert.deepEqual([await width.inputValue(),await height.inputValue()],['1080','1920']);
   assert.equal(await dialog.getByRole('button',{name:/全高清/}).getAttribute('aria-pressed'),'true');
+  for(const button of [dialog.getByRole('button',{name:/全高清/}),dialog.getByRole('button',{name:'纵向'}),dialog.getByRole('button',{name:'创建',exact:true})]){
+    const background=await button.evaluate(el=>getComputedStyle(el).backgroundColor);
+    assert.match(background,/^rgba?\((\d+), \1, \1(?:, [\d.]+)?\)$/,'neutral button surface: '+background);
+  }
   await page.setViewportSize({width:540,height:680});
   const presets=await dialog.getByRole('region',{name:'画布预设'}).boundingBox();
   const details=await dialog.getByRole('region',{name:'图像设置'}).boundingBox();
@@ -61,13 +65,15 @@ try{
   await page.setViewportSize({width:390,height:600});
   const confirm=await dialog.getByRole('button',{name:'创建',exact:true}).boundingBox();
   assert.ok(confirm.y>=0&&confirm.y+confirm.height<=600);
-  await dialog.getByLabel('颜色空间').selectOption('linear');
+  await dialog.getByRole('button',{name:'颜色空间',exact:true}).click();
+  await dialog.getByRole('option',{name:'数据（线性）',exact:true}).click();
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
   assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
   await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
   await width.fill('63');await height.fill('31');
-  await dialog.getByLabel('背景内容').selectOption('custom');
+  await dialog.getByRole('button',{name:'背景内容',exact:true}).click();
+  await dialog.getByRole('option',{name:'自定颜色',exact:true}).click();
   await dialog.getByLabel('背景颜色').fill('#4477aa');
   assert.equal(await paper.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(68, 119, 170)');
   await dialog.getByRole('button',{name:'创建',exact:true}).click();await saved('创建带背景的图像');
