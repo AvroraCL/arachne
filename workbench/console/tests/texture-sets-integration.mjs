@@ -159,6 +159,122 @@ print(json.dumps([int(red.sum()),int(blue.sum()),*points]))`,path.join(data,'bot
   async function restore(bytes){const r=await fetch(origin+'/api/projects/paint-import',{method:'POST',headers:{Origin:origin,'Content-Type':'application/zip'},body:bytes});
     const saved=await r.json();assert.equal(r.status,201,JSON.stringify(saved).slice(0,180));return saved;}
   const copy=await restore(bytes);assert.deepEqual(copy.paint.textureSets.Latch,latch);assert.deepEqual(copy.paint.layers,shell);
+  const jobFolder=id=>path.join(data,'projects',doc.id,'jobs',id);
+  async function finished(type){
+    return until(async()=>{
+      const job=(await json(route+'/jobs')).find(j=>j.type===type&&j.revision===doc.revision);
+      if(job&&['failed','interrupted','cancelled'].includes(job.status))throw Error(type+' '+job.error);
+      return job?.status==='completed'&&job;
+    },type);
+  }
+  await page.getByText('文件',{exact:true}).first().click();await page.locator('#open-delivery').click();
+  await page.locator('#delivery-preview-button').click();const preview=await finished('paint-preview');
+  await page.getByRole('button',{name:'查看纹理集',exact:true}).click();
+  await page.getByRole('option',{name:'Latch',exact:true}).click();
+  const secondary=preview.textureSetBakes.Latch,channelsView=page.locator('#delivery-channels a');
+  await until(async()=>((await channelsView.first().getAttribute('href'))??'').includes(secondary.directory),'查看第二套 4K');
+  assert.equal(await channelsView.count(),8);
+  for(const href of await channelsView.evaluateAll(links=>links.map(link=>link.href))){
+    const response=await fetch(href);assert.equal(response.status,200);await response.body.cancel();
+  }
+  await page.locator('#export-glb').click();const glb=await finished('paint-glb-export');
+  const quality=JSON.parse(execFileSync(pythonExecutable(),['-c',`import io,json,sys
+from pathlib import Path
+from PIL import Image
+from paint_glb import read_glb
+root,slot,out=sys.argv[1:]
+scene,data=read_glb(Path(out).read_bytes())
+def embedded(key):
+ view=scene['bufferViews'][scene['images'][scene['textures'][key['index']]['source']]['bufferView']]
+ start=view.get('byteOffset',0)
+ return Image.open(io.BytesIO(data[start:start+view['byteLength']]))
+results={}
+for material in scene['materials']:
+ name=material['name']; source=Path(root) if name=='Shell' else Path(root)/slot
+ pbr=material['pbrMetallicRoughness']
+ color=embedded(pbr['baseColorTexture']).convert('RGBA')
+ metalrough=embedded(pbr['metallicRoughnessTexture'])
+ raw=[Image.open(source/('f_16xl_'+c+'.png')) for c in ('BaseColor','metallic','roughness','alpha')]
+ assert all(image.size==(4096,4096) for image in [color,metalrough,*raw])
+ samples=[]
+ for x in (69,186,248):
+  point=(x*16+8,2056)
+  rgb=raw[0].convert('RGB').getpixel(point)
+  metal,rough,alpha=[image.getpixel(point) for image in raw[1:]]
+  assert color.getpixel(point)==(*rgb,alpha),(name,point,color.getpixel(point),rgb,alpha)
+  assert metalrough.getpixel(point)[1:]==(rough,metal)
+  samples.append([*rgb,metal,rough,alpha])
+ results[name]=samples
+print(json.dumps(results))`,path.join(jobFolder(preview.id),'paint'),secondary.directory,path.join(jobFolder(glb.id),'model.glb')],{encoding:'utf8'}));
+  for(const [name,pixels] of [['Shell',originalPixels],['Latch',bluePixels]]){
+    for(const [index,x] of [69,186].entries())assert.deepEqual(quality[name][index].slice(0,5),sample(pixels,x,128));
+  }
+  assert.equal(quality.Latch[2][5],128);console.log('PASS 实际 4K 和 GLB 双槽材质、原 UV、透明度',quality);
+  const camera={projection:'orthographic',eye:[0,0,3],target:[0,0,0],up:[0,1,0],fov:38,orthoHeight:1.55};
+  await json(route+'/paint/render',{revision:doc.revision,requestId:'two-slot-render',settings:{width:384,height:256,samples:6,transparent:true,camera}});
+  const frame=await finished('paint-render');
+  assert.equal(frame.render.textureSets.Latch.roughness,secondary.report.files['f_16xl_roughness.png']);
+  const counts=JSON.parse(execFileSync(pythonExecutable(),['-c',`from PIL import Image
+import sys,json,numpy as np
+im=np.asarray(Image.open(sys.argv[1]).convert('RGBA')).astype(int)
+assert im.shape==(256,384,4)
+r,g,b,a=im.transpose(2,0,1); red=(r>g+30)&(r>b+30)&(a>200); blue=(b>r+30)&(b>g+15)&(a>200)
+print(json.dumps([int(red[:,:192].sum()),int(blue[:,192:].sum()),int(red[:,192:].sum()),int(blue[:,:192].sum())]))`,path.join(jobFolder(frame.id),'path-tracing','render.png')],{encoding:'utf8'}));
+  assert.ok(counts[0]>300&&counts[1]>300&&counts[2]<counts[0]/10&&counts[3]<counts[1]/10,JSON.stringify(counts));
+  console.log('PASS 正式出图左右两个面板分别显示涂装颜色',counts);
+  await page.getByRole('button',{name:'贴图输出预设',exact:true}).click();
+  await page.getByRole('option',{name:'Unreal · ORM',exact:true}).click();
+  await page.locator('#export-textures').click();
+  const bundle=await finished('paint-texture-export');
+  const zip=path.join(jobFolder(bundle.id),'textures','project.zip'),damaged=path.join(data,'tampered.zip');
+  const packaged=JSON.parse(execFileSync(pythonExecutable(),['-c',`import io,json,sys
+from zipfile import ZipFile,ZIP_DEFLATED
+from PIL import Image
+with ZipFile(sys.argv[1]) as z, ZipFile(sys.argv[2],'w',ZIP_DEFLATED) as altered:
+ report=json.loads(z.read('project-report.json'))
+ outputs={}; member=None
+ for name,stack in [('Shell',report),('Latch',report['textureSets']['Latch'])]:
+  prefix=stack.get('directory','')
+  p=prefix+'/' if prefix else ''
+  assert len(stack['bake']['files'])==8 and len(stack['textureOutput']['files'])==5
+  key=p+'presets/unreal-orm/'
+  base=Image.open(io.BytesIO(z.read(key+'BaseColor.png')))
+  orm=Image.open(io.BytesIO(z.read(key+'ORM.png')))
+  outputs[name]=[]
+  for x in (69,186,248):
+   point=(x*16+8,2056); r,g,b,a=base.getpixel(point); _,rough,metal=orm.getpixel(point)
+   outputs[name].append([r,g,b,metal,rough,a])
+  if name=='Latch': member=key+'ORM.png'
+ for entry in z.infolist():
+  content=z.read(entry)
+  altered.writestr(entry,content+b'x' if entry.filename==member else content)
+print(json.dumps(outputs))`,zip,damaged],{encoding:'utf8'}));
+  assert.deepEqual(packaged,quality);
+  const packedCopy=await restore(await fs.readFile(zip));assert.deepEqual(packedCopy.paint.textureSets.Latch,latch);
+  const invalid=await fetch(origin+'/api/projects/paint-import',{method:'POST',headers:{Origin:origin,'Content-Type':'application/zip'},body:await fs.readFile(damaged)});
+  assert.equal(invalid.status,400);assert.match((await invalid.json()).error,/指纹/);
+  console.log('PASS 两个槽的 4K ORM、颜色和透明度与 GLB 一致，完整包可重开，损坏副槽被拒绝');
+  await json(route+'/paint/export',{revision:doc.revision,requestId:'native-two-slot',previewId:preview.id,confirmed:true,
+    texturePreset:'unity-hdrp',settings:{width:384,height:256,samples:3,transparent:true,camera}});
+  const delivery=await finished('paint-export');
+  const packageFile=path.join(data,'two-slot-delivery.zip');
+  await fs.writeFile(packageFile,Buffer.from(await (await fetch(new URL(delivery.packageUrl,origin))).arrayBuffer()));
+  const nativeCheck=JSON.parse(execFileSync(pythonExecutable(),['-c',`from zipfile import ZipFile
+from PIL import Image
+import hashlib,json,io,sys
+with ZipFile(sys.argv[1]) as z:
+ material=json.loads(z.read('materials.json'))
+ report=json.loads(z.read('project-report.json'))
+ slots=report['textureSets']['Latch']
+ info=material['textureSets']['Latch']['channels']['roughness']
+ assert hashlib.sha256(z.read(info['file'])).hexdigest()==info['sha256']
+ mask=Image.open(io.BytesIO(z.read(slots['directory']+'/presets/unity-hdrp/MaskMap.png')))
+ rendered=Image.open(io.BytesIO(z.read('render.png')))
+ assert mask.size==(4096,4096) and rendered.size==(384,256)
+ print(json.dumps([mask.getpixel((x*16+8,2056)) for x in (69,186,248)]))`,packageFile],{encoding:'utf8'}));
+  for(const [i,[,,,metal,rough]] of quality.Latch.entries())assert.deepEqual(nativeCheck[i],[metal,255,0,255-rough]);
+  const nativeCopy=await restore(await fs.readFile(packageFile));assert.deepEqual(nativeCopy.paint.textureSets.Latch,latch);
+  console.log('PASS 原生交付包保留副槽的材质清单、HDRP 通道、成片与可继续编辑的工程');
   if(process.argv[2]){
     const old=await restore(await fs.readFile(process.argv[2]));
     assert.equal(old.paint.textureSets,undefined);await page.goto(origin+'/paint.html?project='+old.id);

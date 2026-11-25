@@ -1143,7 +1143,8 @@ function layerActions(l,{issue=command,add=addAndSelect}={}){
 const isPreview=j=>['paint-preview','paint-draft'].includes(j.type);
 const previews=()=>jobs.filter(j=>isPreview(j)&&j.status==='completed')
   .sort((a,b)=>b.revision-a.revision||Number(a.type==='paint-draft')-Number(b.type==='paint-draft'));
-const current=()=>previews().find(j=>j.revision===doc.revision&&j.type==='paint-preview');
+const current=()=>previews().find(j=>j.revision===doc.revision&&j.type==='paint-preview'&&
+  Object.keys(doc.paint.textureSets??{}).every(name=>Object.hasOwn(j.textureSetBakes??{},name)));
 const previewLabel=j=>j.type==='paint-draft'?'1K 试算':'4K 预览';
 async function renderTexture(){
   const j=previews()[0],mode=$('source').value,channel=$('channel').value;
@@ -1653,7 +1654,18 @@ function renderPaintBackups(){
     : pending.error||pending.stage;
 }
 function renderDelivery(j,active,last){
-  const ready=current(),r=j?.paintReport,revision=doc.revision;
+  const ready=current(),revision=doc.revision;
+  const choose=$('delivery-preview-slot'),slots=[doc.source.material,...Object.keys(j?.textureSetBakes??{})];
+  const slotKey=JSON.stringify([doc.id,slots]);
+  if(choose.dataset.slots!==slotKey){
+    const selected=choose.dataset.project===doc.id&&choose.value;
+    choose.replaceChildren(...slots.map(name=>new Option(name,name)));
+    choose.value=slots.includes(selected)?selected:slots[0];
+    choose.dataset.slots=slotKey;choose.dataset.project=doc.id;syncSelectMenu(choose);
+  }
+  choose.closest('label').hidden=slots.length<2;
+  const secondary=Object.hasOwn(j?.textureSetBakes??{},choose.value)?j.textureSetBakes[choose.value]:null,r=secondary?.report??j?.paintReport;
+  const setBase=secondary?'/api/projects/'+doc.id+'/jobs/'+j.id+'/files/paint/'+secondary.directory+'/':null;
   if($('delivery-dialog').open)syncDeliveryControls();
   if(approvedPreviewId!==ready?.id){approvedPreviewId=null;approvedRenderSettings=null;}
   $('approved').checked=!!approvedPreviewId;
@@ -1664,7 +1676,7 @@ function renderDelivery(j,active,last){
   $('export-glb').title='导出建模结果和内嵌 4K PBR 贴图';
   const scope=$('delivery-set-scope');
   scope.hidden=!Object.keys(doc.paint.textureSets??{}).length;
-  if(!scope.hidden)scope.textContent='当前贴图、GLB 和正式出图使用主纹理集「'+doc.source.material+'」。可编辑工程 ZIP 保存全部纹理集。';
+  if(!scope.hidden)scope.textContent=`共 ${1+Object.keys(doc.paint.textureSets).length} 套纹理。贴图 ZIP 按材质槽分目录，GLB 和正式出图使用全部已绘制的槽。`;
   const preset=$('delivery-texture-preset');
   preset.disabled=isPaintExport(active);
   syncSelectMenu(preset);
@@ -1682,12 +1694,12 @@ function renderDelivery(j,active,last){
     `${previewLabel(j)} · r${j.revision} · 交付需要当前修订的 4K 预览`:'先生成当前修订的 4K 预览';
   $('diagnostics').textContent=r?`局部涂装写入 ${r.writtenTexels.toLocaleString()} · 共享 UV 冲突 ${r.conflictTexels.toLocaleString()} · 保护区写入 ${r.protectedTexelsWritten}`:'';
   $('delivery-preview-button').disabled=!!active;
-  const previewKey=j?.id||'';
+  const previewKey=JSON.stringify([j?.id,choose.value]);
   if($('delivery-channels').dataset.job!==previewKey){
     $('delivery-channels').dataset.job=previewKey;
     const [width,height]=r?.resolution||[];
     $('delivery-channels').replaceChildren(...[
-      ...paintChannels.map(k=>[names[k],k==='color'?j?.colorUrl:j?.materialUrls?.[k]])
+      ...paintChannels.map(k=>[names[k],setBase?setBase+channelSpecs[k].file:k==='color'?j?.colorUrl:j?.materialUrls?.[k]])
     ].map(([label,url])=>{
       const node=url?deliveryLink('',url):element('span');
       if(url){
@@ -1695,7 +1707,7 @@ function renderDelivery(j,active,last){
       }
       node.append(element('span',label),element('small',url?`${width}×${height}`:'待生成'));return node;
     }));
-    $('delivery-reference').replaceChildren(...(j?[deliveryLink('写入诊断图',j.coverageUrl),deliveryLink('预览校验报告',j.validationUrl)]:[]));
+    $('delivery-reference').replaceChildren(...(j?[deliveryLink('写入诊断图',setBase?setBase+'coverage.png':j.coverageUrl),deliveryLink('预览校验报告',setBase?setBase+'report.json':j.validationUrl)]:[]));
   }
   const task=last?`r${last.revision} · ${exportLabels[last.type]||previewLabel(last)} · ${last===active&&cyclesProgressLabel(last.progress)||last.stage}${last.error?' · '+last.error:''}`:'';
   if($('task').textContent!==task)$('task').textContent=task;
@@ -2591,6 +2603,7 @@ $('open-delivery').onclick=()=>{
 };
 $('close-delivery').onclick=()=>$('delivery-dialog').close();
 $('delivery-dialog').onclose=()=>{approvedPreviewId=null;approvedRenderSettings=null;renderJobs();};
+$('delivery-preview-slot').onchange=renderJobs;
 $('delivery-preview-button').onclick=()=>run(()=>post('preview',{requestId:crypto.randomUUID()}));
 $('retry-preview').onclick=()=>run(()=>post($('retry-preview').dataset.type==='paint-draft'?'draft':'preview',{requestId:crypto.randomUUID()}));
 $('retry-export').onclick=()=>run(async()=>{

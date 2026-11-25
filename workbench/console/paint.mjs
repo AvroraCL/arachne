@@ -1763,13 +1763,22 @@ function prepareRegistrationFiles(source,files){
   return registration;
 }
 const channelsForReport=report=>channels.filter(k=>Object.hasOwn(report.files,channelSpecs[k].file));
+function setBakeDirectory(name){
+  return 'sets/'+crypto.createHash('sha256').update(name).digest('hex');
+}
 export function paintPreviewFolder(doc,j){
   if(j?.type!=='paint-preview'||j.status!=='completed'||j.revision!==doc.revision)throw Error('请先生成当前修订的有效预览');
+  if(!isDeepStrictEqual(Object.keys(doc.paint.textureSets??{}).sort(),Object.keys(j.textureSetBakes??{}).sort()))
+    throw Error('请重新生成包含全部纹理集的 4K 预览');
   return path.join(projectDir(doc.id),'jobs',j.id,'paint');
 }
 export async function checkPaintPreview(doc,j,options){
   const folder=paintPreviewFolder(doc,j);
   await verifyPaintBake(doc,j.paintReport,folder,options);
+  for(const [name,{report}] of Object.entries(j.textureSetBakes??{})){
+    const scoped=textureSetDocument(doc,name);
+    await verifyPaintBake(scoped,report,path.join(folder,setBakeDirectory(name)),{binding:paintBinding(scoped),signal:options?.signal});
+  }
   return folder;
 }
 export async function verifyPaintBake(doc,report,folder,{draft=false,binding,signal}={}){
@@ -1808,10 +1817,10 @@ export async function nativePaintMaterial(doc,report,folder,{signal}={}){
 }
 export async function reusablePaintBake(doc,jobs,fingerprint,{binding,signal}={}){
   for(const job of jobs){
-    const report=job.paintReport;
+    const report=doc.textureSetName?job.textureSetBakes?.[doc.textureSetName]?.report:job.paintReport;
     if(!['paint-preview','paint-render'].includes(job.type)||job.status!=='completed'||job.revision>doc.revision||
        report?.bakeFingerprint!==fingerprint||report.revision!==job.revision||!/^[\w-]{1,100}$/.test(job.id))continue;
-    const folder=path.join(projectDir(doc.id),'jobs',job.id,'paint');
+    const folder=path.join(projectDir(doc.id),'jobs',job.id,'paint',doc.textureSetName?setBakeDirectory(doc.textureSetName):'');
     try{
       await verifyPaintBake({...doc,revision:job.revision},report,folder,{binding,signal});
       const nodeMaterial=await nativePaintMaterial(doc,report,folder,{signal});
@@ -1842,19 +1851,26 @@ async function copyPaintBake(doc,match,out,{binding,signal}){
 
 const hashBytes=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 
-async function writePaintGlb(doc,{bake,input,model,out,stage,j,run,python,signal}){
-  stage(j,'将已确认的 4K 贴图与建模修改写入 GLB');
+function glbStackMaps(bake,input){
   const maps=Object.fromEntries(channelsForReport(bake).map(channel=>{
     const name=channelSpecs[channel].file;
     return [channel,{file:path.join(input,name),sha256:bake.files[name]}];
   }));
   const activeChannels=(bake.activeChannels||Object.keys(maps)).filter(channel=>Object.hasOwn(maps,channel));
-  await run('glb-input',{model,maps,activeChannels,out,material:doc.source.material,revision:doc.revision,
+  return {maps,activeChannels};
+}
+
+async function writePaintGlb(doc,{bake,textureSetBakes,input,model,out,stage,j,run,python,signal}){
+  stage(j,'将已确认的 4K 贴图与建模修改写入 GLB');
+  const {maps,activeChannels}=glbStackMaps(bake,input);
+  const textureSets=Object.fromEntries(Object.entries(textureSetBakes??{}).map(([name,{report}])=>
+    [name,glbStackMaps(report,path.join(input,setBakeDirectory(name)))]));
+  await run('glb-input',{model,maps,activeChannels,textureSets,out,material:doc.source.material,revision:doc.revision,
     modeling:doc.modeling,sourceMaterials:doc.paint.sourceMaterials,marks:Object.fromEntries(Object.values(doc.paint.sourceMaterials||{}).filter(m=>m.mark).map(({mark})=>[mark.coverage,assetPath(doc,mark.coverage)])),verifyNativeUV:doc.source.format==='glb'},python,['-X','utf8',path.join(ROOT,'paint_glb.py')]);
   return {sha256:await sha256File(out,{signal}),activeChannels};
 }
 
-async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,update,signal,registerBrowser}){
+async function renderPaintFrame(j,doc,{model,report,textureSetBakes,input,out,binding,stage,update,signal,registerBrowser}){
   const bookmark=j.renderBookmark&&doc.paint.renderBookmarks?.find(item=>item.id===j.renderBookmark.id);
   const renderLighting=bookmark?.lighting??doc.paint.renderLighting??null;
   const renderAppearance=doc.paint.renderAppearance||null;
@@ -1864,12 +1880,23 @@ async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,upda
   const active=report.activeChannels||legacyChannels;
   const applied=['color','metallic','roughness','normal','emission','alpha'].filter(name=>active.includes(name));
   const files=Object.fromEntries(applied.map(name=>['/input/'+name+'.png',path.join(input,channelSpecs[name].file)]));
+  const textureSets={};
+  for(const [name,{report:setReport}] of Object.entries(textureSetBakes??{})){
+    const directory=setBakeDirectory(name),maps={};
+    for(const channel of ['color','metallic','roughness','normal','emission','alpha']){
+      if(!setReport.activeChannels.includes(channel))continue;
+      const url='/input/'+directory+'/'+channel+'.png';
+      files[url]=path.join(input,directory,channelSpecs[channel].file);
+      maps[channel]=url;
+    }
+    textureSets[name]=maps;
+  }
   for(const {mark} of Object.values(doc.paint.sourceMaterials||{}))if(mark)files['/input/mark-'+mark.coverage+'.png']=assetPath(doc,mark.coverage);
   files['/input/model.glb']=model.file;
   stage(j,'路径追踪渲染冻结修订');
   const result=await renderPathTrace({
     settings,region,lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,
-    material:doc.source.material,sourceMaterials:doc.paint.sourceMaterials,channels:applied,modeling:doc.modeling,visibility:renderVisibility||{},
+    material:doc.source.material,sourceMaterials:doc.paint.sourceMaterials,textureSets,channels:applied,modeling:doc.modeling,visibility:renderVisibility||{},
     defaultVisibility:model.metadata.render_visibility||{}
   },files,{signal,registerBrowser,onSample:sample=>{
     if(!signal?.aborted)update(j,{progress:{phase:'sample',sample,total:settings.samples}});
@@ -1888,6 +1915,8 @@ async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,upda
     transparent:settings.transparent,...(result.exr?{colorSpace:settings.exrSpace?exrSpaces[settings.exrSpace].label:'scene-linear sRGB',colorInteropID:settings.exrSpace??defaultExrSpace,alphaMode:'premultiplied'}:{}),
     lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,visibility:renderVisibility,
     textureSampling:result.textureSampling,
+    ...(Object.keys(textureSets).length?{textureSets:Object.fromEntries(Object.entries(textureSets).map(([name,maps])=>
+      [name,Object.fromEntries(Object.keys(maps).map(channel=>[channel,textureSetBakes[name].report.files[channelSpecs[channel].file]]))]))}:{}),
     modelSha256:model.sha256,uvSha256:model.uvSha256,materialFingerprint:report.materialFingerprint??null,
     textures:Object.fromEntries(applied.map(name=>[name,report.files[channelSpecs[name].file]])),
     pngSha256:hashBytes(result.png),...(result.exr?{exrSha256:hashBytes(result.exr)}:{}),
@@ -1920,7 +1949,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     const file=path.join(folder,name+'.json');atomic(file,cfg);
     await runProcess(j,exe,[...args,file]);
   };
-  async function packTexturePreset(bake,input,out,archiveFiles){
+  async function packTexturePreset(bake,input,out,archiveFiles,prefix){
     const preset=checkedTexturePreset(j.texturePreset),recipes=textureExportPresets[preset].files;
     if(!recipes)return null;
     if(paintChannels.some(key=>!bake.files[channelSpecs[key].file]))
@@ -1932,12 +1961,37 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
       python,['-X','utf8',path.join(ROOT,'paint_texture_pack.py')]);
     const files={};
     for(const {name,colorSpace,bands,copy} of recipes){
-      const file=path.join(directory,name),member='presets/'+preset+'/'+name;
+      const file=path.join(directory,name),member=prefix+'presets/'+preset+'/'+name;
       archiveFiles[member]=file;
       const sha256=await sha256File(file,{signal});
       files[member]={sha256,colorSpace,...(bands?{bands}:{source:copy})};
     }
     return {version:1,preset,resolution:bake.resolution,files};
+  }
+  async function archiveTextureSets(preview,input,out,files){
+    async function addStack(report,source,prefix){
+      const hashes={};
+      for(const [name,digest] of Object.entries(report.files)){
+        const member=prefix+'textures/'+name;
+        files[member]=path.join(source,name);
+        hashes[member]=digest;
+      }
+      files[prefix+'projection-report.json']=path.join(source,'report.json');
+      const packed=await packTexturePreset(report,source,path.join(out,prefix),files,prefix);
+      return {bake:{previewId:preview.id,resolution:report.resolution,files:hashes},...(packed?{textureOutput:packed}:{})};
+    }
+    const result=await addStack(preview.paintReport,input,'');
+    const entries=Object.entries(preview.textureSetBakes??{});
+    if(entries.length){
+      result.textureSets={};
+      for(const [index,[name,{directory,report}]] of entries.entries()){
+        // A numbered prefix distinguishes names that collide on a case-insensitive disk.
+        const label=Array.from(name.normalize('NFC').replace(/[^\p{L}\p{N} _-]+/gu,'-')).slice(0,48).join('').trim();
+        const target='texture-sets/'+String(index+1).padStart(2,'0')+'-'+(label||'material');
+        result.textureSets[name]={directory:target,...await addStack(report,path.join(input,directory),target+'/')};
+      }
+    }
+    return result;
   }
   if(j.type==='paint-glb-export'){
     const preview=getJob(doc.id,j.paintPreviewId);
@@ -1945,7 +1999,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     const model=(await import('./viewport.mjs')).registeredViewportModel(doc);
     const out=path.join(folder,'model.glb'),pending=out+'.tmp';
     try{
-      const {sha256}=await writePaintGlb(doc,{bake:preview.paintReport,input,model,out:pending,stage,j,run,python,signal});
+      const {sha256}=await writePaintGlb(doc,{bake:preview.paintReport,textureSetBakes:preview.textureSetBakes,input,model,out:pending,stage,j,run,python,signal});
       signal?.throwIfAborted();
       if(read(doc.id).revision!==doc.revision)throw Error('工程已变化，请预览并确认当前修订');
       fs.renameSync(pending,out);
@@ -1970,19 +2024,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
       if(withTextures){
         const preview=getJob(doc.id,j.paintPreviewId);
         const input=await checkPaintPreview(doc,preview,{binding,signal});
-        const bake=preview.paintReport;
-        const hashes={};
-        for(const [name,digest] of Object.entries(bake.files)){
-          const member='textures/'+name;
-          files[member]=path.join(input,name);
-          hashes[member]=digest;
-        }
-        const projection=path.join(out,'projection-report.json');
-        atomic(projection,bake);
-        files['projection-report.json']=projection;
-        report.bake={previewId:preview.id,resolution:bake.resolution,files:hashes};
-        const packed=await packTexturePreset(bake,input,out,files);
-        if(packed)report.textureOutput=packed;
+        Object.assign(report,await archiveTextureSets(preview,input,out,files));
       }
       await run('backup-config',{out,files,report,expected:registration??{}},
         python,['-X','utf8',path.join(ROOT,'paint_archive.py'),'pack']);
@@ -1995,41 +2037,57 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     }finally{
       fs.rmSync(path.join(out,'editable'),{recursive:true,force:true});
       fs.rmSync(path.join(out,'packed'),{recursive:true,force:true});
+      fs.rmSync(path.join(out,'texture-sets'),{recursive:true,force:true});
     }
     update(j,{portable,...(withTextures?{packageUrl:url('textures/project.zip')}:{archiveUrl:url('backup/project.zip')})});
     return;
   }
   if(j.type==='paint-preview'||j.type==='paint-draft'||j.type==='paint-render'){
     if(modelFingerprint(doc))stage(j,'准备建模后的涂装表面与遮挡');
-    const geometry=await preparePaintGeometry(doc,{signal,frozen:true}),paintSource=geometry.source;
-    const out=path.join(folder,'paint');
-    const draft=j.type==='paint-draft',bakeFingerprint=paintBakeFingerprint(doc,binding);
+    const out=path.join(folder,'paint'),draft=j.type==='paint-draft',previous=!draft&&listJobs?listJobs(doc.id):[];
     const model=j.type==='paint-render'?(await import('./viewport.mjs')).registeredViewportModel(doc):null;
     if(model&&doc.modeling?.steps?.length&&doc.modeling.modelSha256!==model.sha256)
       throw Error('工程建模绑定与登记模型不一致');
-    const compose={...paintInput(doc,binding),source:paintSource,surfaceSources:geometry.surfaceSources,out,draft,bakeFingerprint};
-    const cached=!draft&&listJobs?await reusablePaintBake(doc,listJobs(doc.id),bakeFingerprint,{binding,signal}):null;
-    if(cached)stage(j,'复用已验证的 4K 涂装贴图');
-    let report=await copyPaintBake(doc,cached,out,{binding,signal});
-    if(report){
-      atomic(path.join(folder,'paint-input.json'),compose);
-      update(j,{reusedPaintBake:{jobId:cached.job.id,revision:cached.job.revision}});
+    async function bakeStack(scoped,output,key){
+      signal?.throwIfAborted();
+      const name=scoped.source.material,scopeBinding=paintBinding(scoped),fingerprint=paintBakeFingerprint(scoped,scopeBinding);
+      const geometry=await preparePaintGeometry(scoped,{signal,frozen:true});
+      const compose={...paintInput(scoped,scopeBinding),source:geometry.source,surfaceSources:geometry.surfaceSources,
+        out:output,draft,bakeFingerprint:fingerprint};
+      const cached=await reusablePaintBake(scoped,previous,fingerprint,{binding:scopeBinding,signal});
+      if(cached){
+        stage(j,'复用已验证的 4K 涂装贴图 · '+name);
+        await fsp.mkdir(path.dirname(output),{recursive:true});
+        const report=await copyPaintBake(scoped,cached,output,{binding:scopeBinding,signal});
+        if(report){
+          atomic(path.join(folder,key+'.json'),compose);
+          if(scoped===doc)update(j,{reusedPaintBake:{jobId:cached.job.id,revision:cached.job.revision}});
+          return report;
+        }
+      }
+      stage(j,(draft?'生成 1K 试算':'合成八通道并写回原 UV')+' · '+name);
+      await run(key,compose,python,['-X','utf8',path.join(ROOT,'paint_worker.py')]);
+      const report=JSON.parse(await fsp.readFile(path.join(output,'report.json'),{encoding:'utf8',signal}));
+      await verifyPaintBake(scoped,report,output,{draft,binding:scopeBinding,signal});
+      return report;
     }
-    else{
-      stage(j,draft?'生成 1K 试算':'合成八通道并写回原 UV');
-      await run('paint-input',compose,
-        python,['-X','utf8',path.join(ROOT,'paint_worker.py')]);
-      report=JSON.parse(await fsp.readFile(path.join(out,'report.json'),{encoding:'utf8',signal}));
-      await verifyPaintBake(doc,report,out,{draft,binding,signal});
-      await verifyPaint(doc,{signal});
+    const report=await bakeStack(doc,out,'paint-input'),textureSetBakes={};
+    if(!draft){
+      for(const name of Object.keys(doc.paint.textureSets??{})){
+        const directory=setBakeDirectory(name);
+        const secondary=await bakeStack(textureSetDocument(doc,name),path.join(out,directory),'paint-set-'+path.basename(directory));
+        textureSetBakes[name]={directory,report:secondary};
+      }
     }
+    await verifyPaint(doc,{signal});
+    const extra=Object.keys(textureSetBakes).length?{textureSetBakes}:{};
     if(model){
-      const render=await renderPaintFrame(j,doc,{model,report,input:out,out:path.join(folder,'path-tracing'),binding,stage,update,signal,registerBrowser});
-      update(j,{paintReport:report,render,renderUrl:url('path-tracing/render.png'),validationUrl:url('path-tracing/validation.json'),
+      const render=await renderPaintFrame(j,doc,{model,report,textureSetBakes,input:out,out:path.join(folder,'path-tracing'),binding,stage,update,signal,registerBrowser});
+      update(j,{paintReport:report,...extra,render,renderUrl:url('path-tracing/render.png'),validationUrl:url('path-tracing/validation.json'),
         ...(render.exrSha256?{outputUrl:url('path-tracing/render.exr'),outputSha256:render.exrSha256}:{})});
       return;
     }
-    update(j,{paintReport:report,colorUrl:url('paint/f_16xl_BaseColor.png'),baseUrl:url('paint/base.png'),
+    update(j,{paintReport:report,...extra,colorUrl:url('paint/f_16xl_BaseColor.png'),baseUrl:url('paint/base.png'),
       materialUrls:Object.fromEntries(channels.filter(k=>k!=='color').map(k=>[k,url('paint/'+channelSpecs[k].file)])),
       baseMaterialUrls:Object.fromEntries(channels.filter(k=>k!=='color').map(k=>[k,url('paint/base-'+k+'.png')])),
       coverageUrl:url('paint/coverage.png'),validationUrl:url('paint/report.json')});return;
@@ -2041,36 +2099,32 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     const bake=preview.paintReport;
     const model=(await import('./viewport.mjs')).registeredViewportModel(doc);
     const modelFile=path.join(pending,'model.glb');
-    const {sha256:modelSha256,activeChannels}=await writePaintGlb(doc,{bake,input,model,out:modelFile,stage,j,run,python,signal});
-    const render=await renderPaintFrame(j,doc,{model,report:bake,input,out:path.join(pending,'frame'),binding,stage,update,signal,registerBrowser});
+    const {sha256:modelSha256,activeChannels}=await writePaintGlb(doc,{bake,textureSetBakes:preview.textureSetBakes,input,model,out:modelFile,stage,j,run,python,signal});
+    const render=await renderPaintFrame(j,doc,{model,report:bake,textureSetBakes:preview.textureSetBakes,input,out:path.join(pending,'frame'),binding,stage,update,signal,registerBrowser});
     stage(j,'核对模型、材质、贴图与渲染并打包');
     const files={'model.glb':modelFile,'materials.json':path.join(pending,'materials.json'),
-      'render.png':path.join(pending,'frame','render.png'),'render-report.json':path.join(pending,'frame','validation.json'),
-      'projection-report.json':path.join(pending,'projection-report.json')};
-    atomic(files['projection-report.json'],bake);
+      'render.png':path.join(pending,'frame','render.png'),'render-report.json':path.join(pending,'frame','validation.json')};
     const expected={'model.glb':modelSha256,'render.png':render.pngSha256};
     if(render.exrSha256){
       files['render.exr']=path.join(pending,'frame','render.exr');
       expected['render.exr']=render.exrSha256;
     }
-    const textures={};
-    for(const [name,digest] of Object.entries(bake.files)){
-      const member='textures/'+name;
-      files[member]=path.join(input,name);
-      textures[member]=digest;
-    }
+    const stacks=await archiveTextureSets(preview,input,pending,files);
+    const channelManifest=(report,prefix,active)=>Object.fromEntries(channelsForReport(report).map(key=>{
+      const spec=channelSpecs[key],enabled=active.includes(key);
+      return [key,{file:prefix+'textures/'+spec.file,sha256:report.files[spec.file],colorSpace:spec.srgb?'sRGB':'linear',active:enabled,embedded:enabled&&key!=='height'}];
+    }));
     atomic(files['materials.json'],{format:'arachne-pbr-material',version:1,revision:doc.revision,material:doc.source.material,
       model:'model.glb',uv:'TEXCOORD_0',uvSha256:model.uvSha256,resolution:bake.resolution,
-      channels:Object.fromEntries(channelsForReport(bake).map(key=>{
-        const spec=channelSpecs[key],file='textures/'+spec.file,active=activeChannels.includes(key);
-        return [key,{file,sha256:textures[file],colorSpace:spec.srgb?'sRGB':'linear',active,embedded:active&&key!=='height'}];
-      }))});
+      channels:channelManifest(bake,'',activeChannels),
+      ...(stacks.textureSets?{textureSets:Object.fromEntries(Object.entries(stacks.textureSets).map(([name,{directory}])=>{
+        const {report}=preview.textureSetBakes[name];
+        return [name,{channels:channelManifest(report,directory+'/',report.activeChannels)}];
+      }))}:{})});
     const registration=prepareRegistrationFiles(doc.source,files);
     Object.assign(expected,registration);
     const editable=await prepareEditableFiles(doc,pending,files);
-    const packed=await packTexturePreset(bake,input,pending,files);
-    const report={format:archiveFormat,revision:doc.revision,editable,bake:{previewId:preview.id,resolution:bake.resolution,files:textures},
-      ...(packed?{textureOutput:packed}:{}),
+    const report={format:archiveFormat,revision:doc.revision,editable,...stacks,
       delivery:{version:1,confirmedAt:j.paintConfirmedAt,model:{file:'model.glb',sha256:modelSha256,
         sourceGlbSha256:model.sha256,uvSha256:model.uvSha256},material:'materials.json',render:{
         file:render.exrSha256?'render.exr':'render.png',preview:'render.png',report:'render-report.json',engine:render.engine,resolution:render.resolution,
@@ -2080,6 +2134,7 @@ export async function runPaintJob(j,doc,{stage,update,runProcess,getJob,listJobs
     signal?.throwIfAborted();
     await fsp.rm(path.join(pending,'editable'),{recursive:true,force:true});
     await fsp.rm(path.join(pending,'packed'),{recursive:true,force:true});
+    await fsp.rm(path.join(pending,'texture-sets'),{recursive:true,force:true});
     signal?.throwIfAborted();
     if(read(doc.id).revision!==doc.revision)throw Error('工程已变化，请预览并确认当前修订');
     fs.renameSync(pending,out);

@@ -285,3 +285,6 @@
 .profile-values input { width: 100%; min-width: 0; box-sizing: border-box; }
 .profile-source { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #profile-preview { display: block; width: 100%; height: clamp(100px, 21vh, 185px); background: #272727; border-radius: 3px; touch-action: none; }
+
+#delivery-dialog .delivery-preview-slot:not([hidden]){display:flex;align-items:center;gap:8px;min-width:0;margin:6px 0}
+#delivery-dialog .delivery-preview-slot>.custom-select{max-width:min(320px,75%);min-width:0}

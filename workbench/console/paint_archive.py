@@ -100,16 +100,18 @@ def check_metadata(manifest, report, report_name):
             '交付包的修订、模型或 UV 指纹不一致')
 
 
-def check_project_textures(archive, report, hashes):
+def check_project_textures(archive, report, hashes, revision, prefix=''):
     bake = report['bake']
     files = bake['files']
-    require(set(files) in (TEXTURE_NAMES, LEGACY_TEXTURE_NAMES) and bake['resolution'] == [4096, 4096],
+    expected = [{prefix + name for name in names} for names in (TEXTURE_NAMES, LEGACY_TEXTURE_NAMES)]
+    require(set(files) in expected and bake['resolution'] == [4096, 4096],
             '工程贴图清单无效')
-    projection = json.loads(read_checked(archive, TEXTURE_REPORT, 8 * MIB, hashes[TEXTURE_REPORT]),
+    report_path = prefix + TEXTURE_REPORT
+    projection = json.loads(read_checked(archive, report_path, 8 * MIB, hashes[report_path]),
                             object_pairs_hook=unique_object)
-    require(projection['revision'] == report['revision'] and projection['resolution'] == bake['resolution'] and
+    require(projection['revision'] == revision and projection['resolution'] == bake['resolution'] and
             projection['uv_unchanged'] is True and projection['draft'] is False and
-            {'textures/' + name: digest for name, digest in projection['files'].items()} == files,
+            {prefix + 'textures/' + name: digest for name, digest in projection['files'].items()} == files,
             '工程贴图和预览校验报告不一致')
     for name, digest in files.items():
         require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest) and hashes[name] == digest,
@@ -121,7 +123,7 @@ def check_project_textures(archive, report, hashes):
         require(output.get('version') == 1 and preset in ('unreal-orm','unity-hdrp') and
                 output.get('resolution') == bake['resolution'] and 1 <= len(output['files']) <= 8,
                 '贴图输出预设清单无效')
-        prefix = f'presets/{preset}/'
+        prefix += f'presets/{preset}/'
         require(set(output['files']) == {name for name in archive.namelist() if name.startswith(prefix)},
                 '贴图输出预设缺少文件')
         for name, item in output['files'].items():
@@ -210,7 +212,18 @@ def unpack(file, output):
         manifest = json.loads(manifest_data, object_pairs_hook=unique_object)
         check_metadata(manifest, report, report_name)
         if report_name == PROJECT and 'bake' in report:
-            check_project_textures(archive, report, hashes)
+            check_project_textures(archive, report, hashes, report['revision'])
+            if 'textureSets' in report:
+                sets = report['textureSets']
+                require(isinstance(sets,dict) and set(sets) == set(manifest['paint'].get('textureSets',{})),
+                        '交付纹理集与可编辑工程的材质槽不一致')
+                directories = set()
+                for stack in sets.values():
+                    directory = stack['directory']
+                    require(re.fullmatch(r'texture-sets/[0-9]+-[\w -]+',directory) and directory not in directories and
+                            stack['bake']['previewId'] == report['bake']['previewId'], '纹理集的交付路径或修订无效')
+                    directories.add(directory)
+                    check_project_textures(archive, stack, hashes, report['revision'], directory+'/')
         if report_name == PROJECT:
             if 'delivery' in report:
                 delivery = report['delivery']
@@ -245,8 +258,10 @@ def unpack(file, output):
 def pack_project(config):
     report = config['report']
     hashes = {}
-    expected = {**config.get('expected',{}),
-                **{name: item['sha256'] for name,item in report.get('textureOutput',{}).get('files',{}).items()}}
+    expected = dict(config.get('expected',{}))
+    for stack in (report, *report.get('textureSets',{}).values()):
+        expected.update(stack.get('bake',{}).get('files',{}))
+        expected.update({name:item['sha256'] for name,item in stack.get('textureOutput',{}).get('files',{}).items()})
     total_assets = 0
     require(sum(Path(source).stat().st_size for name, source in config['files'].items()
                 if name.startswith('registration/history/')) <= MAX_HISTORY_BYTES,
@@ -278,8 +293,6 @@ def pack_project(config):
             digest = hashes[name] = checksum.hexdigest()
             if name in expected:
                 require(digest == expected[name], '打包时交付文件指纹变化')
-            if name in report.get('bake', {}).get('files', {}):
-                require(digest == report['bake']['files'][name], '打包时贴图指纹变化')
             if asset:
                 require(name == f'editable/assets/paint-{digest}.png', '打包时涂装素材指纹变化')
         report['fileSha256'] = hashes

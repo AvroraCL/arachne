@@ -14,7 +14,10 @@ import {completedPathTraceTarget,drawPathTrace} from './path-trace-display.mjs';
 
 async function loadModel(input){
   const gltf=await createViewportModelLoader().loadAsync('/input/model.glb');
-  const root=gltf.scene,materials=new Set();
+  const root=gltf.scene;
+  const mainMaps=Object.fromEntries(input.channels.map(channel=>[channel,'/input/'+channel+'.png']));
+  const stacks=new Map([[input.material,mainMaps],...Object.entries(input.textureSets??{})]);
+  const materials=new Map([...stacks.keys()].map(name=>[name,new Set()]));
   await applySurfaceMarks(root,input.sourceMaterials,id=>'/input/mark-'+id+'.png');
   root.traverse(node=>{
     const binding=gltf.parser.associations.get(node);
@@ -25,29 +28,32 @@ async function loadModel(input){
     }
     if(node.isMesh)for(const material of [node.material].flat()){
       const name=material.userData.sourceMaterial||material.name;
-      if(name===input.material)materials.add(material);
-      else applySourceFactors(material,input.sourceMaterials?.[name]);
+      if(name!==input.material)applySourceFactors(material,input.sourceMaterials?.[name]);
+      materials.get(name)?.add(material);
     }
   });
-  if(!materials.size)throw Error('登记 GLB 中找不到工程涂装材质');
   if(input.modeling?.steps?.length)applyModelState(root,input.modeling);
   const loader=new THREE.TextureLoader();
-  const maps=Object.fromEntries(await Promise.all(input.channels.map(async channel=>{
-    const texture=await loader.loadAsync('/input/'+channel+'.png');
-    texture.flipY=false;
-    texture.colorSpace=channelSpecs[channel].srgb?THREE.SRGBColorSpace:THREE.NoColorSpace;
-    return [channel,texture];
-  })));
-  for(const material of materials){
-    if(maps.color){material.map=maps.color;material.color.set(0xffffff);}
-    if(maps.metallic){material.metalnessMap=maps.metallic;material.metalness=1;}
-    if(maps.roughness){material.roughnessMap=maps.roughness;material.roughness=1;}
-    if(maps.normal){material.normalMap=maps.normal;material.normalScale.set(1,1);}
-    if(maps.emission){
-      material.emissiveMap=maps.emission;material.emissive.set(0xffffff);material.emissiveIntensity=1;
+  for(const [name,paths] of stacks){
+    const targets=materials.get(name);
+    if(!targets.size)throw Error('登记 GLB 中找不到工程涂装材质：'+name);
+    const maps=Object.fromEntries(await Promise.all(Object.entries(paths).map(async ([channel,url])=>{
+      const texture=await loader.loadAsync(url);
+      texture.flipY=false;
+      texture.colorSpace=channelSpecs[channel].srgb?THREE.SRGBColorSpace:THREE.NoColorSpace;
+      return [channel,texture];
+    })));
+    for(const material of targets){
+      if(maps.color){material.map=maps.color;material.color.set(0xffffff);}
+      if(maps.metallic){material.metalnessMap=maps.metallic;material.metalness=1;}
+      if(maps.roughness){material.roughnessMap=maps.roughness;material.roughness=1;}
+      if(maps.normal){material.normalMap=maps.normal;material.normalScale.set(1,1);}
+      if(maps.emission){
+        material.emissiveMap=maps.emission;material.emissive.set(0xffffff);material.emissiveIntensity=1;
+      }
+      if(maps.alpha){material.alphaMap=maps.alpha;material.opacity=1;material.transparent=material.alphaTest===0;material.depthWrite=!material.transparent;}
+      material.needsUpdate=true;
     }
-    if(maps.alpha){material.alphaMap=maps.alpha;material.opacity=1;material.transparent=material.alphaTest===0;material.depthWrite=!material.transparent;}
-    material.needsUpdate=true;
   }
   return root;
 }

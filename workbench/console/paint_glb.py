@@ -203,15 +203,6 @@ def main(config):
         if expected_uv and original_uv != expected_uv:
             raise ValueError('原 GLB UV 与登记指纹不一致')
         expected_uv = original_uv
-    matches = [i for i, material in enumerate(scene.get('materials', []))
-               if material.get('name') == config['material']]
-    if len(matches) != 1:
-        raise ValueError('无法唯一定位登记涂装材质')
-    selected = matches[0]
-    primitives = [primitive for mesh in scene.get('meshes', []) for primitive in mesh['primitives']
-                  if primitive.get('material') == selected]
-    if not primitives or any('TEXCOORD_0' not in primitive['attributes'] for primitive in primitives):
-        raise ValueError('登记涂装材质缺少原 UV')
     for original in scene['materials']:
         override = config.get('sourceMaterials', {}).get(original.get('name'))
         if not override:
@@ -235,8 +226,16 @@ def main(config):
                 pbr[key + 'Factor'] = override[key]
         if 'transmission' in override:
             original['extensions']['KHR_materials_transmission']['transmissionFactor'] = override['transmission']
-    material = scene['materials'][selected]
-    paint_material(scene, binary, material, config['maps'], set(config['activeChannels']))
+    stacks = {config['material']: config, **config.get('textureSets', {})}
+    for name, stack in stacks.items():
+        matches = [i for i, material in enumerate(scene['materials']) if material.get('name') == name]
+        if len(matches) != 1:
+            raise ValueError('无法唯一定位登记涂装材质：' + name)
+        index = matches[0]
+        primitives = [p for mesh in scene['meshes'] for p in mesh['primitives'] if p.get('material') == index]
+        if not primitives or any('TEXCOORD_0' not in p['attributes'] for p in primitives):
+            raise ValueError('登记涂装材质缺少原 UV：' + name)
+        paint_material(scene, binary, scene['materials'][index], stack['maps'], set(stack['activeChannels']))
     scene['asset'].setdefault('extras', {})['arachne'] = {
         'revision': config['revision'], 'sourceGlbSha256': model['sha256'], 'uvSha256': model['uvSha256']
     }
