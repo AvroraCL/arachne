@@ -1,8 +1,65 @@
 import {editingSide,resizedDocument} from './image-document-size.mjs';
 
-export function editDocumentSize(action,doc,{canvas,signal}={}){
+const presets=[
+  ['4K 方形',editingSide,editingSide],['2K 方形',2048,2048],['1K 方形',1024,1024],
+  ['全高清',1920,1080],['横幅',2048,512],['手机屏幕',1170,2532]
+];
+
+function newImageSettings(form,width,height,defaultName){
+  const layout=document.createElement('div');
+  layout.className='new-image-layout';
+  layout.innerHTML=`
+    <section class="new-image-presets" aria-label="画布预设">
+      <h4>画布预设</h4><div class="new-image-grid"></div>
+    </section>
+    <section class="new-image-details" aria-label="图像设置">
+      <h4>图像设置</h4>
+      <label>名称<input type="text" required maxlength="100" autocomplete="off"></label>
+      <div class="new-image-size"></div>
+      <div role="group" aria-label="方向" class="new-image-orientation">
+        <span>方向</span><button type="button">横向</button><button type="button">纵向</button>
+      </div>
+      <label>颜色空间<select><option value="srgb">颜色（sRGB）</option><option value="linear">数据（线性）</option></select></label>
+      <p class="new-image-background"><span>背景</span>透明</p>
+    </section>`;
+  layout.querySelector('.new-image-size').append(width.parentElement,height.parentElement);
+  form.append(layout);
+  const name=layout.querySelector('input[type=text]'),space=layout.querySelector('select');
+  name.value=defaultName;
+  name.oninput=()=>name.setCustomValidity(name.value.trim()?'':'请输入图像名称');
+  const grid=layout.querySelector('.new-image-grid');
+  const orientations=layout.querySelectorAll('.new-image-orientation button');
+  function sync(){
+    const w=width.valueAsNumber,h=height.valueAsNumber;
+    presets.forEach(([,pw,ph],i)=>grid.children[i].setAttribute('aria-pressed',String(pw===w&&ph===h)));
+    orientations.forEach((button,i)=>{
+      button.disabled=!width.validity.valid||!height.validity.valid||w===h;
+      button.setAttribute('aria-pressed',String(i===0?w>h:h>w));
+    });
+  }
+  function setSize(w,h){width.value=w;height.value=h;sync();}
+  for(const [label,w,h] of presets){
+    const button=document.createElement('button');
+    button.type='button';button.className='new-image-preset';
+    const outline=document.createElement('i'),title=document.createElement('strong'),size=document.createElement('small');
+    outline.setAttribute('aria-hidden','true');
+    outline.style.width=Math.round(32*Math.min(1,w/h))+'px';
+    outline.style.height=Math.round(32*Math.min(1,h/w))+'px';
+    title.textContent=label;size.textContent=w+' × '+h;
+    button.append(outline,title,size);grid.append(button);
+    button.onclick=()=>setSize(w,h);
+  }
+  orientations.forEach((button,i)=>button.onclick=()=>{
+    const w=width.valueAsNumber,h=height.valueAsNumber;
+    setSize(i===0?Math.max(w,h):Math.min(w,h),i===0?Math.min(w,h):Math.max(w,h));
+  });
+  width.oninput=height.oninput=sync;sync();
+  return {name,space};
+}
+
+export function editDocumentSize(action,doc,{canvas,signal,defaultName}={}){
   const crop=action==='cropCanvas',resize=action==='resizeImage';
-  const title={create:'新建贴图',resizeCanvas:'画布尺寸',cropCanvas:'裁切画布',resizeImage:'图像尺寸'}[action];
+  const title={create:'新建图像',resizeCanvas:'画布尺寸',cropCanvas:'裁切画布',resizeImage:'图像尺寸'}[action];
   const dialog=document.createElement('dialog'),form=document.createElement('form');
   dialog.className='image-size-dialog';dialog.setAttribute('aria-label',title);
   const heading=document.createElement('h3');heading.textContent=title;
@@ -16,6 +73,8 @@ export function editDocumentSize(action,doc,{canvas,signal}={}){
   const w=doc?.width??editingSide,h=doc?.height??editingSide;
   const width=number('width','宽度（像素）',w,1,crop?w:editingSide);
   const height=number('height','高度（像素）',h,1,crop?h:editingSide);
+  const creation=action==='create'?newImageSettings(form,width,height,defaultName??'未命名图像'):null;
+  if(creation)dialog.classList.add('new-image-dialog');
   let anchor=4;
   if(action==='resizeCanvas'){
     const grid=document.createElement('div');grid.className='image-anchor-grid';grid.setAttribute('role','group');grid.setAttribute('aria-label','保留位置');
@@ -87,10 +146,11 @@ export function editDocumentSize(action,doc,{canvas,signal}={}){
     dialog.onclose=()=>{signal?.removeEventListener('abort',close);dialog.remove();resolve(result);};
     form.onsubmit=e=>{
       e.preventDefault();const patch=Object.fromEntries(Object.entries(fields).map(([key,input])=>[key,input.valueAsNumber]));
+      if(creation){patch.name=creation.name.value.trim();patch.colorSpace=creation.space.value;}
       if(action==='resizeCanvas')patch.anchor=anchor;
       try{if(doc)resizedDocument(doc,action,patch);}catch(e){error.textContent=e.message;return;}
       result=patch;dialog.close();
     };
-    document.body.append(dialog);dialog.showModal();width.select();
+    document.body.append(dialog);dialog.showModal();const first=creation?.name??width;first.focus();first.select();
   });
 }

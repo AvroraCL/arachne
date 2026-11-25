@@ -44,11 +44,30 @@ try{
     doc=await until(async()=>{const next=await api(route);return next.revision>last&&next;},label);
     console.log('PASS',label);
   }
-  await editor.getByRole('button',{name:'新建贴图',exact:true}).click();
+  await editor.getByRole('button',{name:'新建图像',exact:true}).click();
   const dialog=page.locator('dialog.image-size-dialog[open]');
-  await dialog.getByLabel('宽度（像素）').fill('2048');await dialog.getByLabel('高度（像素）').fill('512');
+  const width=dialog.getByLabel('宽度（像素）'),height=dialog.getByLabel('高度（像素）');
+  await dialog.getByRole('button',{name:/全高清/}).click();
+  await dialog.getByRole('button',{name:'纵向'}).click();
+  assert.deepEqual([await width.inputValue(),await height.inputValue()],['1080','1920']);
+  await page.setViewportSize({width:540,height:680});
+  const presets=await dialog.getByRole('region',{name:'画布预设'}).boundingBox();
+  const details=await dialog.getByRole('region',{name:'图像设置'}).boundingBox();
+  assert.ok(details.y>=presets.y+presets.height-1&&details.x+details.width<=540);
+  await dialog.getByLabel('颜色空间').selectOption('linear');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({width:1580,height:960});
+  assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
+  await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
+  await dialog.getByRole('button',{name:/横幅/}).click();
+  assert.equal(await dialog.getByRole('button',{name:/横幅/}).getAttribute('aria-pressed'),'true');
+  await height.fill('500');
+  assert.equal(await dialog.getByRole('button',{name:/横幅/}).getAttribute('aria-pressed'),'false');
+  await height.fill('512');
+  await dialog.getByLabel('名称',{exact:true}).fill('横幅样稿');
   await dialog.getByRole('button',{name:'创建',exact:true}).click();await saved('创建横幅');
   const documentId=Object.keys(doc.paint.imageDocuments)[0],image=()=>doc.paint.imageDocuments[documentId];
+  assert.equal(image().name,'横幅样稿');assert.equal(image().colorSpace,'srgb');
   const pixelId=image().layers[0].id;
   // Wait for the selected document frame, not a preview left from the previous revision.
   const detailed=()=>editor.locator('.document-image-stage[data-preview-size="4096"][data-preview-revision="'+doc.revision+'"]').waitFor({timeout:65000});
@@ -83,7 +102,7 @@ try{
   async function png(name){
     await detailed();
     const dl=page.waitForEvent('download');
-    await editor.getByRole('button',{name:'导出当前贴图 PNG'}).click();
+    await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();
     await (await dl).saveAs(path.join(data,name+'.png'));
   }
   async function size(menu,fields,anchor){

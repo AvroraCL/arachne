@@ -113,9 +113,10 @@ export function createDocumentEditor(ctx,bridge){
   const {host,state}=ctx,life=new AbortController(),signal=life.signal,imageView=createImageEditorSelection(ctx.project,{areaId:ctx.areaId,saved:state.imageSelections,onChange:ctx.onChange}),project=imageView.project;
   const header=el('div','editor-toolbar'),picker=choice('图像文档',[],'',value=>{if(painter.isEditing()||selection.isTransforming())return;selectImage(project,{documentId:value||null,layerId:null,target:'pixels'});});
   const run=fn=>Promise.resolve().then(fn).catch(error=>{status.textContent=error.message;ctx.error(error);});
-  const create=button('新建贴图',()=>{const origin=imageSelectionOrigin(project),documentId=crypto.randomUUID(),layerId=crypto.randomUUID();void run(async()=>{
-    const dimensions=await editDocumentSize('create',null,{signal});if(!dimensions)return;
-    await project.commands([{op:'image',action:'create',documentId,patch:{...dimensions,name:'未命名贴图 '+(Object.keys(project.document.paint.imageDocuments??{}).length+1)}},{op:'image',action:'addLayer',documentId,layerId,kind:'pixel'}],origin);
+  const create=button('新建图像',()=>{const origin=imageSelectionOrigin(project),documentId=crypto.randomUUID(),layerId=crypto.randomUUID();void run(async()=>{
+    const defaultName='未命名图像 '+(Object.keys(project.document.paint.imageDocuments??{}).length+1);
+    const patch=await editDocumentSize('create',null,{signal,defaultName});if(!patch)return;
+    await project.commands([{op:'image',action:'create',documentId,patch},{op:'image',action:'addLayer',documentId,layerId,kind:'pixel'}],origin);
     const c=project.imageContext;if(!disposed&&project.document?.id===origin.id&&c?.documentId===origin.documentId&&c?.layerId===origin.layerId&&c?.target===origin.target)selectImage(project,{documentId,layerId,target:'pixels'});
   });});
   const channel=choice('材质引用通道',paintChannels.map(k=>[k,channelSpecs[k].name]),state.channel||'color',()=>{syncDestination(true);ctx.onChange();});
@@ -167,9 +168,9 @@ export function createDocumentEditor(ctx,bridge){
     importInput.value='';
     if(file)importFile(file);
   };
-  const download=chromeButton(button('导出当前贴图 PNG',downloadDocument),'download');
+  const download=chromeButton(button('导出当前图像 PNG',downloadDocument),'download');
   download.classList.add('document-export-button');
-  download.title='导出当前贴图 PNG';
+  download.title='导出当前图像 PNG';
   chromeButton(copy,'copy');chromeButton(paste,'paste');
   copy.title='复制图像选区 · ⌘ / Ctrl + C';paste.title='粘贴为图像层 · ⌘ / Ctrl + V';
   copy.disabled=paste.disabled=importButton.disabled=download.disabled=true;
@@ -262,7 +263,7 @@ export function createDocumentEditor(ctx,bridge){
   },{passive:false,signal});
   const sampleNotice=el('span','document-sample-status');
   sampleNotice.setAttribute('role','status');sampleNotice.hidden=true;
-  rail.setAttribute('aria-label','图像绘制工具');canvas.setAttribute('aria-label','图像文档画布');canvas.tabIndex=0;stage.tabIndex=0;stage.append(canvas,uvGuideImage,uvGuideNotice,empty,compass);empty.append(el('strong','','图像文档'),el('span','','新建贴图，或从材质通道打开已有图像文档。'),button('新建贴图',()=>create.click(),'创建第一个图像文档'));
+  rail.setAttribute('aria-label','图像绘制工具');canvas.setAttribute('aria-label','图像文档画布');canvas.tabIndex=0;stage.tabIndex=0;stage.append(canvas,uvGuideImage,uvGuideNotice,empty,compass);empty.append(el('strong','','图像文档'),el('span','','新建图像，或从材质通道打开已有图像文档。'),button('新建图像',()=>create.click(),'创建第一个图像文档'));
   const controls=surfaceControls(el('div'),{drawing:true}),elements=controls.elements;
   elements['brush-erase'].checked=state.eraser===true;
   elements['brush-radius'].closest('label').hidden=true;
@@ -1044,7 +1045,7 @@ export function createDocumentEditor(ctx,bridge){
     return Math.atan2(event.clientY-center[1],event.clientX-center[0])*180/Math.PI;
   }
   stage.addEventListener('pointerdown',event=>{
-    if(drawingGesture()||selection.isDragging())return;
+    if(canvas.hidden||event.target.closest('button,input,select,textarea')||drawingGesture()||selection.isDragging())return;
     const rotating=mode==='rotateView'&&!space&&event.button===0&&!canvas.hidden;
     const panning=event.button===1||event.button===0&&(space||mode==='orbit'&&!event.target.closest('svg'));
     if(!rotating&&!panning)return;
@@ -1185,7 +1186,7 @@ export function createDocumentEditor(ctx,bridge){
     download.disabled=!canPaste()||!!exportRequest;
     download.setAttribute('aria-busy',String(!!exportRequest));
     const doc=currentDocument(project);
-    download.title=exportRequest?'正在导出 PNG…':doc?`导出当前贴图 · ${doc.width} × ${doc.height} PNG`:'导出当前贴图 PNG';
+    download.title=exportRequest?'正在导出 PNG…':doc?`导出当前图像 · ${doc.width} × ${doc.height} PNG`:'导出当前图像 PNG';
   }
   async function downloadDocument(){
     const image=currentDocument(project);
@@ -1232,7 +1233,7 @@ export function createDocumentEditor(ctx,bridge){
     importing=true;
     syncClipboard();
     void run(async()=>{
-      if(!origin.documentId)throw Error('请先新建贴图');
+      if(!origin.documentId)throw Error('请先新建图像');
       const prepared=await prepareDrawingImage(file);
       if(disposed)return;
       const [width,height]=prepared.size;
@@ -1334,7 +1335,7 @@ export function createDocumentEditor(ctx,bridge){
   stage.addEventListener('drop',event=>{
     const transfer=event.dataTransfer;if(!hasAssetDrag(transfer)&&!transfer?.types.includes('Files'))return;
     event.preventDefault();event.stopPropagation();const position=dropPosition(event);
-    if(!currentDocument(project)){ctx.error(Error('请先新建贴图'));return;}
+    if(!currentDocument(project)){ctx.error(Error('请先新建图像'));return;}
     if(!position){ctx.error(Error('请将图片放到画布内'));return;}
     if(transfer.types.includes('Files')){
       const files=[...transfer.files],file=files[0];
@@ -2730,7 +2731,7 @@ export function createImagePanel(type,ctx){
       const colorSpace=choice('图像颜色空间',[['srgb','颜色（sRGB）'],['linear','数据（线性）']],image.colorSpace,value=>void run(()=>command(project,{action:'update',patch:{colorSpace:value}})));body.append(colorSpace);enhanceSelectMenu(colorSpace);
       const refs=doc.paint.layers.flatMap(layer=>Object.entries(layer.documentMaps??{}).filter(([,id])=>id===c.documentId).map(([channel])=>({layer,channel})));
       const documentActions=el('div','document-property-actions');
-      const duplicate=button('复制贴图',()=>{
+      const duplicate=button('复制图像',()=>{
         const origin=imageSelectionOrigin(project),documentId=crypto.randomUUID();
         duplicate.disabled=true;
         void run(async()=>{
@@ -2741,8 +2742,8 @@ export function createImagePanel(type,ctx){
         }).finally(()=>{if(duplicate.isConnected)duplicate.disabled=documents.length>=imageDocumentLimit||!!ctx.busy?.();});
       });
       duplicate.disabled=busy||documents.length>=imageDocumentLimit;
-      duplicate.title=documents.length>=imageDocumentLimit?'工程最多包含 16 个图像文档':'复制贴图的全部图层和蒙版';
-      const remove=button('删除贴图',()=>void run(()=>command(project,{action:'remove'})),'删除图像文档');
+      duplicate.title=documents.length>=imageDocumentLimit?'工程最多包含 16 个图像文档':'复制图像的全部图层和蒙版';
+      const remove=button('删除图像',()=>void run(()=>command(project,{action:'remove'})),'删除图像文档');
       const embeddedUsers=Object.values(doc.paint.imageDocuments).some(source=>source.layers.some(l=>l.embedded?.documentId===c.documentId));
       remove.disabled=!!refs.length||embeddedUsers;remove.title=embeddedUsers?'源稿仍被内嵌实例引用':refs.length?'请先解除材质通道引用':'删除图像文档';
       documentActions.append(duplicate,remove);

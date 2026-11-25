@@ -265,8 +265,8 @@ try{
   const editor=()=>page.locator('.editor-area[data-editor=image]').first();
   const panel=()=>page.locator('.editor-area[data-editor=imageLayers]').first();
   const canvas=()=>editor().getByLabel('图像文档画布');
-  await editor().getByRole('button',{name:'新建贴图',exact:true}).click();
-  await page.getByRole('dialog',{name:'新建贴图'}).getByRole('button',{name:'创建',exact:true}).click();
+  await editor().getByRole('button',{name:'新建图像',exact:true}).click();
+  await page.getByRole('dialog',{name:'新建图像'}).getByRole('button',{name:'创建',exact:true}).click();
   await canvas().waitFor();
   const created=await until(async()=>{const doc=await readDoc();return Object.keys(doc.paint.imageDocuments??{}).length&&doc;},'新建图像文档');
   const documentId=Object.keys(created.paint.imageDocuments)[0];

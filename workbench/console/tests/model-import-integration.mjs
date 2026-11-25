@@ -1306,8 +1306,8 @@ async function verifyModelWorkflows(){
 
   await reopened.locator('[data-area-mode=drawing]').click();
   const drawing=reopened.locator('.editor-area[data-editor=image]').first();
-  await drawing.getByRole('button',{name:'新建贴图',exact:true}).click();
-  await reopened.getByRole('dialog',{name:'新建贴图'}).getByRole('button',{name:'创建',exact:true}).click();
+  await drawing.getByRole('button',{name:'新建图像',exact:true}).click();
+  await reopened.getByRole('dialog',{name:'新建图像'}).getByRole('button',{name:'创建',exact:true}).click();
   const documentCanvas=drawing.locator('canvas[aria-label="图像文档画布"]');
   await documentCanvas.waitFor();
   await drawing.getByRole('button',{name:'渐变工具',exact:true}).click();

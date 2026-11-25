@@ -352,7 +352,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
   const documents=paint.imageDocuments??={},doc=Object.hasOwn(documents,o.documentId)?documents[o.documentId]:null;
   if(o.action==='create'){
     if(doc||!exact(o.patch??{},['name','colorSpace','width','height'])||!validDimensions(o.patch?.width??4096,o.patch?.height??4096))throw Error('图像文档已存在或参数无效');
-    paint.imageDocuments={...documents,[o.documentId]:{name:'未命名贴图',width:4096,height:4096,colorSpace:'srgb',...o.patch,layers:[]}};return;
+    paint.imageDocuments={...documents,[o.documentId]:{name:'未命名图像',width:4096,height:4096,colorSpace:'srgb',...o.patch,layers:[]}};return;
   }
   if(!doc)throw Error('图像文档不存在');
   if(['resizeCanvas','cropCanvas','resizeImage'].includes(o.action)){

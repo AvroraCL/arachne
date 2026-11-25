@@ -704,7 +704,7 @@ try{
   console.log('PASS 4K selection copy, lasso transparency, original scale, same-document placement and cross-document paste');
   const [pngDownload]=await Promise.all([
     page.waitForEvent('download',{timeout:120000}),
-    imageEditor.getByRole('button',{name:'导出当前贴图 PNG',exact:true}).click()
+    imageEditor.getByRole('button',{name:'导出当前图像 PNG',exact:true}).click()
   ]);
   assert.equal(pngDownload.suggestedFilename(),'剪贴板目标.png');
   const drawingPng=path.join(data,'drawing.png');
@@ -787,7 +787,7 @@ try{
   ]});
   const properties=page.locator('.editor-area[data-editor=imageProperties]').first();
   await properties.getByRole('button',{name:'定位材质图层 剪贴板来源',exact:true}).waitFor();
-  await properties.getByRole('button',{name:'复制贴图',exact:true}).click();
+  await properties.getByRole('button',{name:'复制图像',exact:true}).click();
   const duplicate=await waitFor(async()=>{
     const state=await api(project(libraryTarget.id));
     const match=Object.entries(state.paint.imageDocuments).find(([,doc])=>doc.name==='剪贴板来源 副本');

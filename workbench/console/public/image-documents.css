@@ -554,3 +554,43 @@
 .texture-set-body :is(input,canvas):focus-visible{outline:1px solid var(--chrome-focus);outline-offset:-2px}
 .texture-set-body output{color:var(--ui-secondary);font-size:var(--paint-font-caption);overflow-wrap:anywhere}
 .texture-set-body output:empty{display:none}
+
+/* New image uses a preset gallery and editable document settings. */
+.image-size-dialog.new-image-dialog{width:min(745px,calc(100vw - 24px))}
+.new-image-dialog form{min-width:0;padding:0;gap:0}
+.new-image-dialog h3,.new-image-dialog footer{margin:0;padding-inline:18px}
+.new-image-dialog h3{min-height:44px;font-size:15px}
+.new-image-layout{display:grid;grid-template-columns:minmax(0,1.48fr) minmax(225px,1fr)}
+.new-image-layout section{min-width:0;padding:18px}
+.new-image-layout h4{font-size:13px;font-weight:600;margin:0 0 14px}
+.new-image-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.new-image-grid .new-image-preset:not(.custom-select-button){
+  display:grid;grid-template-rows:44px auto auto;align-items:center;justify-items:start;gap:3px;
+  padding:10px;text-align:left;background:#333;border:1px solid #454545;border-radius:4px
+}
+.new-image-grid .new-image-preset[aria-pressed=true]:not(.custom-select-button){
+  background:#303c49;border-color:#82b6e8
+}
+.new-image-preset i{display:block;box-sizing:border-box;background:#c8ccd0;border:1px solid #dadde0}
+.new-image-preset strong{font-size:13px;font-weight:550}
+.new-image-preset small,.new-image-background{color:var(--chrome-muted,#bababa);font-variant-numeric:tabular-nums}
+.new-image-details{border-left:1px solid var(--chrome-line);background:var(--chrome-header)}
+.new-image-dialog .new-image-details label{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;font-size:12px}
+.new-image-details :is(input,select){min-width:0;width:100%;box-sizing:border-box;color:inherit;background:var(--chrome-field);padding:4px 7px;border:1px solid #4b4b4b;border-radius:3px}
+.new-image-details input[type=number]{height:28px}
+.new-image-details :is(input[type=text],select){height:28px}
+.new-image-size{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.new-image-orientation,.new-image-background{display:flex;align-items:center;gap:5px;font-size:12px;margin:12px 0}
+.new-image-orientation>span,.new-image-background>span{margin-right:5px}
+.new-image-orientation button[aria-pressed=true]:not(.custom-select-button){border-color:#82b6e8}
+.new-image-background{margin-bottom:0}
+.new-image-background::after{content:'';width:14px;height:14px;border:1px solid #555;background:repeating-conic-gradient(#777 0 25%,#444 0 50%) 0/8px 8px}
+.new-image-dialog footer{min-height:50px;gap:8px}
+.new-image-dialog footer button{min-width:60px}
+@media(max-width:600px){
+  .new-image-layout{grid-template-columns:1fr}
+  .new-image-layout section{padding:12px}
+  .new-image-details{border-left:0;border-top:1px solid var(--chrome-line)}
+  .new-image-grid .new-image-preset:not(.custom-select-button){grid-template-rows:auto auto;padding:6px 8px}
+  .new-image-preset i{display:none}
+}

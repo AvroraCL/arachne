@@ -155,7 +155,7 @@ import WebKit
         _ = try await js("document.querySelector('[data-area-mode=drawing]').click()")
         try await waitFor("Create a drawing from the Mac workbench") {
             try await js("""
-                const button=Array.from(document.querySelectorAll('[data-editor=image] button')).find(button=>button.textContent.trim()==='新建贴图');
+                const button=Array.from(document.querySelectorAll('[data-editor=image] button')).find(button=>button.textContent.trim()==='新建图像');
                 if (!button || button.disabled) return false;
                 button.click(); return true;
                 """) as? Bool == true
