@@ -11,6 +11,7 @@ export const nodeTypes={
   value:{name:'数值',inputs:{},outputs:scalar,defaults:{value:.5}},
   uv:{name:'UV 坐标',inputs:{},outputs:{uv:'vector'},defaults:{}},
   mapping:{name:'映射',inputs:{uv:'vector'},outputs:{uv:'vector'},defaults:{x:0,y:0,scale:1,rotation:0}},
+  noise:{name:'噪声纹理',inputs:{uv:'vector',scale:'scalar'},outputs:scalar,defaults:{scale:5,detail:2,roughness:.5}},
   image:{name:'图像纹理',inputs:{uv:'vector'},outputs:{color:'color',alpha:'scalar',value:'scalar'},defaults:{asset:'',colorSpace:'srgb'}},
   separateColor:{name:'分离 RGB',inputs:color,outputs:rgb,defaults:{color:'#000000'}},
   combineColor:{name:'合并 RGB',inputs:rgb,outputs:color,defaults:{red:0,green:0,blue:0}},
@@ -20,7 +21,7 @@ export const nodeTypes={
   pbr:{name:'基础 PBR',inputs:Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].type==='color'?'color':'scalar'])),outputs:{surface:'surface'},defaults:{...channelDefaults,color:'#808080',roughness:.5}},
   output:{name:'材质输出',inputs:{surface:'surface'},outputs:{},defaults:{}}
 };
-export const portNames={input:'输入',output:'输出',...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),color:'颜色',metallic:'金属度',roughness:'粗糙度',value:'数值',uv:'UV',a:'A',b:'B',factor:'系数',alpha:'透明度',surface:'表面',red:'红色',green:'绿色',blue:'蓝色'};
+export const portNames={input:'输入',output:'输出',...Object.fromEntries(paintChannels.map(k=>[k,channelSpecs[k].name])),color:'颜色',metallic:'金属度',roughness:'粗糙度',value:'数值',uv:'UV',scale:'缩放',a:'A',b:'B',factor:'系数',alpha:'透明度',surface:'表面',red:'红色',green:'绿色',blue:'蓝色'};
 export function makeNode(type,x=40,y=40,id=globalThis.crypto.randomUUID()){
   if(!Object.hasOwn(nodeTypes,type))throw Error('不支持的材质节点');
   return {id,type,x,y,params:{...nodeTypes[type].defaults,...(type==='image'?{colorSpace:'auto'}:{})}};
@@ -70,7 +71,9 @@ function compileGraph(graph,assets,nodeTypes,domain){
         if(typeof value!=='boolean')throw Error('笔刷开关无效');
       }else if(typeof spec.defaults[key]==='string'){
         if(!hex(value))throw Error('节点颜色无效');
-      }else if(!number(value)||(['factor','metallic','roughness','height','alpha','ao','red','green','blue'].includes(key)&&(value<0||value>1))||key==='scale'&&Math.abs(value)<.001)
+      }else if(node.type==='noise'&&key==='detail'){
+        if(!Number.isFinite(value)||value<0||value>15)throw Error('噪声细节须在 0 到 15 之间');
+      }else if(!number(value)||(['factor','metallic','roughness','height','alpha','ao','red','green','blue'].includes(key)&&(value<0||value>1))||node.type==='mapping'&&key==='scale'&&Math.abs(value)<.001)
         throw Error('节点数值无效');
     }
     nodes.set(node.id,node);

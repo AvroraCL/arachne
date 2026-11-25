@@ -91,6 +91,63 @@ with Image.open(sys.argv[1]) as im:
     assert im.size==(4096,4096)
     assert im.getpixel((2048,2048))==(198,48,24), im.getpixel((2048,2048))
 `,file]);
+  await shader.getByRole('button',{name:'添加材质节点'}).click();
+  await changed(()=>page.getByRole('option',{name:'噪声纹理',exact:true}).click());
+  const noise=shader.locator('[data-type=noise].shader-node');
+  await stage.focus();await page.keyboard.press('Home');
+  async function wire(target,port){
+    const from=await noise.locator('[data-direction=out][data-port=value]').boundingBox();
+    const to=await target.locator('[data-direction=in][data-port='+port+']').boundingBox();
+    await page.mouse.move(from.x+from.width/2,from.y+from.height/2);await page.mouse.down();
+    await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:8});await page.mouse.up();
+  }
+  await changed(()=>wire(ramp,'value'));
+  await changed(()=>wire(shader.locator('[data-node=pbr]'),'roughness'));
+  async function preview(file){
+    const current=await api(route);
+    const response=await fetch(base+paint+'/live',{method:'POST',headers,body:JSON.stringify({revision:current.revision,resolution:256,format:'pbr8'})});
+    assert.equal(response.status,200);
+    const raw=Buffer.from(await response.arrayBuffer());assert.equal(raw.length,256*256*15);
+    await fs.writeFile(path.join(data,file),raw);
+    return current;
+  }
+  await preview('scale-5.raw');
+  const scale=noise.getByLabel('噪声纹理 缩放');
+  await changed(async()=>{await scale.fill('11');await scale.press('Enter');});
+  const scaled=await preview('scale-11.raw');
+  await changed(()=>editMenu('undo'),'undo');assert.equal(await scale.inputValue(),'5');
+  await changed(()=>editMenu('redo'),'redo');
+  await page.reload();assert.equal(await scale.inputValue(),'11');
+  const reopened=await api(route);
+  assert.deepEqual(reopened.paint.materialGraph,scaled.paint.materialGraph);
+  const noiseJob=await api(paint+'/preview',{revision:reopened.revision,requestId:'noise-bake'},202);
+  const noiseBake=await until(async()=>{
+    const j=await api(route+'/jobs/'+noiseJob.id);
+    if(j.status==='failed')throw Error(j.error);return j.status==='completed'&&j;
+  },'噪声 4K 烘焙');
+  for(const [key,url] of [['color',noiseBake.colorUrl],['roughness',noiseBake.materialUrls.roughness]]){
+    const response=await fetch(base+url);assert.ok(response.ok);
+    await fs.writeFile(path.join(data,key+'.png'),Buffer.from(await response.arrayBuffer()));
+  }
+  execFileSync(pythonExecutable(),['-c',`import sys
+import numpy as np
+from pathlib import Path
+from PIL import Image
+root=Path(sys.argv[1])
+load=lambda name: np.fromfile(root/name,dtype=np.uint8).reshape(256,256,15)
+old,new=load('scale-5.raw'),load('scale-11.raw')
+color=np.asarray(Image.open(root/'color.png')).astype(int)
+rough=np.asarray(Image.open(root/'roughness.png')).astype(int)
+assert color.shape==(4096,4096,3) and rough.shape==(4096,4096)
+assert np.mean(abs(old[:,:,4].astype(int)-new[:,:,4]))>5
+assert np.mean(abs(old[:,:,:3].astype(int)-new[:,:,:3]))>5
+# Baked centers are within half of a 4K texel of each live sample.
+delta=abs(color[8::16,8::16]-new[:,:,:3])
+assert np.percentile(delta,99)<4, np.percentile(delta,[50,99,100])
+dr=abs(rough[8::16,8::16]-new[:,:,4])
+assert dr.max()<=2,(dr.mean(),dr.max())
+`,data]);
+  console.log('PASS 单个噪声分支驱动渐变颜色和粗糙度，修改尺度、撤销重做、重开及同 UV 的实时与 4K 像素。');
   assert.deepEqual(errors,[]);
   console.log('PASS 添加、调色、移动并重排色标，移除、撤销、重做和重开。4K 烘焙中心为 (198,48,24)。');
 }finally{

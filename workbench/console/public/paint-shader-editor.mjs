@@ -11,7 +11,7 @@ import {workspaceIcons} from './workspace-icons.mjs';
 import {compositionKey} from './text-input.mjs';
 import {readNodeClipboard,writeNodeClipboard} from './node-clipboard.mjs';
 
-const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',flow:'流量',spacing:'间距',smoothing:'平滑',tipAngle:'笔尖角度',roundness:'圆度',scatter:'散布',grain:'纹理深度',tipAsset:'图片笔尖',textureAsset:'笔刷纹理',pressure:'压感不透明度',pressureSize:'压感大小',mirror:'镜像 X',red:'红色',green:'绿色',blue:'蓝色'};
+const labels={...Object.fromEntries(Object.entries(channelSpecs).map(([k,s])=>[k,s.name])),color:'颜色',value:'数值',a:'A',b:'B',factor:'系数',low:'起点颜色',high:'终点颜色',metallic:'金属度',roughness:'粗糙度',x:'偏移 X',y:'偏移 Y',scale:'缩放',rotation:'旋转',detail:'细节',operation:'运算',asset:'图像',colorSpace:'颜色空间',worldRadius:'三维半径',uvRadius:'二维半径（px）',hardness:'硬度',opacity:'不透明度',flow:'流量',spacing:'间距',smoothing:'平滑',tipAngle:'笔尖角度',roundness:'圆度',scatter:'散布',grain:'纹理深度',tipAsset:'图片笔尖',textureAsset:'笔刷纹理',pressure:'压感不透明度',pressureSize:'压感大小',mirror:'镜像 X',red:'红色',green:'绿色',blue:'蓝色'};
 const operations={add:'加',subtract:'减',multiply:'乘',divide:'除',minimum:'最小值',maximum:'最大值'};
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 export function createShaderEditor({host,read,save,draft:onDraft,busy,importImage,viewAsset,readTarget=()=>null,onIdle=()=>{},viewKey='',initialView=null,onViewChange=()=>{}}){
@@ -242,7 +242,7 @@ export function createShaderEditor({host,read,save,draft:onDraft,busy,importImag
             input.step='any';
             input.dataset.scrubSpeed=['uvRadius','smoothing','tipAngle','roundness','scatter','grain'].includes(param)?'1':param==='rotation'?'.5':'.01';
             const limits=node.type==='brush'?brushParamRanges[param]:
-              ['factor','metallic','roughness','height','alpha','ao','red','green','blue'].includes(param)?[0,1]:null;
+              node.type==='noise'&&param==='detail'?[0,15]:['factor','metallic','roughness','height','alpha','ao','red','green','blue'].includes(param)?[0,1]:null;
             if(limits)[input.min,input.max]=limits.map(String);
           }
         }

@@ -85,6 +85,17 @@ def apply_material_graph(material, config):
             node.inputs['Rotation'].default_value = (0,0,math.radians(p['rotation']))
             node.inputs['Scale'].default_value = (p['scale'],p['scale'],1)
             ports = bind(node, dict(uv=node.inputs['Vector']), dict(uv=node.outputs['Vector']))
+        elif kind == 'noise':
+            node=new('ShaderNodeTexNoise',source)
+            node.noise_dimensions='2D';node.noise_type='FBM';node.normalize=True
+            for key in ('scale','detail','roughness'):
+                node.inputs[key.title()].default_value=p[key]
+            node.inputs['Lacunarity'].default_value=2
+            node.inputs['Distortion'].default_value=0
+            if 'uv' not in instruction['inputs']:
+                texcoord=new('ShaderNodeTexCoord',source,'-uv',-220)
+                tree.links.new(texcoord.outputs['UV'],node.inputs['Vector'])
+            ports=bind(node,dict(uv=node.inputs['Vector'],scale=node.inputs['Scale']),dict(value=node.outputs['Fac']))
         elif kind == 'image':
             if p['asset']:
                 space = p.get('colorSpace','srgb')

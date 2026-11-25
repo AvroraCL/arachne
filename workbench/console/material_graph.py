@@ -8,6 +8,7 @@ import tempfile
 import numpy as np
 from PIL import Image
 from image_color_spaces import convert_image, profile_bytes
+from material_noise import uv_noise
 
 
 def decode(c):
@@ -146,6 +147,8 @@ class MaterialGraph:
                 angle = p['rotation'] * np.pi / 180
                 matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
                 out = dict(uv=coords @ matrix.T + [p['x'], p['y']])
+            elif kind == 'noise':
+                out = dict(value=uv_noise(get('uv',uv),get('scale',p['scale']),p['detail'],p['roughness']))
             elif kind == 'image':
                 image = self.images.get(node['id'])
                 if image is None:

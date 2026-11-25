@@ -162,3 +162,32 @@ np.testing.assert_array_equal(out[:,:3],expected)
 `],{cwd:new URL('../',import.meta.url),input:JSON.stringify(compileMaterialGraph(graph)),encoding:'utf8'});
   assert.equal(run.status,0,run.stderr);
 });
+
+test('normalized 2D noise agrees with Cycles samples and remains invariant to tile boundaries',()=>{
+  const graph=defaultMaterialGraph(),noise=makeNode('noise',0,0,'texture');
+  graph.nodes.push(noise);
+  graph.links=graph.links.filter(l=>l.to.port!=='roughness');
+  graph.links.push({from:{node:'texture',port:'value'},to:{node:'pbr',port:'roughness'}});
+  for(const detail of [-1,15.01]){
+    noise.params.detail=detail;
+    assert.throws(()=>compileMaterialGraph(graph),/噪声细节/);
+  }
+  const run=spawnSync(pythonExecutable(),['-c',`
+import numpy as np
+from material_noise import uv_noise
+# Each constant was compared with a CPU Cycles Noise Fac in a pair of
+# scene-linear EXR emission renders at identical UV and shader settings.
+cases=[[.13,.79,5,2,.5,.47900468],[-.35,.72,2.5,.6,.7,.44861221],
+       [.75,-2.32,3,2.25,.33,.4110899],[.74,.28,10.5,0,0,.5956703],
+       [.445,.86,-6,2,.5,.5688186],[.01,.015,8,3,1,.5567903]]
+for u,v,scale,detail,roughness,expected in cases:
+    result=uv_noise(np.array([[u,v]]),scale,detail,roughness)
+    np.testing.assert_allclose(result,expected,atol=2e-6,rtol=0)
+uv=np.array([c[:2] for c in cases])
+scale=np.arange(1,7)
+whole=uv_noise(uv,scale,2.3,.8)
+np.testing.assert_array_equal(whole,np.concatenate([uv_noise(u[None,:],s,2.3,.8) for u,s in zip(uv,scale)]))
+np.testing.assert_array_equal(uv_noise(uv,0,15,1),np.full(6,.5))
+`],{cwd:new URL('../',import.meta.url),encoding:'utf8'});
+  assert.equal(run.status,0,run.stderr);
+});
