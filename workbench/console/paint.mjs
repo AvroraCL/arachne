@@ -1242,10 +1242,18 @@ export async function bakeImageLayers(doc,request,{signal}={}){
     validate(next);
   }).document;
 }
-export async function meshMapOperation(doc,request,operation,signal){
+export async function meshMapOperation(doc,request,operation,signal,highModel){
   const {revision}=request;
   let config,names,target;
-  if(operation==='mesh-bake'){
+  if(operation==='mesh-normal'){
+    const {resolution,front,rear,createLayer}=fields(request,['revision','resolution','front','rear','createLayer']);
+    if(![512,1024,2048,4096].includes(resolution)||![front,rear].every(v=>Number.isFinite(v)&&v>=0)||
+      !Number.isFinite(front+rear)||front+rear===0||typeof createLayer!=='boolean')throw Error('请选择有效的分辨率与投射距离');
+    if(doc.revision!==revision)throw revisionError(doc);
+    const {source}=await prepareModelGeometry(doc,{signal});
+    config={source,resolution,front,rear,highModel,steps:doc.modeling?.steps??[]};
+    names={normal:'高模 · 切线法线'};
+  }else if(operation==='mesh-bake'){
     const {resolution,idSource}=fields(request,['revision','resolution','idSource']);
     if(![512,1024,2048].includes(resolution)||!['material','object','vertex'].includes(idSource))throw Error('网格贴图参数无效');
     const {source}=await prepareModelGeometry(doc,{signal});
@@ -1273,16 +1281,21 @@ export async function meshMapOperation(doc,request,operation,signal){
     const pictures={};
     for(const [key,title] of Object.entries(names))
       pictures[key]=describePng(doc,await fsp.readFile(path.join(scratch,key+'.png')),title+'.png',64);
+    const coverage=highModel?JSON.parse(await fsp.readFile(path.join(scratch,'coverage.json'),'utf8')):null;
     signal?.throwIfAborted();
     const updated=commit(doc.id,revision,next=>{
       for(const png of Object.values(pictures)){
         ensurePaintAsset(doc,png);
         next.paint.assets[png.entry.id]=png.entry;
       }
+      if(highModel&&request.createLayer){
+        applyOperations(next,[{op:'add',kind:'fill',patch:{name:'高模法线',channels:Object.fromEntries(channels.map(k=>[k,k==='normal'])),maps:{normal:pictures.normal.entry.id}}}]);
+        validate(next);
+      }
       if(target)Object.assign(next.paint.layers.find(layer=>layer.id===target.id),{mask:pictures.mask.entry.id,maskEnabled:true});
       return next;
-    },target?'从网格贴图提取蒙版':'烘焙网格贴图');
-    return {revision:updated.revision,maps:Object.fromEntries(Object.entries(pictures).map(([key,png])=>[key,png.entry.id]))};
+    },highModel?'烘焙高模切线法线':target?'从网格贴图提取蒙版':'烘焙网格贴图');
+    return {revision:updated.revision,...(coverage?{coverage}:{}),maps:Object.fromEntries(Object.entries(pictures).map(([key,png])=>[key,png.entry.id]))};
   }finally{await fsp.rm(scratch,{recursive:true,force:true});}
 }
 

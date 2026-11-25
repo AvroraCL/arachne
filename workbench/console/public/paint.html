@@ -63,6 +63,7 @@
       <button id="open-render-results" type="button" disabled>渲染结果</button>
       <button id="open-task-monitor" type="button" aria-haspopup="dialog" disabled>后台任务…</button>
       <button id="preview" type="button">生成 4K 预览</button>
+      <button id="open-normal-bake" type="button" aria-haspopup="dialog">烘焙高模法线…</button>
       <button id="open-render-settings" type="button">渲染设置</button>
       <label><input id="auto-preview" type="checkbox">自动预览</label>
     </div></details>
@@ -590,6 +591,21 @@
   </div>
   <div class="mask-area"><canvas id="mask-canvas" aria-label="灰度蒙版画布"></canvas></div>
   <div class="mask-footer"><span id="mask-status" role="status"></span><button id="mask-save" class="primary" type="button">保存蒙版</button></div>
+</dialog>
+<dialog id="normal-bake-dialog" class="paint-form-dialog" aria-labelledby="normal-bake-title">
+  <form>
+    <header><h2 id="normal-bake-title">烘焙高模法线</h2><button type="button" data-close>关闭</button></header>
+    <div class="paint-form-content">
+      <p data-low></p>
+      <label>高模 GLB<input type="file" name="high" accept=".glb" required></label>
+      <label>贴图尺寸<select name="resolution"><option>512</option><option selected>1024</option><option>2048</option><option>4096</option></select></label>
+      <label>向外距离（模型单位）<input name="front" type="number" value="0.05" min="0" step="any" required></label>
+      <label>向内距离（模型单位）<input name="rear" type="number" value="0.05" min="0" step="any" required></label>
+      <label><input name="createLayer" type="checkbox" checked>为低模材质新建法线填充层</label>
+      <img data-preview alt="烘焙的切线空间法线" hidden>
+    </div>
+    <footer class="paint-form-footer"><output role="status"></output><button class="primary" type="submit">烘焙</button></footer>
+  </form>
 </dialog>
 <dialog id="mesh-map-dialog" class="paint-form-dialog" aria-labelledby="mesh-map-title">
   <form>

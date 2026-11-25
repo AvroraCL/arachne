@@ -575,7 +575,7 @@ body:has(#mask-editor.surface-mask[open]) #viewport canvas{cursor:crosshair}
 .paint-text-effects summary::-webkit-details-marker{display:none}
 .paint-text-effects .paint-text-fields{padding-block:4px 8px}
 
-#mesh-map-dialog [data-preview]{display:block;max-width:100%;width:190px;height:190px;object-fit:contain;justify-self:center;background:repeating-conic-gradient(#282828 0 25%,#333 0 50%) 0/14px 14px}
+:is(#mesh-map-dialog,#normal-bake-dialog) [data-preview]{display:block;max-width:100%;width:190px;height:190px;object-fit:contain;justify-self:center;background:repeating-conic-gradient(#282828 0 25%,#333 0 50%) 0/14px 14px}
 #mesh-map-dialog [data-pickable]{cursor:crosshair}
-#mesh-map-dialog [hidden]{display:none}
-#mesh-map-dialog output{flex:1;color:var(--chrome-text)}
+:is(#mesh-map-dialog,#normal-bake-dialog) [hidden]{display:none}
+:is(#mesh-map-dialog,#normal-bake-dialog) output{flex:1;color:var(--chrome-text)}

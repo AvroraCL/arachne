@@ -214,6 +214,22 @@ const server=http.createServer(async(req,res)=>{
     if(![`127.0.0.1:${PORT}`,`localhost:${PORT}`].includes(req.headers.host)){send(res,403,{error:'仅限本地访问'});return;}
     if(req.headers.origin&&![local,`http://localhost:${PORT}`].includes(req.headers.origin)){send(res,403,{error:'拒绝跨来源访问'});return;}
     const url=new URL(req.url,local);
+    const normalBake=url.pathname.match(/^\/api\/projects\/([\w-]{1,100})\/paint\/mesh-normal$/);
+    if(req.method==='POST'&&normalBake){
+      if(req.headers['content-type']!=='model/gltf-binary'){send(res,415,{error:'请选择 GLB 高模'});return;}
+      const params=url.searchParams,doc=read(normalBake[1]);
+      if(params.get('revision')!==String(doc.revision)){send(res,409,{error:'工程修订已变化',currentRevision:doc.revision});return;}
+      const request={revision:doc.revision,createLayer:params.get('createLayer')==='true'};
+      for(const key of ['resolution','front','rear'])request[key]=params.get(key)?.trim()?Number(params.get(key)):NaN;
+      const client=new AbortController(),disconnect=()=>client.abort();
+      res.once('close',disconnect);
+      const signal=AbortSignal.any([client.signal,meshMapShutdown.signal]);
+      try{
+        const result=await receiveGlb(req,input=>meshMapQueue.submit(()=>meshMapOperation(read(doc.id),request,'mesh-normal',signal,input),signal));
+        if(!res.destroyed)send(res,200,result);
+      }finally{res.off('close',disconnect);}
+      return;
+    }
     const modelUpdate=url.pathname.match(/^\/api\/projects\/([\w-]{1,100})\/paint\/update-glb$/);
     if(req.method==='POST'&&modelUpdate){
       if(req.headers['content-type']!=='model/gltf-binary'){send(res,415,{error:'请选择 GLB 模型'});return;}

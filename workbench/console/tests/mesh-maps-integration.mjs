@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from 'playwright-core';
+import {verifyPanelNormal} from './panel-normal-workflow.mjs';
 import {verifyPanelProjection} from './panel-projection-workflow.mjs';
 import {verifyPanelAnchors} from './panel-anchor-workflow.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
@@ -42,6 +43,8 @@ try{
   const page=await browser.newPage({viewport:{width:1400,height:900}});
   page.on('pageerror',error=>console.error(error));
   await page.goto(origin+'/paint.html?project='+project.id);
+  await verifyPanelNormal({page,api,url,paint,origin,folder,panel,python});
+  const normalTrial=await api(url);await api(paint+'/undo',{revision:normalTrial.revision});await page.reload();
   await page.locator('[data-area-mode=material]').click();
   await page.getByRole('button',{name:'绘制蒙版 · 面板漆',exact:true}).click();
   await page.getByRole('button',{name:'网格贴图…'}).first().click();

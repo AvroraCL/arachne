@@ -131,7 +131,14 @@ if __name__ == '__main__':
     config = json.loads((folder/'input.json').read_bytes())
     watch_parent(config['ownerPid'])
     try:
-        if 'source' in config:
+        if 'highModel' in config:
+            from normal_projection import normal_map
+            source = config['source']
+            surface, *_ = geometry(source['cacheRun'], source['bundle'], source['material'],
+                                   'mesh-bake', 4096//config['resolution'], surface_only=True)
+            report = normal_map(surface,source,config['highModel'],config['front'],config['rear'],folder/'normal.png',config['steps'])
+            (folder/'coverage.json').write_text(json.dumps(report),encoding='utf-8')
+        elif 'source' in config:
             bake(config['source'],config['resolution'],config['idSource'],folder)
         else:
             extract_mask(config['file'],config['mode'],config.get('color')).save(folder/'mask.png')

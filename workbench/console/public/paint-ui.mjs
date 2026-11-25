@@ -31,7 +31,7 @@ import {createViewport} from './viewport3d.mjs';
 import {createUVSelection} from './paint-uv-selection.mjs';
 import {createPaintModeling} from './paint-modeling.mjs';
 import {createModelOutliner} from './paint-model-outliner.mjs';
-import {createMeshMapDialog} from './mesh-map-dialog.mjs';
+import {createMeshMapDialog,bindNormalBakeDialog} from './mesh-map-dialog.mjs';
 import {createMaskEditor} from './paint-mask.mjs';
 import {createPaintRenderResults} from './paint-render-results.mjs';
 import {viewportSamplingOptions,updateViewportSampling} from './cycles-viewport-sampling.mjs';
@@ -709,6 +709,7 @@ $('brush-ink').onchange=()=>{
 };
 const effectAxes=[['z','朝上'],['-z','朝下'],['x','X 正向'],['-x','X 负向'],['y','Y 正向'],['-y','Y 负向']];
 const meshMaps=createMeshMapDialog({read:()=>doc,api,refresh,assetUrl});
+bindNormalBakeDialog({read:()=>doc,refresh,assetUrl});
 function renderMaskEffects(form,l,editTarget,liveField){
   const effects=l.maskEffects||[],stack=element('section'),states=form.propertySections??={};
   const sources=paintAnchorSources(doc.paint.layers,l).reverse();

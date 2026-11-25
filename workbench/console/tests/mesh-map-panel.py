@@ -55,6 +55,22 @@ def make_panel(file, turned_tip=False):
     write_glb(file,scene,bytes(data))
 
 
+def make_high(file):
+    # Two inclined patches over the panel and its rotated UV island, without source UVs.
+    points = []
+    for center in (-.55,.85):
+        for x,y in [(-1,-1),(1,-1),(1,1),(-1,-1),(1,1),(-1,1)]:
+            dx,dy = .1*x,.12*y
+            points.append((center+dx,.12+.4*dx+.3*dy,-dy))
+    vertices = np.asarray(points,dtype='<f4')
+    scene = dict(asset=dict(version='2.0'),scene=0,scenes=[dict(nodes=[0])],
+                 nodes=[dict(mesh=0)],meshes=[dict(primitives=[dict(attributes={'POSITION':0})])],
+                 accessors=[dict(bufferView=0,componentType=5126,count=len(vertices),type='VEC3',
+                                 min=vertices.min(axis=0).tolist(),max=vertices.max(axis=0).tolist())],
+                 bufferViews=[dict(buffer=0,byteLength=vertices.nbytes)],buffers=[dict(byteLength=vertices.nbytes)])
+    write_glb(file,scene,vertices.tobytes())
+
+
 def check(folder):
     ao, curvature, ids = [np.array(Image.open(folder/(key+'.png'))) for key in ('ao','curvature','id')]
     assert ao.shape == curvature.shape == (512,512) and ids.shape == (512,512,4)
@@ -72,5 +88,7 @@ def check(folder):
 if __name__=='__main__':
     if sys.argv[1] in ('create','create-seam'):
         make_panel(Path(sys.argv[2]),sys.argv[1]=='create-seam')
+    elif sys.argv[1]=='create-high':
+        make_high(Path(sys.argv[2]))
     else:
         check(Path(sys.argv[2]))

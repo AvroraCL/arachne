@@ -18,6 +18,7 @@ const commands=[
   {target:'open-render-results',name:'渲染结果',group:'渲染',keys:'render results'},
   {target:'open-task-monitor',name:'后台任务',group:'渲染',keys:'进度 日志 jobs tasks'},
   {target:'preview',name:'生成 4K 预览',group:'渲染',keys:'烘焙贴图 bake preview'},
+  {target:'open-normal-bake',name:'烘焙高模法线',group:'渲染',keys:'bake high low normal tangent'},
   {target:'open-render-settings',name:'渲染设置',group:'渲染',keys:'render settings'},
   {area:'modeling',name:'切换到建模',group:'工作区',keys:'modeling'},
   {area:'material',name:'切换到材质',group:'工作区',keys:'涂装 material'},

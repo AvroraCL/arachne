@@ -81,3 +81,54 @@ export function createMeshMapDialog({read,api,refresh,assetUrl}){
     dialog.showModal();
   }};
 }
+
+export function bindNormalBakeDialog({read,refresh,assetUrl}){
+  const dialog=document.getElementById('normal-bake-dialog'),form=dialog.querySelector('form');
+  const {high,resolution,front,rear,createLayer}=form.elements;
+  const status=form.querySelector('output'),preview=form.querySelector('img'),submit=form.querySelector('[type=submit]');
+  const close=form.querySelector('[data-close]');
+  let projectId,revision,controller;
+  document.getElementById('open-normal-bake').onclick=()=>{
+    const doc=read();
+    if(!doc)return;
+    projectId=doc.id;revision=doc.revision;
+    form.reset();syncSelectMenu(resolution);
+    form.querySelector('[data-low]').textContent='低模 · '+doc.name+' / '+doc.source.material;
+    status.textContent='高模和低模须使用相同的坐标和比例。';
+    preview.hidden=true;preview.removeAttribute('src');
+    dialog.showModal();
+  };
+  close.onclick=()=>controller?controller.abort():dialog.close();
+  dialog.oncancel=event=>{if(controller){event.preventDefault();controller.abort();}};
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    if(controller)return;
+    if(read()?.id!==projectId||read().revision!==revision){status.textContent='工程已变化，请重新打开烘焙窗口';return;}
+    if(Number(front.value)+Number(rear.value)===0){status.textContent='向内和向外距离至少一项须大于零';return;}
+    const file=high.files[0];
+    if(!file)return;
+    const params=new URLSearchParams({revision,resolution:resolution.value,front:front.value,rear:rear.value,createLayer:createLayer.checked});
+    controller=new AbortController();
+    for(const input of [high,resolution,front,rear,createLayer,submit])input.disabled=true;
+    syncSelectMenu(resolution);
+    close.textContent='取消烘焙';status.textContent='正在将高模表面投射到低模 UV…';
+    preview.hidden=true;
+    try{
+      const response=await fetch('/api/projects/'+projectId+'/paint/mesh-normal?'+params,{method:'POST',
+        headers:{'Content-Type':'model/gltf-binary'},body:file,signal:controller.signal});
+      const result=await response.json();
+      if(!response.ok)throw Error(result.error||'法线烘焙失败');
+      await refresh();
+      if(read()?.id!==projectId||read().revision!==result.revision){status.textContent='工程已变化，请重新打开烘焙窗口';return;}
+      revision=result.revision;
+      preview.src=assetUrl(result.maps.normal);preview.hidden=false;
+      const {hits,valid}=result.coverage;
+      status.textContent='命中 '+hits+' / '+valid+' 像素（'+(100*hits/valid).toFixed(1)+'%）· '+(createLayer.checked?'已添加法线填充层':'已保存到工程素材');
+    }catch(error){status.textContent=controller.signal.aborted?'已取消烘焙':error.message;}
+    finally{
+      controller=null;close.textContent='关闭';
+      for(const input of [high,resolution,front,rear,createLayer,submit])input.disabled=false;
+      syncSelectMenu(resolution);
+    }
+  };
+}

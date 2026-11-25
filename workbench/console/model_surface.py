@@ -37,6 +37,19 @@ def xyz(points):
     return points[..., [0,2,1]] * [1,-1,1]
 
 
+def world_triangle_frames(primitive, world):
+    indices = primitive['indices']
+    vertices = primitive['positions'] @ world[:3,:3].T + world[:3,3]
+    triangles = xyz(vertices[indices])
+    normal = normalize(np.cross(triangles[:,1]-triangles[:,0],triangles[:,2]-triangles[:,0]))
+    if np.linalg.det(world[:3,:3]) < 0:
+        normal = -normal
+    attribute = primitive['normals']
+    shade = (np.repeat(normal[:,None,:],3,axis=1) if attribute is None else
+             normalize(xyz(attribute @ np.linalg.inv(world[:3,:3])))[indices])
+    return triangles, normal, shade
+
+
 def surface(model):
     points, shading, normals, uv, objects, polygons, materials = [],[],[],[],[],[],[]
     worlds = model.worlds()
@@ -44,14 +57,7 @@ def surface(model):
     for primitive in model.primitives:
         key, indices = primitive['node'], primitive['indices']
         world = worlds[key]
-        vertices = primitive['positions'] @ world[:3,:3].T + world[:3,3]
-        triangles = xyz(vertices[indices])
-        normal = normalize(np.cross(triangles[:,1]-triangles[:,0],triangles[:,2]-triangles[:,0]))
-        if np.linalg.det(world[:3,:3]) < 0:
-            normal = -normal
-        attribute = primitive['normals']
-        shade = (np.repeat(normal[:,None,:],3,axis=1) if attribute is None else
-                 normalize(xyz(attribute @ np.linalg.inv(world[:3,:3])))[indices])
+        triangles, normal, shade = world_triangle_frames(primitive, world)
         coords = primitive['uv']
         coords = (np.full((len(indices),3,2),-1.) if coords is None else
                   coords[indices].astype(float)*[1,-1]+[0,1])
