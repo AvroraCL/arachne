@@ -108,3 +108,17 @@ test('camera changes invalidate a reviewed view while numerical jitter does not'
   assert.equal(sameDeliveryCamera(camera,{...camera,projection:'orthographic'}),false);
   assert.equal(sameDeliveryCamera(null,null),true);
 });
+
+test('EXR primaries survive project presets and distinguish otherwise identical queued renders',()=>{
+  const options=updateDeliveryOptions({},{fileFormat:'OPEN_EXR',bitDepth:32,exrSpace:'lin_ap1_scene'});
+  const captured=captureRenderPreset(options);
+  assert.deepEqual(checkRenderPreset(captured),captured);
+  const rendered=resolvePaintRenderSettings({renderPreset:captured},{useProjectPreset:true});
+  assert.equal(rendered.exrSpace,'lin_ap1_scene');
+  const pending={type:'paint-render',status:'queued',revision:2,paintSettings:rendered};
+  assert.equal(pendingRenderFor([pending],2,{...rendered,exrSpace:'lin_ap0_scene'}),undefined);
+  assert.equal(pendingRenderFor([pending],2,rendered),pending);
+  assert.equal(captureDeliverySettings(updateDeliveryOptions(options,{fileFormat:'PNG'}),null,null).exrSpace,undefined);
+  assert.throws(()=>cyclesOptions({fileFormat:'PNG',exrSpace:'lin_ap1_scene'}),/颜色空间/);
+  assert.throws(()=>updateDeliveryOptions(options,{exrSpace:'unknown'}),/颜色空间/);
+});

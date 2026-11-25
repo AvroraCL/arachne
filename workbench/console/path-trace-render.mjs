@@ -13,9 +13,9 @@ const importMap={imports:{
 }};
 
 export function pathTraceOptions(raw){
-  const {width,height,samples,camera,maxBounces=12,transparent=false,textureJobId,device='auto',fileFormat='PNG',bitDepth}=cyclesOptions(raw);
+  const {width,height,samples,camera,maxBounces=12,transparent=false,textureJobId,device='auto',fileFormat='PNG',bitDepth,exrSpace}=cyclesOptions(raw);
   if(textureJobId)throw Error('工程渲染使用冻结修订的贴图');
-  return {width,height,samples,camera,maxBounces,transparent,device,fileFormat,bitDepth:fileFormat==='OPEN_EXR'?bitDepth:8};
+  return {width,height,samples,camera,maxBounces,transparent,device,fileFormat,bitDepth:fileFormat==='OPEN_EXR'?bitDepth:8,...(exrSpace?{exrSpace}:{})};
 }
 
 export async function renderPathTrace(input,files,{signal,onSample,registerBrowser}){

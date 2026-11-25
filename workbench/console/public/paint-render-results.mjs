@@ -1,3 +1,4 @@
+import {defaultExrSpace,exrSpaces,fillExrSpaceSelect} from './render-exr-color.mjs';
 import {cyclesProgressLabel} from './cycles-progress-ui.mjs';
 import {cyclesFormatLabel,showRenderDownload,showRenderPassDownload} from './render-output-ui.mjs';
 import {renderRegionPixels} from './render-region.mjs';
@@ -13,7 +14,7 @@ export function pendingRenderFor(jobs,revision,settings){
   // A batch entry may render this camera with its own bookmarked lighting.
   return jobs.find(job=>job.type==='paint-render'&&!job.renderBookmark&&job.revision===revision&&active(job)&&
     job.paintSettings&&sameDeliveryCamera(job.paintSettings.camera,settings.camera)&&
-    ['width','height','samples','maxBounces','transparent','device','fileFormat','bitDepth']
+    ['width','height','samples','maxBounces','transparent','device','fileFormat','bitDepth','exrSpace']
       .every(key=>job.paintSettings[key]===settings[key]));
 }
 
@@ -22,6 +23,7 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
   const list=$('paint-render-list'),info=$('paint-render-info'),image=$('paint-render-image'),sampling=$('paint-render-samples');
   const download=$('paint-render-download'),report=$('paint-render-report'),log=$('paint-render-log');
   const passes=$('paint-render-passes'),format=$('paint-render-format');
+  const space=$('paint-render-space');fillExrSpaceSelect(space);format.onchange=()=>sync();
   const start=$('start-paint-render'),cancel=$('cancel-paint-render'),retry=$('retry-paint-render');
   const background=$('render-background-status'),backgroundText=background.querySelector('span');
   let projectId=null,selectedId=null,pending=false,listKey='',backgroundJob=null;
@@ -57,7 +59,7 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     const region=renderRegionPixels(doc?.paint.renderRegion,values.width,values.height);
     $('paint-render-summary').textContent=`${values.width} × ${values.height} · ${values.samples} 次采样 · ${framing}`+
       (region?` · ${region.crop?'裁切':'区域渲染'} ${region.output.join(' × ')}`:'');
-    start.disabled=format.disabled=!doc||blocked;
+    start.disabled=format.disabled=space.disabled=!doc||blocked;space.closest('label').hidden=format.value==='png';
     start.textContent=running?'加入渲染队列':'渲染当前修订';
     cancel.hidden=!active(selected);cancel.disabled=blocked;
     retry.hidden=!canRetry(selected);retry.disabled=blocked||!!running;
@@ -70,6 +72,7 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
       selected.render?`路径追踪 · ${selected.render.resolution.join(' × ')} · ${selected.render.samples} 次采样`:selected.cycles?`${selected.cycles.device} · ${selected.cycles.resolution.join(' × ')} · ${selected.cycles.samples} 次采样`:selected.error,
       selected.render?`${cyclesFormatLabel(selected.render.fileFormat)} · ${selected.render.bitDepth} 位${selected.render.fileFormat==='OPEN_EXR'?'浮点':''}`:
         selected.cycles?.render_effective?.bitDepth?`${cyclesFormatLabel(selected.cycles.render_effective.fileFormat)} · ${selected.cycles.render_effective.bitDepth} 位`:'',
+      selected.render?.colorInteropID?exrSpaces[selected.render.colorInteropID]?.label:'',
       selected.cycles?.gpu_fallback?'已从 GPU 切换至 CPU':'',
       selected.render?.textureSampling?.reduced
         ?'受设备或内存预算限制，实际贴图最大尺寸 '+selected.render.textureSampling.atlas.join(' × '):'',
@@ -118,6 +121,8 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     const output=format.value==='png'?{fileFormat:'PNG',bitDepth:8}:
       {fileFormat:'OPEN_EXR',bitDepth:format.value==='exr32'?32:16};
     const requested={...camera(),...output};
+    if(format.value==='png'||space.value===defaultExrSpace)delete requested.exrSpace;
+    else requested.exrSpace=space.value;
     const existing=pendingRenderFor(jobs,doc.revision,requested);
     const job=existing||await post('render',{requestId:crypto.randomUUID(),settings:requested});
     if(doc.id===read().doc?.id)selectedId=job.id;
@@ -132,6 +137,7 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     $('open-paint-render').closest('details').open=false;
     const preferences=settings();
     setSelectValue(format,preferences.fileFormat==='OPEN_EXR'?(preferences.bitDepth===32?'exr32':'exr16'):'png');
+    setSelectValue(space,preferences.exrSpace??defaultExrSpace);
     dialog.showModal();sync();
   };
   background.onclick=()=>{

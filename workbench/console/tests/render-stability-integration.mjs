@@ -84,6 +84,11 @@ try{
   await fs.writeFile(path.join(dir,name+'-view.png'),Buffer.from(preview,'base64'));
   await fs.writeFile(path.join(dir,name+'.exr'),render.exr);
  }
+ for(const [space,bits] of [['lin_ap1_scene',16],['lin_rec2020_scene',32]]){
+  const render=await renderPathTrace({...base,settings:{...settings,exrSpace:space,bitDepth:bits},
+    appearance:{viewTransform:'AgX',exposure:0,gamma:1,look:'None'}},files,{onSample(){}});
+  await fs.writeFile(path.join(dir,space+'.exr'),render.exr);
+ }
  console.log(execFileSync(python,['-c',`
 from pathlib import Path
 import struct, sys
@@ -95,18 +100,21 @@ assert np.ptp(img('stripes.png')[80:300,40:344,0].mean(0)) > 60, '4K stripes los
 if (root/'reduced.png').exists():
  reduced=img('reduced.png')[420:1100,600:1450,0]
  assert reduced.max()>20 and reduced.mean()>20
-def exr(file):
+def exr(file,bits=32,space='lin_rec709_scene'):
  data=(root/file).read_bytes()
- at=8
+ at=8;attrs={}
  while data[at]:
-  at=data.index(b'\\0',at)+1
+  end=data.index(b'\\0',at);name=data[at:end].decode();at=end+1
   at=data.index(b'\\0',at)+1
   size,=struct.unpack_from('<I',data,at)
-  at+=4+size
+  attrs[name]=data[at+4:at+4+size];at+=4+size
+ assert attrs['colorInteropID'].decode()==space
+ xy=struct.unpack('<8f',attrs['chromaticities'])
+ assert abs(xy[0]-{'lin_rec709_scene':.64,'lin_ap1_scene':.713,'lin_rec2020_scene':.708}[space])<1e-6
  at+=1
  offset,=struct.unpack_from('<Q',data,at+64*8)
  y,size=struct.unpack_from('<II',data,offset)
- return np.frombuffer(data, dtype='<f4',count=size//4,offset=offset+8).reshape(4,128)
+ return np.frombuffer(data, dtype='<f'+str(bits//8),count=size//(bits//8),offset=offset+8).reshape(4,128)
 for name in ['default','gamma','low','high','opaque']:
  a,b=img(name+'-png.png'),img(name+'-view.png')
  diff=np.abs(a[38:90,38:90]-b[38:90,38:90])
@@ -117,6 +125,15 @@ for name in ['default','gamma','low','high','opaque']:
   assert np.max(np.abs(raw[:,40:88]-exr('default.exr')[:,40:88])) < .008
   assert np.all(raw[:,0]==0) and np.all(raw[0,40:88]==1)
  print(name,'center pixel',a[64,64].tolist(),'max viewport/PNG channel delta',diff.max())
+# The EXR channels in this scanline are A, B, G, R. Compare interior pixels
+# to independent OpenColorIO reference transforms with the same camera and lights.
+src=exr('default.exr')
+for name,bits,matrix in [('lin_ap1_scene',16,[[.6130974,.3395232,.0473795],[.0701937,.9163539,.0134524],[.0206156,.1095698,.8698146]]),
+                         ('lin_rec2020_scene',32,[[.6274039,.3292831,.0433131],[.0690973,.9195403,.0113622],[.0163915,.0880134,.8955953]])]:
+ target=exr(name+'.exr',bits,name)
+ np.testing.assert_array_equal(target[0,40:88],src[0,40:88])
+ np.testing.assert_allclose(target[3:0:-1,40:88],np.array(matrix)@src[3:0:-1,40:88],atol=.008,rtol=0)
+ assert np.all(target[:,0]==0)
 assert not np.array_equal(img('default-png.png'),img('gamma-png.png'))
 assert not np.array_equal(img('low-png.png'),img('high-png.png'))
 assert np.all(exr('default.exr')[:,0]==0)

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {prepareExrPixels,taggedExr} from './render-exr-color.mjs';
 import {createViewportModelLoader} from './viewport-model-loader.mjs';
 import {applySurfaceMarks,applySourceFactors} from './viewport-materials.mjs';
 import {applyModelState} from './paint-model-state.mjs';
@@ -107,14 +108,7 @@ async function downloadLinearExr(renderer,target,settings,region){
   // WebGL buffers start at the bottom. EXRExporter flips their rows on export.
   const pixels=new Float32Array(width*height*4);
   await renderer.readRenderTargetPixelsAsync(target,left,target.height-bottom,width,height,pixels);
-  for(let i=0;i<pixels.length;i+=4){
-    const alpha=settings.transparent?pixels[i+3]:1;
-    // The path tracer stores straight RGB. OpenEXR compositing uses associated alpha.
-    pixels[i]*=alpha;
-    pixels[i+1]*=alpha;
-    pixels[i+2]*=alpha;
-    pixels[i+3]=alpha;
-  }
+  prepareExrPixels(pixels,settings.transparent,settings.exrSpace);
   let output=pixels;
   if(region&&!region.crop){
     output=new Float32Array(outputWidth*outputHeight*4);
@@ -127,7 +121,7 @@ async function downloadLinearExr(renderer,target,settings,region){
   const texture=new THREE.DataTexture(output,outputWidth,outputHeight,THREE.RGBAFormat,THREE.FloatType);
   try{
     const bytes=await new EXRExporter().parse(texture,{compression:0,type:settings.bitDepth===32?THREE.FloatType:THREE.HalfFloatType});
-    const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+    const url=URL.createObjectURL(taggedExr(bytes,outputHeight,settings.exrSpace));
     // The isolated browser stays open until the worker has collected the download.
     const anchor=document.createElement('a');
     anchor.href=url;

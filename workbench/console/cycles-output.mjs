@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {exrSpaces} from './public/render-exr-color.mjs';
 import {sha256File} from './file-fingerprint.mjs';
 import path from 'node:path';
 import {renderPassChannels} from './public/cycles-render-passes.mjs';
@@ -8,7 +9,7 @@ export const pngSizeIs=(bytes,width,height)=>bytes.length>=24&&bytes.subarray(0,
   bytes.toString('ascii',12,16)==='IHDR'&&bytes.readUInt32BE(16)===width&&bytes.readUInt32BE(20)===height;
 
 // Inspect the single-part scanline files the renderers write. See the OpenEXR file layout.
-export function exrMatches(file,width,height,bitDepth,expected,{compressionType=3}={}){
+export function exrMatches(file,width,height,bitDepth,expected,{compressionType=3,exrSpace}={}){
   const handle=fs.openSync(file,'r');
   try{
     const size=fs.fstatSync(handle).size;
@@ -28,6 +29,12 @@ export function exrMatches(file,width,height,bitDepth,expected,{compressionType=
       attrs.set(name[0],{type:type[0],start,end:i});
     }
     if(i>=length)return false;
+    if(exrSpace!==undefined){
+      const id=attrs.get('colorInteropID'),xy=attrs.get('chromaticities');
+      if(id?.type!=='string'||header.toString('ascii',id.start,id.end)!==exrSpace||
+        xy?.type!=='chromaticities'||xy.end-xy.start!==32||
+        !exrSpaces[exrSpace].primaries.every((value,j)=>header.readFloatLE(xy.start+j*4)===Math.fround(value)))return false;
+    }
     for(const key of ['dataWindow','displayWindow']){
       const box=attrs.get(key);
       if(box?.type!=='box2i'||box.end-box.start!==16)return false;

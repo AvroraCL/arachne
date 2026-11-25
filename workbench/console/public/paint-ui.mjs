@@ -1,3 +1,4 @@
+import {defaultExrSpace,fillExrSpaceSelect} from './render-exr-color.mjs';
 import {menuShortcut} from './menu-shortcut.mjs';
 import {connectDesktopWorkspace} from './paint-desktop-workspace.mjs';
 import {isSelectionAsset} from './uv-selection-region.mjs';
@@ -2388,12 +2389,15 @@ function effectiveDeliveryPreferences(){
   const preferences=workingDeliveryPreferences();
   return preferences.framing==='saved'&&!doc?.paint.renderCamera?{...preferences,framing:'auto'}:preferences;
 }
+fillExrSpaceSelect($('delivery-exr-space'));
 function syncDeliveryPreferences(){
   const preferences=effectiveDeliveryPreferences(),values=deliveryEditorValues(preferences);
   const size=deliveryControls.size.querySelector('option[value="custom"]'),quality=deliveryControls.quality.querySelector('option[value="custom"]');
   size.hidden=preferences.size!=='custom';size.textContent=`${values.width} × ${values.height} · 自定义`;
   quality.hidden=preferences.quality!=='custom';quality.textContent=`${values.samples} 次采样 · 自定义`;
   for(const [key,control] of Object.entries(deliveryControls))setSelectValue(control,preferences[key]);
+  $('delivery-exr-space').closest('label').hidden=values.fileFormat!=='OPEN_EXR';
+  setSelectValue($('delivery-exr-space'),values.exrSpace??defaultExrSpace);
   setSelectValue($('delivery-format'),values.fileFormat==='OPEN_EXR'?'exr'+(values.bitDepth??16):'png');
 }
 function changeDeliveryPreferences(change,{refresh=true,persist=true}={}){
@@ -2411,6 +2415,7 @@ syncDeliveryPreferences();
 for(const [key,control] of Object.entries(deliveryControls)){
   control.onchange=()=>applyDeliveryPreferences({...workingDeliveryPreferences(),[key]:control.value});
 }
+$('delivery-exr-space').onchange=()=>applyDeliveryPreferences(updateDeliveryOptions(workingDeliveryPreferences(),{exrSpace:$('delivery-exr-space').value}));
 $('delivery-format').onchange=()=>{
   const format=$('delivery-format').value;
   applyDeliveryPreferences(updateDeliveryOptions(workingDeliveryPreferences(),format==='png'?{fileFormat:'PNG',bitDepth:8}:

@@ -1,3 +1,4 @@
+import {defaultExrSpace,exrSpaces} from './render-exr-color.mjs';
 import {cyclesLimits,cyclesFormats} from './cycles-limits.mjs';
 import {checkCyclesLightPaths} from './cycles-light-paths.mjs';
 import {checkCyclesRenderPasses} from './cycles-render-passes.mjs';
@@ -34,6 +35,7 @@ export function normalizeDeliveryOptions(raw){
     ...(integer(raw.maxBounces,0,64)&&raw.maxBounces!==renderDefaults.maxBounces?{maxBounces:raw.maxBounces}:{}),
     ...(raw.transparent===true?{transparent:true}:{}),...(lightPaths?{lightPaths}:{}),
     ...(renderPasses.length?{renderPasses}:{}),...(exr?{fileFormat}:{}),
+    ...(Object.hasOwn(exrSpaces,raw.exrSpace)&&raw.exrSpace!==defaultExrSpace?{exrSpace:raw.exrSpace}:{}),
     ...(cyclesFormats[fileFormat].depths.includes(raw.bitDepth)?{bitDepth:raw.bitDepth}:exr?{bitDepth:16}:{})};
 }
 
@@ -43,15 +45,16 @@ export function deliveryEditorValues(preferences){
   return {framing:options.framing,width,height,samples:options.quality==='custom'?options.samples:deliveryQuality[options.quality],denoise:options.denoise!==false,
     device:options.device??renderDefaults.device,adaptive:options.adaptive??renderDefaults.adaptive,noiseThreshold:options.noiseThreshold??renderDefaults.noiseThreshold,
     maxBounces:options.maxBounces??renderDefaults.maxBounces,transparent:options.transparent??renderDefaults.transparent,
-    fileFormat:options.fileFormat??'PNG',bitDepth:options.bitDepth??null,...(options.lightPaths?{lightPaths:options.lightPaths}:{}),
+    fileFormat:options.fileFormat??'PNG',bitDepth:options.bitDepth??null,...(options.exrSpace?{exrSpace:options.exrSpace}:{}),...(options.lightPaths?{lightPaths:options.lightPaths}:{}),
     ...(options.renderPasses?{renderPasses:options.renderPasses}:{})};
 }
 
 export function updateDeliveryOptions(preferences,patch){
-  if(!patch||typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).some(key=>!['framing','width','height','samples','denoise','device','adaptive','noiseThreshold','maxBounces','transparent','fileFormat','bitDepth','lightPaths','renderPasses'].includes(key)))throw Error('渲染设置无效');
+  if(!patch||typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).some(key=>!['framing','width','height','samples','denoise','device','adaptive','noiseThreshold','maxBounces','transparent','fileFormat','bitDepth','exrSpace','lightPaths','renderPasses'].includes(key)))throw Error('渲染设置无效');
   const value={...deliveryEditorValues(preferences),...patch};
   if(value.lightPaths!==undefined&&value.lightPaths!==null)checkCyclesLightPaths(value.lightPaths);
   if(!Object.hasOwn(cyclesFormats,value.fileFormat))throw Error('渲染输出格式无效');
+  if(Object.hasOwn(value,'exrSpace')&&!Object.hasOwn(exrSpaces,value.exrSpace))throw Error('EXR 输出颜色空间无效');
   const depths=cyclesFormats[value.fileFormat].depths;
   if(Object.hasOwn(patch,'fileFormat')&&!Object.hasOwn(patch,'bitDepth')&&!depths.includes(value.bitDepth))
     value.bitDepth=value.fileFormat==='OPEN_EXR'?16:null;
@@ -69,6 +72,7 @@ export function captureDeliverySettings(preferences,camera,savedCamera){
   return {width,height,samples,textureJobId:null,...(!options.denoise?{denoise:false}:{}),
     ...(options.fileFormat==='OPEN_EXR'?{fileFormat:options.fileFormat}:{}),
     ...(options.bitDepth===null?{}:{bitDepth:options.bitDepth}),
+    ...(options.fileFormat==='OPEN_EXR'&&options.exrSpace?{exrSpace:options.exrSpace}:{}),
     ...(options.lightPaths?{lightPaths:options.lightPaths}:{}),
     ...(options.renderPasses?{renderPasses:options.renderPasses}:{}),
     device:options.device,adaptive:options.adaptive,noiseThreshold:options.noiseThreshold,maxBounces:options.maxBounces,transparent:options.transparent,
@@ -80,12 +84,13 @@ export function captureRenderPreset(preferences){
   const value=deliveryEditorValues(preferences);
   if(value.framing==='viewport')throw Error('请先保存当前视角为工程相机');
   return {version:1,...Object.fromEntries(presetFields.map(key=>[key,value[key]])),
+    ...(value.fileFormat==='OPEN_EXR'&&value.exrSpace?{exrSpace:value.exrSpace}:{}),
     ...(value.lightPaths?{lightPaths:value.lightPaths}:{}),...(value.renderPasses?{renderPasses:value.renderPasses}:{})};
 }
 
 export function checkRenderPreset(value){
   if(!value||typeof value!=='object'||Array.isArray(value)||value.version!==1||
-    Object.keys(value).length!==presetFields.length+1+['lightPaths','renderPasses'].filter(key=>Object.hasOwn(value,key)).length||
+    Object.keys(value).length!==presetFields.length+1+['exrSpace','lightPaths','renderPasses'].filter(key=>Object.hasOwn(value,key)).length||
     !presetFields.every(key=>Object.hasOwn(value,key))||Object.hasOwn(value,'lightPaths')&&!value.lightPaths||
     !['auto','saved'].includes(value.framing))throw Error('工程渲染预设无效');
   const {version,...patch}=value;

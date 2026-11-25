@@ -1095,6 +1095,8 @@ async function verifyModelWorkflows(){
   await page.locator('#approved').check({timeout:120000});
   await page.getByRole('button',{name:'交付渲染格式',exact:true}).click();
   await page.getByRole('option',{name:'OpenEXR · 32 位浮点',exact:true}).click();
+  await page.getByRole('button',{name:'交付 EXR 颜色空间',exact:true}).click();
+  await page.getByRole('option',{name:'ACEScg（AP1）',exact:true}).click();
   assert.equal(await page.locator('#approved').isChecked(),false);
   await page.locator('#approved').check();
   await page.screenshot({path:path.join(data,'texture-export-presets.png')});
@@ -1106,6 +1108,7 @@ async function verifyModelWorkflows(){
   });
   assert.deepEqual(delivery.render.camera,camera);
   assert.equal(delivery.render.engine,'PATH_TRACING');
+  assert.equal(delivery.render.colorInteropID,'lin_ap1_scene');
   assert.equal(delivery.blendUrl,undefined);
   assert.equal(delivery.texturePreset,'unreal-orm');
   const zip=path.join(data,'delivery.zip');

@@ -1,3 +1,4 @@
+import {defaultExrSpace,exrSpaces} from './public/render-exr-color.mjs';
 import {previewDimensions} from './public/image-document-size.mjs';
 import {libraryFill,insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
@@ -1851,7 +1852,7 @@ async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,upda
     engine:'PATH_TRACING',revision:doc.revision,resolution,frameResolution:[settings.width,settings.height],
     ...(j.renderBookmark?{cameraBookmark:j.renderBookmark}:{}),
     region,camera:result.camera,samples:result.samples,fileFormat:settings.fileFormat,bitDepth:settings.bitDepth,
-    transparent:settings.transparent,...(result.exr?{colorSpace:'scene-linear sRGB',alphaMode:'premultiplied'}:{}),
+    transparent:settings.transparent,...(result.exr?{colorSpace:settings.exrSpace?exrSpaces[settings.exrSpace].label:'scene-linear sRGB',colorInteropID:settings.exrSpace??defaultExrSpace,alphaMode:'premultiplied'}:{}),
     lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,visibility:renderVisibility,
     textureSampling:result.textureSampling,
     modelSha256:model.sha256,uvSha256:model.uvSha256,materialFingerprint:report.materialFingerprint??null,
@@ -1866,8 +1867,8 @@ async function renderPaintFrame(j,doc,{model,report,input,out,binding,stage,upda
       if(!result.exr)throw Error('路径追踪未返回 OpenEXR');
       const exr=path.join(pending,'render.exr');
       await fsp.writeFile(exr,result.exr,{signal});
-      if(!exrMatches(exr,...resolution,settings.bitDepth,['R','G','B','A'],{compressionType:0}))
-        throw Error('OpenEXR 的尺寸、通道或浮点位深与出图设置不一致');
+      if(!exrMatches(exr,...resolution,settings.bitDepth,['R','G','B','A'],{compressionType:0,exrSpace:render.colorInteropID}))
+        throw Error('OpenEXR 的尺寸、颜色空间、通道或位深与出图设置不一致');
     }
     atomic(path.join(pending,'validation.json'),render);
     signal?.throwIfAborted();

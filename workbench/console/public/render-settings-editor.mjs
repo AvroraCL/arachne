@@ -1,3 +1,4 @@
+import {defaultExrSpace,fillExrSpaceSelect} from './render-exr-color.mjs';
 import {sameDeliveryCamera,renderBookmarkLimit} from './paint-delivery-options.mjs';
 import {syncSelectMenu} from './paint-select.mjs';
 import {createPropertyEditorFrame} from './property-editor.mjs';
@@ -263,6 +264,9 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
   format.onchange=()=>{try{settings.set({fileFormat:format.value});}catch(error){ctx.error(error);sync();}};
   row(output,'文件格式',format);
   const bitDepth=el('select');bitDepth.setAttribute('aria-label','PNG 位深');
+  const exrSpace=el('select');exrSpace.setAttribute('aria-label','EXR 输出颜色空间');
+  fillExrSpaceSelect(exrSpace);
+  exrSpace.onchange=()=>{try{settings.set({exrSpace:exrSpace.value});}catch(error){ctx.error(error);sync();}};
   let depthFormat='';
   function syncFormat(value){
     const selected=value.fileFormat;
@@ -275,10 +279,13 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
         [new Option('8 位','8')]));
     }
     bitDepth.value=String(selected==='OPEN_EXR'?value.bitDepth??16:8);
+    exrSpace.closest('label').hidden=selected!=='OPEN_EXR';
+    exrSpace.value=value.exrSpace??defaultExrSpace;syncSelectMenu(exrSpace);
     bitDepth.disabled=selected==='PNG';syncSelectMenu(format);syncSelectMenu(bitDepth);
   }
   bitDepth.onchange=()=>{try{settings.set({bitDepth:bitDepth.value?Number(bitDepth.value):null});}catch(error){ctx.error(error);sync();}};
   row(output,'位深',bitDepth);
+  row(output,'EXR 颜色空间',exrSpace);
   const presets=section('output','projectPreset','工程渲染预设',false);
   const presetStatus=el('p','render-camera-state'),presetActions=el('div','render-settings-camera-actions');
   presetActions.dataset.search='保存为工程预设 恢复工程预设 移除工程预设';
