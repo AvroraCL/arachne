@@ -41,7 +41,7 @@ export function displayColorCss(hex,space){
 }
 
 export function setWorkingSwatch(input,space){
-  if(!Object.hasOwn(toSRGB,space)){
+  if(space!=='srgb'&&!Object.hasOwn(toSRGB,space)){
     delete input.dataset.workingSpace;input.style.removeProperty('--working-swatch');return;
   }
   input.dataset.workingSpace=space;
@@ -62,6 +62,56 @@ function outsideSRGB(m,r,g,b){
   return false;
 }
 
+const powerCurve={'gray-g22':2.2,'dci-p3':2.6,'rec2020-g24':2.4,'adobe-rgb':563/256};
+const linearSpaces=new Set(['gray-linear','linear-srgb','acescg','aces2065-1']);
+const videoCurve={'rec709':.909912109375,'rec2020':.90966796875};
+function decodeComponent(x,space){
+  if(linearSpaces.has(space))return x;
+  if(powerCurve[space])return x**powerCurve[space];
+  const a=videoCurve[space];
+  if(a)return x<.081?x/4.5:(a*x+1-a)**(1/.45);
+  if(space==='prophoto-rgb')return x<1/32?x/16:x**1.8;
+  return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;
+}
+function encodeComponent(x,space){
+  if(linearSpaces.has(space))return x;
+  if(powerCurve[space])return x**(1/powerCurve[space]);
+  const a=videoCurve[space];
+  if(a)return x<.018?x*4.5:(x**.45-1+a)/a;
+  if(space==='prophoto-rgb')return x<1/512?x*16:x**(1/1.8);
+  return x<=.0031308?x*12.92:1.055*x**(1/2.4)-.055;
+}
+
+// ICC PCS coordinates from the shared sRGB profile. Colorants are D50-adapted.
+const srgbXYZ=[.43603516,.38510132,.14306641,.22244263,.71693420,.06062317,.01390076,.09707642,.71392822];
+const d50=[.96420288,1,.82490540],delta=6/29;
+const transform3=(m,[x,y,z])=>[m[0]*x+m[1]*y+m[2]*z,m[3]*x+m[4]*y+m[5]*z,m[6]*x+m[7]*y+m[8]*z];
+function inverse3([a,b,c,d,e,f,g,h,i]){
+  const adj=[e*i-f*h,c*h-b*i,b*f-c*e,f*g-d*i,a*i-c*g,c*d-a*f,d*h-e*g,b*g-a*h,a*e-b*d];
+  const det=a*adj[0]+b*adj[3]+c*adj[6];
+  return adj.map(x=>x/det);
+}
+const fromXYZ=inverse3(srgbXYZ),fromSRGB=new Map();
+export function workingHexToLab(hex,space){
+  const linear=hex.slice(1).match(/../g).map(n=>decodeComponent(parseInt(n,16)/255,space));
+  const xyz=transform3(srgbXYZ,toSRGB[space]?transform3(toSRGB[space],linear):linear);
+  const [x,y,z]=xyz.map((v,i)=>{
+    const t=v/d50[i];
+    return t>delta**3?Math.cbrt(t):t/(3*delta**2)+4/29;
+  });
+  return [116*y-16,500*(x-y),200*(y-z)];
+}
+export function labToWorkingHex([l,a,b],space){
+  const y=(l+16)/116;
+  const xyz=[y+a/500,y,y-b/200].map((v,i)=>d50[i]*(v>delta?v**3:3*delta**2*(v-4/29)));
+  const rgb=transform3(fromXYZ,xyz);
+  if(toSRGB[space]&&!fromSRGB.has(space))fromSRGB.set(space,inverse3(toSRGB[space]));
+  const linear=fromSRGB.has(space)?transform3(fromSRGB.get(space),rgb):rgb;
+  const clipped=linear.some(n=>n<-.0002||n>1.0002);
+  const hex='#'+linear.map(n=>Math.round(255*encodeComponent(Math.max(0,Math.min(1,n)),space)).toString(16).padStart(2,'0')).join('');
+  return {hex,clipped};
+}
+
 export function writeDisplayRGB(target,pixels,space,warnGamut=false,outputSpace='srgb'){
   const p3=outputSpace==='display-p3',m=(p3?toP3:toSRGB)[space];
   if(!m||p3&&space==='display-p3'&&!warnGamut){if(target!==pixels)target.set(pixels);return;}
@@ -69,20 +119,7 @@ export function writeDisplayRGB(target,pixels,space,warnGamut=false,outputSpace=
     const x=i/65535;
     return Math.round(255*(x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055));
   });
-  if(!decoders.has(space))decoders.set(space,Float64Array.from({length:256},(_,i)=>{
-    const x=i/255;
-    if(space==='gray-g22')return x**2.2;
-    if(space==='gray-linear'||space==='linear-srgb'||space==='acescg'||space==='aces2065-1')return x;
-    if(space==='dci-p3')return x**2.6;
-    if(space==='rec2020-g24')return x**2.4;
-    if(space==='rec709'||space==='rec2020'){
-      const a=space==='rec709'?.909912109375:.90966796875;
-      return x<.081?x/4.5:(a*x+1-a)**(1/.45);
-    }
-    if(space==='adobe-rgb')return x**(563/256);
-    if(space==='prophoto-rgb')return x<1/32?x/16:x**1.8;
-    return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;
-  }));
+  if(!decoders.has(space))decoders.set(space,Float64Array.from({length:256},(_,i)=>decodeComponent(i/255,space)));
   const linear=decoders.get(space);
   const byte=x=>encoded[Math.round(Math.max(0,Math.min(1,x))*65535)];
   for(let i=0;i<pixels.length;i+=4){

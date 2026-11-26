@@ -137,6 +137,17 @@ assert im.getextrema()==tuple((n,n) for n in expected),im.getextrema()`,backgrou
       const chip=await picker.locator('.paint-color-sample').evaluate(el=>getComputedStyle(el).backgroundColor);
       assert.equal(chip,'rgb(188, 188, 188)','ACEScg 线性中灰在拾色器中应与画布相同');
       assert.deepEqual(await picker.locator('.paint-color-sv canvas').evaluate(c=>[...c.getContext('2d').getImageData(0,66,1,1).data]),[188,188,188,255]);
+      await picker.getByRole('button',{name:'输入 Lab（D50）'}).click();
+      const lightness=picker.getByLabel('Lab L*',{exact:true});
+      assert.ok(Math.abs(Number(await lightness.inputValue())-76.2)<.1);
+      await lightness.fill('50');
+      assert.equal(await picker.getByLabel('HEX 颜色').inputValue(),'#2f2f2f');
+      await picker.getByLabel('Lab a*',{exact:true}).fill('127');await picker.getByLabel('Lab b*',{exact:true}).fill('-128');
+      assert.match(await picker.getByRole('status').textContent(),/超出原稿色域/);
+      await lightness.fill('-1');assert.ok(await picker.getByRole('button',{name:'确定',exact:true}).isDisabled());
+      await picker.getByLabel('HEX 颜色').fill('#808080');
+      await picker.screenshot({path:path.join(data,'aces-lab-picker.png')});
+      await picker.getByRole('button',{name:'输入 RGB'}).click();
       const red=picker.getByLabel('红色通道 R');
       await red.fill('256');assert.ok(await picker.getByRole('button',{name:'确定',exact:true}).isDisabled());
       await red.fill('131');assert.equal(await picker.getByRole('textbox',{name:'HEX 颜色'}).inputValue(),'#838080');

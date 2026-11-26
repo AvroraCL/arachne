@@ -3,7 +3,7 @@ import {existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {test} from 'node:test';
 import {pythonExecutable} from '../python-runtime.mjs';
-import {writeDisplayRGB} from '../public/image-display-rgb.mjs';
+import {writeDisplayRGB,workingHexToLab,labToWorkingHex} from '../public/image-display-rgb.mjs';
 import {createSmoothMesh,smoothMesh,validImageWarp,warpPoint} from '../public/image-warp.mjs';
 
 test('local exact preview uses the 4K pixels for paint, low flow, tip grain, erasure and a soft mask',()=>{
@@ -392,6 +392,35 @@ for space,gamma in [('gray-g22',2.2),('gray-linear',1.)]:
         result=Image.open(BytesIO(content))
         assert result.getpixel((4,4))==display.getpixel((4,4))+(64,)
 `],{cwd:new URL('..',import.meta.url)});
+});
+
+test('D50 Lab input and readout agree with LittleCMS across the drawing profiles',()=>{
+  const reference=JSON.parse(execFileSync(pythonExecutable(),['-B','-c',`
+from io import BytesIO
+from PIL import Image,ImageCms
+from image_color_spaces import PROFILE_FILES,GRAY_SPACES,profile_bytes
+import json
+rows=[]
+for space in PROFILE_FILES.keys()-GRAY_SPACES:
+    profile=ImageCms.ImageCmsProfile(BytesIO(profile_bytes(space)))
+    lab=ImageCms.createProfile('LAB')
+    # Keep the reference samples inside the 8-bit Lab representation.
+    rgb=(73,162,114)
+    sample=ImageCms.profileToProfile(Image.new('RGB',(1,1),rgb),profile,lab,outputMode='LAB',renderingIntent=1).getpixel((0,0))
+    coords=(140,131,121)
+    converted=ImageCms.profileToProfile(Image.new('LAB',(1,1),coords),lab,profile,outputMode='RGB',renderingIntent=1).getpixel((0,0))
+    rows.append([space,sample,converted])
+print(json.dumps(rows))`],{cwd:new URL('..',import.meta.url)}));
+  for(const [space,referenceLab,referenceRGB] of reference){
+    const lab=workingHexToLab('#49a272',space);
+    const encoded=[lab[0]*255/100,lab[1]+128,lab[2]+128];
+    encoded.forEach((n,i)=>assert.ok(Math.abs(n-referenceLab[i])<=1,space+' Lab '+encoded+' vs '+referenceLab));
+    assert.deepEqual(labToWorkingHex(lab,space),{hex:'#49a272',clipped:false});
+    const {hex,clipped}=labToWorkingHex([140*100/255,3,-7],space);
+    assert.equal(clipped,false);
+    Buffer.from(hex.slice(1),'hex').forEach((n,i)=>assert.ok(Math.abs(n-referenceRGB[i])<=1,space+' RGB '+hex+' vs '+referenceRGB));
+  }
+  assert.equal(labToWorkingHex([50,127,-128],'srgb').clipped,true);
 });
 
 test('packaged ACES colorants implement the published AP0 to AP1 matrix',()=>{
