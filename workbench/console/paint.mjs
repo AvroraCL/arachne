@@ -977,10 +977,17 @@ export function imageExportInput(doc,request){
       throw Error('ICC 文件或渲染意图无效');
     const bytes=Buffer.from(data,'base64'),mode=outputProfileMode(bytes,bytes.length);
     if(proof!==undefined){
-      const {space,paper,plate,inkLimit}=fields(proof,['space','paper','plate','inkLimit']);
+      const {space,paper,plate,inkLimit,point}=fields(proof,['space','paper','plate','inkLimit','point']);
       if(!['srgb','display-p3'].includes(space)||typeof paper!=='boolean'||paper&&mode!=='CMYK')throw Error('校样显示设置无效');
       if(plate!==undefined&&(mode!=='CMYK'||paper||!['C','M','Y','K','limit'].includes(plate)))throw Error('请选择有效的 CMYK 分色版');
       if(plate==='limit'?(!Number.isFinite(inkLimit)||inkLimit<0||inkLimit>400):inkLimit!==undefined)throw Error('总墨量警戒线须在 0–400% 之间');
+      if(point!==undefined){
+        const image=doc.paint.imageDocuments[documentId];
+        if(mode!=='CMYK'||!Array.isArray(point)||point.length!==2||!point.every(Number.isInteger)||
+            point[0]<0||point[0]>=image.width||point[1]<0||point[1]>=image.height)
+          throw Error('请选择图像范围内的 CMYK 取样点');
+        return {...input,exportProfile:{data,mode,intent},imageProof:{point},imageViewSize:[1,1]};
+      }
       return {...input,imagePng:true,exportProfile:{data,mode,intent},imageProof:{space,paper,plate,inkLimit},
         imageViewSize:thumbnailDimensions(doc.paint.imageDocuments[documentId],512)};
     }

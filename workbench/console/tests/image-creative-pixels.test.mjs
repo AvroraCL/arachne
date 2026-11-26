@@ -617,6 +617,9 @@ for key,intent in [('perceptual',0),('relative',1)]:
         expected=ImageCms.profileToProfile(paper,BytesIO(profile_bytes('srgb')),BytesIO(target),outputMode='CMYK',renderingIntent=intent)
         assert actual.format=='TIFF' and actual.mode=='CMYK' and actual.size==(3,1)
         assert actual.info['icc_profile']==target and actual.tobytes()==expected.tobytes()
+        for x in range(3):
+            point=profiled_copy(rgba[:,x:x+1],'srgb',target,'CMYK',key,{'point':[x,0]})
+            assert point==bytes(expected.getpixel((x,0)))
         def proof(options):
             settings={'space':'srgb','paper':False,**options}
             result=Image.open(BytesIO(profiled_copy(rgba,'srgb',target,'CMYK',key,settings)))
@@ -656,7 +659,7 @@ for key,intent in [('relative',1),('perceptual',0)]:
 test('framed linked sources and final exports match the full editing grid for odd sizes, soft masks and fractional crops',()=>{
   execFileSync(pythonExecutable(),['-B','-c',`
 import numpy as np
-from image_documents import document_pixels, composite_document, framed_pixels, framed_composite
+from image_documents import document_pixel, document_pixels, composite_document, framed_pixels, framed_composite
 ink=dict(uv=True,radius=.007,hardness=.65,color='#fb5222',opacity=.74,flow=.4,spacing=.15,erase=False,
     stamps=[[.492,.494],[.496,.498],[.502,.501],[.509,.505]])
 mask=dict(uv=True,radius=.004,hardness=.5,opacity=.8,spacing=.2,value=0,stamps=[[.499,.497],[.504,.502]])
@@ -669,6 +672,8 @@ for frame in [None,[1987.25,2026.75,106.5,69.5]]:
     wanted=framed_pixels(reference,doc)
     assert 0<wanted[:,:,3].max()<255 and len(np.unique(wanted[:,:,3]))>16
     np.testing.assert_array_equal(framed_composite(doc,{},(127,53),resolution=4096),wanted)
+    for x,y in [(0,0),(63,24),(85,35),(126,52)]:
+        np.testing.assert_array_equal(document_pixel(doc,{},(x,y)),wanted[y:y+1,x:x+1])
     cached=document_pixels(doc,{},4096)
     np.testing.assert_array_equal(cached,wanted)
     assert not isinstance(cached.base,np.ndarray) or cached.base.nbytes<=cached.nbytes

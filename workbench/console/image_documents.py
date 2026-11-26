@@ -1566,6 +1566,18 @@ def framed_pixels(pixels, document, limit=None, target=None, window=None):
     return np.asarray(image.resize((width,height),Image.Resampling.BICUBIC,box=tuple(box)))
 
 
+def document_pixel(document, assets, point):
+    """Sample the export pixel, including the current canvas crop and resampling."""
+    x,y = point
+    left,top,w,h = document_frame(document)
+    size = (document.get('width',4096),document.get('height',4096))
+    if (w,h)==size and float(left).is_integer() and float(top).is_integer():
+        pixels = exact_stroke_window(document,assets,(int(left)+x,int(top)+y,1),None)
+        if pixels is not None:
+            return pixels
+    return framed_composite(document,assets,size,resolution=4096)[y:y+1,x:x+1]
+
+
 def framed_composite(document, assets, target, inspect_mask=None, resolution=None):
     x,y,w,h = document_frame(document)
     if resolution is None:

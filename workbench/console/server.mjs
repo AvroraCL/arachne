@@ -483,7 +483,7 @@ const server=http.createServer(async(req,res)=>{
         if(res.destroyed)return;
         if(read(id).revision!==b.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
         const window=input?.imageWindow&&pixels.length===input.imageWindow[2]**2*4+1&&pixels[0]===87?input.imageWindow:null;
-        res.writeHead(200,{'Content-Type':operation==='image-live'?'application/octet-stream':input?.imageTiff?'image/tiff':'image/png','Cache-Control':'no-store',
+        res.writeHead(200,{'Content-Type':operation==='image-live'||input?.imageProof?.point?'application/octet-stream':input?.imageTiff?'image/tiff':'image/png','Cache-Control':'no-store',
           'X-Paint-Resolution':String(input?.liveResolution??b.resolution),'X-Paint-Revision':String(b.revision),
           ...(window?{'X-Paint-Window':window.join(',')}:{})});
         res.end(window?pixels.subarray(1):pixels);return;

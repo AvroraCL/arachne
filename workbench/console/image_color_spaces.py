@@ -130,6 +130,8 @@ def profiled_copy(pixels, space, target, mode, intent, proof=None):
         converted = ImageCms.profileToProfile(input_image,BytesIO(profile_bytes(space)),BytesIO(target),
             outputMode={'RGB':'RGB','GRAY':'L','CMYK':'CMYK','LAB':'LAB'}[mode],
             renderingIntent=ImageCms.Intent.PERCEPTUAL if intent=='perceptual' else ImageCms.Intent.RELATIVE_COLORIMETRIC)
+        if proof and 'point' in proof:
+            return bytes(converted.getpixel((0,0)))
         if proof:
             display=profile_bytes(proof['space'])
             # Display exactly the device codes used in the exported file, including

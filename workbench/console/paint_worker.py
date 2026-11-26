@@ -17,7 +17,7 @@ from paint_mask_generators import preview_generator, smooth
 from material_graph import MaterialGraph, MaterialImages, PreviewImages
 from image_color_spaces import display_pixels
 from image_color_spaces import profiled_copy
-from image_documents import embedded_image_assets,document_pixels,framed_composite,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
+from image_documents import embedded_image_assets,document_pixels,document_pixel,framed_composite,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
 
 
 def decode(srgb):
@@ -732,9 +732,11 @@ def live_pixels(cfg):
             pixels=framed_composite(doc,cfg['assets'],cfg['imageViewSize'],cfg.get('imageInspectMask'))
             return memoryview(np.ascontiguousarray(pixels)).cast('B')
         if cfg.get('imageProof'):
-            pixels=framed_composite(doc,cfg['assets'],cfg['imageViewSize'])
+            proof=cfg['imageProof']
+            pixels=(document_pixel(doc,cfg['assets'],proof['point']) if 'point' in proof else
+                    framed_composite(doc,cfg['assets'],cfg['imageViewSize']))
             profile=cfg['exportProfile']
-            return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'],cfg['imageProof'])
+            return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'],proof)
         if cfg.get('clipboardRegion'):
             pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
             return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'],cfg['assets'])

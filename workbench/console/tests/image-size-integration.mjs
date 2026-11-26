@@ -298,8 +298,18 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
         }
         const initialProof=await readProof();
         assert.deepEqual(initialProof.slice(0,2),[126,31]);
-        let paperProof;const plates=[];
+        let paperProof,inkReadout;const plates=[];
         if(mode==='CMYK'){
+          const sampler=profileDialog.getByRole('button',{name:'在原稿或校样上取样 CMYK 墨量'});
+          const readout=profileDialog.locator('.profile-ink-readout');
+          const box=await sampler.boundingBox();
+          await sampler.click({position:{x:box.width*.75,y:box.height*.5}});
+          await until(async()=>(await readout.innerText()).includes('(31, 15) · C'),'从右侧校样的原始坐标取样');
+          inkReadout=await readout.innerText();
+          await sampler.press('ArrowLeft');
+          await until(async()=>(await readout.innerText()).includes('(30, 15) · C'),'方向键移动一个原稿像素');
+          await sampler.click({position:{x:box.width*.25,y:box.height*.5}});
+          await until(async()=>(await readout.innerText())===inkReadout,'左右图在同一个像素得到相同墨量');
           const url=await comparison.getAttribute('src');
           await profileDialog.getByLabel('模拟纸白').check();
           await until(async()=>await comparison.isVisible()&&(await comparison.getAttribute('src'))!==url,'纸白模拟图更新');
@@ -336,6 +346,9 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
         if(plates.length){
           const inks=JSON.parse(execFileSync(pythonExecutable(),['-B','-c','from PIL import Image;import sys,json;print(json.dumps(Image.open(sys.argv[1]).getpixel((31,15))))',fileName],{encoding:'utf8'}));
           assert.deepEqual(plates,inks.map(n=>[255-n,255-n,255-n,255]));
+          const pct=n=>(n*100/255).toFixed(1)+'%';
+          const actualInk=inkReadout.match(/[0-9]+\.[0-9]+%/g);
+          assert.deepEqual(actualInk,[...inks,inks.reduce((a,b)=>a+b,0)].map(pct));
         }
         execFileSync(pythonExecutable(),['-B','-c',`import sys
 from io import BytesIO

@@ -642,6 +642,11 @@
 .image-profile-dialog .profile-proof-options label[hidden]{display:none}
 .image-profile-dialog figure{margin:2px auto;width:min(100%,calc(30vh * var(--proof-ratio,1)))}
 .image-profile-dialog figure img{width:100%;display:block;background:repeating-conic-gradient(#444 0 25%,#383838 0 50%) 0 0/12px 12px}
+.image-profile-dialog .profile-compare{position:relative}
+.image-profile-dialog .profile-compare[role=button]{cursor:crosshair}
+.image-profile-dialog .profile-compare:focus-visible{outline:1px solid var(--ui-text);outline-offset:2px}
+.image-profile-dialog .profile-compare i{position:absolute;pointer-events:none;transform:translate(-50%,-50%);width:9px;height:9px;box-sizing:border-box;border-radius:50%;border:1px solid #fff;box-shadow:0 0 0 1px #181818}
+.image-profile-dialog .profile-ink-readout{font-size:12px;font-variant-numeric:tabular-nums;color:var(--ui-text)}
 .image-profile-dialog figcaption{display:grid;grid-template-columns:1fr 1fr;text-align:center;padding-top:4px;font-size:12px}
 .image-profile-dialog .profile-proof-status{color:var(--ui-muted);font-size:12px}
 .image-profile-dialog .profile-proof-status:empty{display:none}
