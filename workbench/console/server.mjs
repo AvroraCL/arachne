@@ -18,6 +18,8 @@ import {cyclesSessionFrame,interactiveCyclesAvailable,stopCyclesSessions,updateC
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import {pipeline} from 'node:stream/promises';
 import crypto from 'node:crypto';
 import {StringDecoder} from 'node:string_decoder';
 import {gzip} from 'node:zlib';
@@ -479,6 +481,19 @@ const server=http.createServer(async(req,res)=>{
         const input=textDraft?null:inputFor(doc,b);
         const controller=new AbortController();
         res.on('close',()=>{if(!res.writableEnded)controller.abort();});
+        if(input?.exportExr){
+          const scratch=await fs.promises.mkdtemp(path.join(os.tmpdir(),'arachne-image-exr-'));
+          const target=path.join(scratch,'output.exr');
+          try{
+            await livePaint({...input,exportExrFile:target},{signal:controller.signal});
+            if(res.destroyed)return;
+            if(read(id).revision!==b.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
+            const {size}=await fs.promises.stat(target);
+            res.writeHead(200,{'Content-Type':'image/x-exr','Content-Length':size,'Cache-Control':'no-store','X-Paint-Revision':String(b.revision)});
+            await pipeline(fs.createReadStream(target),res,{signal:controller.signal});
+          }finally{await fs.promises.rm(scratch,{recursive:true,force:true});}
+          return;
+        }
         const pixels=textDraft?await previewImageText(doc,b,{signal:controller.signal}):await livePaint(input,{signal:controller.signal});
         if(res.destroyed)return;
         if(read(id).revision!==b.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}

@@ -2,7 +2,7 @@ import {fillWorkingSpaces} from './image-color-spaces.mjs';
 import {menuShortcut} from './menu-shortcut.mjs';
 import {documentClip,documentFrame,editingSide,imageViewGeometry,previewDimensions} from './image-document-size.mjs';
 import {hasWideGamut,setWorkingSwatch} from './image-display-rgb.mjs';
-import {chooseOutputProfile} from './image-profile-dialog.mjs';
+import {chooseOutputProfile,chooseExrCopy} from './image-profile-dialog.mjs';
 import {editDocumentSize} from './image-size-dialog.mjs';
 import {textEffects,imageStyleKinds,outlinePositions,hasImageStyle} from './image-text-style.mjs';
 import {createImageEdgeTool} from './image-edge-tool.mjs';
@@ -205,6 +205,12 @@ export function createDocumentEditor(ctx,bridge){
         return downloadDocument(space);
       }
     }));
+    choices.push({label:'场景线性 OpenEXR…',run:async()=>{
+      const exr=await chooseExrCopy(image,signal);if(!exr)return;
+      const current=imageSelectionOrigin(project);
+      if(current.id!==origin.id||current.documentId!==origin.documentId||current.revision!==origin.revision)throw Error('图像已变化，请重新选择输出配置');
+      return downloadDocument(undefined,undefined,exr);
+    }});
     choices.push({label:'Lab D50 · TIFF（白底）',run:async()=>{
       const response=await fetch(new URL('./color-profiles/Lab-D50.icc',import.meta.url),{signal});
       if(!response.ok)throw Error('无法读取内置 Lab D50 配置');
@@ -1262,7 +1268,7 @@ export function createDocumentEditor(ctx,bridge){
     exportOptions.title=doc?.colorSpace==='linear'?'数据贴图按原始通道数值导出':'选择导出颜色空间';
     download.title=exportRequest?'正在导出图像…':doc?`导出当前图像 · ${doc.width} × ${doc.height} PNG`:'导出当前图像 PNG';
   }
-  async function documentOutput({id,revision,documentId},{outputSpace,profile,proof},signal){
+  async function documentOutput({id,revision,documentId},{outputSpace,profile,proof,exr},signal){
     let outputProfile;
     if(profile){
       const data=await new Promise((resolve,reject)=>{
@@ -1273,25 +1279,25 @@ export function createDocumentEditor(ctx,bridge){
     }
     const response=await fetch('/api/projects/'+id+'/paint/image-export',{
       method:'POST',headers:{'Content-Type':'application/json'},signal,
-      body:JSON.stringify({revision,documentId,outputSpace,outputProfile,proof})
+      body:JSON.stringify({revision,documentId,outputSpace,outputProfile,proof,exr})
     });
     if(response.status===204)throw Error('图像已变化，请重新选择输出配置');
     if(!response.ok)throw Error((await response.json()).error||'图像输出失败');
     return response.blob();
   }
-  async function downloadDocument(outputSpace,profile){
+  async function downloadDocument(outputSpace,profile,exr){
     const image=currentDocument(project);
     if(!image||exportRequest||!canPaste())return;
     const {id,revision,documentId}=imageSelectionOrigin(project);
     const controller=exportRequest=new AbortController();
     syncClipboard();
     try{
-      const result=await documentOutput({id,revision,documentId},{outputSpace,profile},controller.signal);
+      const result=await documentOutput({id,revision,documentId},{outputSpace,profile,exr},controller.signal);
       if(controller.signal.aborted)return;
       const url=URL.createObjectURL(result),link=el('a');
       const name=image.name.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g,'_').replace(/[ .]+$/,'')||'贴图';
-      const suffix=profile?'-'+profile.mode.toLowerCase():outputSpace&&outputSpace!==image.colorSpace?'-'+outputSpace:'';
-      link.href=url;link.download=name+suffix+(result.type==='image/tiff'?'.tif':'.png');
+      const suffix=exr?'-'+exr.space:profile?'-'+profile.mode.toLowerCase():outputSpace&&outputSpace!==image.colorSpace?'-'+outputSpace:'';
+      link.href=url;link.download=name+suffix+(exr?'.exr':result.type==='image/tiff'?'.tif':'.png');
       host.append(link);link.click();link.remove();
       setTimeout(()=>URL.revokeObjectURL(url),10000);
     }catch(error){

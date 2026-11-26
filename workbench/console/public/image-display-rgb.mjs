@@ -1,3 +1,4 @@
+import {defaultExrSpace,exrSpaces} from './render-exr-color.mjs';
 // D50-adapted RGB colorants of the bundled ICC profiles, multiplied by the
 // inverse sRGB colorant matrix. Clipping applies only after conversion to the display target.
 const rec2020=[1.66036035,-.58746738,-.07289297,-.12439522,1.13276038,-.00836516,-.01812828,-.10059072,1.118719];
@@ -98,6 +99,21 @@ const fromXYZ=inverse3(srgbXYZ),fromSRGB=new Map();
 export function linearSRGBToWorkingMatrix(space){
   if(!fromSRGB.has(space))fromSRGB.set(space,inverse3(toSRGB[space]));
   return fromSRGB.get(space);
+}
+const identity=[1,0,0,0,1,0,0,0,1];
+const sceneSpaces={srgb:defaultExrSpace,rec709:defaultExrSpace,'linear-srgb':defaultExrSpace,
+  'gray-linear':defaultExrSpace,'gray-g22':defaultExrSpace,'display-p3':'lin_p3d65_scene','linear-p3':'lin_p3d65_scene',
+  rec2020:'lin_rec2020_scene','rec2020-g24':'lin_rec2020_scene','linear-rec2020':'lin_rec2020_scene',
+  'adobe-rgb':'lin_adobergb_scene','linear-adobe-rgb':'lin_adobergb_scene',acescg:'lin_ap1_scene','aces2065-1':'lin_ap0_scene'};
+export function preferredExrSpace(space){return sceneSpaces[space]??defaultExrSpace;}
+export function documentExrMatrix(space,destination){
+  if(sceneSpaces[space]===destination)return identity;
+  const source=sceneSpaces[space]?inverse3(exrSpaces[sceneSpaces[space]].matrix??identity):toSRGB[space];
+  const target=exrSpaces[destination].matrix??identity;
+  return Array.from({length:9},(_,i)=>{
+    const row=Math.floor(i/3)*3,col=i%3;
+    return target[row]*source[col]+target[row+1]*source[col+3]+target[row+2]*source[col+6];
+  });
 }
 export function workingHexToLab(hex,space){
   const linear=hex.slice(1).match(/../g).map(n=>decodeComponent(parseInt(n,16)/255,space));

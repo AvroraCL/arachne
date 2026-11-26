@@ -1,6 +1,7 @@
 import {outputProfileMode} from './image-output-profile.mjs';
 import {enhanceSelectMenu,syncSelectMenu} from './paint-select.mjs';
-import {preferredDisplaySpace} from './image-display-rgb.mjs';
+import {fillExrSpaceSelect} from './render-exr-color.mjs';
+import {preferredDisplaySpace,preferredExrSpace} from './image-display-rgb.mjs';
 
 export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
   const dialog=document.createElement('dialog');
@@ -186,5 +187,26 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
     };
     document.body.append(dialog);enhanceSelectMenu(intent);dialog.showModal();void loadInstalled();
     signal?.addEventListener('abort',close,{once:true});chooseFile.focus();
+  });
+}
+
+export function chooseExrCopy(image,signal){
+  const dialog=document.createElement('dialog');
+  dialog.className='image-size-dialog image-profile-dialog';dialog.setAttribute('aria-label','导出 OpenEXR');
+  dialog.innerHTML=`<form><h3>导出 OpenEXR</h3><p class="profile-source"></p>
+    <label>颜色空间<select aria-label="EXR 输出颜色空间"></select></label>
+    <label>通道精度<select aria-label="EXR 通道精度"><option value="16">16 位浮点（Half）</option><option value="32">32 位浮点（Float）</option></select></label>
+    <p class="profile-source">按场景线性 RGB 写入，保留转换后的负值和高光。透明度采用预乘 Alpha。</p>
+    <footer><button type="button">取消</button><button type="submit" class="primary">导出 EXR</button></footer></form>`;
+  dialog.querySelector('.profile-source').textContent=image.name+' · '+image.width+' × '+image.height+' px · 原稿 8 位/通道';
+  const [space,depth]=dialog.querySelectorAll('select');
+  fillExrSpaceSelect(space);space.value=preferredExrSpace(image.colorSpace);
+  return new Promise(resolve=>{
+    let result;const close=()=>dialog.close();
+    dialog.querySelector('[type=button]').onclick=close;
+    dialog.querySelector('form').onsubmit=event=>{event.preventDefault();result={space:space.value,bitDepth:Number(depth.value)};close();};
+    dialog.onclose=()=>{signal.removeEventListener('abort',close);dialog.remove();resolve(result);};
+    document.body.append(dialog);enhanceSelectMenu(space);enhanceSelectMenu(depth);dialog.showModal();
+    signal.addEventListener('abort',close,{once:true});dialog.querySelector('[type=submit]').focus();
   });
 }

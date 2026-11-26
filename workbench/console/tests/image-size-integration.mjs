@@ -7,6 +7,8 @@ import {once} from 'node:events';
 import {spawn,execFileSync} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from 'playwright-core';
+import {EXRLoader} from 'three/addons/loaders/EXRLoader.js';
+import {FloatType} from 'three';
 import {pythonExecutable} from '../python-runtime.mjs';
 
 const data=await fs.mkdtemp(path.join(os.tmpdir(),'arachne-banner-'));
@@ -43,6 +45,25 @@ try{
     const last=doc.revision;
     doc=await until(async()=>{const next=await api(route);return next.revision>last&&next;},label);
     console.log('PASS',label);
+  }
+  async function exrCopy(expectedDefault,spaceLabel,depth){
+    await editor.getByRole('button',{name:'选择导出颜色空间',exact:true}).click();
+    await page.getByRole('menuitem',{name:'场景线性 OpenEXR…'}).click();
+    const options=page.getByRole('dialog',{name:'导出 OpenEXR',exact:true});
+    const spaces=options.getByRole('button',{name:'EXR 输出颜色空间'});
+    assert.equal(await spaces.innerText(),expectedDefault);
+    if(spaceLabel){await spaces.click();await options.getByRole('option',{name:spaceLabel,exact:true}).click();}
+    if(depth===32){
+      await options.getByRole('button',{name:'EXR 通道精度'}).click();
+      await options.getByRole('option',{name:'32 位浮点（Float）',exact:true}).click();
+    }
+    const wait=page.waitForEvent('download');await options.getByRole('button',{name:'导出 EXR',exact:true}).click();
+    const file=await wait;assert.equal(path.extname(file.suggestedFilename()),'.exr');
+    const target=path.join(data,'document-'+depth+'.exr');await file.saveAs(target);
+    const raw=await fs.readFile(target);
+    const parsed=new EXRLoader().setDataType(FloatType).parse(raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength));
+    assert.equal(parsed.header.channels[0].pixelType,depth===16?1:2);
+    return parsed;
   }
   await editor.getByRole('button',{name:'新建图像',exact:true}).click();
   const dialog=page.locator('dialog.image-size-dialog[open]');
@@ -114,6 +135,16 @@ target=ImageCms.ImageCmsProfile(BytesIO(out.info['icc_profile']))
 assert 'P3' in ImageCms.getProfileDescription(target)
 reference=ImageCms.profileToProfile(src,BytesIO(src.info['icc_profile']),target,outputMode='RGBA',renderingIntent=1)
 np.testing.assert_array_equal(np.asarray(reference),np.asarray(out))`,photo,opened]);
+    const scene=await exrCopy('线性 P3-D65',null,16);
+    assert.deepEqual([scene.width,scene.height,scene.header.colorInteropID],[127,53,'lin_p3d65_scene']);
+    for(const [x,y] of [[0,0],[34,17],[65,38],[126,52]]){
+      const alpha=[51,163,255][(x+y)%3]/255;
+      const colors=[x*2,(y*7+x)%256,(x%2)*255].map(code=>{
+        const v=code/255;return (v<=.04045?v/12.92:((v+.055)/1.055)**2.4)*alpha;
+      });
+      const offset=((52-y)*127+x)*4;
+      [...colors,alpha].forEach((value,i)=>assert.ok(Math.abs(scene.data[offset+i]-value)<.0006));
+    }
     await canvas.focus();await page.keyboard.press(mod+'+z');await saved('一次撤销打开图片');
     assert.equal(Object.keys(doc.paint.imageDocuments??{}).length,0);
     await page.keyboard.press(mod+'+Shift+z');await saved('重做打开带配置的图片');
@@ -235,6 +266,11 @@ assert before!=after and before==undone and after==redone==reopened`,converted,e
     }
     if(colorSpace==='acescg'){
       const revisionBefore=(await api(route)).revision;
+      const frame=await exrCopy('ACEScg（AP1）','线性 sRGB / Rec.709',32);
+      assert.deepEqual([frame.width,frame.height,frame.header.colorInteropID],[63,31,'lin_rec709_scene']);
+      const green=frame.data.slice((15*63+31)*4,(15*63+31)*4+4);
+      [-.62179,1.1408,-.12897,1].forEach((v,i)=>assert.ok(Math.abs(v-green[i])<.0005));
+      assert.equal((await api(route)).revision,revisionBefore);
       await checkDisplay();
       const front=editor.getByLabel('图像前景色',{exact:true});
       const originalForeground=await front.inputValue();

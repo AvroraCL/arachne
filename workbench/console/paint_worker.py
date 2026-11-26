@@ -747,6 +747,10 @@ def live_pixels(cfg):
             pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
             if target:
                 pixels=framed_pixels(pixels,doc,target=target)
+        if cfg.get('exportExr'):
+            from image_exr import write_document_exr
+            write_document_exr(cfg['exportExrFile'],pixels,doc['colorSpace'],cfg['exportExr'])
+            return b''
         if cfg.get('exportProfile'):
             profile=cfg['exportProfile']
             return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'])

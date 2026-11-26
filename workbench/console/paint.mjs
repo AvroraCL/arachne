@@ -1,3 +1,4 @@
+import {documentExrMatrix} from './public/image-display-rgb.mjs';
 import {defaultExrSpace,exrSpaces} from './public/render-exr-color.mjs';
 import {outputProfileLimit,outputProfileMode} from './public/image-output-profile.mjs';
 import {documentFrame,editingSide,previewDimensions,thumbnailDimensions} from './public/image-document-size.mjs';
@@ -960,8 +961,15 @@ export function imageClipboardInput(doc,request){
   return {...input,clipboardRegion:{rect,...uvShapePayload(request)}};
 }
 export function imageExportInput(doc,request){
-  const {revision,documentId,outputSpace,outputProfile,proof}=fields(request,['revision','documentId','outputSpace','outputProfile','proof']);
+  const {revision,documentId,outputSpace,outputProfile,proof,exr}=fields(request,['revision','documentId','outputSpace','outputProfile','proof','exr']);
   const input=imageDocumentInput(doc,{revision,documentId,resolution:4096});
+  if(exr!==undefined){
+    const {space,bitDepth}=fields(exr,['space','bitDepth']);
+    const source=doc.paint.imageDocuments[documentId].colorSpace;
+    if(source==='linear'||outputSpace!==undefined||outputProfile!==undefined||proof!==undefined||
+       !Object.hasOwn(exrSpaces,space)||![16,32].includes(bitDepth))throw Error('请选择单个场景线性 EXR 空间和有效浮点位深');
+    return {...input,exportDocument:true,exportExr:{space,bitDepth,primaries:exrSpaces[space].primaries,matrix:documentExrMatrix(source,space)}};
+  }
   if(proof!==undefined&&outputProfile===undefined)throw Error('请选择校样的目标 ICC');
   if(outputSpace!==undefined){
     const source=doc.paint.imageDocuments[documentId].colorSpace;
