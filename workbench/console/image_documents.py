@@ -21,7 +21,7 @@ from image_filters import alpha_bounds, blur_gaussian, gaussian_box
 from image_raster_tools import flood_layer, clone_layer, connected_area, healing_inputs
 
 
-from image_color_spaces import (PROFILED_RGB, convert_image, decode, encode, image_input, profile_bytes)
+from image_color_spaces import (GRAY_SPACES, PROFILED_SPACES, convert_image, decode, encode, image_input, profile_bytes)
 
 
 class ImageSurface(Surface):
@@ -476,7 +476,7 @@ def embedded_image_assets(layers, documents, files, space='srgb'):
             if image.size != key[1:3]:
                 image = image.resize(key[1:3],Image.Resampling.BICUBIC)
             transfer = child_space
-            if child_space != target and (child_space in PROFILED_RGB or target in PROFILED_RGB):
+            if child_space != target and (child_space in PROFILED_SPACES or target in PROFILED_SPACES):
                 source_profile = 'linear-srgb' if child_space == 'linear' else child_space
                 transfer = 'linear-srgb' if target == 'linear' else target
                 image = convert_image(image,profile_bytes(source_profile),profile_bytes(transfer))
@@ -1122,27 +1122,26 @@ def exact_stroke_window(document,assets,window,inspect_mask):
 
 
 def composite_document(document,assets,size=4096,inspect_mask=None,alpha_only=False,window=None):
-    surface=ImageSurface(size,assets,window);result=np.zeros((size*size,4),dtype=np.float32)
+    surface=ImageSurface(size,assets,window)
+    layers=document['layers']
+    if inspect_mask:
+        layer=next((item for item in layers if item['id']==inspect_mask),None)
+        if alpha_only:
+            return np.full((size,size),float(layer is not None),np.float32)
+        # Mask coverage is data. Quantize it once, independent of the document's color profile.
+        pixels=np.full((size*size,4),255 if layer is not None else 0,np.uint8)
+        mask=image_mask(layer,surface) if layer is not None else None
+        if mask is not None:
+            for start in range(0,len(pixels),131072):
+                ids=np.arange(start,min(start+131072,len(pixels)))
+                pixels[start:start+len(ids),:3]=np.rint(np.clip(mask(ids),0,1)*255).astype(np.uint8)[:,None]
+        return pixels.reshape(size,size,4)[::-1]
+    result=np.zeros((size*size,4),dtype=np.float32)
     space=document['colorSpace']
     def color(text):
         c=np.array(list(bytes.fromhex(text[1:])),dtype=np.float32)/255
         return decode(c,space)
-    layers = document['layers']
-    if inspect_mask:
-        for layer in layers:
-            if layer['id'] == inspect_mask:
-                mask = image_mask(layer, surface)
-                for start in range(0, len(result), 131072):
-                    ids = np.arange(start, min(start+131072, len(result)))
-                    if mask is None:
-                        result[ids, :3] = 1
-                    else:
-                        value = mask(ids)[:, None]
-                        result[ids, :3] = decode(value,space)
-                    result[ids, 3] = 1
-                break
-    else:
-        composite_stack(result, document_stack(layers), surface, assets, space, color)
+    composite_stack(result,document_stack(layers),surface,assets,space,color)
     if alpha_only:
         return result[:,3].reshape(size,size)[::-1].copy()
     return encode_document_pixels(result,space).reshape(size,size,4)[::-1]
@@ -1513,10 +1512,14 @@ def image_edge_view(document,assets,size,options):
     coverage = Image.fromarray(mask)
     if view == 'overlay':
         from PIL import ImageChops
+        space=document['colorSpace']
+        if space in GRAY_SPACES:
+            rgba=convert_image(rgba,profile_bytes(space),profile_bytes('srgb'))
+            space='srgb'
         red = Image.new('RGBA',rgba.size,(209,42,49,255))
         red.putalpha(ImageChops.invert(coverage).point(lambda n: n*.58))
         rgba.alpha_composite(red)
-        return png_bytes(np.asarray(rgba),document['colorSpace'])
+        return png_bytes(np.asarray(rgba),space)
     from PIL import ImageChops
     rgba.putalpha(ImageChops.multiply(rgba.getchannel('A'),coverage))
     background = Image.new('RGBA',rgba.size,'black' if view=='black' else 'white')
@@ -1529,13 +1532,15 @@ def png_bytes(pixels, color_space=None, output_space=None):
     if output_space and output_space!=color_space:
         image = convert_image(image,profile_bytes(color_space),profile_bytes(output_space))
         color_space = output_space
+    if color_space in GRAY_SPACES:
+        image = Image.merge('LA',(image.getchannel('R'),image.getchannel('A')))
     metadata = PngImagePlugin.PngInfo()
     if color_space == 'srgb':
         metadata.add(b'sRGB', bytes([0]))
     elif color_space == 'linear':
         metadata.add(b'gAMA', struct.pack('>I', 100000))
     out = BytesIO()
-    image.save(out, format='PNG', pnginfo=metadata, icc_profile=profile_bytes(color_space) if color_space in PROFILED_RGB else None, compress_level=3)
+    image.save(out, format='PNG', pnginfo=metadata, icc_profile=profile_bytes(color_space) if color_space in PROFILED_SPACES else None, compress_level=3)
     return out.getvalue()
 
 

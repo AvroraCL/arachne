@@ -1,7 +1,9 @@
 // D50-adapted RGB colorants of the bundled ICC profiles, multiplied by the
 // inverse sRGB colorant matrix. Clipping applies only after conversion to the display target.
 const rec2020=[1.66036035,-.58746738,-.07289297,-.12439522,1.13276038,-.00836516,-.01812828,-.10059072,1.118719];
+const grayMatrix=[.2126,.7152,.0722,.2126,.7152,.0722,.2126,.7152,.0722];
 const toSRGB={
+  'gray-g22':grayMatrix,'gray-linear':grayMatrix,
   'rec709':[.99991849,.00009716,-.00001566,.00008821,.9999266,-.00001481,.00001097,.00000809,.99998095],
   'rec2020':rec2020,'rec2020-g24':rec2020,'linear-srgb':[1,0,0,0,1,0,0,0,1],
   'dci-p3':[1.15743957,-.15484122,-.00259835,-.04140836,1.04547255,-.00406419,-.01801717,-.07859357,1.09661074],
@@ -48,7 +50,7 @@ export function setWorkingSwatch(input,space){
 const decoders=new Map();
 let encoded;
 export function hasWideGamut(space){
-  return Boolean(toSRGB[space])&&space!=='rec709'&&space!=='linear-srgb';
+  return Boolean(toSRGB[space])&&toSRGB[space]!==grayMatrix&&space!=='rec709'&&space!=='linear-srgb';
 }
 
 function outsideSRGB(m,r,g,b){
@@ -69,7 +71,8 @@ export function writeDisplayRGB(target,pixels,space,warnGamut=false,outputSpace=
   });
   if(!decoders.has(space))decoders.set(space,Float64Array.from({length:256},(_,i)=>{
     const x=i/255;
-    if(space==='linear-srgb'||space==='acescg'||space==='aces2065-1')return x;
+    if(space==='gray-g22')return x**2.2;
+    if(space==='gray-linear'||space==='linear-srgb'||space==='acescg'||space==='aces2065-1')return x;
     if(space==='dci-p3')return x**2.6;
     if(space==='rec2020-g24')return x**2.4;
     if(space==='rec709'||space==='rec2020'){

@@ -1,10 +1,17 @@
 import {grayColor,normalizePaintHex,paintHsv,paintHex} from './paint-colors.mjs';
 import {displayColorCss,imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
-import {imageColorSpaces} from './image-color-spaces.mjs';
+import {imageColorSpaces,isGraySpace} from './image-color-spaces.mjs';
 
 const paletteKey='arachne-recent-colors-v1',maxRecent=10;
 const clamp=n=>Math.min(1,Math.max(0,n));
 const el=(tag,cls='',text='')=>Object.assign(document.createElement(tag),{className:cls,textContent:text});
+
+function grayHex(hex,space){
+  if(space!=='gray-g22')return grayColor(hex);
+  const [r,g,b]=hex.slice(1).match(/../g).map(value=>(parseInt(value,16)/255)**2.2);
+  const level=Math.round(255*(.2126*r+.7152*g+.0722*b)**(1/2.2)).toString(16).padStart(2,'0');
+  return '#'+level.repeat(3);
+}
 
 export function setupPaintColorPicker(root=document){
   let active=null,recent=[];
@@ -113,7 +120,7 @@ export function setupPaintColorPicker(root=document){
   function editHex(value,updateText){
     const parsed=normalizePaintHex(value);
     if(!active||!parsed)return false;
-    active.color=paintHsv(active.gray?grayColor(parsed):parsed);
+    active.color=paintHsv(active.gray?grayHex(parsed,active.space):parsed);
     render(updateText);return true;
   }
   function recentButtons(){
@@ -129,12 +136,18 @@ export function setupPaintColorPicker(root=document){
   function open(input){
     dismiss(false);
     if(input.disabled||!input.isConnected)return;
-    const gray=input.hasAttribute('data-color-gray'),color=normalizePaintHex(input.value)||'#000000';
+    const space=input.dataset.workingSpace,gray=isGraySpace(space)||input.hasAttribute('data-color-gray'),color=normalizePaintHex(input.value)||'#000000';
     const events=new AbortController();
     const observer=new MutationObserver(()=>{if(input.disabled||!input.isConnected)dismiss(false);});
-    const state={input,gray,color:paintHsv(gray?grayColor(color):color),events,observer,pointer:null,lastColor:color};
+    const state={input,gray,space,color:paintHsv(gray?grayHex(color,space):color),events,observer,pointer:null,lastColor:color};
     active=state;
-    state.space=input.dataset.workingSpace;
+    if(isGraySpace(space)){
+      const stops=Array.from({length:17},(_,i)=>{
+        const byte=Math.round(i*255/16).toString(16).padStart(2,'0');
+        return displayColorCss('#'+byte.repeat(3),space);
+      });
+      brightness.style.setProperty('--color-track','linear-gradient(90deg,'+stops.join(',')+')');
+    }else brightness.style.removeProperty('--color-track');
     state.palette=state.space?paletteKey+'-'+state.space:paletteKey;
     recent=[];
     try{

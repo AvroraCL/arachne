@@ -362,6 +362,38 @@ assert raw.info['gamma']==1.0 and 'icc_profile' not in raw.info
 `],{cwd:new URL('..',import.meta.url)});
 });
 
+test('grayscale layers, soft mask, placed P3 and PNG copies keep independent gray and alpha values',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+from io import BytesIO
+import numpy as np
+from PIL import Image,ImageCms
+from image_color_spaces import image_input,profile_bytes,profiled_copy
+from image_documents import composite_document,png_bytes
+photo=Image.new('RGBA',(1,1),(219,45,72,79))
+photo.info['icc_profile']=profile_bytes('display-p3')
+for space,gamma in [('gray-g22',2.2),('gray-linear',1.)]:
+    source=profile_bytes(space)
+    expected=ImageCms.profileToProfile(photo.convert('RGB'),BytesIO(photo.info['icc_profile']),BytesIO(source),
+                                      outputMode='L',renderingIntent=1).getpixel((0,0))
+    placed,encoding=image_input(photo,space)
+    assert encoding==space and placed[0,0].tolist()==[expected]*3+[79]
+    stroke=dict(uv=True,rect=[0.,0.,1.,1.],opacity=1.,color='#ff0000',erase=False)
+    layer=dict(id='red',kind='pixel',visible=True,opacity=.5,blend='normal',strokes=[stroke],
+               maskEnabled=True,maskBase=1,maskStrokes=[dict(uv=True,rect=[0.,0.,1.,1.],value=0.,opacity=.5)])
+    doc=dict(colorSpace=space,layers=[layer])
+    pixels=composite_document(doc,{},8)
+    gray=round(255*.2126**(1/gamma))
+    assert pixels[4,4].tolist()==[gray]*3+[64],pixels[4,4]
+    assert composite_document(doc,{},8,'red')[4,4].tolist()==[128]*3+[255]
+    output=Image.open(BytesIO(png_bytes(pixels,space)))
+    assert output.mode=='LA' and output.getpixel((4,4))==(gray,64)
+    display=ImageCms.profileToProfile(output.getchannel('L'),BytesIO(source),BytesIO(profile_bytes('srgb')),outputMode='RGB',renderingIntent=1)
+    for content in [png_bytes(pixels,space,'srgb'),profiled_copy(pixels,space,profile_bytes('srgb'),'RGB','relative')]:
+        result=Image.open(BytesIO(content))
+        assert result.getpixel((4,4))==display.getpixel((4,4))+(64,)
+`],{cwd:new URL('..',import.meta.url)});
+});
+
 test('packaged ACES colorants implement the published AP0 to AP1 matrix',()=>{
   execFileSync(pythonExecutable(),['-B','-c',`
 import numpy as np

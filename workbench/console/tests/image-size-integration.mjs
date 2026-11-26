@@ -70,7 +70,7 @@ try{
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
   assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
-  for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['acescg','ACEScg（AP1 线性）','ACEScg - Arachne Linear RGB'],['aces2065-1','ACES2065-1（AP0 线性）','ACES2065-1 - Arachne Linear RGB'],['linear-srgb','线性 sRGB（颜色）','cRGB']]){
+  for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['acescg','ACEScg（AP1 线性）','ACEScg - Arachne Linear RGB'],['aces2065-1','ACES2065-1（AP0 线性）','ACES2065-1 - Arachne Linear RGB'],['linear-srgb','线性 sRGB（颜色）','cRGB'],['gray-g22','灰度（Gamma 2.2）','Arachne Gray Gamma 2.2'],['gray-linear','灰度（线性光）','Arachne Linear Gray']]){
     await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
     await width.fill('63');await height.fill('31');
     await dialog.getByRole('button',{name:'背景内容',exact:true}).click();
@@ -98,18 +98,34 @@ from io import BytesIO
 im=Image.open(sys.argv[1])
 profile=ImageCms.ImageCmsProfile(BytesIO(im.info['icc_profile']))
 assert ImageCms.getProfileDescription(profile).strip()==sys.argv[2]
-proof=ImageCms.profileToProfile(im,profile,ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
+gray=profile.profile.xcolor_space.strip()=='GRAY'
+assert im.mode==('LA' if gray else 'RGBA')
+proof=ImageCms.profileToProfile(im.getchannel('L') if gray else im,profile,ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
+proof.putalpha(im.getchannel('A'))
 print(*proof.getpixel((30,15)))
 assert im.size==(63,31)
 from PIL import ImageColor
-rgba=ImageColor.getrgb(sys.argv[3])+(255,)
-assert im.getextrema()==tuple((n,n) for n in rgba),im.getextrema()`,backgroundFile,description,sourceHex],{encoding:'utf8'}).trim().split(/\s+/).map(Number);
+rgb=ImageColor.getrgb(sys.argv[3])
+gamma=2.2 if sys.argv[2].endswith('2.2') else 1.0
+expected=(round(255*sum(w*(n/255)**gamma for w,n in zip((.2126,.7152,.0722),rgb))**(1/gamma)),255) if gray else rgb+(255,)
+assert im.getextrema()==tuple((n,n) for n in expected),im.getextrema()`,backgroundFile,description,sourceHex],{encoding:'utf8'}).trim().split(/\s+/).map(Number);
     swatch.forEach((value,i)=>assert.ok(Math.abs(value-expectedDisplay[i])<=1,label+' 新建预览色块'));
     async function checkDisplay(){
       await until(async()=>{
         const pixel=await canvas.evaluate(c=>[...c.getContext('2d').getImageData(c.width>>1,c.height>>1,1,1).data]);
         return pixel.every((n,i)=>Math.abs(n-expectedDisplay[i])<=1);
       },label+' 画布与导出 ICC 色块一致');
+    }
+    if(colorSpace.startsWith('gray-')){
+      await editor.getByLabel('图像前景色',{exact:true}).click();
+      const chooser=page.getByRole('dialog',{name:'图像前景色选色'});
+      await chooser.getByRole('slider',{name:'灰度',exact:true}).waitFor();
+      assert.equal(await chooser.getByRole('slider',{name:'色相',exact:true}).isVisible(),false);
+      await chooser.getByLabel('HEX 颜色').fill('#808080');
+      const chip=await chooser.locator('.paint-color-sample').evaluate(el=>getComputedStyle(el).backgroundColor);
+      const level=colorSpace==='gray-linear'?188:129;
+      assert.equal(chip,'rgb('+[level,level,level].join(', ')+')');
+      await chooser.getByRole('button',{name:'取消',exact:true}).click();
     }
     if(colorSpace==='acescg'){
       const revisionBefore=(await api(route)).revision;

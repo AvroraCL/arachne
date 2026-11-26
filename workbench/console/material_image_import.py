@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
-from image_color_spaces import profile_bytes, rgb_transform
+from image_color_spaces import GRAY_SPACES, profile_bytes, rgb_transform
 
 
 MIB = 1024 * 1024
@@ -36,7 +36,7 @@ def convert(item):
                 space = item.get('workingSpace', 'srgb')
                 target = profile_bytes('srgb' if space == 'linear' else space)
                 normalized = ImageCms.profileToProfile(orientation,BytesIO(profile),BytesIO(target),
-                    outputMode='RGB',renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC)
+                    outputMode='L' if space in GRAY_SPACES else 'RGB',renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC)
                 profile = target
             else:
                 if profile and item.get('workingSpace') not in (None, 'linear'):

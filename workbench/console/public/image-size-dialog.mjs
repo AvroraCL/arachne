@@ -67,6 +67,8 @@ function newImageSettings(form,width,height,defaultName){
     }
     const hex=readColor(),profiled=!['linear','srgb'].includes(space.value);
     const usage={
+      'gray-g22':'单通道灰度和透明度，使用 Gamma 2.2 曲线。',
+      'gray-linear':'按线性光混合，保留灰度和透明度。',
       'acescg':'使用 AP1 线性 RGB，PNG 保存 0–1 范围的 8 位颜色。',
       'aces2065-1':'使用 AP0 线性 RGB，PNG 保存 0–1 范围的 8 位颜色。',
       'linear-srgb':'按线性光处理颜色，预览会校正亮度。',
