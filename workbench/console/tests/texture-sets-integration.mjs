@@ -85,7 +85,7 @@ try{
     await choose(name);
     await written(()=>panel.getByText('新建填充层',{exact:true}).click());
     await written(()=>panel.getByLabel('颜色',{exact:true}).fill(color));
-    await written(async()=>{const input=panel.getByLabel('粗糙度');await input.fill(String(roughness));await input.press('Enter');await input.blur();});
+    await written(async()=>{const input=panel.getByLabel('粗糙度',{exact:true});await input.fill(String(roughness));await input.press('Enter');await input.blur();});
     const canvas=panel.getByLabel('纹理集 UV 蒙版');await canvas.scrollIntoViewIfNeeded();
     const box=await canvas.boundingBox();
     await written(async()=>{await page.mouse.move(box.x+x*box.width,box.y+box.height*.4);
@@ -105,7 +105,7 @@ try{
   assert.equal(latch.layers[0].name,'源材质贴图');assert.ok(latch.layers[0].maps.color&&latch.layers[0].maps.roughness);
   assert.equal(latch.layers.at(-1).maskStrokes.length,1);
   await choose('Shell');assert.equal(await panel.getByLabel('颜色',{exact:true}).inputValue(),'#d92820');
-  await choose('Latch');assert.equal(await panel.getByLabel('粗糙度').inputValue(),'0.81');
+  await choose('Latch');assert.equal(await panel.getByLabel('粗糙度',{exact:true}).inputValue(),'0.81');
   assert.deepEqual(await channels('Shell'),originalPixels);
   const bluePixels=await channels('Latch');
   console.log('PIXELS',sample(originalPixels,186,128),sample(originalPixels,69,128),sample(bluePixels,69,128),sample(bluePixels,186,128));
@@ -275,6 +275,97 @@ with ZipFile(sys.argv[1]) as z:
   for(const [i,[,,,metal,rough]] of quality.Latch.entries())assert.deepEqual(nativeCheck[i],[metal,255,0,255-rough]);
   const nativeCopy=await restore(await fs.readFile(packageFile));assert.deepEqual(nativeCopy.paint.textureSets.Latch,latch);
   console.log('PASS 原生交付包保留副槽的材质清单、HDRP 通道、成片与可继续编辑的工程');
+  // The two panels overlap in UV space. Only the Latch reads this banner.
+  const image=(action,fields)=>({op:'image',action,documentId:'banner',...fields});
+  const ink=color=>image('stroke',{layerId:'label',target:'pixels',stroke:{rect:[0,0,1,1],uv:true,color,opacity:1,erase:false}});
+  doc=await json(route+'/paint/commands',{revision:doc.revision,operations:[
+    image('create',{patch:{width:2048,height:512,name:'机身标记'}}),
+    image('addLayer',{layerId:'label',kind:'pixel'}),ink('#60b050')]});
+  await page.reload();await viewport.waitFor();
+  if(await slot.isHidden())await panel.getByRole('button',{name:'纹理集',exact:true}).click();
+  await choose('Latch');
+  for(const name of ['纹理集颜色来源','纹理集粗糙度来源']){
+    await written(async()=>{
+      await panel.getByRole('button',{name,exact:true}).click();
+      await page.getByRole('option',{name:'机身标记',exact:true}).click();
+    });
+  }
+  // Wait for the actual viewport upload before requesting independent comparison frames.
+  async function viewportBand(band){
+    return until(async()=>{
+      const bytes=await viewport.screenshot();
+      const count=Number(execFileSync(pythonExecutable(),['-c',`from PIL import Image
+import io,sys,numpy as np
+r,g,b=np.asarray(Image.open(io.BytesIO(sys.stdin.buffer.read())).convert('RGB')).astype(int).transpose(2,0,1)
+test=(g>r+20)&(g>b+20) if sys.argv[1]=='green' else (b>g+25)&(r>g+12)
+print(test.sum())`,band],{input:bytes,encoding:'utf8'}));
+      return count>15000;
+    },'视口横幅 '+band);
+  }
+  await viewportBand('green');
+  await page.waitForLoadState('networkidle');
+  const shelf=page.locator('.editor-area[data-editor=library]').first();
+  await shelf.getByRole('button',{name:'编辑器类型',exact:true}).click();
+  await page.getByRole('option',{name:'图像图层',exact:true}).click();
+  const imageLayers=page.locator('.editor-area[data-editor=imageLayers]').first();
+  const row=imageLayers.locator('[data-image-layer-id=label] .document-layer-select');
+  if(!await row.count()){
+    await imageLayers.locator('.area-header-tools select').first().selectOption('banner',{force:true});
+  }
+  await row.click();
+  const properties=page.locator('.editor-area[data-editor=properties]:visible').first();
+  await properties.getByRole('button',{name:'编辑器类型',exact:true}).click();
+  await page.getByRole('option',{name:'UV 编辑器',exact:true}).click();
+  const uv=page.locator('.editor-area[data-editor=uv]:visible').first();
+  await uv.getByRole('button',{name:'UV 纹理集',exact:true}).click();
+  await page.getByRole('option',{name:'Latch',exact:true}).click();
+  const uvPixel=()=>uv.getByLabel('UV 画布').evaluate(c=>Array.from(c.getContext('2d')
+    .getImageData(Math.floor(c.width*.27),Math.floor(c.height*.5),1,1).data).slice(0,3));
+  await until(async()=>String(await uvPixel())==='96,176,80','UV 副槽横幅原色');
+  await viewportBand('green');await page.waitForLoadState('networkidle');
+  const baseline=path.join(data,'banner-before.png');await viewport.screenshot({path:baseline});
+  const changedPixels=async()=>Number(execFileSync(pythonExecutable(),['-c',`from PIL import Image
+import sys,io,numpy as np
+a=np.asarray(Image.open(sys.argv[1]).convert('RGB')).astype(int)
+b=np.asarray(Image.open(io.BytesIO(sys.stdin.buffer.read())).convert('RGB')).astype(int)
+print(np.count_nonzero(np.abs(a-b).max(axis=2)>8))`,baseline],{input:await viewport.screenshot(),encoding:'utf8'}));
+  const targetSlots=[];
+  function trackDraft(req){
+    if(req.method()!=='POST'||!req.url().endsWith('/paint/live'))return;
+    const body=req.postDataJSON();
+    if(body.operation?.documentId==='banner')targetSlots.push(body.textureSet);
+  }
+  page.on('request',trackDraft);
+  const opacity=imageLayers.locator('input[aria-label="不透明度"]').locator('..'),box=await opacity.boundingBox();
+  const x=box.x+box.width*.75,y=box.y+box.height*.5;
+  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x-115,y,{steps:5});
+  await until(async()=>String(await uvPixel())!=='96,176,80','UV 显示未松手的透明度');
+  await until(async()=>await changedPixels()>15000,'三维显示未松手的透明度');
+  assert.equal((await json(route)).revision,doc.revision);
+  assert.deepEqual([...new Set(targetSlots)],['Latch']);
+  await page.keyboard.press('Escape');await page.mouse.up();
+  await until(async()=>String(await uvPixel())==='96,176,80','取消后 UV 恢复原色');
+  await until(async()=>await changedPixels()<100,'取消后三维恢复同机位像素');
+  assert.equal((await json(route)).revision,doc.revision);
+  page.off('request',trackDraft);
+  const green=await channels('Latch');
+  const update=ink('#8030d0');
+  const draft=await fetch(origin+route+'/paint/live',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({textureSet:'Latch',revision:doc.revision,resolution:256,operation:update})});
+  assert.equal(draft.status,200);
+  const purple=Buffer.from(await draft.arrayBuffer());
+  assert.notDeepEqual(sample(green,69,128).slice(0,3),sample(purple,69,128).slice(0,3));
+  assert.notEqual(sample(green,69,128)[4],sample(purple,69,128)[4]);
+  doc=await json(route+'/paint/commands',{revision:doc.revision,operations:[update]});
+  assert.deepEqual(await channels('Latch'),purple);
+  assert.deepEqual(await channels('Shell'),originalPixels);
+  doc=await json(route+'/paint/undo',{revision:doc.revision});
+  assert.deepEqual(await channels('Latch'),green);
+  doc=await json(route+'/paint/redo',{revision:doc.revision});
+  await page.reload();await viewport.waitFor();await viewportBand('purple');
+  await page.waitForLoadState('networkidle');
+  assert.deepEqual(await channels('Latch'),purple);
+  console.log('PASS 同一横幅驱动副槽颜色和粗糙度，草稿与提交逐字节一致，撤销、重做、重开保留主槽');
   if(process.argv[2]){
     const old=await restore(await fs.readFile(process.argv[2]));
     assert.equal(old.paint.textureSets,undefined);await page.goto(origin+'/paint.html?project='+old.id);

@@ -31,6 +31,22 @@ export function placedImageBounds(layer,assets){
   const placement=imagePlacement(layer,assets);
   return placement&&unionImageBounds((layer.warp?.points??quadPoints).map(placement.toCanvas).map(([x,y])=>[x,y,x,y]));
 }
+// Exterior pixels are unchanged when moving independently composited placed layers.
+export function layoutDamage(layers,assets,operation){
+  if(operation?.action!=='layoutLayers'||layers.some(l=>l.kind==='adjustment'||l.parentId||l.clipped||
+      l.kind==='group'||Object.values(l.styles??{}).some(style=>style.enabled)))return null;
+  const boxes=[];
+  for(const transform of operation.transforms){
+    for(const id of transform.layerIds){
+      const layer=layers.find(item=>item.id===id);
+      if(!layer||!['shape','image'].includes(layer.kind)||layer.warp)return null;
+      const bounds=placedImageBounds(layer,assets);
+      if(!bounds)return null;
+      boxes.push(bounds,layoutBounds(bounds,transform));
+    }
+  }
+  return unionImageBounds(boxes);
+}
 export function imageLayoutTargets(layers,ids){
   const batch=imageBatchSelection(layers,ids);
   const targets=batch.affected.filter(layer=>layoutKinds.includes(layer.kind));

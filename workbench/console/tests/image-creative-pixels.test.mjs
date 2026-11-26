@@ -5,6 +5,8 @@ import {test} from 'node:test';
 import {gunzipSync} from 'node:zlib';
 import {createBrushTiles,renderBrushTile} from '../public/image-brush-tile.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
+import {layoutDamage} from '../public/image-layout.mjs';
+import {imageDocumentOperation} from '../public/image-documents.mjs';
 import {writeDisplayRGB,workingHexToLab,labToWorkingHex} from '../public/image-display-rgb.mjs';
 import {createSmoothMesh,smoothMesh,validImageWarp,warpPoint} from '../public/image-warp.mjs';
 
@@ -882,4 +884,30 @@ with tempfile.TemporaryDirectory() as temp:
         with Image.open(source) as im:np.testing.assert_array_equal(image_input(im,'linear',(1,0,5,1))[0],expected[:,1:5])
         np.testing.assert_array_equal(decode_image(source,'RGBA'),expected)
 `],{cwd:new URL('..',import.meta.url)});
+});
+
+
+test('the native transform tile covers both the erased and newly occupied shape pixels',()=>{
+  const shape={id:'badge',kind:'shape',visible:true,opacity:.7,blend:'normal',x:.45,y:.4,rotation:13,
+    scale:.018,stretch:[1,.8],maskEnabled:false,maskBase:1,
+    shape:{kind:'ellipse',width:90,height:52,fill:'#ffa552',stroke:null,strokeWidth:0,cornerRadius:0}};
+  const original={colorSpace:'srgb',layers:[shape]},after=structuredClone(original);
+  const operation={op:'image',documentId:'design',action:'layoutLayers',
+    transforms:[{layerIds:['badge'],pivot:[shape.x,shape.y],offset:[.0154,.005],angle:31,scale:1.15}]};
+  const [left,top,right,bottom]=layoutDamage(original.layers,{},operation);
+  const box=[Math.floor(left*4096)-2,Math.floor(top*4096)-2,256];
+  assert.ok(right*4096+2<box[0]+256 && bottom*4096+2<box[1]+256);
+  imageDocumentOperation({imageDocuments:{design:after}},operation,{requireUnlocked(){}});
+  execFileSync(pythonExecutable(),['-B','-c',`
+import json,sys,numpy as np
+from image_documents import composite_document,exact_stroke_window
+a,b,box=json.load(sys.stdin)
+before=composite_document(a,{},4096)
+final=composite_document(b,{},4096)
+assert np.count_nonzero((before[:,:,3]!=0)&(final[:,:,3]==0))>100
+assert np.count_nonzero((before[:,:,3]==0)&(final[:,:,3]!=0))>100
+x,y,side=box
+before[y:y+side,x:x+side]=exact_stroke_window(b,{},box,None)
+assert np.array_equal(before,final)
+`],{cwd:new URL('..',import.meta.url),input:JSON.stringify([original,after,box])});
 });

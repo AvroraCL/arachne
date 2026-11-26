@@ -123,6 +123,22 @@ tip.filter(ImageFilter.GaussianBlur(3)).save(sys.argv[2])`,markFile,path.join(da
   assert.equal(layer(title).text.font,font.id);assert.deepEqual(boxAnchor(),position);
 
   await select(logo);
+  // Inspect canvas pixels while the pointer is still down, then cancel the scrub.
+  await wait4K();
+  const pixelSignature=()=>canvas.evaluate(c=>{
+    const g=document.createElement('canvas');g.width=g.height=48;const ctx=g.getContext('2d');
+    ctx.drawImage(c,0,0,48,48);return Array.from(ctx.getImageData(0,0,48,48).data).join(',');
+  });
+  const beforeOpacity=await pixelSignature(),revisionBeforeOpacity=doc.revision;
+  const opacity=panel.locator('input[aria-label="不透明度"]').locator('..');
+  const ob=await opacity.boundingBox();
+  await page.mouse.move(ob.x+ob.width*.6,ob.y+ob.height*.5);await page.mouse.down();
+  await page.mouse.move(ob.x+ob.width*.6-65,ob.y+ob.height*.5,{steps:5});
+  await until(async()=>await pixelSignature()!==beforeOpacity,'未松开时看到图层透明度');
+  assert.equal((await api(route)).revision,revisionBeforeOpacity);
+  await page.keyboard.press('Escape');await page.mouse.up();
+  await until(async()=>await pixelSignature()===beforeOpacity,'Esc 恢复原画布像素');
+  assert.equal((await api(route)).revision,revisionBeforeOpacity);
   await properties.locator('summary').filter({hasText:/^图层样式$/}).click();
   await properties.locator('summary').filter({hasText:/^描边$/}).click();
   await properties.getByRole('checkbox',{name:'启用描边',exact:true}).check();await saved('打开图像层描边');

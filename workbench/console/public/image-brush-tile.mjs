@@ -198,14 +198,20 @@ export function createBrushTiles(read){
     img.onerror=()=>images.delete(assetKey);
     img.src='/api/projects/'+state.id+'/paint/assets/'+id;
   }
-  function prepare(uv){
-    if(uv)point=uv;
+  function prepare(uv,drawing=false){
+    // Start preparing the next patch while the tip is still on the current one.
+    if(uv){
+      const dx=point?uv[0]-point[0]:0,dy=point?uv[1]-point[1]:0;
+      point=uv;
+      const distance=Math.hypot(dx,dy);
+      if(drawing&&distance)uv=uv.map((value,i)=>value+[dx,dy][i]/distance*Math.min(side/4/grid,distance*6));
+    }
     const state=read();
     if(!state){loading?.abort();tile=null;previous=null;flat=null;key='';return;}
     const {layer}=state;
     for(const [id,isTip] of [[state.tip,true],[state.texture,false]])if(id)loadImage(state,id,isTip);
     if(!layer?.visible||!layer.opacity||layer.blend!=='normal')return;
-    const pointIn=point??state.center;
+    const pointIn=uv??point??state.center;
     const [x,y]=pointIn.map(v=>clamp(Math.round((v*grid-side/2)/64)*64,0,grid-side));
     const identity=[state.id,state.doc,state.revision,layer.id].join('/');
     const layerKey=[state.id,state.doc,layer.id].join('/');
@@ -216,7 +222,7 @@ export function createBrushTiles(read){
       flat={layerKey,frame,revision:source.revision,edits:[]};
     if(previous?.key===identity&&Math.abs(previous.x-x)<side/4&&Math.abs(previous.y-y)<side/4)[tile,previous]=[previous,tile];
     if(tile?.key===identity&&Math.abs(tile.x-x)<side/4&&Math.abs(tile.y-y)<side/4)return;
-    if(key===identity&&loading&&Math.abs(loading.x-x)<side/4&&Math.abs(loading.y-y)<side/4)return;
+    if(key===identity&&loading&&Math.abs(loading.x-x)<side/2&&Math.abs(loading.y-y)<side/2)return;
     loading?.abort();
     key=identity;
     if(state.empty){

@@ -41,10 +41,12 @@ export function createImageEdgeTool({stage,canvas,parameters,signal,settings={},
   }
   signal.addEventListener('abort',clearPreview,{once:true});
   async function updateInspection(state){
-    if(!active||view.value==='canvas'||!state.source){clearPreview();return;}
-    const {origin,layerId,region}=state.source,selection=region&&{...region};
+    const source=active?state.source:state.coverageSource;
+    const display=active?view.value:'coverage';
+    if(!source||display==='canvas'){clearPreview();return;}
+    const {origin,layerId,region}=source,selection=region&&{...region};
     if(selection)delete selection.outline;
-    const key=JSON.stringify([origin.id,origin.revision,origin.documentId,layerId,view.value,selection]);
+    const key=JSON.stringify([origin.id,origin.revision,origin.documentId,layerId,display,selection]);
     inspection.style.width=canvas.style.width;inspection.style.height=canvas.style.height;
     inspection.style.transform=canvas.style.transform;
     inspection.style.imageRendering=canvas.style.imageRendering;
@@ -54,13 +56,13 @@ export function createImageEdgeTool({stage,canvas,parameters,signal,settings={},
     try{
       const response=await fetch('/api/projects/'+origin.id+'/paint/image-edge-view',{
         method:'POST',signal:request.signal,headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({revision:origin.revision,documentId:origin.documentId,layerId,view:view.value,selection})
+        body:JSON.stringify({revision:origin.revision,documentId:origin.documentId,layerId,view:display,selection})
       });
       if(!response.ok)throw Error((await response.json()).error);
       const blob=await response.blob();
       if(request!==previewRequest)return;
       if(previewUrl)URL.revokeObjectURL(previewUrl);
-      previewUrl=URL.createObjectURL(blob);inspection.src=previewUrl;inspection.hidden=false;stage.setAttribute('data-edge-inspecting','');
+      previewUrl=URL.createObjectURL(blob);inspection.src=previewUrl;inspection.hidden=false;inspection.classList.toggle('selection-coverage',display==='coverage');stage.toggleAttribute('data-edge-inspecting',display!=='coverage');
     }catch(error){if(request===previewRequest&&!request.signal.aborted){inspection.hidden=true;stage.removeAttribute('data-edge-inspecting');onError(error);}}
   }
   async function editMask(action){

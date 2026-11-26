@@ -658,3 +658,5 @@
 .custom-select-menu.image-profile-menu{--select-menu-height:480px;--select-menu-align:right}
 .image-profile-menu .custom-select-group{display:grid;min-width:0}
 .image-profile-menu .custom-select-group-title{padding:5px 8px 2px;font-size:11px;color:var(--ui-muted)}
+
+.document-edge-inspection.selection-coverage{background:none;box-shadow:none}

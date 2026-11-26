@@ -25,7 +25,7 @@ function imageBounds(image){
 }
 
 export function createUVSelection({pane,canvas,context,isHandHeld,activate,preview,commit,fillOperation,onTransformState=()=>{},
-  selectionMode='replace',selectionFeather=0,onMode=()=>{},onError=()=>{},requestSelection,wandOptions,elements=null}) {
+  selectionMode='replace',selectionFeather=0,onSelectionDisplay,onMode=()=>{},onError=()=>{},requestSelection,wandOptions,elements=null}) {
   const $=id=>elements?.[id]||document.getElementById(id);
   const overlay=$('uv-selection-overlay'), border=$('uv-selection-border'), handles=$('uv-selection-handles');
   const lassoBorder=$('uv-lasso-border');
@@ -75,7 +75,9 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
   }
   async function sample(spec,state=context(),before=selectedRegion(state),onResult){
     stopRequest();
-    const task={state,controller:new AbortController()};
+    const task={state,controller:new AbortController(),clip:null};
+    let finish;
+    task.done=new Promise(resolve=>{finish=resolve;});
     request=task;render();
     try{
       const value=await requestSelection({...spec,previous:payload(before)},state,task.controller.signal);
@@ -87,9 +89,10 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
         refinementRevision=current.revision;refinementUndo.push(before);refinementRedo=[];
         assign(value,current,true);
       }else assign(value,current);
+      if(value)task.clip={clip:value.rect.slice(),...uvShapePayload(value)};
       onResult?.();return true;
     }catch(error){if(request===task&&error.name!=='AbortError')onError(error);return false;}
-    finally{if(request===task){request=null;render();}}
+    finally{if(request===task){request=null;render();}finish(task.clip);}
   }
   function combine(before,next,mode,state){
     if(mode!=='replace'&&(before?.coverage||next?.coverage)){
@@ -178,6 +181,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     transformStart.disabled=transformTool.disabled=busySelection()||!!transformReason;
     transformStart.title=transformTool.title=transformTitle;
     overlay.toggleAttribute('hidden',!visible);
+    onSelectionDisplay?.();
     options.hidden=!visible||!draft;
     onTransformState(!options.hidden,draft?.boundary);
     selectionOptions.hidden=!state.active||tool==='none'||!!draft;
@@ -296,8 +300,9 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     if(remember&&region&&sameOwner(owner,context()))lastDeselected={region,owner};
     assign(null,null);render();
   }
-  function stop(){
-    cancel();tool='none';render();
+  function stop(keepSampling=false){
+    if(!request||!keepSampling)cancel();
+    tool='none';render();
   }
   function sync(){
     const state=context();
@@ -725,6 +730,7 @@ export function createUVSelection({pane,canvas,context,isHandHeld,activate,previ
     getFeather:()=>feather,isTracing:()=>!!trace,finishTrace,removeTracePoint,repositionMarquee,
     clip:()=>{const selected=!trace&&selectedRegion(context());return selected?{clip:selected.rect.slice(),...uvShapePayload(selected)}:null;},
     snapshot:()=>{const selected=selectedRegion(context());return selected?{...payload(selected),...(selected.outline?{outline:selected.outline}:{})}:null;},
+    pendingSample:()=>request,
     getCombination:()=>combination,hasSelection:()=>!!region&&!trace,isTransforming:()=>!!draft,
     isTransformingBoundary:()=>draft?.boundary===true,isDragging:busySelection};
 }

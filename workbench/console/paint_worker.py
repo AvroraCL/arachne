@@ -425,13 +425,18 @@ def composite_layers(cfg, step, material_images):
             continue
         image = art(layer['image'],'decal') if layer['kind']=='decal' else None
         material_id = layer.get('materialId')
-        maps = {} if material_id else {name: art(asset_id,name) for name,asset_id in layer.get('maps',{}).items() if name in opacity}
+        maps = {} if material_id else {name: art(asset_id,name) for name,asset_id in layer.get('maps',{}).items() if name in opacity and name not in layer.get('documentMaps',{})}
+        document_sources = {}
         for name,document_id in layer.get('documentMaps',{}).items():
             if name not in opacity:continue
             image_doc=paint['imageDocuments'][document_id]
-            assets=embedded_image_assets(image_doc['layers'],paint['imageDocuments'],cfg['assets'],image_doc['colorSpace'])
-            pixels=document_pixels(image_doc,assets,shape[0])
-            maps[name]={'document':display_pixels(pixels,image_doc['colorSpace']) if name in SRGB else pixels,'colorSpace':image_doc['colorSpace']}
+            if document_id not in document_sources:
+                assets=embedded_image_assets(image_doc['layers'],paint['imageDocuments'],cfg['assets'],image_doc['colorSpace'])
+                document_sources[document_id]={'raw':document_pixels(image_doc,assets,shape[0])}
+            source=document_sources[document_id]
+            if name in SRGB and 'display' not in source:
+                source['display']=display_pixels(source['raw'],image_doc['colorSpace'])
+            maps[name]={'document':source['display' if name in SRGB else 'raw'],'colorSpace':image_doc['colorSpace']}
         mask = prepare_mask(layer, inspection)
         has_generator |= mask[-1]
         projector = layer.get('projector')

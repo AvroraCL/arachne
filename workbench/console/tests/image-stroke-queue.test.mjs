@@ -116,3 +116,20 @@ test('material strokes survive a lost response but never rebase model-space poin
  assert.match(conflicted.failure.message,/无法确认表面仍一致/);
  assert.equal(conflicted.size,1);
 });
+
+test('a held write and a restored journal keep image layer and mask targets in order',async()=>{
+ let doc={id:target.id,revision:2},journal,unblock;
+ const held=new Promise(resolve=>{unblock=resolve;}),writes=[];
+ const pixel=operation('red'),mask={...operation('black'),target:'mask'},other={...pixel,layerId:'upper'};
+ const queueOptions={read:()=>doc,readLatest:async()=>doc,onPreview(){},onStateChange(){},onError(){}};
+ const first=createImageStrokeQueue({...queueOptions,onDraftChange:(_,draft)=>{journal=structuredClone(draft);},
+   write:async()=>{await held;throw Error('offline');}});
+ const origin={...target,revision:2};
+ first.submit(pixel,origin);
+ assert.ok(first.accepts({...origin,target:'mask'}));assert.ok(!first.accepts({...origin,documentId:'elsewhere'}));
+ first.submit(mask,{...origin,target:'mask'});first.submit(other,{...origin,layerId:'upper'});
+ assert.deepEqual(first.operations(origin),[pixel,mask,other]);
+ unblock();await first.flush();
+ const restored=createImageStrokeQueue({...queueOptions,write:async(op,state)=>{writes.push(op);return doc=committed(doc,state);}});
+ assert.ok(restored.restore(doc.id,journal));assert.ok(await restored.retry());assert.deepEqual(writes,[pixel,mask,other]);
+});

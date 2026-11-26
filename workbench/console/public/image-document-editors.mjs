@@ -36,6 +36,7 @@ import {pauseImageThumbnail,updateImageThumbnail} from './image-layer-thumbnails
 import {createImageGradientTool} from './image-gradient-tool.mjs';
 import {createImageFillTool} from './image-fill-tool.mjs';
 import {createImageCloneTool} from './image-clone-tool.mjs';
+import {layoutDamage} from './image-layout.mjs';
 import {createImageMoveTool} from './image-move-tool.mjs';
 import {createImageWarpTool} from './image-warp-tool.mjs';
 import {createImageStrokeQueue} from './image-stroke-queue.mjs';
@@ -570,7 +571,7 @@ export function createDocumentEditor(ctx,bridge){
       tip:imageControls.tipAsset.select.value,texture:imageControls.textureAsset.select.value,space:image.colorSpace,inspect:!!project.imageContext.inspectMask,center:[(x+w/2)/4096,(y+h/2)/4096]};
   });
   stage.addEventListener('pointermove',event=>{
-    if(event.target===canvas)brushTiles.prepare(canvasPoint(canvas,event));
+    if(event.target===canvas)brushTiles.prepare(canvasPoint(canvas,event),!!event.buttons);
   },{capture:true,signal:life.signal});
   const live=createLiveView({localBrush:edits=>brushTiles.render(edits),rgba:true,viewport:{showLivePaint(){}},canvas,guide:el('canvas'),
     context:()=>{
@@ -605,6 +606,7 @@ export function createDocumentEditor(ctx,bridge){
       return {id:doc.id,revision:doc.revision,documentId:c.documentId,inspectMask:c.inspectMask?c.layerId:null,channel:'color',
         colorSpace:image.colorSpace,gamutWarning:gamutWarning&&canWarnGamut(),imageGeometry:imageViewGeometry(image),
         nativeCanvas:prefs.autoDetail,patchLayer:localEdits?selected?.id:null,maskEnabled:selected?.maskEnabled,
+        draftBounds:patchable?op=>layoutDamage(image.layers,doc.paint.assets,op):undefined,
         fastSize,visiblePixels,strokeBleed,detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};
     },
     onFrame:frame=>{stage.dataset.strokeWindow=frame.window?.join(',')??'';},
@@ -651,7 +653,11 @@ export function createDocumentEditor(ctx,bridge){
     ctx.root.toggleAttribute('data-saving-strokes',strokeQueue.saving);
     if(shown)updateViewStatus();
     recovery.hidden=!failure;
-    if(failure)saveMessage.textContent=`${strokeQueue.size} 笔待保存。 ${failure.message}${journal.unavailable?' '+unavailableStrokeJournal:''}`;
+    if(failure){
+      const [,docId,layerId,target]=strokeQueue.target;
+      const layer=project.document?.paint.imageDocuments?.[docId]?.layers.find(item=>item.id===layerId);
+      saveMessage.textContent=`${layer?.name??layerId} · ${target==='mask'?'蒙版':'内容'}，${strokeQueue.size} 笔待保存。 ${failure.message}${journal.unavailable?' '+unavailableStrokeJournal:''}`;
+    }
     rebaseStroke.hidden=!strokeQueue.canRebase;
     retryStroke.disabled=rebaseStroke.disabled=discardStroke.disabled=drawingGesture();
     bridge.saveStateChanged();
@@ -741,15 +747,30 @@ export function createDocumentEditor(ctx,bridge){
   function brushContext(){
     const layer=editableImageLayer(project),origin=imageOrigin(),maskTarget=project.imageContext?.target==='mask';
     const busy=!!pendingImageEdit||importing||cutting||bridge.busy()&&!strokeQueue.saving||!strokeQueue.accepts(imageSelectionOrigin(project));
-    return {...origin,busy,enabled:false,uvEnabled:!!layer&&!busy,imageTool:mode,brushColor:bridge.foreground(),brushAssets:project.document?.paint.assets,
+    return {...origin,pendingSample:selection?.pendingSample(),busy,enabled:false,uvEnabled:!!layer&&!busy,imageTool:mode,brushColor:bridge.foreground(),brushAssets:project.document?.paint.assets,
       maskValue:maskTarget&&elements['brush-erase'].checked?maskGray(bridge.colorPair('mask').background):bridge.maskInk(),maskTarget,
       layer:layer?{...layer,kind:layer.kind==='pixel'?'paint':'image',channels:{color:true,metallic:false,roughness:false},
         values:{color:bridge.foreground(),metallic:0,roughness:.5}}:null};
   }
-  painter=createSurfaceTools({viewport:{},host:controls.dummy,uvHost:stage,elements,settingsKey:'arachne-document-brush:'+ctx.areaId,preserveUnavailableMode:true,stickySample:true,sampleAnyLayer:true,isHandHeld:()=>space||!!nav,uvClip:()=>selection?.clip(),onIdle:()=>{sync();syncStrokeSave();},
+  function imageStroke(op,origin,commit){
+    const operation=mapOperation(op,origin),sample=origin?.pendingSample;
+    const publish=()=>commit?strokeQueue.submit(operation,origin):strokeQueue.preview(operation,origin);
+    if(!sample||!operation){publish();return;}
+    function apply(clip){
+      if(!clip||disposed||project.document?.id!==origin.id||project.document.revision!==origin.revision){
+        if(commit&&!disposed)ctx.error(Error('选区为空、已取消或目标修订已变化，未应用该笔触'));
+        return;
+      }
+      Object.assign(operation.stroke,clip);
+      publish();
+    }
+    if(sample.clip)apply(sample.clip);
+    else if(commit)void sample.done.then(apply);
+  }
+  painter=createSurfaceTools({viewport:{},host:controls.dummy,uvHost:stage,elements,settingsKey:'arachne-document-brush:'+ctx.areaId,preserveUnavailableMode:true,stickySample:true,sampleAnyLayer:true,isHandHeld:()=>space||!!nav,uvClip:()=>selection?.pendingSample()?null:selection?.clip(),onIdle:()=>{sync();syncStrokeSave();},
     context:brushContext,uvBounds:()=>documentClip(currentDocument(project)),cloneTool:()=>cloneTool,
-    preview:(op,origin)=>strokeQueue.preview(mapOperation(op,origin),origin),
-    commit:(op,origin)=>strokeQueue.submit(mapOperation(op,origin),origin),sample:sampleImage,place:()=>{}});
+    preview:(op,origin)=>imageStroke(op,origin,false),
+    commit:(op,origin)=>imageStroke(op,origin,true),sample:sampleImage,place:()=>{}});
   const brushBinding=createBrushBinding({project,painter});
   selectionControls(elements,parameters,stage);
   elements['uv-ellipse-tool']=button(selectionNames.ellipse);
@@ -909,7 +930,13 @@ export function createDocumentEditor(ctx,bridge){
     void submitEdit({op:'image',action:'saveSelection',documentId:origin.documentId,
       patch:{name,...region}},origin,()=>{selectionName.value='';});
   };
-  elements['uv-selection-options'].append(invertSelectionButton,fitSelectionButton,transformBoundary,refineMenu,selectionLibrary);
+  const coverageToggle=button('覆盖预览',()=>{
+    coverageToggle.setAttribute('aria-pressed',String(coverageToggle.getAttribute('aria-pressed')!=='true'));
+    edgeTool?.sync();ctx.onChange();
+  });
+  coverageToggle.setAttribute('aria-pressed',String(state.selectionCoverage===true));
+  coverageToggle.title='用半透明红色显示实际选区覆盖，包括羽化边缘';
+  elements['uv-selection-options'].append(coverageToggle,invertSelectionButton,fitSelectionButton,transformBoundary,refineMenu,selectionLibrary);
   parameters.append(transformOptions,elements['uv-selection-options'],sampleNotice);
   selection=bridge.createSelection({pane:stage,canvas,elements,isHandHeld:()=>space||!!nav,
     context:()=>{
@@ -927,6 +954,7 @@ export function createDocumentEditor(ctx,bridge){
         canClear:editable&&pixels&&layer.kind==='pixel'&&!layer.alphaLocked,
         canFillMaterial:editable&&pixels&&layer.kind==='pixel',canFillMask:editable};
     },
+    onSelectionDisplay:()=>{if(coverageToggle.getAttribute('aria-pressed')==='true')edgeTool?.sync();},
     activate:()=>{setMode('select');return true;},onTransformState:syncToolName,selectionMode:state.selectionMode,selectionFeather:state.selectionFeather,onMode:ctx.onChange,onError:ctx.error,
     wandOptions:{host:wandOptions,read:readWand,rangeHost:rangeOptions,readRange,refine:refineMenu},
     requestSelection:async(request,origin,signal)=>{
@@ -1005,7 +1033,7 @@ export function createDocumentEditor(ctx,bridge){
       syncToolName();ctx.onChange();
     });
   }
-  elements['surface-orbit'].onclick=()=>{selection.stop();setMode('orbit');};elements['surface-paint'].onclick=()=>{selection.stop();elements['brush-erase'].checked=false;setMode(project.imageContext?.target==='mask'?'mask':'paint');};elements['uv-eraser-tool'].onclick=()=>{selection.stop();elements['brush-erase'].checked=true;setMode(project.imageContext?.target==='mask'?'mask':'paint');};elements['surface-sample'].onclick=()=>{if(project.imageContext?.target!=='mask'){selection.stop();setMode('sample');}};
+  elements['surface-orbit'].onclick=()=>{selection.stop();setMode('orbit');};elements['surface-paint'].onclick=()=>{selection.stop(true);elements['brush-erase'].checked=false;setMode(project.imageContext?.target==='mask'?'mask':'paint');};elements['uv-eraser-tool'].onclick=()=>{selection.stop(true);elements['brush-erase'].checked=true;setMode(project.imageContext?.target==='mask'?'mask':'paint');};elements['surface-sample'].onclick=()=>{if(project.imageContext?.target!=='mask'){selection.stop();setMode('sample');}};
   const colors=el('div','document-colors'),swatches=el('div','document-color-swatches'),actions=el('div','document-color-actions');
   colors.setAttribute('role','group');colors.setAttribute('aria-label','前景色和背景色');
   const front=el('input','document-color-front'),back=el('input','document-color-back');
@@ -1147,7 +1175,7 @@ export function createDocumentEditor(ctx,bridge){
     layout();
     return true;
   }
-  function drawingGesture(){return painter.isEditing()||gradientTool?.isEditing()||shapeTool?.isEditing()||moveTool?.isEditing()||warpTool?.isEditing()||canvasText?.isEditing()||penTool?.isEditing()||edgeTool?.isEditing();}
+  function drawingGesture(){return painter.isEditing()||bucketTool?.isEditing()||gradientTool?.isEditing()||shapeTool?.isEditing()||moveTool?.isEditing()||warpTool?.isEditing()||canvasText?.isEditing()||penTool?.isEditing()||edgeTool?.isEditing();}
   function pointerAngle(event,center){
     return Math.atan2(event.clientY-center[1],event.clientX-center[0])*180/Math.PI;
   }
@@ -1216,6 +1244,7 @@ export function createDocumentEditor(ctx,bridge){
   bucketTool=createImageFillTool({stage,canvas,parameters,signal,settings:state.bucket,onChange:ctx.onChange,
     context:()=>({origin:imageSelectionOrigin(project),layer:currentLayer(project),color:bridge.foreground(),
       selection:selection.clip(),enabled:canPaintPixels()&&!selection.isTransforming()&&!nav&&!space}),
+    preview:operation=>{live.update(operation);project.draft(operation);},
     commit:submitEdit,sample:([u,v])=>sampleImage({u,v},imageOrigin())});
   cloneTool=createImageCloneTool({stage,canvas,parameters,settings:state.clone,context:brushContext,onChange:ctx.onChange,onError:ctx.error});
   moveTool=createImageMoveTool({stage,canvas,parameters,signal,settings:state.move,context:()=>{
@@ -1437,7 +1466,7 @@ export function createDocumentEditor(ctx,bridge){
       return {layer,origin,active:mode==='text',usable,editable:usable&&layer?.text&&!layer.locked,canInsert:canInsertImage(project),
         color:bridge.foreground(),assets:project.document?.paint.assets??{},fonts:project.document?.paint.textFonts??{},insertion:imageInsertion(project)};
     },
-    preview:operation=>live.update(operation),
+    preview:operation=>live.update(operation),materialDraft:operation=>project.draft(operation),
     save:async(origin,layer,placement,text)=>{
       const result=await bridge.saveImageText(origin,layer,placement,text);
       if(!disposed&&!layer)selectAddedLayer(project,origin,result.layerId);
@@ -1458,7 +1487,8 @@ export function createDocumentEditor(ctx,bridge){
     const layer=editableImageLayer(project),image=currentDocument(project),origin=imageSelectionOrigin(project);
     const usable=!!image&&!bridge.busy()&&!pendingImageEdit&&!space&&!nav&&!strokeQueue.size&&!selection.isTransforming();
     const source=layer&&['image','pixel','shape'].includes(layer.kind)?{layerId:layer.id,origin,region:selection.snapshot()}:null;
-    return {usable,source,hasMask:source&&hasImageLayerMask(layer),canSaveMask:source&&!layerLockOwner(image.layers,layer),
+    const coverageSource=shown&&mode==='select'&&image&&coverageToggle.getAttribute('aria-pressed')==='true'&&selection.snapshot();
+    return {usable,source,coverageSource:coverageSource?{origin,region:coverageSource}:null,hasMask:source&&hasImageLayerMask(layer),canSaveMask:source&&!layerLockOwner(image.layers,layer),
       selection:selection.hasSelection(),canUndo:selection.canTravelRefinement('undo'),canRedo:selection.canTravelRefinement('redo')};
   },apply:selection.refineLocal,travel:direction=>selection.travelRefinement(direction),
   loadMask:()=>selection.sampleLayer(currentLayer(project).id,'mask','replace'),
@@ -1552,7 +1582,7 @@ export function createDocumentEditor(ctx,bridge){
       return true;
     }
     if(key==='escape'){
-      if(!finishNavigation(true)&&!edgeTool.cancel()&&!painter.cancel({preserveMode:true})&&!gradientTool.cancel()&&!shapeTool.cancel()&&!selection.cancel())selection.clear();
+      if(!finishNavigation(true)&&!edgeTool.cancel()&&!painter.cancel({preserveMode:true})&&!bucketTool.cancel()&&!gradientTool.cancel()&&!shapeTool.cancel()&&!selection.cancel())selection.clear();
       event.preventDefault();event.stopPropagation();return true;
     }
     if(key===' '&&painter.isDrawing()&&painter.pauseDrawing()){
@@ -1561,20 +1591,30 @@ export function createDocumentEditor(ctx,bridge){
     if(key===' '&&selection.repositionMarquee(true)){
       event.preventDefault();event.stopPropagation();return true;
     }
-    if(drawingGesture()||selection.isDragging()||nav){
+    const fillShortcut=(event.altKey!==mod)&&!event.shiftKey&&(key==='backspace'||key==='delete');
+    const afterSelection=selection.pendingSample()&&(fillShortcut||!mod&&!event.altKey&&['b','e'].includes(key));
+    if(drawingGesture()||selection.isDragging()&&!afterSelection||nav){
       event.preventDefault();event.stopPropagation();return true;
     }
     if(combineShortcut(event)){
       event.preventDefault();event.stopPropagation();return true;
     }
     let handled=true;
-    if((event.altKey!==mod)&&!event.shiftKey&&(key==='backspace'||key==='delete')){
-      const {clip,...shape}=selection.clip()||{clip:documentClip(currentDocument(project))};
-      const mask=colorTarget()==='mask',slot=event.altKey?'foreground':'background';
-      const color=bridge.colorPair(colorTarget())[slot];
-      const op=!selection.isTransforming()&&painter.fillUV(clip,mask?'mask':'material',maskGray(color),shape,{opacity:1,color});
-      handled=!!op;
-      if(op)void save(op,imageOrigin());
+    if(fillShortcut){
+      const sample=selection.pendingSample(),origin=imageSelectionOrigin(project);
+      const mask=colorTarget()==='mask',slot=event.altKey?'foreground':'background',color=bridge.colorPair(colorTarget())[slot];
+      const fill=region=>{
+        if(!region||!stillOnImageSelection(project,origin)||project.document.revision!==origin.revision){
+          ctx.error(Error('选区为空或编辑目标已变化，未应用填充'));return false;
+        }
+        const {clip,...shape}=region;
+        const op=painter.fillUV(clip,mask?'mask':'material',maskGray(color),shape,{opacity:1,color});
+        if(op)void save(op,{...origin,imageDocumentId:origin.documentId});
+        return !!op;
+      };
+      if(selection.isTransforming())handled=false;
+      else if(sample)void sample.done.then(fill);
+      else handled=fill(selection.clip()||{clip:documentClip(currentDocument(project))});
     }else if(mod&&!event.altKey){
       if(key==='c')handled=copySelection(event.shiftKey);
       else if(key==='x'&&!event.shiftKey)handled=cutSelection();
@@ -1655,7 +1695,7 @@ export function createDocumentEditor(ctx,bridge){
     if(event.key!==' ')return;
     if(selection.repositionMarquee(false)){event.preventDefault();event.stopPropagation();return;}
     strokePan=null;holdHand(false);
-  },{signal});window.addEventListener('blur',()=>{strokePan=null;holdHand(false);finishNavigation(true);edgeTool.cancel();penTool.cancelDrag();gradientTool.cancel();shapeTool.cancel();moveTool.cancel();warpTool.cancel();painter.cancel({preserveMode:true});selection.cancel();},{signal});
+  },{signal});window.addEventListener('blur',()=>{strokePan=null;holdHand(false);finishNavigation(true);edgeTool.cancel();penTool.cancelDrag();bucketTool.cancel();gradientTool.cancel();shapeTool.cancel();moveTool.cancel();warpTool.cancel();painter.cancel({preserveMode:true});selection.cancel();},{signal});
   stage.addEventListener('dblclick',event=>{
     if(mode!=='move'||(event.target!==canvas&&event.target!==stage)||writing()||!currentDocument(project)?.layers.some(l=>l.embedded))return;
     const bounds=canvas.getBoundingClientRect();
@@ -1701,7 +1741,7 @@ export function createDocumentEditor(ctx,bridge){
     const imageKey=JSON.stringify([doc.id,c?.documentId,c?.layerId,c?.target]);if(lastImage!==imageKey){
       const first=lastProject!==doc.id,targetChanged=!first&&lastTarget!==c?.target;
       let next=mode;if(c?.target==='mask'&&!['gradient','move'].includes(mode)&&(mode==='paint'||targetChanged||first&&!state.tool))next='mask';else if(c?.target!=='mask'&&mode==='mask')next='paint';
-      clearClipboardNotice();lastImage=imageKey;lastTarget=c?.target;lastProject=doc.id;gradientTool.cancel();shapeTool.cancel();painter.cancel({preserveMode:true});selection.stop();setMode(next);if(next==='select')selection.choose(selectionShape,{focus:false});if(imageView.isActive())remember(project);
+      clearClipboardNotice();lastImage=imageKey;lastTarget=c?.target;lastProject=doc.id;bucketTool.cancel();gradientTool.cancel();shapeTool.cancel();painter.cancel({preserveMode:true});selection.stop();setMode(next);if(next==='select')selection.choose(selectionShape,{focus:false});if(imageView.isActive())remember(project);
     }
     const documents=Object.entries(doc.paint.imageDocuments??{}),optionsKey=JSON.stringify([doc.id,documents.map(([id,d])=>[id,d.name])]);if(pickerOptionsKey!==optionsKey){pickerOptionsKey=optionsKey;picker.replaceChildren(new Option('选择图像文档',''),...documents.map(([id,d])=>new Option(d.name,id)));}
     const next=JSON.stringify([doc.id,doc.revision]);if(sourceKey!==next){sourceKey=next;syncDestination();}else if(destinationDocument!==c?.documentId)syncDestination();
@@ -1730,7 +1770,7 @@ export function createDocumentEditor(ctx,bridge){
     ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();live.refresh();brushTiles.prepare();uvGuide.sync();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,openPhotoFile(){if(!importing&&!writing())openInput.click();},travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,angle,mirror,gamutWarning,uvGuide:uvGuide.enabled,tool:mode,edgeRefine:edgeTool.getState(),selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),wand:readWand(),colorRange:readRange(),selectionRefineRadius:refineRadius.valueAsNumber,gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),move:moveTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,openPhotoFile(){if(!importing&&!writing())openInput.click();},travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,angle,mirror,gamutWarning,uvGuide:uvGuide.enabled,tool:mode,edgeRefine:edgeTool.getState(),selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),selectionCoverage:coverageToggle.getAttribute('aria-pressed')==='true',wand:readWand(),colorRange:readRange(),selectionRefineRadius:refineRadius.valueAsNumber,gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),move:moveTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
     strokeSaveStatus:()=>({pending:strokeQueue.size,saving:strokeQueue.saving,failure:strokeQueue.failure}),retryStrokeSave,
     editCommand,canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
     canCut,cutSelection,pasteSystemImage,canPasteInPlace:()=>canPaste()&&canInsertImage(project)&&!!copiedImage(),pasteInPlace:()=>pasteSelection(true),
@@ -1764,10 +1804,10 @@ export function createDocumentEditor(ctx,bridge){
       if(shown===visible)return;
       shown=visible;live.setVisible(visible);
       uvGuide.sync();
-      if(!visible){stopAdjustmentPick();edgeTool.cancel();penTool.cancelDrag();canvasText.cancel();gradientTool.cancel();shapeTool.cancel();moveTool.cancel();warpTool.cancel();}
+      if(!visible){stopAdjustmentPick();edgeTool.cancel();penTool.cancelDrag();canvasText.cancel();bucketTool.cancel();gradientTool.cancel();shapeTool.cancel();moveTool.cancel();warpTool.cancel();}
       if(visible)sync();
     },
-    dispose(){disposed=true;clearClipboardNotice();stopAdjustmentPick();exportRequest?.abort();exportMenu.dispose();unsub();stopClipboard();gradientTool.cancel();cloneTool.dispose();shapeTool.cancel();moveTool.dispose();warpTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();brushTiles.dispose();live.dispose();uvGuide.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
+    dispose(){disposed=true;clearClipboardNotice();stopAdjustmentPick();exportRequest?.abort();exportMenu.dispose();unsub();stopClipboard();bucketTool.cancel();gradientTool.cancel();cloneTool.dispose();shapeTool.cancel();moveTool.dispose();warpTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();brushTiles.dispose();live.dispose();uvGuide.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
 }
 
 export function createImagePanel(type,ctx){
@@ -1780,6 +1820,15 @@ export function createImagePanel(type,ctx){
     if(adjustmentEditing?.owner!==owner)return;
     const {origin}=adjustmentEditing;adjustmentEditing=null;
     ctx.imageAdjustment?.(owner,origin,null);
+  }
+  function previewLayerPatch(layer,patch){
+    const owner={};
+    return (value,origin)=>{
+      if(value===null){clearAdjustment(owner);return;}
+      if(!layer||!origin?.id)return;
+      adjustmentEditing={owner,origin};
+      ctx.imageAdjustment?.(owner,origin,{op:'image',action:'updateLayer',documentId:origin.documentId,layerId:layer.id,patch:patch(value)});
+    };
   }
   function addControl(parent,label,type,value,change,extra={},preview){
     const row=el('label','document-property',label),input=el('input');
@@ -2685,14 +2734,7 @@ export function createImagePanel(type,ctx){
     const kind=choice('图层形状',imageShapeKinds,shape.kind,value=>void run(()=>write(style('kind',value))));
     kind.disabled=disabled;section.append(kind);enhanceSelectMenu(kind);
     function control(label,type,value,patch,attrs={}){
-      const owner={};
-      const preview=type==='checkbox'?undefined:(value,origin)=>{
-        if(value===null){clearAdjustment(owner);return;}
-        if(!origin.id)return;
-        adjustmentEditing={owner,origin};
-        ctx.imageAdjustment?.(owner,origin,{op:'image',action:'updateLayer',documentId:origin.documentId,
-          layerId:layer.id,patch:patch(value)});
-      };
+      const preview=type==='checkbox'?undefined:previewLayerPatch(layer,patch);
       return addControl(section,label,type,value,value=>write(patch(value)),{disabled,...attrs},preview);
     }
     imageShapeSize(layer).forEach((size,index)=>{
@@ -2752,7 +2794,8 @@ export function createImagePanel(type,ctx){
       effect.open=openEffects.has(id);
       effect.ontoggle=()=>{if(effect.open)openEffects.add(id);else openEffects.delete(id);};
       effect.append(summary,params);controls.append(effect);
-      const update=patch=>write({...layer.styles,[id]:{...state,...patch}});
+      const styles=patch=>({...layer.styles,[id]:{...state,...patch}});
+      const update=patch=>write(styles(patch));
       addControl(params,'启用'+label,'checkbox',state.enabled,enabled=>update({enabled}),{disabled});
       if(id==='outline'){
         const position=choice('描边位置',outlinePositions,state.position,position=>void run(()=>update({position})));
@@ -2762,7 +2805,7 @@ export function createImagePanel(type,ctx){
       for(const [name,{label,value,min,max}] of Object.entries(fields)){
         const isColor=typeof value==='string';
         const input=addControl(params,label,isColor?'color':'number',state[name],value=>update({[name]:value}),
-          {disabled:disabled||!state.enabled,...(isColor?{}:{min,max,step:1})});
+          {disabled:disabled||!state.enabled,...(isColor?{}:{min,max,step:1})},previewLayerPatch(layer,value=>({styles:styles({[name]:value})})));
         if(!isColor)input.dataset.scrubSpeed='1';
       }
     }
@@ -2846,8 +2889,8 @@ export function createImagePanel(type,ctx){
       blend.disabled=!canEdit;
       controls.append(blend);
       const opacity=addControl(controls,'不透明度','number',Math.round((layer?.opacity??1)*100),
-        value=>command(project,{action:'updateLayer',layerId:layer.id,patch:{opacity:value/100}}),{min:0,max:100,disabled:!canEdit});
-      opacity.dataset.scrubSuffix='%';
+        value=>command(project,{action:'updateLayer',layerId:layer.id,patch:{opacity:value/100}}),{min:0,max:100,disabled:!canEdit},previewLayerPatch(layer,value=>({opacity:value/100})));
+      opacity.dataset.scrubSpeed='1';opacity.dataset.scrubSuffix='%';
       opacity.parentElement.firstChild.replaceWith(el('span','document-opacity-caption','不透明度'));
       const alphaLock=chromeButton(button('锁定透明像素',()=>{
         const origin=imageSelectionOrigin(project);
@@ -2926,13 +2969,13 @@ export function createImagePanel(type,ctx){
         if(layer.text&&c.target!=='mask'){const edit=button('编辑文字…',()=>editText(layer));edit.disabled=layer.locked;body.append(edit);}
         if(layer.gradient&&c.target!=='mask'){
           const disabled=!!lockOwner||busy;
-          const update=(key,index,value)=>{
-            const gradient={...layer.gradient,[key]:layer.gradient[key].map((previous,i)=>i===index?value:previous)};
-            return command(project,{action:'updateLayer',layerId:layer.id,patch:{gradient}});
-          };
+          const property=(key,index,value)=>({gradient:{...layer.gradient,[key]:layer.gradient[key].map((prior,i)=>i===index?value:prior)}});
           for(const [index,label] of ['起点','终点'].entries()){
-            addControl(body,label+'颜色','color',layer.gradient.colors[index],color=>update('colors',index,color),{disabled});
-            addControl(body,label+'不透明度','number',layer.gradient.alpha[index],alpha=>update('alpha',index,alpha),{min:0,max:1,step:'any',disabled});
+            for(const [key,caption,type,attrs] of [['colors','颜色','color',{}],['alpha','不透明度','number',{min:0,max:1,step:'any'}]]){
+              const patch=value=>property(key,index,value);
+              addControl(body,label+caption,type,layer.gradient[key][index],value=>command(project,{action:'updateLayer',layerId:layer.id,patch:patch(value)}),
+                {disabled,...attrs},previewLayerPatch(layer,patch));
+            }
           }
         }
         if(c.target==='mask'){

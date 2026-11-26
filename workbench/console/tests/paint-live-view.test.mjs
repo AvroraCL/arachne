@@ -443,3 +443,22 @@ test('toggling the gamut warning redraws a held wide-gamut brush patch without i
   assert.equal(drawn.at(-1),0);
   assert.equal(requests.length,4);
 });
+
+test('switching layers rejects an older same-revision draft and targets the new visible region',async t=>{
+  const {view,requests,drawn,finish,configure}=fixture(t,true,{rgba:true});
+  t.after(()=>view.dispose());
+  configure({documentId:'banner',visiblePixels:[[0,4096],[0,4096]],detailDelay:60_000,
+    draftBounds:edit=>edit.layerId==='a'?[0,0,.02,.02]:[.75,.5,.78,.53]});
+  view.refresh();await finish(0,7);
+  view.retryDetail();await finish(1,8,4096);
+  const opacity=layerId=>({op:'image',action:'updateLayer',documentId:'banner',layerId,patch:{opacity:.25}});
+  view.update(opacity('a'));
+  assert.deepEqual(requests[2].data.window,[0,0,256]);
+  view.update(opacity('b'));
+  assert.equal(requests[2].signal.aborted,true);
+  await finish(2,99);
+  assert.equal(drawn.at(-1),8);
+  const [x,y,side]=requests[3].data.window;
+  assert.ok(x<=3072 && x+side>=3195 && y<=2048 && y+side>=2171);
+  assert.equal(requests[3].data.operation.layerId,'b');
+});

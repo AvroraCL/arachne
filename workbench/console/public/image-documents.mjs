@@ -152,6 +152,17 @@ export function embeddedDependencies(documents,layers){
   visit(layers);return Object.fromEntries(found);
 }
 
+function materialLayers(paint){
+  return paint.layers.concat(Object.values(paint.textureSets??{}).flatMap(set=>set.layers));
+}
+
+// A source can be shared across channels and can contain nested instances.
+export function materialImageSources(documents,layers){
+  const ids=[...new Set(layers.flatMap(layer=>Object.values(layer.documentMaps??{})))].sort();
+  const direct=Object.fromEntries(ids.map(id=>[id,documents[id]]));
+  return {...direct,...embeddedDependencies(documents,ids.flatMap(id=>direct[id].layers))};
+}
+
 function embedLayer(paint,doc,layer,newId){
   const documents=paint.imageDocuments;
   if(!id(newId)||Object.hasOwn(documents,newId))throw Error('内嵌源稿编号无效或重复');
@@ -312,7 +323,7 @@ export function validateImageDocuments(paint,{checkStroke,checkedUVTransform,val
     validateImageLayerTree(doc.layers);
   }
   if(checkPending&&stamps>60000)throw Error('待压实的图像笔触过多，请分批保存');
-  for(const layer of paint.layers){
+  for(const layer of materialLayers(paint)){
     if(layer.documentMaps===undefined)continue;
     if(!exact(layer.documentMaps,paintChannels))throw Error('图像文档引用无效');
     if(!Object.keys(layer.documentMaps).length)continue;
@@ -417,7 +428,7 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
   }
   if(o.action==='remove'){
     if(Object.values(documents).some(d=>d.layers.some(l=>l.embedded?.documentId===o.documentId)))throw Error('源稿仍被内嵌实例引用');
-    if(paint.layers.some(l=>Object.values(l.documentMaps??{}).includes(o.documentId)))throw Error('图像文档仍被材质引用，请先解除绑定');delete documents[o.documentId];return;
+    if(materialLayers(paint).some(l=>Object.values(l.documentMaps??{}).includes(o.documentId)))throw Error('图像文档仍被材质引用，请先解除绑定');delete documents[o.documentId];return;
   }
   if(o.action==='bind'){
     if(!paintChannels.includes(o.channel))throw Error('请选择材质通道');

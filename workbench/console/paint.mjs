@@ -5,7 +5,7 @@ import {documentFrame,editingSide,previewDimensions,thumbnailDimensions} from '.
 import {libraryFill,insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
 import {textDefaults,textFonts,textEffects,checkStyleFields,hasImageStyle,paragraphOrigin} from './public/image-text-style.mjs';
-import {imageColorSpaces,embeddedDependencies,validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
+import {imageColorSpaces,materialImageSources,embeddedDependencies,validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
 import {layoutKinds} from './public/image-layout.mjs';
 import {imagePlacement,warpPoint} from './public/image-warp.mjs';
 import {imageLayersThrough,isolateImageLayer} from './public/image-layer-tree.mjs';
@@ -377,7 +377,7 @@ function applyTextureSet(doc,operation,compact,seeds){
   if(typeof name!=='string'||['__proto__','constructor','prototype'].includes(name)||
     !edit||!['add','update','stroke','remove'].includes(edit.op))throw Error('纹理集命令无效');
   if(edit.op==='add'&&edit.kind!=='fill')throw Error('纹理集面板支持新建填充层');
-  if(edit.op==='update')fields(edit.patch,['name','channels','values','maskEnabled']);
+  if(edit.op==='update')fields(edit.patch,['name','channels','values','maskEnabled','documentMaps']);
   if(edit.op==='stroke'&&(edit.target!=='mask'||edit.stroke?.uv!==true))
     throw Error('请选择纹理集的 UV 蒙版');
   if(name===doc.source.material){applyOperations(doc,[edit],undefined,{compact});return;}
@@ -823,7 +823,7 @@ export function paintBakeFingerprint(doc,binding=paintBinding(doc)){
 export function materialFingerprint(doc){
   const plan=compileMaterialGraph(doc.paint.materialGraph,doc.paint.assets),fills=fillMaterialPlans(doc),bindings=doc.paint.layers.filter(l=>Object.keys(l.documentMaps??{}).length).map(l=>({id:l.id,documentMaps:l.documentMaps}));
   let input=Object.keys(fills).length?{output:plan,fills}:plan;
-  if(bindings.length){const ids=[...new Set(bindings.flatMap(l=>Object.values(l.documentMaps)))].sort();input={output:plan,fills,bindings,imageDocuments:{...Object.fromEntries(ids.map(id=>[id,doc.paint.imageDocuments[id]])),...embeddedDependencies(doc.paint.imageDocuments,ids.flatMap(id=>doc.paint.imageDocuments[id].layers))}};}
+  if(bindings.length)input={output:plan,fills,bindings,imageDocuments:materialImageSources(doc.paint.imageDocuments,doc.paint.layers)};
   return input?crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex'):undefined;
 }
 function fillMaterialPlans(doc){return Object.fromEntries([...new Set(doc.paint.layers.filter(layer=>layer.materialId).map(layer=>layer.materialId))].sort().map(id=>[id,compileLibraryMaterial(doc.paint.materials[id].graph,doc.paint.assets)]));}
@@ -860,8 +860,8 @@ function liveDraftOperations(doc,operation,operations,imageDocumentId){
       throw Error('实时笔触批次无效');
     const first=strokeTarget(operations[0]);
     if(!first||imageDocumentId!==undefined&&(first[0]!=='image'||first[1]!==imageDocumentId)||
-       operations.some(edit=>{const key=strokeTarget(edit);return !key||key.some((value,index)=>value!==first[index]);}))
-      throw Error('实时笔触必须位于同一图层和编辑目标');
+       operations.some(edit=>{const key=strokeTarget(edit);return !key||key[0]!==first[0]||key[1]!==first[1]||first[0]!=='image'&&key.some((value,index)=>value!==first[index]);}))
+      throw Error('图像笔触必须属于同一文档，材质笔触必须属于同一图层和目标');
     return operations;
   }
   if(!operation)return [];
@@ -901,7 +901,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
     if(!Array.isArray(window)||window.length!==3||!window.every(Number.isInteger))throw Error('局部预览范围无效');
     const [x,y,side]=window;
     if(![256,512,768,1024,1536,2048].includes(side)||x<0||y<0||x+side>4096||y+side>4096||
-       isolatedImageLayer||beforeImageLayer!==undefined||(!edits.length&&resolution!==256)||edits.some(edit=>edit.action!=='stroke'||!edit.stroke.stamps))
+       isolatedImageLayer||beforeImageLayer!==undefined||(!edits.length&&resolution!==256)||edits.some(edit=>edit.op!=='image'))
       throw Error('局部预览范围无效');
   }
   if(![64,128,256,512,1024,4096].includes(resolution)||resolution===4096&&edits.length)throw Error('图像预览尺寸无效');
@@ -1135,9 +1135,9 @@ function edgeSourceLayers(image,layerId){
 }
 export function imageEdgeViewInput(doc,request){
   const {revision,documentId,layerId,view,selection}=fields(request,['revision','documentId','layerId','view','selection']);
-  if(!['original','black','white','overlay','mask'].includes(view))throw Error('检查视图无效');
+  if(!['original','black','white','overlay','mask','coverage'].includes(view))throw Error('检查视图无效');
   const input=imageDocumentInput(doc,{revision,documentId,resolution:1024});
-  const layers=edgeSourceLayers(doc.paint.imageDocuments[documentId],layerId);
+  const layers=view==='coverage'?[]:edgeSourceLayers(doc.paint.imageDocuments[documentId],layerId);
   input.paint.imageDocuments[documentId].layers=layers;
   input.assets=Object.fromEntries(layers.flatMap(imageLayerAssets).map(id=>[id,assetPath(doc,id)]));
   if(selection){
@@ -1559,7 +1559,7 @@ function replaceTextLayer(doc,layer,style,entry,assetField,origin){
   }
 }
 
-export async function previewImageText(doc,request,{signal}={}){
+export async function previewImageText(doc,request,{signal,materialInput}={}){
   const {revision,documentId,resolution,textDraft,inspectMask,documentView}=fields(request,['revision','documentId','resolution','textDraft','inspectMask','documentView']);
   if(doc.revision!==revision)throw revisionError(doc);
   if(![256,512,1024].includes(resolution)||inspectMask!=null)throw Error('文字预览参数无效');
@@ -1568,7 +1568,7 @@ export async function previewImageText(doc,request,{signal}={}){
   const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId&&item.text);
   if(!layer)throw Error('请选择可编辑的文字层');
   if(typeof content!=='string')throw Error('文字参数无效');
-  const inputFor=next=>imageDocumentInput(next,{revision,documentId,resolution,documentView});
+  const inputFor=materialInput??(next=>imageDocumentInput(next,{revision,documentId,resolution,documentView}));
   if(!content.trim()){
     const next=structuredClone(doc);
     next.paint.imageDocuments[documentId].layers.find(item=>item.id===layerId).visible=false;

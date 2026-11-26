@@ -6,7 +6,7 @@ import {imagePlacement,imageQuadTransform,isMeshWarp,warpPoint} from './image-wa
 const limit=n=>Math.min(1,Math.max(0,n));
 const inside=point=>point.every(n=>n>=0&&n<=1);
 
-export function createImageCanvasText({stage,canvas,parameters,signal,context,preview,save,onChange,openProperties}){
+export function createImageCanvasText({stage,canvas,parameters,signal,context,preview,materialDraft,save,onChange,openProperties}){
   const form=document.createElement('form'),input=document.createElement('textarea'),status=document.createElement('output');
   form.className='document-inline-text';form.hidden=true;
   input.rows=1;input.maxLength=480;input.spellcheck=false;
@@ -34,14 +34,16 @@ export function createImageCanvasText({stage,canvas,parameters,signal,context,pr
   tools.append(hint,apply,cancel,properties,meshHint);parameters.append(tools);
   let session=null,drag=null,resizing=null,previewTimer=null,composing=false;
   const meshEditing=()=>isMeshWarp(session?.layer?.warp);
-  function queueMeshPreview(){
+  function queueTextPreview(){
     clearTimeout(previewTimer);
-    if(!meshEditing()||composing)return;
+    if(!session?.layer||composing)return;
     const current=session;
     previewTimer=setTimeout(()=>{
-      if(session===current&&!current.saving)preview({textDraft:{
-        layerId:current.layer.id,content:input.value,box:current.style.box
-      }});
+      if(session!==current||current.saving)return;
+      const draft={op:'image',documentId:current.state.origin.documentId,
+        textDraft:{layerId:current.layer.id,content:input.value,box:current.style.box}};
+      if(meshEditing())preview(draft);
+      materialDraft(draft);
     },120);
   }
   signal.addEventListener('abort',()=>clearTimeout(previewTimer),{once:true});
@@ -121,7 +123,7 @@ export function createImageCanvasText({stage,canvas,parameters,signal,context,pr
     const edited=session.layer,pointer=resizing?.pointer;
     session=null;resizing=null;status.hidden=true;
     if(pointer!==undefined&&stage.hasPointerCapture(pointer))stage.releasePointerCapture(pointer);
-    if(edited)preview(null);
+    if(edited){preview(null);materialDraft(null);}
     layout();stage.focus({preventScroll:true});onChange();
     return true;
   }
@@ -145,16 +147,16 @@ export function createImageCanvasText({stage,canvas,parameters,signal,context,pr
       session.saving=false;close();
     }catch(error){
       session.saving=false;status.textContent=error.message;status.hidden=false;
-      queueMeshPreview();
+      queueTextPreview();
     }finally{
       input.disabled=apply.disabled=cancel.disabled=false;
       if(session)input.focus({preventScroll:true});
     }
   }
   form.onsubmit=event=>{event.preventDefault();void commit();};
-  input.oninput=()=>{status.hidden=true;layout();queueMeshPreview();};
+  input.oninput=()=>{status.hidden=true;layout();queueTextPreview();};
   input.addEventListener('compositionstart',()=>{composing=true;clearTimeout(previewTimer);},{signal});
-  input.addEventListener('compositionend',()=>{composing=false;queueMeshPreview();},{signal});
+  input.addEventListener('compositionend',()=>{composing=false;queueTextPreview();},{signal});
   input.addEventListener('keydown',event=>{
     if(composing||compositionKey(event))return;
     if(event.key==='Escape'||event.key==='Enter'&&(event.metaKey||event.ctrlKey)){
@@ -188,13 +190,13 @@ export function createImageCanvasText({stage,canvas,parameters,signal,context,pr
     const size=n=>Math.min(4096,Math.max(16,Math.round(n)));
     session.style.box={width:size(box.width+dx),height:size(box.height+dy)};
     layout();
-    queueMeshPreview();
+    queueTextPreview();
   }
   stage.addEventListener('pointermove',resizeBox,{signal});
   for(const type of ['pointerup','pointercancel','lostpointercapture'])stage.addEventListener(type,event=>{
     if(resizing?.pointer!==event.pointerId)return;
     if(type==='pointerup')resizeBox(event);
-    else{session.style.box=resizing.box;layout();queueMeshPreview();}
+    else{session.style.box=resizing.box;layout();queueTextPreview();}
     resizing=null;
     if(stage.hasPointerCapture(event.pointerId))stage.releasePointerCapture(event.pointerId);
   },{signal});

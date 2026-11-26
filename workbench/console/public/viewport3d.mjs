@@ -1,3 +1,5 @@
+import {materialImageSources} from './image-documents.mjs';
+import {createLiveView} from './paint-live-view.mjs';
 import {channelSpecs,activePaintChannels,renderChannel} from './paint-channels.mjs';
 import {applyModelState} from './paint-model-state.mjs';
 import {configureNavigation,attachOrbitInput,alignedCamera,projectionCamera,movedCamera} from './viewport-navigation.mjs';
@@ -345,7 +347,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
   const slotTextures=new Map();
   function removeSlotTextures(name){
     const entry=slotTextures.get(name);
-    entry?.request?.abort();
+    entry?.view.dispose();
     for(const map of Object.values(entry?.maps??{}))map.dispose();
     slotTextures.delete(name);
   }
@@ -354,31 +356,40 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     for(const name of slotTextures.keys())if(!Object.hasOwn(sets,name)){removeSlotTextures(name);paintMaterials(name);}
     for(const [name,set] of Object.entries(sets)){
       let entry=slotTextures.get(name);
-      if(!entry){entry={};slotTextures.set(name,entry);}
-      const key=JSON.stringify([set,doc.modeling]);
-      if(entry.key===key){entry.request?.abort();entry.pending=null;continue;}
-      if(entry.pending===key&&entry.revision===doc.revision)continue;
-      entry.request?.abort();
-      const controller=new AbortController(),revision=doc.revision;
-      Object.assign(entry,{request:controller,pending:key,revision});
-      void (async()=>{
-        const size=512;
-        const response=await fetch('/api/projects/'+doc.id+'/paint/live',{method:'POST',signal:controller.signal,
-          headers:{'Content-Type':'application/json'},body:JSON.stringify({textureSet:name,revision,resolution:size,format:'pbr8'})});
-        if(response.status===204)return;
-        if(!response.ok)throw Error((await response.json()).error);
-        const pixels=new Uint8Array(await response.arrayBuffer());
-        if(controller.signal.aborted)return;
-        if(pixels.length!==size*size*15)throw Error('纹理集预览尺寸无效');
-        const {maps}=updateLivePaintTextures(entry.maps,size,activePaintChannels(set),space=>createLiveTexture(space,size));
-        fillLivePaintTextures(pixels,size,maps);
-        for(const map of Object.values(maps))map.needsUpdate=true;
-        Object.assign(entry,{maps,key});
-        paintMaterials(name);
-      })().catch(error=>{if(!controller.signal.aborted)state(name+' · '+error.message,'error');})
-        .finally(()=>{if(entry.request===controller)entry.pending=null;});
+      if(!entry){
+        entry={};
+        entry.view=createLiveView({canvas:document.createElement('canvas'),guide:document.createElement('canvas'),
+          renderCanvas:false,viewport:{showLivePaint(){}},context:()=>entry.context,
+          onStatus:(message,failed)=>{if(failed)state(name+' · '+message,'error');},
+          onFrame:({pixels,request})=>{
+            if(entry.pixels===pixels)return;
+            const {maps}=updateLivePaintTextures(entry.maps,request.size,activePaintChannels(doc.paint.textureSets[name]),space=>createLiveTexture(space,request.size));
+            fillLivePaintTextures(pixels,request.size,maps);
+            for(const map of Object.values(maps))map.needsUpdate=true;
+            entry.maps=maps;entry.pixels=pixels;paintMaterials(name);
+          }});
+        slotTextures.set(name,entry);
+      }
+      if(entry.doc!==doc){
+        entry.sources=materialImageSources(doc.paint.imageDocuments,set.layers);
+        const key=JSON.stringify([set,doc.modeling,entry.sources]);
+        entry.context={id:doc.id,revision:doc.revision,textureSet:name,key:JSON.stringify([doc.id,doc.revision,name]),
+          reuseKey:entry.key===key?entry.context?.key:undefined,fastSize:512};
+        entry.doc=doc;entry.key=key;entry.draft=null;
+      }
+      entry.view.setVisible(active);
+      if(active)entry.view.refresh();
     }
   }
+  function previewSlotEdit(operation){
+    const edit=Array.isArray(operation)?operation[0]:operation;
+    for(const entry of slotTextures.values()){
+      const next=edit&&Object.hasOwn(entry.sources,edit.documentId)?operation:null;
+      if(entry.draft===next)continue;
+      entry.draft=next;entry.view.update(next);
+    }
+  }
+
   function paintMaterials(onlyName) {
     const projected=hasProjectedFill();
     const enabled=new Set(livePaint?activePaintChannels(doc.paint):manifest?.activeChannels||activePaintChannels(doc?.paint));
@@ -884,5 +895,7 @@ export function createViewport({host,onStatus=()=>{},onMaterials=()=>{},onSelect
     (localUI?host.querySelector('[data-vp-ortho]'):document.getElementById('vp-ortho'))?.setAttribute('aria-pressed', String(orthographic));
     size();
   }
-  return {setDisplayColorPreference(value){displayColorPreference=value;colorWatcher?.setPreference(value);},showChannelPreview,beginSourcePreview,inspectionChannels,pickedSurface,sourceMaterial,readCamera:()=>camera&&cameraState(),dispose(){if(disposed)return;disposed=true;sequence++;textureSequence++;active=false;resizeObserver?.disconnect();stopWatchingScale?.();colorWatcher?.dispose();controls?.dispose();pathTracer?.dispose();disposeModel();objectOutline?.dispose();environment?.dispose();solidMaterial.dispose();wireMaterial.dispose();renderer?.dispose();renderer?.domElement.remove();cursorMark?.remove();},modelingContext,applyCamera,navigate,pickTargetUV,focusDistanceAt,viewFrame,screenPoint,setSceneCursor,cursorPointAt,showLivePaint,showMaskCanvas,setRenderPreview,renderPreviewState:()=>pathTracer?.state(),setDisplay,setOverlays,setEnvironment(raw){displaySettings=sceneOptions(raw);syncEnvironment();},capture(){if(!renderer||!camera||host.dataset.state!=='ready')throw Error('请等待模型载入');updateDepthRange();renderObserved();notifyCamera();const data=renderer.domElement.toDataURL('image/png');request();return data;},getRenderSettings(samples=64){if(!manifest||host.dataset.state!=='ready'||!camera)throw Error('请等待三维模型与贴图载入');const aspect=host.clientWidth/Math.max(host.clientHeight,1),width=Math.round(Math.min(1200,1200*aspect)),height=Math.round(width/aspect);const match=manifest.textureUrl?.match(/\/jobs\/([^/]+)\/files\//);return {samples,width:Math.max(128,width),height:Math.max(128,Math.min(2048,height)),textureJobId:match?.[1]||null,camera:cameraState()};},loadProject,focusSelected,setActive(value){active=value;if(!active&&axisMotion)applyCamera(axisMotion.end);else size();},fit:frameAll,direction,projection,select,setWireframe(value){wireframe=value;paintMaterials();},setUnlit:shade,setSolo(value){solo=value;paintMaterials();},syncDocument,async setTextureSource(source){textureOverride=source;await this.refreshTexture();},async reload(){if(doc)return loadProject(doc);},async refreshTexture(){if(!doc||!manifest||host.dataset.state==='error')return;const token=sequence,textureToken=++textureSequence;try{const r=await fetch(`/api/projects/${doc.id}/viewport`);if(!r.ok)throw Error('贴图来源请求失败');const next=resolvedTexture(await r.json());if(token!==sequence||textureToken!==textureSequence)return;if(next.status==='ready'&&(next.textureUrl!==manifest.textureUrl||JSON.stringify(next.materialUrls)!==JSON.stringify(manifest.materialUrls)))await applyTexture(next,token,textureToken);else{manifest=next;textureStatus();}}catch(e){state('贴图更新失败：'+e.message,'error');}},getState(){return {projectId:doc?.id,modelRadius:radius,meshCount:host.dataset.meshes,frames:frameCount,clipping:camera?{near:camera.near,far:camera.far}:null,selected,wireframe,unlit,orthographic,position:camera?.position.toArray(),materialUrls:manifest?.materialUrls,textureUrl:manifest?.textureUrl,textureRevision:manifest?.textureRevision};}};
+  return {setDisplayColorPreference(value){displayColorPreference=value;colorWatcher?.setPreference(value);},showChannelPreview,beginSourcePreview,inspectionChannels,pickedSurface,sourceMaterial,readCamera:()=>camera&&cameraState(),dispose(){if(disposed)return;disposed=true;sequence++;textureSequence++;active=false;resizeObserver?.disconnect();stopWatchingScale?.();colorWatcher?.dispose();controls?.dispose();pathTracer?.dispose();disposeModel();objectOutline?.dispose();environment?.dispose();solidMaterial.dispose();wireMaterial.dispose();renderer?.dispose();renderer?.domElement.remove();cursorMark?.remove();},modelingContext,applyCamera,navigate,pickTargetUV,focusDistanceAt,viewFrame,screenPoint,setSceneCursor,cursorPointAt,showLivePaint,previewSlotEdit,showMaskCanvas,setRenderPreview,renderPreviewState:()=>pathTracer?.state(),setDisplay,setOverlays,setEnvironment(raw){displaySettings=sceneOptions(raw);syncEnvironment();},capture(){if(!renderer||!camera||host.dataset.state!=='ready')throw Error('请等待模型载入');updateDepthRange();renderObserved();notifyCamera();const data=renderer.domElement.toDataURL('image/png');request();return data;},getRenderSettings(samples=64){if(!manifest||host.dataset.state!=='ready'||!camera)throw Error('请等待三维模型与贴图载入');const aspect=host.clientWidth/Math.max(host.clientHeight,1),width=Math.round(Math.min(1200,1200*aspect)),height=Math.round(width/aspect);const match=manifest.textureUrl?.match(/\/jobs\/([^/]+)\/files\//);return {samples,width:Math.max(128,width),height:Math.max(128,Math.min(2048,height)),textureJobId:match?.[1]||null,camera:cameraState()};},loadProject,focusSelected,setActive(value){active=value;
+    for(const entry of slotTextures.values()){entry.view.setVisible(value);if(value)entry.view.refresh();}
+    if(!active&&axisMotion)applyCamera(axisMotion.end);else size();},fit:frameAll,direction,projection,select,setWireframe(value){wireframe=value;paintMaterials();},setUnlit:shade,setSolo(value){solo=value;paintMaterials();},syncDocument,async setTextureSource(source){textureOverride=source;await this.refreshTexture();},async reload(){if(doc)return loadProject(doc);},async refreshTexture(){if(!doc||!manifest||host.dataset.state==='error')return;const token=sequence,textureToken=++textureSequence;try{const r=await fetch(`/api/projects/${doc.id}/viewport`);if(!r.ok)throw Error('贴图来源请求失败');const next=resolvedTexture(await r.json());if(token!==sequence||textureToken!==textureSequence)return;if(next.status==='ready'&&(next.textureUrl!==manifest.textureUrl||JSON.stringify(next.materialUrls)!==JSON.stringify(manifest.materialUrls)))await applyTexture(next,token,textureToken);else{manifest=next;textureStatus();}}catch(e){state('贴图更新失败：'+e.message,'error');}},getState(){return {projectId:doc?.id,modelRadius:radius,meshCount:host.dataset.meshes,frames:frameCount,clipping:camera?{near:camera.near,far:camera.far}:null,selected,wireframe,unlit,orthographic,position:camera?.position.toArray(),materialUrls:manifest?.materialUrls,textureUrl:manifest?.textureUrl,textureRevision:manifest?.textureRevision};}};
 }

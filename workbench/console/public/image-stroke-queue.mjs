@@ -24,6 +24,9 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
     const key=strokeTarget(op);
     return key?.[0]===domain?[id,...key.slice(1)]:null;
   };
+  // Image layers and their masks compose in one document. Each queued
+  // operation already owns its layer and target; surface-space strokes do not.
+  const compatible=(a,b)=>!!b&&(domain==='image'?a[0]===b[0]&&a[1]===b[1]:same(a,b));
   let target=null,expected=null,active=null,task=null,failure=null,canRebase=false;
   const pending=[];
   function reset(){
@@ -40,7 +43,7 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
     for(const entry of draft.pending){
       const op=entry?.operation;
       if(!requestIdPattern.test(entry?.requestId)||ids.has(entry.requestId)||typeof entry.attempted!=='boolean'||
-         !same(operationKey(id,op),draft.target))return false;
+         !compatible(draft.target,operationKey(id,op)))return false;
       ids.add(entry.requestId);
     }
     target=draft.target;expected=draft.expected;pending.push(...draft.pending);
@@ -48,16 +51,16 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
     return true;
   }
   function accepts(origin){
-    return !failure&&pending.length<imageStrokeQueueLimit&&(!target||same(target,identity(origin)));
+    return !failure&&pending.length<imageStrokeQueueLimit&&(!target||compatible(target,identity(origin)));
   }
   function prepare(operation,origin){
     const key=operationKey(origin.id,operation),doc=read();
-    if(!key||doc?.id!==origin.id||target&&!same(target,key))return false;
+    if(!key||doc?.id!==origin.id||target&&!compatible(target,key))return false;
     if(!target){target=key;expected=origin.revision;}
     return true;
   }
   function operations(origin){
-    if(!target||origin.id!==target[0]||(origin.layerId!==undefined&&!same(target,identity(origin))))return [];
+    if(!target||origin.id!==target[0]||(origin.layerId!==undefined&&!compatible(target,identity(origin))))return [];
     const saved=receipt(read(),pending[0]);
     const start=origin.revision===expected?0:saved?.revision===origin.revision&&saved.revision===expected+1?1:null;
     return start===null?[]:[...pending.slice(start).map(entry=>entry.operation),...(active?[active]:[])];
@@ -151,5 +154,5 @@ export function createImageStrokeQueue({read,readLatest,write,onPreview,onStateC
     confirmedOperation:revision=>receipt(read(),pending[0])?.revision===revision?pending[0]?.operation:null,
     flush:()=>task||Promise.resolve(!pending.length),
     get size(){return pending.length;},get saving(){return !!task;},get failure(){return failure;},get canRebase(){return canRebase;},
-    get target(){return target?.slice()??null;}};
+    get target(){return pending.length?operationKey(target[0],pending[0].operation):target?.slice()??null;}};
 }

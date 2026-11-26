@@ -14,7 +14,9 @@ export function mountTextureSets(ctx,bridge){
       <div class="texture-set-actions"><button type="button" data-add>${workspaceIcons.plus}新建填充层</button><button type="button" data-remove aria-label="删除图层" title="删除图层">${workspaceIcons.trash}</button></div>
       <fieldset hidden><details open><summary>图层属性</summary><div class="texture-set-parameters">
         <label>名称<input aria-label="图层名称" name="layerName"></label><label>颜色<span class="texture-set-color"><input aria-label="颜色" name="color" type="color"><span data-hex aria-hidden="true"></span></span></label>
-        <label>粗糙度<input name="roughness" type="number" min="0" max="1" step=".01"></label>
+        <label>粗糙度<input aria-label="粗糙度" name="roughness" type="number" min="0" max="1" step=".01"></label>
+        <label>颜色来源<select name="colorImage" aria-label="纹理集颜色来源"></select></label>
+        <label>粗糙度来源<select name="roughnessImage" aria-label="纹理集粗糙度来源"></select></label>
       </div></details>
       <details open><summary>蒙版</summary><div class="texture-set-parameters">
         <label>笔刷模式<select name="ink" aria-label="UV 蒙版"><option value="0">遮盖</option><option value="1">恢复</option></select></label>
@@ -101,8 +103,13 @@ export function mountTextureSets(ctx,bridge){
     layerRow.hidden=fields.hidden=!layer;
     if(next===key)return;key=next;
     layers.replaceChildren(...[...stackLayers].reverse().map(l=>new Option(l.name,l.id)));layers.value=layer?.id??'';syncSelectMenu(layers);
-    field('color').disabled=!layer?.values||!!layer.maps?.color;
-    field('roughness').disabled=!layer?.values||!!layer.maps?.roughness;
+    for(const channel of ['color','roughness']){
+      const select=field(channel+'Image'),bound=layer?.documentMaps?.[channel];
+      select.replaceChildren(new Option(layer?.maps?.[channel]?'导入贴图':'图层数值',''),
+        ...Object.entries(doc.paint.imageDocuments??{}).map(([id,image])=>new Option(image.name,id)));
+      select.value=bound??'';select.disabled=layer?.kind!=='fill'||!!layer.materialId;syncSelectMenu(select);
+      field(channel).disabled=!layer?.values||!!layer.maps?.[channel]||!!bound;
+    }
     if(layer){field('layerName').value=layer.name;field('color').value=layer.values?.color??'#808080';field('roughness').value=layer.values?.roughness??.5;
       root.querySelector('[data-hex]').textContent=field('color').value.toUpperCase();}
     status.textContent=reason||(!layer?'在当前材质槽新建第一层。':'');
@@ -119,6 +126,14 @@ export function mountTextureSets(ctx,bridge){
     channels:{color:true,roughness:true,metallic:true},values:{color:'#808080',roughness:.5,metallic:0}}});
   remove.onclick=()=>void command({op:'remove',id:item().id});
   function update(patch){void command({op:'update',id:item().id,patch});}
+  for(const channel of ['color','roughness']){
+    field(channel+'Image').onchange=event=>{
+      const layer=item(),documentMaps={...layer.documentMaps},id=event.target.value;
+      if(id)documentMaps[channel]=id;
+      else delete documentMaps[channel];
+      update({documentMaps,...(id?{channels:{...layer.channels,[channel]:true}}:{})});
+    };
+  }
   field('layerName').onchange=e=>update({name:e.target.value});
   field('color').onchange=e=>update({channels:{...item().channels,color:true},values:{...item().values,color:e.target.value}});
   field('roughness').onchange=e=>{if(e.target.reportValidity()&&e.target.value!=='')update({channels:{...item().channels,roughness:true},values:{...item().values,roughness:e.target.valueAsNumber}});};

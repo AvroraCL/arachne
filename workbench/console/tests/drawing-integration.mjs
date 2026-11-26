@@ -533,7 +533,10 @@ try{
   await page.getByRole('button',{name:'曲线通道',exact:true}).click();
   await page.getByRole('option',{name:'红色',exact:true}).click();
   await page.locator('.document-curves-graph[data-channel=red]:not([data-disabled])').waitFor();
-  await page.mouse.click(...await graphPoint(128,148));
+  await graph.scrollIntoViewIfNeeded();
+  const [curveX,curveY]=await graphPoint(128,148);
+  const graphBox=await graph.boundingBox();
+  await graph.click({position:{x:curveX-graphBox.x,y:curveY-graphBox.y}});
   const redCurve=await until(async()=>{
     const current=await api(projectRoute);
     return current.revision>rgbCurve.revision&&curvesLayer(current).adjustment.points.red.length===3&&current;
@@ -714,6 +717,13 @@ try{
   assert.equal(await bucket.getAttribute('aria-pressed'),'true');
   await setBrushOption('油漆桶容差',12);
   await editor.getByLabel('图像前景色',{exact:true}).fill('#f3b529');
+  const readBucketPixel=()=>canvas.evaluate(c=>Array.from(c.getContext('2d').getImageData(c.width*.17,c.height*.5,1,1).data));
+  await page.mouse.move(...await point([.17,.5]));await page.mouse.down();
+  await until(async()=>String(await readBucketPixel())==='243,181,41,255','按住油漆桶可见实际填充');
+  assert.equal((await api(projectRoute)).revision,bucketSeed.revision);
+  await page.keyboard.press('Escape');await page.mouse.up();
+  await until(async()=>String(await readBucketPixel())!=='243,181,41,255','取消填充草稿');
+  assert.equal((await api(projectRoute)).revision,bucketSeed.revision);
   await page.mouse.click(...await point([.17,.5]));
   const bucketStrokes=current=>current.paint.imageDocuments[fillDoc].layers[0].strokes;
   const contiguousFill=await until(async()=>{
@@ -810,7 +820,8 @@ try{
   await brushTool.click();
   await setBrushOption('流量',100);
   await setBrushOption('不透明度',100);
-  const delayedWrite=async route=>{await delay(300);await route.continue();};
+  const heldWrites=Promise.withResolvers();
+  const delayedWrite=async route=>{await heldWrites.promise;await route.continue();};
   await page.route('**/paint/commands',delayedWrite);
   const pendingPreview=page.waitForResponse(response=>{
     const request=response.request().postDataJSON();
@@ -819,7 +830,7 @@ try{
   const rapidPositions=[[.2,.35],[.34,.35],[.48,.35],[.62,.35],[.76,.35]];
   for(const position of rapidPositions)await page.mouse.click(...await point(position));
   assert.ok(Number(await editor.locator('.document-image-stage').getAttribute('data-pending-strokes'))>=3);
-  assert.equal((await pendingPreview).status(),200);
+  try{assert.equal((await pendingPreview).status(),200);}finally{heldWrites.resolve();}
   await canvas.focus();
   assert.equal(await page.evaluate(()=>window.arachneNativeHost.command('undo')),true);
   const rapidStrokes=current=>current.paint.imageDocuments[rapidDoc].layers[0].strokes;

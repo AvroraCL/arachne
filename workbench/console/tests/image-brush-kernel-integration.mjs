@@ -31,7 +31,8 @@ async function api(route,body){
   return result.json();
 }
 const counts=Number(process.env.ARACHNE_BRUSH_BENCH_SAMPLES||5),timings={},digests={};
-try{
+const longLine=process.argv.includes('--long-line');
+async function run(){
   for(let n=0;n<100;n++){
     if(await fetch(origin+'/api/health').then(r=>r.ok,()=>false))break;
     await new Promise(resolve=>setTimeout(resolve,100));
@@ -68,7 +69,7 @@ try{
   browser=await chromium.launch({executablePath:process.env.ARACHNE_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   const page=await browser.newPage({viewport:{width:1540,height:920}}),errors=[];
   page.on('pageerror',error=>errors.push(error.message));
-  await page.addInitScript(()=>{
+  if(!longLine)await page.addInitScript(()=>{
     // Track which draft actually reached the drawing canvas, after transfer.
     const buffers=new WeakMap(),originalFetch=window.fetch,putImage=CanvasRenderingContext2D.prototype.putImageData;
     window.brushBench={};
@@ -215,6 +216,43 @@ try{
   await editor.getByRole('button',{name:'实际像素',exact:true}).click();
   await layer.locator('.document-layer-select').click();
   await editor.getByRole('button',{name:'画笔',exact:true}).click();
+  if(longLine){
+    await editor.getByLabel('图像前景色',{exact:true}).fill('#ff135b');
+    await numeric(editor,'像素半径',3);await numeric(editor,'流量',75);
+    const length=700;
+    for(let pass=0;pass<=counts;pass++){
+      const box=await canvas.boundingBox(),left=box.x+(box.width-length)/2,top=box.y+box.height/2;
+      await page.mouse.move(left,top);await page.waitForTimeout(350);
+      await canvas.evaluate((c,{left,top,length})=>{
+        const ctx=c.getContext('2d'),box=c.getBoundingClientRect(),x=Math.floor(left-box.left),y=Math.floor(top-box.top);
+        const before=ctx.getImageData(x,y,length+1,1).data;
+        const sites=Array.from({length:16},(_,i)=>({x:Math.floor((i+1)*length/16)}));
+        function move(e){
+          if(e.buttons)for(const site of sites)if(site.event===undefined&&e.clientX-left>=site.x-.5)site.event=performance.now();
+        }
+        document.addEventListener('pointermove',move,true);
+        let frame;
+        function sample(){
+          frame=requestAnimationFrame(sample);
+          if(!sites.some(s=>s.event!==undefined)||c.width!==4096)return;
+          const now=performance.now(),pixels=ctx.getImageData(x,y,length+1,1).data;
+          for(const site of sites)if(site.hit===undefined&&[0,1,2,3].some(k=>Math.abs(pixels[4*site.x+k]-before[4*site.x+k])>8))site.hit=now;
+        }
+        frame=requestAnimationFrame(sample);
+        window.finishMotion=()=>{
+          cancelAnimationFrame(frame);document.removeEventListener('pointermove',move,true);
+          return sites.filter(s=>s.event!==undefined&&s.hit!==undefined).map(s=>Math.round(Math.max(0,s.hit-s.event)));
+        };
+      },{left,top,length});
+      await page.mouse.down();await page.mouse.move(left+length,top,{steps:35});
+      await nextRevision(()=>page.mouse.up());await page.waitForTimeout(75);
+      const times=await page.evaluate(()=>window.finishMotion());
+      assert.ok(times.length>=15,'crossing pixels reached the drawing canvas');
+      console.log('MOTION',3,length,pass,JSON.stringify({covered:times.length,ms:times}));
+      await stage.focus();await nextRevision(()=>page.keyboard.press(mod+'+z'));
+    }
+    assert.deepEqual(errors,[]);return;
+  }
   const popup=editor.getByRole('button',{name:'笔尖参数',exact:true}),tipPanel=editor.getByRole('dialog',{name:'笔尖参数',exact:true});
   for(const name of ['thin','tip','softMask']){
     if(name==='softMask')await layer.locator('.document-layer-mask').click();
@@ -414,9 +452,31 @@ try{
   for(let i=2;i>=0;i--){await nextRevision(()=>page.keyboard.press(mod+'+Shift+z'));assert.equal(await hash(),undos[i]);}
   await page.reload();await wait4K();assert.equal(await hash(),mixedHash);
   console.log('Mixed handoff',JSON.stringify({pressInk,mixedPixels,frames:rows.length,revision:doc.revision}));
+  // Select a mask and paint before the content write has returned. Both
+  // gestures must survive with their captured targets and separate history.
+  await layer.locator('.document-layer-select').click();
+  let resume,intercept;
+  const hold=new Promise(r=>{resume=r;}),received=new Promise(r=>{intercept=r;});
+  const requests=[];
+  const capture=r=>{if(r.url().endsWith('/paint/commands'))requests.push(...r.postDataJSON().operations);};
+  page.on('request',capture);
+  await page.route('**/paint/commands',async r=>{intercept();await hold;await r.continue();},{times:1});
+  try{
+    await drag(.52);await received;
+    await layer.locator('.document-layer-mask').click();
+    assert.equal(await layer.locator('.document-layer-mask').getAttribute('aria-pressed'),'true');
+    await drag(.52);
+    assert.equal(await stage.getAttribute('data-pending-strokes'),'2');
+  }finally{resume();}
+  await page.waitForFunction(()=>document.querySelector('.document-image-stage')?.dataset.pendingStrokes==='0');
+  page.off('request',capture);
+  assert.deepEqual(requests.map(op=>[op.layerId,op.target]),[['ink','pixels'],['ink','mask']]);
+  const previousRevision=doc.revision;doc=await api(route);assert.equal(doc.revision,previousRevision+2);
+  await wait4K();await compareCanvas();
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({timings,digests,burst:{strokes:3,fastMs:burstFast}}));
-}finally{
+}
+try{await run();}finally{
   try{await browser?.close();}finally{
     if(server.exitCode===null&&server.signalCode===null){const done=once(server,'exit');server.kill();await done;}
   }

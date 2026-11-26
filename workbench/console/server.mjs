@@ -508,7 +508,9 @@ const server=http.createServer(async(req,res)=>{
       if(operation==='live'){
         if(b.revision!==doc.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
         const scoped=textureSetDocument(doc,b.textureSet);
-        const input=livePaintInput(scoped,b);
+        const textDraft=b.textDraft!==undefined;
+        if(textDraft&&(b.operation||b.operations||b.pickUv||b.rawLayer||![256,512].includes(b.resolution)))throw Error('文字材质草稿参数无效');
+        const input=textDraft?null:livePaintInput(scoped,b);
         const controller=new AbortController();
         const disconnect=()=>{if(!res.writableEnded)controller.abort();};
         res.on('close',disconnect);
@@ -517,13 +519,16 @@ const server=http.createServer(async(req,res)=>{
           const geometry=await preparePaintGeometry(scoped,{signal:controller.signal});
           if(res.destroyed||controller.signal.aborted)return;
           if(read(id).revision!==b.revision){res.writeHead(204);res.end();return;}
-          input.source=geometry.source;input.surfaceSources=geometry.surfaceSources;
-          let pixels=await livePaint(input,{signal:controller.signal});
+          const geometryInput={source:geometry.source,surfaceSources:geometry.surfaceSources};
+          const resolution=textDraft?b.resolution:input.liveResolution;
+          let pixels=textDraft?await previewImageText(scoped,{revision:b.revision,documentId:b.documentId,resolution,textDraft:b.textDraft},{
+            signal:controller.signal,materialInput:next=>({...livePaintInput(next,b),...geometryInput})
+          }):await livePaint({...input,...geometryInput},{signal:controller.signal});
           if(res.destroyed)return;
           if(read(id).revision!==b.revision){res.writeHead(204,{'Cache-Control':'no-store'});res.end();return;}
           const headers={'Content-Type':'application/octet-stream','Cache-Control':'no-store',
-            'X-Paint-Resolution':String(input.liveResolution),'X-Paint-Revision':String(b.revision)};
-          if(input.liveResolution===4096&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
+            'X-Paint-Resolution':String(resolution),'X-Paint-Revision':String(b.revision)};
+          if(resolution===4096&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
             pixels=await compressLive(pixels,{level:1});headers['Content-Encoding']='gzip';headers.Vary='Accept-Encoding';
           }
           if(res.destroyed)return;

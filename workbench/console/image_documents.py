@@ -1564,12 +1564,22 @@ def image_selection_sample(document,assets,options,size):
 
 def image_edge_view(document,assets,size,options):
     view = options['view']
+    def preview(pixels, space=None):
+        return png_bytes(framed_pixels(pixels, document, limit=size), space)
+    if view == 'coverage':
+        # Compute feather and asset masks on their authored grid before reducing for display.
+        mask = selection_pixels(ImageSurface(4096,assets), options.get('selection'))
+        alpha = framed_pixels(mask,document,limit=size)
+        result = np.empty((*alpha.shape,4), dtype=np.uint8)
+        result[:,:,:3] = (209,42,49)
+        result[:,:,3] = np.rint(alpha*.58)
+        return png_bytes(result)
     if view == 'original':
-        return png_bytes(composite_document(document,assets,size),document['colorSpace'])
+        return preview(composite_document(document,assets,size),document['colorSpace'])
     surface = ImageSurface(size,assets)
     mask = selection_pixels(surface,options['selection']) if options.get('selection') else np.full((size,size),255,np.uint8)
     if view == 'mask':
-        return png_bytes(mask)
+        return preview(mask)
     rgba = Image.fromarray(composite_document(document,assets,size))
     coverage = Image.fromarray(mask)
     if view == 'overlay':
@@ -1581,12 +1591,12 @@ def image_edge_view(document,assets,size,options):
         red = Image.new('RGBA',rgba.size,(209,42,49,255))
         red.putalpha(ImageChops.invert(coverage).point(lambda n: n*.58))
         rgba.alpha_composite(red)
-        return png_bytes(np.asarray(rgba),space)
+        return preview(np.asarray(rgba),space)
     from PIL import ImageChops
     rgba.putalpha(ImageChops.multiply(rgba.getchannel('A'),coverage))
     background = Image.new('RGBA',rgba.size,'black' if view=='black' else 'white')
     background.alpha_composite(rgba)
-    return png_bytes(np.asarray(background),document['colorSpace'])
+    return preview(np.asarray(background),document['colorSpace'])
 
 
 def png_bytes(pixels, color_space=None, output_space=None):

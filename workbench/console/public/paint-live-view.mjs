@@ -57,6 +57,32 @@ function strokeWindow(edits,visible,bleed=0){
   return side?[...ranges.map(([start,end])=>clamp(Math.round((start+end-side)/2),0,4096-side)),side]:undefined;
 }
 
+function draftWindow(edits,state){
+  if(edits.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke?.stamps))
+    return strokeWindow(edits,state.visiblePixels??(state.nativeCanvas&&state.patchLayer?[[0,detailSize],[0,detailSize]]:null),state.strokeBleed);
+  // For a transform or adjustment every visible pixel may change. Use a
+  // native window only when its cost is bounded by the ordinary draft size.
+  if(!edits.every(edit=>edit?.op==='image'&&!edit.textDraft))return;
+  const bounds=edits.length===1&&state.draftBounds?.(edits[0]);
+  if(!bounds&&!state.visiblePixels)return;
+  const [x,y,w,h]=documentFrame(state.imageGeometry);
+  const ranges=(state.visiblePixels??[[x,x+w],[y,y+h]]).map(([start,end],i)=>[
+    Math.max(i?y:x,Math.floor(start),bounds?Math.floor(bounds[i]*detailSize)-2:0),
+    Math.min(i?y+h:x+w,Math.ceil(end),bounds?Math.ceil(bounds[i+2]*detailSize)+2:detailSize)
+  ]);
+  if(ranges.some(([start,end])=>end<=start))return;
+  const needed=Math.max(...ranges.map(([start,end])=>end-start));
+  const side=[256,512,768,1024].find(value=>value>=needed&&value<=(state.fastSize??256));
+  if(side)return [...ranges.map(([start,end])=>clamp(Math.floor((start+end-side)/2),0,detailSize-side)),side];
+}
+
+function draftTarget(operation){
+  if(!operation)return '';
+  const edit=Array.isArray(operation)?operation.at(-1):operation;
+  return JSON.stringify([edit.op,edit.action,edit.documentId,edit.layerId??edit.id??edit.textDraft?.layerId,edit.target,
+    edit.transforms?.flatMap(t=>t.layerIds),edit.patch&&Object.keys(edit.patch)]);
+}
+
 export function createLiveView({viewport,canvas,guide,context:readContext,localBrush,onStatus,onFrame=()=>{},renderCanvas=true,rgba=false,retryDelays=defaultRetryDelays}){
   const ctx=canvas.getContext('2d',{alpha:rgba,...(rgba?{colorSpace:preferredDisplaySpace()}:{})});
   const canvasSpace=ctx.getContextAttributes?.().colorSpace??'srgb';
@@ -67,7 +93,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
   let localInk=null;
   let detailFailure=null,fastFailure=null,visible=true,disposed=false,patched=null;
   const context=()=>visible&&!disposed&&!page?.hidden?readContext():null;
-  const fastSize=state=>rgba&&[512,1024].includes(state?.fastSize)?state.fastSize:workingSize;
+  const fastSize=state=>(rgba||state?.textureSet)&&[512,1024].includes(state?.fastSize)?state.fastSize:workingSize;
 
   function cancelRetry(){if(retryTimer!==null)clearTimeout(retryTimer);retryTimer=null;retrying=null;}
   function cancelPending(){
@@ -197,9 +223,9 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       (operation||frame?.request.group!==request.group||frame.request.operation||frame.request.size<=size);
     try{
       if(context()?.modeling&&frame?.request.revision!==revision)onStatus('正在更新建模后的材质与表面…');
-      const draft=rgba&&operation?.textDraft?{textDraft:operation.textDraft}:
+      const draft=operation?.textDraft?{textDraft:operation.textDraft,documentId:operation.documentId}:
         Array.isArray(operation)?{operations:operation}:{operation};
-      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:request.savedWindow?256:size,window,...(request.imageGeometry?{documentView:true}:{})}:{revision,...draft,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
+      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:request.savedWindow?256:size,window,...(request.imageGeometry?{documentView:true}:{})}:{revision,...draft,textureSet:request.textureSet,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
       const response=await transport(()=>fetch('/api/projects/'+id+'/paint/'+(rgba?'image-live':'live'),{
         method:'POST',headers:{'Content-Type':'application/json'},signal:request.controller.signal,
         body
@@ -294,7 +320,8 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     cancelRetry();fastFailure=null;
     // Consecutive moves in one gesture can display intermediate frames. A
     // cancel, revision change or source switch invalidates the whole gesture.
-    const continued=intent?.key===state.key&&Boolean(intent.operation)===Boolean(operation);
+    const target=draftTarget(operation);
+    const continued=intent?.key===state.key&&intent.target===target;
     if(!continued||size===detailSize){
       clearTimeout(detailTimer);
       detailTimer=null;
@@ -307,12 +334,12 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     // Its worker tile already includes the saved history for the new revision.
     const previous=frame?.request;
     const nativeSurface=previous?.size===detailSize&&(previous.key===state.key||
-      state.nativeCanvas&&previous.id===state.id&&previous.documentId===state.documentId&&
+      state.nativeCanvas&&strokes.every(edit=>edit?.op==='image'&&edit.action==='stroke')&&
+      previous.id===state.id&&previous.documentId===state.documentId&&
       previous.inspectMask===state.inspectMask&&previous.colorSpace===state.colorSpace&&
       JSON.stringify(previous.imageGeometry)===JSON.stringify(state.imageGeometry));
-    const window=savedWindow??(rgba&&nativeSurface&&
-      strokes.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke.stamps)?strokeWindow(strokes,state.visiblePixels??(state.nativeCanvas&&state.patchLayer?[[0,detailSize],[0,detailSize]]:null),state.strokeBleed):undefined);
-    intent={...state,operation,size,window,savedWindow,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
+    const window=savedWindow??(rgba&&nativeSurface&&operation?draftWindow(strokes,state):undefined);
+    intent={...state,operation,target,size,window,savedWindow,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
     if(operation&&localBrush){
       const sameCanvas=frame?.request.id===state.id&&frame.request.documentId===state.documentId&&frame.request.inspectMask===state.inspectMask;
       const patch=localBrush(strokes);
@@ -406,7 +433,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       const state=context();
       if(!state||intent?.key!==state.key)return;
       const edits=Array.isArray(intent.operation)?intent.operation:[intent.operation];
-      const moved=intent.operation&&intent.window&&state.visiblePixels&&intent.window.join(',')!==strokeWindow(edits,state.visiblePixels,state.strokeBleed)?.join(',');
+      const moved=frame?.request.size===detailSize&&intent.operation&&state.visiblePixels&&intent.window?.join(',')!==draftWindow(edits,state)?.join(',');
       if(moved||intent.size<fastSize(state))requestFrame(state,intent.operation);
     },
     preferencesChanged(){

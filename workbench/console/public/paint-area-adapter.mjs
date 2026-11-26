@@ -6,6 +6,7 @@ import {createProjectState} from './project-state.mjs';
 import {createEditorRegistry} from './editor-registry.mjs';
 import {createAreaWorkspace} from './area-workspace.mjs';
 import {registerAreaEditors} from './area-editors.mjs';
+import {materialImageSources} from './image-documents.mjs';
 import {createLiveView} from './paint-live-view.mjs';
 import {createUVSelection} from './paint-uv-selection.mjs';
 import {createMaterialStrokeSave} from './material-stroke-save.mjs';
@@ -24,7 +25,7 @@ export function setupPaintAreas(hooks){
   let applying=false,lastProject=null,preferredViewport=null,preferredCanvas=null,preferredLayers=null;
   let materialVisible=false,materialDetail=false,visibleEditors=[],inspection=null,inspectionFrame=null,inspectionStatus=null;
   let adjustmentPreview=null;
-  let materialStrokes;
+  let materialStrokes,sourcePaint,mainSources,mainDraft=false;
   const write=async(action,errorOutput,options)=>{
     let value,failure;const ok=await hooks.run(async()=>{try{value=await action();}catch(error){failure=error;throw error;}},errorOutput,options);
     if(ok!==true)throw failure||Error('操作未完成，请结束当前编辑后重试');return value;
@@ -51,7 +52,24 @@ export function setupPaintAreas(hooks){
       if(doc?.id!==origin?.id)throw Error('工程已切换，撤销未执行');
       return hooks.travelWithLayerSelection(()=>write(()=>hooks.api('/api/projects/'+doc.id+'/paint/'+direction,{revision:doc.revision})));
     },
-    draft:op=>{activePreview().update(op);hooks.draft(op);},
+    draft:op=>{
+      const edit=Array.isArray(op)?op[0]:op,doc=project.document;
+      if(!doc)return;
+      if(sourcePaint!==doc.paint){
+        sourcePaint=doc.paint;mainSources=materialImageSources(sourcePaint.imageDocuments,sourcePaint.layers);
+      }
+      const imageDraft=edit?.op==='image'?op:null;
+      for(const editor of visibleEditors){
+        if(editor.kind==='viewport'&&editor.isReady())editor.viewport.previewSlotEdit(imageDraft);
+        if(editor.kind==='uv')editor.previewSlotEdit?.(imageDraft);
+      }
+      if(edit?.op==='image'&&!Object.hasOwn(mainSources,edit.documentId)){
+        if(!mainDraft)return;
+        op=null;
+      }
+      if(!op&&!mainDraft)return;
+      mainDraft=!!op;activePreview().update(op);hooks.draft(op);
+    },
     selectLayer:id=>{if(applying)return;applying=true;try{hooks.selectLayer(id);}finally{applying=false;}},
     selectResource:t=>{if(applying)return;applying=true;try{if(t?.library==='materials'||t?.library==='brushes')hooks.selectResource(t);}finally{applying=false;}}
   });
@@ -94,8 +112,8 @@ export function setupPaintAreas(hooks){
     activePreview().refresh();
   }
   function updateMaterialDemand(){
-    materialVisible=visibleEditors.some(editor=>editor.kind==='viewport'||editor.kind==='uv');
-    const detail=visibleEditors.some(editor=>editor.kind==='uv'||editor.kind==='viewport'&&editor.wantsLiveDetail?.()!==false);
+    materialVisible=visibleEditors.some(editor=>editor.kind==='viewport'||editor.kind==='uv'&&editor.wantsMainMaterial?.()!==false);
+    const detail=visibleEditors.some(editor=>editor.kind==='uv'&&editor.wantsMainMaterial?.()!==false||editor.kind==='viewport'&&editor.wantsLiveDetail?.()!==false);
     const changed=detail!==materialDetail;materialDetail=detail;syncPreviews(changed);
   }
   let savedColors;try{savedColors=JSON.parse(localStorage.getItem('arachne-image-colors-v1'));}catch{}

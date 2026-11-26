@@ -380,13 +380,30 @@ assert np.count_nonzero((number[:,:,3]>0)&(number[:,:,3]<150))>500
   }
   const previewBefore=await materialScreenshot('material-title-073');
   await page.locator('[data-area-mode=drawing]').click();
+  await page.locator('.editor-area[data-editor=imageProperties]').first().getByRole('button',{name:'编辑器类型',exact:true}).click();
+  await page.getByRole('option',{name:'UV 编辑器',exact:true}).click();
+  await page.getByLabel('UV 画布',{exact:true}).waitFor();
   await canvas.waitFor();await waitCanvas();
   await stack.locator('[data-image-layer-id="'+numberId+'"] .document-layer-select').click();
   await textTool.click();
   await page.mouse.click(...await point(placedCenter()));
-  await input.fill('780');await input.press(modifier+'+Enter');
+  const materialDraft=page.waitForResponse(r=>r.url().endsWith('/paint/live')&&r.request().postDataJSON()?.textDraft?.content==='780');
+  await input.fill('780');
+  const reply=await materialDraft;
+  assert.equal(reply.status(),200,reply.ok()?'':await reply.text());
+  const draftPixels=await reply.body(),request=reply.request().postDataJSON();
+  const {textDraft,documentId,...settings}=request;
+  const materialPixels=async revision=>{
+    const r=await fetch(base+paint+'/live',{method:'POST',headers,body:JSON.stringify({...settings,revision})});
+    assert.equal(r.status,200);
+    return Buffer.from(await r.arrayBuffer());
+  };
+  assert.equal((await api(route)).revision,doc.revision);
+  assert.notDeepEqual(draftPixels,await materialPixels(doc.revision));
+  await input.press(modifier+'+Enter');
   await saved('检查模型后返回修改编号');
   assert.equal(number().text.content,'780');
+  assert.deepEqual(await materialPixels(doc.revision),draftPixels);
   assert.deepEqual(number().text.effects,{...styledNumber.text.effects,gradient:{start:'#ffffff',end:'#ec672c',angle:0}});
   assert.equal(doc.paint.layers.find(layer=>layer.id===binding.id).documentMaps.color,'design');
   const previewAfter=await materialScreenshot('material-title-780');
