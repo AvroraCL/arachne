@@ -14,7 +14,8 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
     <div class="profile-file"><label for="output-device-profile">目标 ICC</label>
       <button type="button" class="profile-choose-file">选择配置文件…</button>
       <input id="output-device-profile" type="file" accept=".icc,.icm" hidden></div>
-    <label>渲染意图<select aria-label="渲染意图"><option value="relative">相对色度</option><option value="perceptual">感知</option></select></label>
+    <label>渲染意图<select aria-label="渲染意图"><option value="relative">相对色度</option><option value="perceptual">感知</option><option value="saturation">饱和度</option><option value="absolute">绝对色度</option></select></label>
+    <label class="profile-black-point">黑点补偿<input type="checkbox"></label>
     <output aria-live="polite">选择显示器、印刷或灰度配置文件。</output>
     <div class="profile-proof-options"><button class="profile-proof-action" type="button" disabled>预览校样</button>
       <label hidden><input type="checkbox">模拟纸白</label></div>
@@ -30,7 +31,9 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
   const form=dialog.querySelector('form'),file=form.querySelector('input[type=file]'),intent=form.querySelector('[aria-label=渲染意图]');
   const installed=form.querySelector('.profile-installed select'),lifetime=new AbortController();
   const message=form.querySelector('output'),submit=form.querySelector('[type=submit]');
-  const preview=form.querySelector('.profile-proof-action'),paper=form.querySelector('[type=checkbox]');
+  const preview=form.querySelector('.profile-proof-action'),paper=form.querySelector('.profile-proof-options [type=checkbox]');
+  const blackPoint=form.querySelector('.profile-black-point input');
+  const withBlackPoint=()=>blackPoint.checked&&!blackPoint.disabled;
   const plate=form.querySelector('.profile-plates select'),limit=form.querySelector('.profile-ink-limit input');
   const rightCaption=form.querySelector('figcaption span:last-child');
   enhanceSelectMenu(plate);
@@ -52,18 +55,18 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
       mark.style.top=100*(at[1]+.5)/image.height+'%';mark.hidden=false;
     });
     const position='('+at.join(', ')+')';
-    if(lastSample?.file===selectedFile&&lastSample.intent===intent.value&&lastSample.position===position){
+    if(lastSample?.file===selectedFile&&lastSample.intent===intent.value&&lastSample.blackPoint===withBlackPoint()&&lastSample.position===position){
       readout.textContent=lastSample.text;return;
     }
     readout.textContent=position+' · 正在读取墨量…';
     try{
-      const blob=await requestProof({file:selectedFile,intent:intent.value},
+      const blob=await requestProof({file:selectedFile,intent:intent.value,blackPoint:withBlackPoint()},
         {space:preferredDisplaySpace(),paper:false,point:at},request.signal);
       const inks=new Uint8Array(await blob.arrayBuffer());
       if(request.signal.aborted)return;
       if(inks.length!==4)throw Error('未取得四个印版的墨量');
       const text=position+' · '+Array.from(inks,(v,i)=>'CMYK'[i]+' '+inkLabel(v)).join('  ')+' · 总墨量 '+inkLabel(inks.reduce((a,b)=>a+b,0));
-      lastSample={file:selectedFile,intent:intent.value,position,text};readout.textContent=text;
+      lastSample={file:selectedFile,intent:intent.value,blackPoint:withBlackPoint(),position,text};readout.textContent=text;
     }catch(error){if(!request.signal.aborted)readout.textContent=error.message;}
   }
   pair.onclick=event=>{
@@ -101,7 +104,7 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
     const space=preferredDisplaySpace();
     status.textContent='正在生成校样…';
     try{
-      const blob=await requestProof({file:selectedFile,intent:intent.value},
+      const blob=await requestProof({file:selectedFile,intent:intent.value,blackPoint:withBlackPoint()},
         {space,paper:mode==='CMYK'&&!selectedPlate&&paper.checked,...(selectedPlate?{plate:selectedPlate}:{}),
           ...(selectedPlate==='limit'?{inkLimit:limit.valueAsNumber}:{})},request.signal);
       if(request.signal.aborted)return;
@@ -123,7 +126,8 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
     }catch(error){if(!request.signal.aborted)status.textContent=error.message;}
   }
   preview.onclick=()=>{showProof=!showProof;preview.textContent=showProof?'收起校样':'预览校样';void refreshProof();};
-  plate.onchange=limit.onchange=intent.onchange=paper.onchange=refreshProof;
+  plate.onchange=limit.onchange=paper.onchange=blackPoint.onchange=refreshProof;
+  intent.onchange=()=>{blackPoint.disabled=intent.value==='absolute';return refreshProof();};
   let selectionVersion=0;
   async function choose(read){
     const version=++selectionVersion;
@@ -183,7 +187,7 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
     form.onsubmit=event=>{
       event.preventDefault();
       if(!mode||!selectedFile)return;
-      result={file:selectedFile,mode,intent:intent.value};dialog.close();
+      result={file:selectedFile,mode,intent:intent.value,blackPoint:withBlackPoint()};dialog.close();
     };
     document.body.append(dialog);enhanceSelectMenu(intent);dialog.showModal();void loadInstalled();
     signal?.addEventListener('abort',close,{once:true});chooseFile.focus();

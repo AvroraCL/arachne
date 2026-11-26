@@ -1275,7 +1275,7 @@ export function createDocumentEditor(ctx,bridge){
         const reader=new FileReader();reader.onerror=()=>reject(Error('无法读取 ICC 配置文件'));
         reader.onload=()=>resolve(reader.result.split(',')[1]);reader.readAsDataURL(profile.file);
       });
-      outputProfile={data,intent:profile.intent};
+      outputProfile={data,intent:profile.intent,blackPoint:profile.blackPoint};
     }
     const response=await fetch('/api/projects/'+id+'/paint/image-export',{
       method:'POST',headers:{'Content-Type':'application/json'},signal,
@@ -1689,7 +1689,11 @@ export function createDocumentEditor(ctx,bridge){
     else control.title=control.getAttribute('aria-label')+(control===healButton?' · Shift + J · Alt / Option 单击取样':' · J');shapeButton.disabled=!canCreateShape();
     penButton.disabled=!image||!!pendingImageEdit||bridge.busy();
     if(adjustmentPick&&!currentAdjustmentPick(adjustmentPick))stopAdjustmentPick();
-    bucketTool.sync();cloneTool.refresh();shapeTool.sync();moveTool.layout();warpTool.layout();canvasText.layout();penTool.layout();edgeTool.sync();empty.hidden=!!image;canvas.hidden=!image;
+    bucketTool.sync();cloneTool.refresh();shapeTool.sync();moveTool.layout();warpTool.layout();canvasText.layout();penTool.layout();edgeTool.sync();
+    // Undoing the last open image hides its focused canvas. Keep shortcuts in
+    // this editor so Redo can restore the image even after the empty state paints.
+    if((!image&&document.activeElement===canvas)||(image&&empty.contains(document.activeElement)))stage.focus({preventScroll:true});
+    empty.hidden=!!image;canvas.hidden=!image;
     if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}
     ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();live.refresh();uvGuide.sync();
   }

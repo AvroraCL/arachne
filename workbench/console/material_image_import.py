@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
-from image_color_spaces import GRAY_SPACES, PROFILE_FILES, profile_bytes, rgb_transform
+from image_color_spaces import GRAY_SPACES, PROFILE_FILES, png_source_space, profile_bytes, rgb_transform
 
 
 MIB = 1024 * 1024
@@ -42,9 +42,12 @@ def open_document_image(image, item):
     # A file opens at its oriented pixel dimensions in a single project revision.
     if max(image.size)>4096:
         raise ValueError('绘制文档宽高须在 4096 像素以内，可先缩小图片或置入现有图像')
+    assigned=item.get('sourceSpace') or item.get('profileFile')
+    named=png_source_space(image) if not assigned and item['openWorkingSpace']!='linear' else None
     oriented=ImageOps.exif_transpose(image)
     embedded=oriented.info.get('icc_profile')
-    assigned=item.get('sourceSpace') or item.get('profileFile')
+    if named:
+        embedded=profile_bytes(named)
     if item.get('sourceSpace'):
         embedded=profile_bytes(item['sourceSpace'])
     elif item.get('profileFile'):
@@ -52,6 +55,10 @@ def open_document_image(image, item):
     known=next((key for key in PROFILE_FILES if embedded==profile_bytes(key)),None) if embedded else None
     mode=oriented.mode
     gray=mode in ('1','L','LA') or mode.startswith('I;16')
+    # A gray PNG may use an RGB cICP transfer; its three equal values are
+    # interpreted in the declared RGB space just like a neutral RGB pixel.
+    if named and gray:
+        gray=False
     if embedded:
         profile=ImageCms.ImageCmsProfile(BytesIO(embedded))
         description=ImageCms.getProfileDescription(profile).strip()[:100]
@@ -60,6 +67,8 @@ def open_document_image(image, item):
             raise ValueError(('指定的源' if assigned else '嵌入的')+' ICC 与图片通道不匹配')
         if assigned:
             description='指定 · '+description
+        elif named:
+            description='PNG cICP · '+description
         source_space=known or matching_rgb_space(profile) or ('gray-g22' if gray else 'prophoto-rgb')
     elif mode=='CMYK':
         raise ValueError('CMYK 图片缺少印刷 ICC，请在源配置中指定此图片使用的印刷配置')

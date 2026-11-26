@@ -612,17 +612,17 @@ target=Path(sys.argv[1]).read_bytes()
 # Black at 128/255 on white gives sRGB 187. Direct mixing in encoded space would give 127.
 rgba=np.array([[[12,39,78,0],[0,0,0,128],[15,155,220,255]]],np.uint8)
 paper=Image.fromarray(np.array([[[255,255,255],[187,187,187],[15,155,220]]],np.uint8))
-for key,intent in [('perceptual',0),('relative',1)]:
-    with Image.open(BytesIO(profiled_copy(rgba,'srgb',target,'CMYK',key))) as actual:
-        expected=ImageCms.profileToProfile(paper,BytesIO(profile_bytes('srgb')),BytesIO(target),outputMode='CMYK',renderingIntent=intent)
+for key,intent,bpc in [('perceptual',0,False),('relative',1,False),('relative',1,True),('saturation',2,True),('absolute',3,False)]:
+    with Image.open(BytesIO(profiled_copy(rgba,'srgb',target,'CMYK',key,black_point=bpc))) as actual:
+        expected=ImageCms.profileToProfile(paper,BytesIO(profile_bytes('srgb')),BytesIO(target),outputMode='CMYK',renderingIntent=intent,flags=ImageCms.Flags.BLACKPOINTCOMPENSATION if bpc else 0)
         assert actual.format=='TIFF' and actual.mode=='CMYK' and actual.size==(3,1)
         assert actual.info['icc_profile']==target and actual.tobytes()==expected.tobytes()
         for x in range(3):
-            point=profiled_copy(rgba[:,x:x+1],'srgb',target,'CMYK',key,{'point':[x,0]})
+            point=profiled_copy(rgba[:,x:x+1],'srgb',target,'CMYK',key,{'point':[x,0]},black_point=bpc)
             assert point==bytes(expected.getpixel((x,0)))
         def proof(options):
             settings={'space':'srgb','paper':False,**options}
-            result=Image.open(BytesIO(profiled_copy(rgba,'srgb',target,'CMYK',key,settings)))
+            result=Image.open(BytesIO(profiled_copy(rgba,'srgb',target,'CMYK',key,settings,black_point=bpc)))
             return np.asarray(result)[:,3:,:3]
         for channel in 'CMYK':
             plate=proof({'plate':channel})
@@ -635,7 +635,7 @@ for key,intent in [('perceptual',0),('relative',1)]:
 `,cmykProfile],{cwd:new URL('..',import.meta.url)});
 });
 
-test('RGB output profile applies both intents to straight color and retains the full alpha byte',()=>{
+test('RGB output profile applies all four intents to straight color and retains the full alpha byte',()=>{
   execFileSync(pythonExecutable(),['-B','-c',`
 from io import BytesIO
 import numpy as np
@@ -643,7 +643,7 @@ from PIL import Image,ImageCms
 from image_color_spaces import profile_bytes,profiled_copy
 rgba=np.array([[[180,130,55,0],[14,127,251,47],[204,96,64,255]]],np.uint8)
 source=profile_bytes('acescg');target=profile_bytes('display-p3')
-for key,intent in [('relative',1),('perceptual',0)]:
+for key,intent in [('relative',1),('perceptual',0),('saturation',2),('absolute',3)]:
     with Image.open(BytesIO(profiled_copy(rgba,'acescg',target,'RGB',key))) as actual:
         expected=ImageCms.profileToProfile(Image.fromarray(rgba),BytesIO(source),BytesIO(target),outputMode='RGBA',renderingIntent=intent)
         assert actual.info['icc_profile']==target and actual.tobytes()==expected.tobytes()
@@ -740,5 +740,42 @@ with tempfile.TemporaryDirectory() as folder:
     try:open_file(source)
     except ValueError as error:assert '4096' in str(error)
     else:raise AssertionError('oversize image silently resized')
+`],{cwd:new URL('..',import.meta.url)});
+});
+
+test('PNG cICP primaries reach document pixels and automatic material sampling ahead of a fallback ICC',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import json,tempfile
+from io import BytesIO
+from pathlib import Path
+import numpy as np
+from PIL import Image,ImageCms,PngImagePlugin
+from image_color_spaces import image_input,profile_bytes
+from material_image_import import convert
+from material_graph import decode_image
+with tempfile.TemporaryDirectory() as folder:
+ root=Path(folder);file=root/'art.png';dest=root/'opened.png';info=root/'info.json'
+ rgba=np.array([[[99,64,30,255],[156,77,125,167],[43,94,50,71]]],dtype=np.uint8)
+ def save(code,icc=None):
+  meta=PngImagePlugin.PngInfo();meta.add(b'cICP',bytes(code))
+  Image.fromarray(rgba).save(file,pnginfo=meta,icc_profile=icc)
+ def open_as(target):
+  convert(dict(name=file.name,source=str(file),destination=str(dest),documentInfo=str(info),openWorkingSpace=target))
+ for code,space in [((12,13,0,1),'display-p3'),((9,8,0,1),'linear-rec2020'),((1,1,0,1),'rec709')]:
+  save(code,profile_bytes('srgb'))
+  open_as('auto')
+  assert json.loads(info.read_text())['colorSpace']==space
+  with Image.open(dest) as out:np.testing.assert_array_equal(np.asarray(out),rgba)
+  expected=np.asarray(ImageCms.profileToProfile(Image.fromarray(rgba),BytesIO(profile_bytes(space)),BytesIO(profile_bytes('srgb')),outputMode='RGBA',renderingIntent=1))
+  with Image.open(file) as im: np.testing.assert_array_equal(image_input(im,'srgb')[0],expected)
+  np.testing.assert_array_equal(decode_image(file,'RGBA',profile='auto'),expected)
+  np.testing.assert_array_equal(decode_image(file,'RGBA'),rgba)
+  open_as('srgb')
+  with Image.open(dest) as out:np.testing.assert_array_equal(np.asarray(out),expected)
+ save((9,16,0,1));open_as('linear')
+ with Image.open(dest) as out:np.testing.assert_array_equal(np.asarray(out),rgba)
+ try:open_as('auto')
+ except ValueError as error:assert 'HDR PQ' in str(error)
+ else:raise AssertionError('untagged HDR was treated as SDR')
 `],{cwd:new URL('..',import.meta.url)});
 });

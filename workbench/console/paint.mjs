@@ -980,10 +980,12 @@ export function imageExportInput(doc,request){
   if(outputProfile!==undefined){
     if(outputSpace!==undefined||doc.paint.imageDocuments[documentId].colorSpace==='linear')
       throw Error('请选择单个颜色转换目标，数据贴图须保留原始数值');
-    const {data,intent}=fields(outputProfile,['data','intent']);
-    if(typeof data!=='string'||data.length>4*Math.ceil(outputProfileLimit/3)||!['perceptual','relative'].includes(intent))
+    const {data,intent,blackPoint=false}=fields(outputProfile,['data','intent','blackPoint']);
+    if(typeof data!=='string'||data.length>4*Math.ceil(outputProfileLimit/3)||!['perceptual','relative','saturation','absolute'].includes(intent)||
+       typeof blackPoint!=='boolean'||blackPoint&&intent==='absolute')
       throw Error('ICC 文件或渲染意图无效');
     const bytes=Buffer.from(data,'base64'),mode=outputProfileMode(bytes,bytes.length);
+    const exportProfile={data,mode,intent,...(blackPoint?{blackPoint}: {})};
     if(proof!==undefined){
       const {space,paper,plate,inkLimit,point}=fields(proof,['space','paper','plate','inkLimit','point']);
       if(!['srgb','display-p3'].includes(space)||typeof paper!=='boolean'||paper&&mode!=='CMYK')throw Error('校样显示设置无效');
@@ -994,12 +996,12 @@ export function imageExportInput(doc,request){
         if(mode!=='CMYK'||!Array.isArray(point)||point.length!==2||!point.every(Number.isInteger)||
             point[0]<0||point[0]>=image.width||point[1]<0||point[1]>=image.height)
           throw Error('请选择图像范围内的 CMYK 取样点');
-        return {...input,exportProfile:{data,mode,intent},imageProof:{point},imageViewSize:[1,1]};
+        return {...input,exportProfile,imageProof:{point},imageViewSize:[1,1]};
       }
-      return {...input,imagePng:true,exportProfile:{data,mode,intent},imageProof:{space,paper,plate,inkLimit},
+      return {...input,imagePng:true,exportProfile,imageProof:{space,paper,plate,inkLimit},
         imageViewSize:thumbnailDimensions(doc.paint.imageDocuments[documentId],512)};
     }
-    return {...input,exportProfile:{data,mode,intent},exportDocument:true,...(['CMYK','LAB'].includes(mode)?{imageTiff:true}:{imagePng:true})};
+    return {...input,exportProfile,exportDocument:true,...(['CMYK','LAB'].includes(mode)?{imageTiff:true}:{imagePng:true})};
   }
   return {...input,imagePng:true,exportDocument:true};
 }

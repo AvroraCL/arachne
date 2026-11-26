@@ -2,6 +2,7 @@
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
+import struct
 
 import numpy as np
 from PIL import Image, ImageCms
@@ -19,6 +20,49 @@ POWER_TRC = {'adobe-rgb':563/256,'dci-p3':2.6,'rec2020-g24':2.4}
 GRAY_SPACES = {'gray-g22', 'gray-linear'}
 LINEAR_RGB = {'linear','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','acescg','aces2065-1'}
 PROFILED_SPACES = PROFILE_FILES.keys() - {'srgb'}
+
+
+# PNG third edition, full-range RGB cICP (H.273 primaries, transfer).
+_PNG_SPACES = {(1,13):'srgb', (12,13):'display-p3', (1,8):'linear-srgb',
+               (12,8):'linear-p3', (9,8):'linear-rec2020', (1,1):'rec709',
+               (9,14):'rec2020', (9,15):'rec2020'}
+
+
+def png_source_space(image):
+    """Read before Pillow consumes IDAT; this Pillow discards public cICP."""
+    if image.format != 'PNG' or image.fp is None:
+        return None
+    stream = image.fp
+    original = stream.tell()
+    try:
+        stream.seek(8)
+        while True:
+            header = stream.read(8)
+            if len(header) != 8:
+                return None
+            size, kind = struct.unpack('>I4s', header)
+            if kind in (b'IDAT', b'IEND'):
+                return None
+            if kind == b'cICP':
+                if size != 4:
+                    return None
+                codes = stream.read(4)
+                if len(codes) != 4:
+                    return None
+                primaries, transfer, matrix, full = codes
+                if matrix == 0 and full == 1:
+                    space = _PNG_SPACES.get((primaries, transfer))
+                    if space:
+                        return space
+                if image.info.get('icc_profile') or 'srgb' in image.info:
+                    return None
+                if transfer in (16,18):
+                    curve = 'PQ' if transfer == 16 else 'HLG'
+                    raise ValueError('此 PNG 使用 HDR '+curve+'，请先转为 SDR，或用数据模式读取原始通道')
+                raise ValueError('PNG cICP 颜色编码暂不支持，请指定对应的源配置或转为全范围 RGB')
+            stream.seek(size + 4, 1)
+    finally:
+        stream.seek(original)
 
 
 @lru_cache
@@ -95,8 +139,9 @@ def encode(c, space='srgb'):
 def image_input(image, space, box=None, authored=False):
     """Return straight RGBA bytes and their transfer function. Untagged photos assume sRGB."""
     info = image.info
+    named = png_source_space(image) if space != 'linear' and not authored else None
+    source = profile_bytes(named) if named else info.get('icc_profile')
     rgba = (image.crop(box) if box else image).convert('RGBA')
-    source = info.get('icc_profile')
     if space == 'linear':
         return np.asarray(rgba), 'srgb' if 'srgb' in info else 'linear'
     if authored and not source:
@@ -112,7 +157,11 @@ def image_input(image, space, box=None, authored=False):
     return np.asarray(rgba), 'srgb' if 'srgb' in info else space
 
 
-def profiled_copy(pixels, space, target, mode, intent, proof=None):
+_intents = {'perceptual': ImageCms.Intent.PERCEPTUAL, 'relative': ImageCms.Intent.RELATIVE_COLORIMETRIC,
+            'saturation': ImageCms.Intent.SATURATION, 'absolute': ImageCms.Intent.ABSOLUTE_COLORIMETRIC}
+
+
+def profiled_copy(pixels, space, target, mode, intent, proof=None, black_point=False):
     """Convert the composited document once; CMYK output represents ink on white paper."""
     image = Image.fromarray(pixels)
     rgb = image.convert('RGB')
@@ -131,7 +180,7 @@ def profiled_copy(pixels, space, target, mode, intent, proof=None):
         input_image = rgb.getchannel('R') if space in GRAY_SPACES else rgb
         converted = ImageCms.profileToProfile(input_image,BytesIO(profile_bytes(space)),BytesIO(target),
             outputMode={'RGB':'RGB','GRAY':'L','CMYK':'CMYK','LAB':'LAB'}[mode],
-            renderingIntent=ImageCms.Intent.PERCEPTUAL if intent=='perceptual' else ImageCms.Intent.RELATIVE_COLORIMETRIC)
+            renderingIntent=_intents[intent], flags=ImageCms.Flags.BLACKPOINTCOMPENSATION if black_point else 0)
         if proof and 'point' in proof:
             return bytes(converted.getpixel((0,0)))
         if proof:

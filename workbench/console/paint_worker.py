@@ -736,7 +736,7 @@ def live_pixels(cfg):
             pixels=(document_pixel(doc,cfg['assets'],proof['point']) if 'point' in proof else
                     framed_composite(doc,cfg['assets'],cfg['imageViewSize']))
             profile=cfg['exportProfile']
-            return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'],proof)
+            return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'],proof,black_point=profile.get('blackPoint',False))
         if cfg.get('clipboardRegion'):
             pixels=composite_document(doc,cfg['assets'],cfg['liveResolution'],cfg.get('imageInspectMask'))
             return clipboard_png(pixels,cfg['clipboardRegion'],doc['colorSpace'],cfg['assets'])
@@ -753,7 +753,7 @@ def live_pixels(cfg):
             return b''
         if cfg.get('exportProfile'):
             profile=cfg['exportProfile']
-            return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'])
+            return profiled_copy(pixels,doc['colorSpace'],base64.b64decode(profile['data']),profile['mode'],profile['intent'],black_point=profile.get('blackPoint',False))
         if cfg.get('imagePng'):
             return png_bytes(pixels,doc['colorSpace'],cfg.get('exportColorSpace'))
         # Row reversal leaves a strided view. Copy rows once into a contiguous

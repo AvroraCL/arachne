@@ -7,7 +7,7 @@ import os
 import tempfile
 import numpy as np
 from PIL import Image
-from image_color_spaces import convert_image, profile_bytes
+from image_color_spaces import convert_image, profile_bytes, png_source_space
 from material_noise import uv_noise
 
 
@@ -39,7 +39,8 @@ def decode_image(file, mode, max_edge=None, profile=None):
     with Image.open(file) as image:
         source = None
         if profile == 'auto':
-            source = image.info.get('icc_profile')
+            named = png_source_space(image)
+            source = profile_bytes(named) if named else image.info.get('icc_profile')
             if not source and image.info.get('gamma') == 1 and 'srgb' not in image.info:
                 source = profile_bytes('linear-srgb')
         elif profile:

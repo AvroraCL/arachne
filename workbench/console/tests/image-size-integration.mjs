@@ -147,6 +147,8 @@ np.testing.assert_array_equal(np.asarray(reference),np.asarray(out))`,photo,open
     }
     await canvas.focus();await page.keyboard.press(mod+'+z');await saved('一次撤销打开图片');
     assert.equal(Object.keys(doc.paint.imageDocuments??{}).length,0);
+    await canvas.waitFor({state:'hidden'});
+    assert.ok(await editor.locator('.document-image-stage').evaluate(stage=>stage===document.activeElement));
     await page.keyboard.press(mod+'+Shift+z');await saved('重做打开带配置的图片');
     assert.deepEqual(doc.paint.imageDocuments[id],image);
     await page.reload();await editor.getByRole('button',{name:'图像文档',exact:true}).click();
@@ -155,6 +157,23 @@ np.testing.assert_array_equal(np.asarray(reference),np.asarray(out))`,photo,open
     await canvas.focus();await page.keyboard.press(mod+'+z');await saved('清理本轮临时打开的图片');
   }
   {
+    const cicp=path.join(data,'带 P3 视频标记.png');
+    execFileSync(pythonExecutable(),['-B','-c',`from PIL import Image,PngImagePlugin
+import sys
+meta=PngImagePlugin.PngInfo();meta.add(b'cICP',bytes([12,13,0,1]))
+Image.new('RGBA',(31,17),(156,77,125,167)).save(sys.argv[1],pnginfo=meta)`,cicp]);
+    const pick=page.waitForEvent('filechooser');await editor.getByRole('button',{name:'从图片打开图像文档'}).click();
+    await (await pick).setFiles(cicp);await page.getByRole('dialog',{name:'打开图像',exact:true}).getByRole('button',{name:'打开',exact:true}).click();
+    await saved('读取仅有 cICP 标记的 P3 图像');
+    assert.equal(Object.values(doc.paint.imageDocuments)[0].colorSpace,'display-p3');
+    await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+    const original=page.waitForEvent('download');await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();
+    const output=path.join(data,'cicp-P3-out.png');await (await original).saveAs(output);
+    execFileSync(pythonExecutable(),['-B','-c',`import sys
+from PIL import Image
+from image_color_spaces import profile_bytes
+im=Image.open(sys.argv[1]);assert im.info['icc_profile']==profile_bytes('display-p3') and im.getpixel((14,8))==(156,77,125,167)`,output]);
+    await canvas.focus();await page.keyboard.press(mod+'+z');await saved('撤销 cICP 图片');
     const inputs=[['RGB','Display P3',path.resolve('public/color-profiles/DisplayP3-v4.icc')]];
     const ink=process.env.ARACHNE_TEST_CMYK_PROFILE||'/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc';
     if(await fs.access(ink).then(()=>true,()=>false))inputs.push(['CMYK','指定 ICC 文件…',ink]);
@@ -403,6 +422,14 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
         await until(async()=>(await profileDialog.locator('output').textContent()).includes('不完整'),'损坏配置提示');
         assert.ok(await confirm.isDisabled());
         await chooser.setInputFiles(profile);
+        if(mode==='CMYK'){
+          const intent=profileDialog.getByRole('button',{name:'渲染意图',exact:true});
+          await intent.click();await profileDialog.getByRole('option',{name:'绝对色度'}).click();
+          const compensation=profileDialog.getByLabel('黑点补偿');
+          assert.ok(await compensation.isDisabled());
+          await intent.click();await profileDialog.getByRole('option',{name:'饱和度',exact:true}).click();
+          await compensation.check();
+        }
         await profileDialog.getByRole('button',{name:'预览校样'}).click();
         const comparison=profileDialog.locator('figure img');
         await comparison.waitFor();
@@ -477,7 +504,8 @@ assert im.size==(63,31) and im.mode==mode and im.info['icc_profile']==dest
 assert im.format==('TIFF' if mode=='CMYK' else 'PNG')
 src=Image.new('RGB',(1,1),(0,255,0))
 ref=ImageCms.profileToProfile(src,BytesIO(profile_bytes('acescg')),BytesIO(dest),outputMode={'CMYK':'CMYK','RGBA':'RGB','LA':'L'}[mode],
-    renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC).getpixel((0,0))
+    renderingIntent=ImageCms.Intent.SATURATION if mode=='CMYK' else ImageCms.Intent.RELATIVE_COLORIMETRIC,
+    flags=ImageCms.Flags.BLACKPOINTCOMPENSATION if mode=='CMYK' else 0).getpixel((0,0))
 if mode=='LA': ref=(ref,255)
 if mode=='RGBA': ref=(*ref,255)
 assert im.getpixel((30,15))==ref,(im.getpixel((30,15)),ref)`,fileName,profile,mode],{cwd:new URL('..',import.meta.url)});
