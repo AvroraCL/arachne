@@ -180,11 +180,11 @@ export function setupPaintAreas(hooks){
       return result.asset;
     },
     importProjectMaps:hooks.importProjectMaps,
-    openDocumentAsset:async(file,origin,inputFormat,openWorkingSpace)=>{
-      const data=await hooks.pngData(file);
+    openDocumentAsset:async(file,origin,inputFormat,{openWorkingSpace,sourceSpace,profile})=>{
+      const [data,sourceProfile]=await Promise.all([hooks.pngData(file),profile?hooks.pngData(profile):undefined]);
       return write(()=>{
         if(project.document?.id!==origin.id||project.document.revision!==origin.revision)throw Error('工程已变化，请重新打开图片');
-        return hooks.api('/api/projects/'+origin.id+'/paint/assets',{revision:origin.revision,name:file.name,data,inputFormat,openWorkingSpace});
+        return hooks.api('/api/projects/'+origin.id+'/paint/assets',{revision:origin.revision,name:file.name,data,inputFormat,openWorkingSpace,sourceSpace,sourceProfile});
       });
     },
     importDocumentAsset:async(file,origin,layerId,position,inputFormat,pixelSize)=>{

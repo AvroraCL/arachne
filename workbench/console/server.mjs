@@ -426,7 +426,8 @@ const server=http.createServer(async(req,res)=>{
         }finally{res.off('close',disconnect);}
       }
       if(req.method!=='POST'){send(res,405,{error:'方法不支持'});return;}
-      const b=await body(req);
+      // Opening a photo can carry both a 24 MiB original and a 24 MiB source ICC in base64.
+      const b=await body(req,operation==='assets'?64*1024*1024+65536:undefined);
       doc=read(id);
       if(operation==='source-mark'){
         const controller=new AbortController();

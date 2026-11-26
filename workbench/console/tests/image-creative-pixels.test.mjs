@@ -693,9 +693,9 @@ from image_color_spaces import profile_bytes
 with tempfile.TemporaryDirectory() as folder:
     root=Path(folder)
     dest=root/'opened.png'
-    def open_file(file,target='auto'):
+    def open_file(file,target='auto',**extra):
         convert(dict(source=str(file),destination=str(dest),name=file.name,
-                     openWorkingSpace=target,documentInfo=str(root/'info.json')))
+                     openWorkingSpace=target,documentInfo=str(root/'info.json'),**extra))
         return Image.open(dest),json.loads((root/'info.json').read_text())
     source=root/'gray.tif'
     a=np.array([[0,128,257,16384,65535]],dtype=np.uint16)
@@ -725,6 +725,17 @@ with tempfile.TemporaryDirectory() as folder:
     with output,Image.open(source) as original:
         ref=ImageCms.profileToProfile(original,BytesIO(lab),BytesIO(profile_bytes('prophoto-rgb')),outputMode='RGB',renderingIntent=1)
         assert info['colorSpace']=='prophoto-rgb' and output.tobytes()==ref.tobytes()
+    untagged=root/'untagged.png';picture.save(untagged)
+    tag=root/'scanner.icc';tag.write_bytes(profile_bytes('adobe-rgb'))
+    expected=ImageCms.profileToProfile(picture,BytesIO(tag.read_bytes()),BytesIO(profile_bytes('srgb')),renderingIntent=1)
+    for hint in [dict(sourceSpace='adobe-rgb'),dict(profileFile=str(tag))]:
+        output,info=open_file(untagged,'srgb',**hint)
+        with output:np.testing.assert_array_equal(np.asarray(output.convert('RGB')),np.asarray(expected))
+        assert info['sourceProfile'].startswith('指定')
+    tag.write_bytes(profile_bytes('gray-linear'))
+    try: open_file(untagged,'auto',profileFile=str(tag))
+    except ValueError as error: assert '与图片通道不匹配' in str(error)
+    else: raise AssertionError('accepted a gray profile for a color file')
     source=root/'too-wide.png';Image.new('RGB',(4097,1)).save(source)
     try:open_file(source)
     except ValueError as error:assert '4096' in str(error)

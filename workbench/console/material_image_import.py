@@ -44,6 +44,11 @@ def open_document_image(image, item):
         raise ValueError('绘制文档宽高须在 4096 像素以内，可先缩小图片或置入现有图像')
     oriented=ImageOps.exif_transpose(image)
     embedded=oriented.info.get('icc_profile')
+    assigned=item.get('sourceSpace') or item.get('profileFile')
+    if item.get('sourceSpace'):
+        embedded=profile_bytes(item['sourceSpace'])
+    elif item.get('profileFile'):
+        embedded=Path(item['profileFile']).read_bytes()
     known=next((key for key in PROFILE_FILES if embedded==profile_bytes(key)),None) if embedded else None
     mode=oriented.mode
     gray=mode in ('1','L','LA') or mode.startswith('I;16')
@@ -52,10 +57,12 @@ def open_document_image(image, item):
         description=ImageCms.getProfileDescription(profile).strip()[:100]
         family=profile.profile.xcolor_space.strip()
         if family!=('CMYK' if mode=='CMYK' else 'Lab' if mode=='LAB' else 'GRAY' if gray else 'RGB'):
-            raise ValueError('嵌入 ICC 与图片通道不匹配')
+            raise ValueError(('指定的源' if assigned else '嵌入的')+' ICC 与图片通道不匹配')
+        if assigned:
+            description='指定 · '+description
         source_space=known or matching_rgb_space(profile) or ('gray-g22' if gray else 'prophoto-rgb')
     elif mode=='CMYK':
-        raise ValueError('CMYK 图片缺少印刷 ICC，请先嵌入印刷配置')
+        raise ValueError('CMYK 图片缺少印刷 ICC，请在源配置中指定此图片使用的印刷配置')
     elif mode=='LAB':
         white=image.tag_v2.get(318) if hasattr(image,'tag_v2') else None
         if white and (abs(float(white[0])-.3457)>.001 or abs(float(white[1])-.3585)>.001):

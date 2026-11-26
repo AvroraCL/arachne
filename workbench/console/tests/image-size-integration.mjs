@@ -154,6 +154,42 @@ np.testing.assert_array_equal(np.asarray(reference),np.asarray(out))`,photo,open
     await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
     await canvas.focus();await page.keyboard.press(mod+'+z');await saved('清理本轮临时打开的图片');
   }
+  {
+    const inputs=[['RGB','Display P3',path.resolve('public/color-profiles/DisplayP3-v4.icc')]];
+    const ink=process.env.ARACHNE_TEST_CMYK_PROFILE||'/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc';
+    if(await fs.access(ink).then(()=>true,()=>false))inputs.push(['CMYK','指定 ICC 文件…',ink]);
+    for(const [mode,label,profile] of inputs){
+      const file=path.join(data,'未标记-'+mode+'.tif'),png=path.join(data,'源配置-'+mode+'.png');
+      execFileSync(pythonExecutable(),['-B','-c',`import sys
+from PIL import Image
+im=Image.new(sys.argv[1],(31,17))
+for y in range(17):
+ for x in range(31):
+  im.putpixel((x,y),(45+x*4,61+y*6,133-x*2,44)[:len(im.getbands())])
+im.save(sys.argv[2])`,mode,file]);
+      const chooser=page.waitForEvent('filechooser');await editor.getByRole('button',{name:'从图片打开图像文档'}).click();
+      await (await chooser).setFiles(file);
+      const options=page.getByRole('dialog',{name:'打开图像',exact:true});
+      await options.getByRole('button',{name:'打开图像的源配置'}).click();
+      await options.getByRole('option',{name:label,exact:true}).click();
+      const accept=options.getByRole('button',{name:'打开',exact:true});
+      if(mode==='CMYK'){
+        assert.ok(await accept.isDisabled());await options.locator('input[type=file]').setInputFiles(profile);
+      }
+      await options.getByRole('button',{name:'打开图像的颜色空间'}).click();
+      await options.getByRole('option',{name:'颜色（sRGB）',exact:true}).click();
+      await accept.click();await saved('指定 '+mode+' 源配置并转换为 sRGB');
+      await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+      const download=page.waitForEvent('download');await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();
+      await (await download).saveAs(png);
+      execFileSync(pythonExecutable(),['-B','-c',`import sys,numpy as np
+from PIL import Image,ImageCms
+src=Image.open(sys.argv[1]);ref=ImageCms.profileToProfile(src,sys.argv[2],'public/color-profiles/sRGB-v4.icc',outputMode='RGB',renderingIntent=1)
+assert not src.info.get('icc_profile')
+np.testing.assert_array_equal(np.asarray(ref),np.asarray(Image.open(sys.argv[3]).convert('RGB')))`,file,profile,png]);
+      await canvas.focus();await page.keyboard.press(mod+'+z');await saved('撤销指定源配置的打开操作');
+    }
+  }
   for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['acescg','ACEScg（AP1 线性）','ACEScg - Arachne Linear RGB'],['aces2065-1','ACES2065-1（AP0 线性）','ACES2065-1 - Arachne Linear RGB'],['linear-srgb','线性 sRGB（颜色）','cRGB'],['linear-p3','线性 Display P3','P3-D65 - Arachne Linear RGB'],['linear-rec2020','线性 Rec.2020','Rec2020 - Arachne Linear RGB'],['linear-adobe-rgb','线性 Adobe RGB','AdobeRGB - Arachne Linear RGB'],['gray-g22','灰度（Gamma 2.2）','Arachne Gray Gamma 2.2'],['gray-linear','灰度（线性光）','Arachne Linear Gray']]){
     await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
     await width.fill('63');await height.fill('31');

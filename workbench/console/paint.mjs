@@ -1381,17 +1381,26 @@ export async function importPaintMaps(doc,revision,files,scratch){
   return {document:saved,uploaded:pictures.map((png,index)=>({id:png.entry.id,name:files[index].name}))};
 }
 export async function openDocumentPhoto(doc,request){
-  const {revision,name,data,inputFormat,openWorkingSpace}=fields(request,['revision','name','data','inputFormat','openWorkingSpace']);
+  const {revision,name,data,inputFormat,openWorkingSpace,sourceSpace,sourceProfile:profileData}=fields(request,['revision','name','data','inputFormat','openWorkingSpace','sourceSpace','sourceProfile']);
   if(doc.revision!==revision)throw revisionError(doc);
   if(!['png','jpeg','webp','tiff'].includes(inputFormat)||typeof name!=='string'||typeof data!=='string'||
      openWorkingSpace!=='auto'&&!imageColorSpaces.some(([id])=>id===openWorkingSpace))throw Error('图片格式或文档颜色空间无效');
   const bytes=Buffer.from(data,'base64');
   if(!bytes.length||bytes.length>24*1024*1024)throw Error('图片大小须在 24 MiB 以内');
+  if(sourceSpace!==undefined&&(!imageColorSpaces.some(([id])=>id===sourceSpace&&id!=='linear')||profileData!==undefined))
+    throw Error('请选择一种源配置');
+  let profileBytes;
+  if(profileData!==undefined){
+    if(typeof profileData!=='string'||profileData.length>Math.ceil(outputProfileLimit/3)*4)throw Error('源 ICC 配置无效');
+    profileBytes=Buffer.from(profileData,'base64');outputProfileMode(profileBytes,profileBytes.length);
+  }
   const scratch=await fsp.mkdtemp(path.join(projectDir(doc.id),'open-image-'));
   try{
     const source=path.join(scratch,'source'),destination=path.join(scratch,'picture.png'),documentInfo=path.join(scratch,'color.json');
     await fsp.writeFile(source,bytes);
-    await normalizeImageFiles([{source,destination,documentInfo,name:'image.'+inputFormat,openWorkingSpace}],scratch);
+    const profileFile=profileBytes?path.join(scratch,'source.icc'):undefined;
+    if(profileFile)await fsp.writeFile(profileFile,profileBytes);
+    await normalizeImageFiles([{source,destination,documentInfo,name:'image.'+inputFormat,openWorkingSpace,sourceSpace,profileFile}],scratch);
     const {colorSpace,sourceProfile}=JSON.parse(await fsp.readFile(documentInfo,'utf8'));
     const title=(path.basename(name).replace(/\.[^.]*$/,'').trim()||'打开的图像').slice(0,100);
     const png=describePng(doc,await fsp.readFile(destination),title,64);
