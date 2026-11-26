@@ -982,7 +982,7 @@ export function imageExportInput(doc,request){
       return {...input,imagePng:true,exportProfile:{data,mode,intent},imageProof:{space,paper},
         imageViewSize:thumbnailDimensions(doc.paint.imageDocuments[documentId],512)};
     }
-    return {...input,exportProfile:{data,mode,intent},exportDocument:true,...(mode==='CMYK'?{imageTiff:true}:{imagePng:true})};
+    return {...input,exportProfile:{data,mode,intent},exportDocument:true,...(['CMYK','LAB'].includes(mode)?{imageTiff:true}:{imagePng:true})};
   }
   return {...input,imagePng:true,exportDocument:true};
 }

@@ -1,4 +1,4 @@
-"""Regenerate Arachne's bounded ACES RGB and neutral grayscale ICC profiles."""
+"""Regenerate Arachne's bounded ACES RGB, neutral grayscale and D50 Lab ICC profiles."""
 import argparse
 import ctypes as c
 from ctypes.util import find_library
@@ -29,6 +29,7 @@ def generate(lib, folder, family):
     gamma = bind('cmsBuildGamma',ptr,ptr,c.c_double)
     create = bind('cmsCreateRGBProfile',ptr,c.POINTER(Chromaticity),c.POINTER(Primaries),c.POINTER(ptr))
     gray = bind('cmsCreateGrayProfile',ptr,c.POINTER(Chromaticity),ptr)
+    lab = bind('cmsCreateLab4Profile',ptr,c.POINTER(Chromaticity))
     mlu = bind('cmsMLUalloc',ptr,ptr,u32)
     string = bind('cmsMLUsetASCII',c.c_int,ptr,c.c_char_p,c.c_char_p,c.c_char_p)
     write = bind('cmsWriteTag',c.c_int,ptr,u32,ptr)
@@ -42,12 +43,16 @@ def generate(lib, folder, family):
     if family in ('all','gray'):
         spaces.extend([('Gray Gamma 2.2',None,2.2,'Gray-g22','Arachne Gray Gamma 2.2'),
                        ('Gray Linear',None,1.,'Gray-linear','Arachne Linear Gray')])
+    if family in ('all','lab'):
+        spaces.append(('Lab D50',None,None,'Lab-D50','Arachne CIELAB D50'))
     for name,xy,exponent,filename,description in spaces:
-        curve=gamma(None,exponent)
-        if not curve:
+        curve=gamma(None,exponent) if exponent is not None else None
+        if exponent is not None and not curve:
             raise RuntimeError('Tone curve creation failed')
         try:
-            if xy:
+            if exponent is None:
+                profile=lab(None)
+            elif xy:
                 white=Chromaticity(.32168,.33767,1.)
                 primaries = Primaries(*(Chromaticity(x,y,1.) for x,y in xy))
                 profile = create(c.byref(white),c.byref(primaries),(ptr*3)(curve,curve,curve))
@@ -80,13 +85,14 @@ def generate(lib, folder, family):
             finally:
                 close(profile)
         finally:
-            free_curve(curve)
+            if curve:
+                free_curve(curve)
 
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--lcms',default=find_library('lcms2'),help='Path to the LittleCMS 2 shared library')
-    parser.add_argument('--family',choices=['all','aces','gray'],default='all')
+    parser.add_argument('--family',choices=['all','aces','gray','lab'],default='all')
     args = parser.parse_args()
     if not args.lcms:
         parser.error('Pass the LittleCMS 2 library path with --lcms')

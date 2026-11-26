@@ -30,9 +30,13 @@ def convert(item):
             profile = orientation.info.get('icc_profile')
             if expected=='TIFF' and orientation.mode=='CMYK' and not profile:
                 raise ValueError('CMYK TIFF 缺少 ICC 配置，请在原软件中嵌入印刷配置再置入')
-            if orientation.mode == 'CMYK' and profile:
-                # PNG cannot carry CMYK samples; interpret their profile while they
-                # still have four color channels.
+            if orientation.mode=='LAB' and not profile:
+                white=orientation.tag_v2.get(318) if hasattr(orientation,'tag_v2') else image.tag_v2.get(318)
+                if white and (abs(float(white[0])-.3457)>.001 or abs(float(white[1])-.3585)>.001):
+                    raise ValueError('此 Lab TIFF 指定了其他白点，请先嵌入对应的 ICC 配置')
+                profile=ImageCms.ImageCmsProfile(ImageCms.createProfile('LAB')).tobytes()
+            if orientation.mode in ('LAB','CMYK') and profile:
+                # Interpret the original channels before converting into a PNG-supported mode.
                 space = item.get('workingSpace', 'srgb')
                 target = profile_bytes('srgb' if space == 'linear' else space)
                 normalized = ImageCms.profileToProfile(orientation,BytesIO(profile),BytesIO(target),

@@ -423,6 +423,33 @@ print(json.dumps(rows))`],{cwd:new URL('..',import.meta.url)}));
   assert.equal(labToWorkingHex([50,127,-128],'srgb').clipped,true);
 });
 
+test('D50 TIFF encodes signed Lab components and composites fractional coverage on linear-light white',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+from io import BytesIO
+from pathlib import Path
+import numpy as np, tempfile
+from PIL import Image,ImageCms,TiffImagePlugin
+from material_image_import import convert
+from image_color_spaces import profiled_copy,profile_bytes
+icc=Path('public/color-profiles/Lab-D50.icc').read_bytes()
+raw=np.array([[[27,60,225,0],[202,40,99,128],[54,160,89,255]]],dtype=np.uint8)
+im=Image.open(BytesIO(profiled_copy(raw,'linear-srgb',icc,'LAB','relative')))
+matte=Image.new('RGB',(3,1));matte.putdata([(255,255,255),(228,147,177),(54,160,89)])
+reference=ImageCms.profileToProfile(matte,BytesIO(profile_bytes('linear-srgb')),ImageCms.createProfile('LAB'),outputMode='LAB',renderingIntent=1)
+assert im.tag_v2[262]==8 and im.info['icc_profile']==icc and im.tobytes()==reference.tobytes()
+with tempfile.TemporaryDirectory() as folder:
+    path=Path(folder)/'swatch.tif';out=Path(folder)/'placed.png'
+    # A photometric CIELAB TIFF with no explicit white point uses D50.
+    unt=Image.frombytes('LAB',im.size,im.tobytes());unt.save(path,format='TIFF')
+    item=dict(source=str(path),name=path.name,destination=str(out),workingSpace='gray-g22')
+    convert(item)
+    target=profile_bytes('gray-g22')
+    placed=Image.open(out)
+    expected=ImageCms.profileToProfile(im,BytesIO(icc),BytesIO(target),outputMode='L',renderingIntent=1)
+    assert placed.mode=='L' and placed.info['icc_profile']==target and placed.tobytes()==expected.tobytes()
+`],{cwd:new URL('..',import.meta.url)});
+});
+
 test('packaged ACES colorants implement the published AP0 to AP1 matrix',()=>{
   execFileSync(pythonExecutable(),['-B','-c',`
 import numpy as np

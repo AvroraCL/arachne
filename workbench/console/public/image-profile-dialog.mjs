@@ -61,7 +61,7 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
       const header=new Uint8Array(await selected.slice(0,128).arrayBuffer());
       if(selected!==file.files[0]||!dialog.open)return;
       mode=outputProfileMode(header,selected.size);
-      message.textContent=mode==='CMYK'?'CMYK TIFF · 透明区域合成至纸白':'PNG · '+(mode==='GRAY'?'灰度':'RGB')+' · 保留透明度';
+      message.textContent=['CMYK','LAB'].includes(mode)?(mode==='LAB'?'Lab':'CMYK')+' TIFF · 透明区域合成至白底':'PNG · '+(mode==='GRAY'?'灰度':'RGB')+' · 保留透明度';
       submit.disabled=preview.disabled=false;paper.parentElement.hidden=mode!=='CMYK';void refreshProof();
     }catch(error){if(selected===file.files[0])message.textContent=error.message;}
   };

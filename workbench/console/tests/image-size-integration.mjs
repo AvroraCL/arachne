@@ -285,6 +285,34 @@ print(json.dumps([original,screen(device,file.info['icc_profile'],1),screen(devi
         if(paperProof)assert.deepEqual(paperProof.slice(2),[expectedProof[0],expectedProof[2]]);
         console.log('PASS 选择 ICC 导出',mode,ext);
       }
+      await editor.getByRole('button',{name:'选择导出颜色空间'}).click();
+      const labDownload=page.waitForEvent('download');
+      await page.getByRole('menuitem',{name:'Lab D50 · TIFF（白底）'}).click();
+      const labFile=path.join(data,'mural-Lab.tif'),labResult=await labDownload;
+      assert.match(labResult.suggestedFilename(),/-lab\.tif$/);await labResult.saveAs(labFile);
+      execFileSync(pythonExecutable(),['-B','-c',`import sys
+from io import BytesIO
+from PIL import Image,ImageCms
+from image_color_spaces import profile_bytes
+im=Image.open(sys.argv[1])
+assert im.size==(63,31) and im.mode=='LAB' and im.tag_v2[262]==8
+assert ImageCms.ImageCmsProfile(BytesIO(im.info['icc_profile'])).profile.xcolor_space.strip()=='Lab'
+expected=ImageCms.profileToProfile(Image.new('RGB',im.size,(0,255,0)),BytesIO(profile_bytes('acescg')),ImageCms.createProfile('LAB'),outputMode='LAB',renderingIntent=1)
+assert im.tobytes()==expected.tobytes()
+`,labFile],{cwd:new URL('..',import.meta.url)});
+      const [placeLab]=await Promise.all([page.waitForEvent('filechooser'),editor.getByRole('button',{name:'导入图片至画布'}).click()]);
+      await placeLab.setFiles(labFile);await saved('重新置入 Lab D50 三通道 TIFF');
+      const labLayer=Object.values(doc.paint.imageDocuments)[0].layers.find(layer=>layer.kind==='image');
+      const labAsset=doc.paint.assets[labLayer.asset];
+      execFileSync(pythonExecutable(),['-B','-c',`import sys
+from io import BytesIO
+from PIL import Image,ImageCms
+from image_color_spaces import profile_bytes
+im=Image.open(sys.argv[1]); placed=Image.open(sys.argv[2])
+expected=ImageCms.profileToProfile(im,BytesIO(im.info['icc_profile']),BytesIO(profile_bytes('acescg')),outputMode='RGB',renderingIntent=1)
+assert placed.mode=='RGB' and placed.size==expected.size and placed.tobytes()==expected.tobytes()
+`,labFile,path.join(data,'projects',doc.id,'assets',labAsset.file)],{cwd:new URL('..',import.meta.url)});
+      await canvas.focus();await page.keyboard.press(mod+'+z');await saved('撤销置入 Lab TIFF');
       if(profiles.some(([,mode])=>mode==='CMYK')){
         const fileName=path.join(data,'proof-CMYK.tif');
         const [chooser]=await Promise.all([page.waitForEvent('filechooser'),editor.getByRole('button',{name:'导入图片至画布'}).click()]);

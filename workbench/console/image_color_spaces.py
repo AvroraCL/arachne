@@ -114,7 +114,8 @@ def profiled_copy(pixels, space, target, mode, intent, proof=None):
     """Convert the composited document once; CMYK output represents ink on white paper."""
     image = Image.fromarray(pixels)
     rgb = image.convert('RGB')
-    if mode == 'CMYK' and image.getchannel('A').getextrema()[0] < 255:
+    opaque_output = mode in ('CMYK','LAB')
+    if opaque_output and image.getchannel('A').getextrema()[0] < 255:
         # Blend onto paper in the document's linear working light, in strips.
         for top in range(0,pixels.shape[0],128):
             strip = pixels[top:top+128]
@@ -127,7 +128,7 @@ def profiled_copy(pixels, space, target, mode, intent, proof=None):
     try:
         input_image = rgb.getchannel('R') if space in GRAY_SPACES else rgb
         converted = ImageCms.profileToProfile(input_image,BytesIO(profile_bytes(space)),BytesIO(target),
-            outputMode={'RGB':'RGB','GRAY':'L','CMYK':'CMYK'}[mode],
+            outputMode={'RGB':'RGB','GRAY':'L','CMYK':'CMYK','LAB':'LAB'}[mode],
             renderingIntent=ImageCms.Intent.PERCEPTUAL if intent=='perceptual' else ImageCms.Intent.RELATIVE_COLORIMETRIC)
         if proof:
             display=profile_bytes(proof['space'])
@@ -136,7 +137,7 @@ def profiled_copy(pixels, space, target, mode, intent, proof=None):
             right=ImageCms.profileToProfile(converted,BytesIO(target),BytesIO(display),outputMode='RGB',
                 renderingIntent=ImageCms.Intent.ABSOLUTE_COLORIMETRIC if proof['paper'] else ImageCms.Intent.RELATIVE_COLORIMETRIC)
             left=convert_image(rgb.convert('RGBA'),profile_bytes(space),display)
-            if mode!='CMYK':
+            if not opaque_output:
                 alpha=image.getchannel('A')
                 left.putalpha(alpha)
                 right.putalpha(alpha)
@@ -150,7 +151,7 @@ def profiled_copy(pixels, space, target, mode, intent, proof=None):
         message='此 ICC 缺少校样所需的颜色转换，可直接尝试导出副本' if proof else 'ICC 配置不支持所选输出转换，请使用有效的目标设备配置'
         raise ValueError(message) from error
     out = BytesIO()
-    if mode == 'CMYK':
+    if opaque_output:
         converted.save(out,format='TIFF',compression='tiff_deflate',icc_profile=target)
     else:
         converted.putalpha(image.getchannel('A'))

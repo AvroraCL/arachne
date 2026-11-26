@@ -201,6 +201,14 @@ export function createDocumentEditor(ctx,bridge){
         return downloadDocument(space);
       }
     }));
+    choices.push({label:'Lab D50 · TIFF（白底）',run:async()=>{
+      const response=await fetch(new URL('./color-profiles/Lab-D50.icc',import.meta.url),{signal});
+      if(!response.ok)throw Error('无法读取内置 Lab D50 配置');
+      const profile=await response.blob(),current=imageSelectionOrigin(project);
+      if(current.id!==origin.id||current.documentId!==origin.documentId||current.revision!==origin.revision)
+        throw Error('图像已变化，请重新选择输出空间');
+      return downloadDocument(undefined,{file:profile,mode:'LAB',intent:'relative'});
+    }});
     choices.push({label:'按 ICC 导出副本…',run:async()=>{
       const profile=await chooseOutputProfile(image,label,signal,(profile,proof,previewSignal)=>
         documentOutput(origin,{profile,proof},previewSignal));
@@ -1279,7 +1287,7 @@ export function createDocumentEditor(ctx,bridge){
       const url=URL.createObjectURL(result),link=el('a');
       const name=image.name.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g,'_').replace(/[ .]+$/,'')||'贴图';
       const suffix=profile?'-'+profile.mode.toLowerCase():outputSpace&&outputSpace!==image.colorSpace?'-'+outputSpace:'';
-      link.href=url;link.download=name+suffix+(profile?.mode==='CMYK'?'.tif':'.png');
+      link.href=url;link.download=name+suffix+(result.type==='image/tiff'?'.tif':'.png');
       host.append(link);link.click();link.remove();
       setTimeout(()=>URL.revokeObjectURL(url),10000);
     }catch(error){

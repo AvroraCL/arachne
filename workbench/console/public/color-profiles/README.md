@@ -5,3 +5,5 @@ The drawing workspace uses the Rec.709 and Rec.2020 camera curves, a separate Re
 Arachne generates ACEScg-linear.icc and ACES2065-1-linear.icc with LittleCMS 2 from the published [AP1](https://docs.acescentral.com/encodings/acescg/) and [AP0](https://docs.acescentral.com/encodings/aces2065-1/) chromaticities and ACES white point. These two profiles and their [generator](../../../tools/generate_aces_profiles.py) use the repository's GPL-3.0-only license. The document canvas previews the bounded PNG values through an ICC transform to sRGB.
 
 Gray-g22.icc and Gray-linear.icc describe a single D50 grayscale channel with a gamma of 2.2 or 1.0. Arachne generates these profiles with the same LittleCMS script and distributes them under GPL-3.0-only.
+
+Lab-D50.icc is the D50 CIELAB profile generated with LittleCMS. The same GPL-3.0-only generator supplies its description, copyright and reproducible profile ID.

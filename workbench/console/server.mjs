@@ -289,6 +289,9 @@ const server=http.createServer(async(req,res)=>{
         res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','X-Content-Type-Options':'nosniff'});
         res.end(fs.readFileSync(path.join(workspaceRoot,'LICENSE')));return;
       }
+      if(['GET','HEAD'].includes(req.method)&&parts[0]==='color-profiles'&&parts.length===2&&/^[\w-]+\.icc$/.test(parts[1])){
+        file(res,path.join(ROOT,'public',...parts));return;
+      }
       if(['GET','HEAD'].includes(req.method)&&parts[0]==='fonts'&&parts.length===3&&
          parts.slice(1).every(p=>/^[\w.-]+$/.test(p))&&/\.(woff2?|txt|json)$/.test(parts[2])){
         file(res,path.join(ROOT,'public',...parts));return;
