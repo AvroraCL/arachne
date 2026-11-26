@@ -88,6 +88,10 @@ try{
   assert.ok(confirm.y>=0&&confirm.y+confirm.height<=600);
   await dialog.getByRole('button',{name:'颜色空间',exact:true}).click();
   const spaceMenu=dialog.getByRole('listbox',{name:'颜色空间',exact:true});
+  const picker=await dialog.getByRole('button',{name:'颜色空间',exact:true}).boundingBox();
+  const list=await spaceMenu.boundingBox();
+  assert.ok(list.y>=0&&list.y+list.height<=600&&list.x>=0&&list.x+list.width<=390);
+  assert.ok(list.height>260&&list.y+list.height<=picker.y+1);
   const searchSpace=spaceMenu.getByRole('searchbox',{name:'搜索颜色空间'});
   await searchSpace.fill('场景线性');
   assert.equal(await spaceMenu.getByRole('option').count(),7);
@@ -100,6 +104,34 @@ try{
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
   assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
+  {
+    const rawMap=path.join(data,'标记为 sRGB 的通道数据.png');
+    execFileSync(pythonExecutable(),['-c',`from PIL import Image,PngImagePlugin
+import sys
+tag=PngImagePlugin.PngInfo();tag.add(b'sRGB',bytes(1))
+Image.new('RGBA',(63,31),(32,128,224,173)).save(sys.argv[1],pnginfo=tag)`,rawMap]);
+    await editor.getByRole('button',{name:'新建图像',exact:true}).click();
+    await width.fill('63');await height.fill('31');
+    await dialog.getByRole('button',{name:'颜色空间',exact:true}).click();
+    await dialog.getByRole('option',{name:'数据（线性）',exact:true}).click();
+    await dialog.getByRole('button',{name:'创建',exact:true}).click();await saved('创建原始数据画布');
+    const waitChooser=page.waitForEvent('filechooser');
+    await editor.getByRole('button',{name:'导入图片至画布'}).click();await (await waitChooser).setFiles(rawMap);
+    await saved('置入带 sRGB 标记的通道图');
+    await canvas.focus();await page.keyboard.press(mod+'+z');await saved('撤销通道图');
+    await page.keyboard.press(mod+'+Shift+z');await saved('恢复通道图');
+    await page.reload();
+    await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+    const output=path.join(data,'重开的通道图.png'),download=page.waitForEvent('download');
+    await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();await (await download).saveAs(output);
+    execFileSync(pythonExecutable(),['-c',`from PIL import Image
+import sys
+with Image.open(sys.argv[1]) as source,Image.open(sys.argv[2]) as out:
+ assert out.info['gamma']==1 and out.size==source.size
+ assert out.crop((4,4,59,27)).tobytes()==source.crop((4,4,59,27)).tobytes()`,rawMap,output]);
+    await canvas.focus();await page.keyboard.press(mod+'+z');await saved('撤销数据图置入');
+    await page.keyboard.press(mod+'+z');await saved('撤销数据画布');
+  }
   {
     const photo=path.join(data,'有颜色的图 127.png'),opened=path.join(data,'打开的图.png');
     const macP3='/System/Library/ColorSync/Profiles/Display P3.icc';

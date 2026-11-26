@@ -19,9 +19,11 @@ function positionMenu(wrapper,menu,contentWidth){
   const width=Math.min(innerWidth-gap*2,Math.max(rect.width,parseFloat(style.getPropertyValue('--select-menu-width'))||contentWidth));
   const below=innerHeight-rect.bottom-gap,above=rect.top-gap;
   menu.style.width=Math.round(width)+'px';
-  const height=Math.min(menu.scrollHeight+2,260);
-  const opensAbove=below<Math.min(height,160)&&above>below;
-  const room=Math.max(0,Math.min(260,(opensAbove?above:below)-gap));
+  const preferredHeight=parseFloat(style.getPropertyValue('--select-menu-height'));
+  const limit=preferredHeight||260;
+  const height=Math.min(menu.scrollHeight+2,limit);
+  const opensAbove=below<(preferredHeight?height:Math.min(height,160))&&above>below;
+  const room=Math.max(0,Math.min(limit,(opensAbove?above:below)-gap));
   menu.style.maxHeight=Math.floor(room)+'px';
   const anchor=style.getPropertyValue('--select-menu-align').trim()==='right'?rect.right-width:rect.left;
   menu.style.left=Math.round(Math.max(gap,Math.min(anchor,innerWidth-gap-width)))+'px';

@@ -165,7 +165,7 @@ def image_input(image, space, box=None, authored=False):
     source = profile_bytes(named) if named else info.get('icc_profile')
     rgba = gray16_to_working_bytes(image.crop(box) if box else image).convert('RGBA')
     if space == 'linear':
-        return np.asarray(rgba), 'srgb' if 'srgb' in info else 'linear'
+        return np.asarray(rgba), 'linear'
     if authored and not source:
         return np.asarray(rgba), space
     if not source and info.get('gamma') == 1 and 'srgb' not in info:
