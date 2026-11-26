@@ -6,6 +6,7 @@ from io import BytesIO
 from contextlib import contextmanager
 from tempfile import TemporaryFile
 import math
+import gzip
 import hashlib
 import json
 import struct
@@ -1089,7 +1090,7 @@ def document_stack(layers):
     return children
 
 
-def exact_stroke_window(document,assets,window,inspect_mask):
+def stroke_window_padding(document):
     # Operations that sample the rest of the document still use the ordinary
     # preview. A window shares the 4K brush and blend math for everything else.
     padding = 0
@@ -1112,6 +1113,13 @@ def exact_stroke_window(document,assets,window,inspect_mask):
         if layer.get('maskFeather'):
             half,_ = gaussian_box(layer['maskFeather'])
             padding += 3*(half+1)
+    return padding
+
+
+def exact_stroke_window(document,assets,window,inspect_mask):
+    padding = stroke_window_padding(document)
+    if padding is None:
+        return None
     x,y,side = window
     wide = side+2*padding
     if wide>2048:
@@ -1119,6 +1127,54 @@ def exact_stroke_window(document,assets,window,inspect_mask):
     left,top = (max(0,min(4096-wide,k-padding)) for k in (x,y))
     pixels = composite_document(document,assets,wide,inspect_mask,window=(left,top,wide))
     return pixels[y-top:y-top+side,x-left:x-left+side]
+
+
+def brush_tile(document, assets, tile):
+    """Prepare the active layer and its neighbours once, in linear premultiplied RGBA."""
+    x,y,side = tile['window']
+    layers = document['layers']
+    active = next((i for i,l in enumerate(layers) if l['id']==tile['layerId']), None)
+    if active is None:
+        return b''
+    layer = layers[active]
+    if (layer['kind'] in ('group','adjustment') or layer['blend']!='normal' or layer.get('blendIf')
+            or any(e['enabled'] for e in layer.get('styles',{}).values()) or layer.get('edgeDecontaminate')
+            or any(l.get('parentId') or l.get('clipped') for l in layers)
+            or any(l['blend']!='normal' or l.get('blendIf') or l['kind']=='adjustment' for l in layers[active+1:])):
+        return b''
+    padding = stroke_window_padding(document)
+    if padding is None or side+2*padding>1024:
+        return b''
+    size = side+2*padding
+    left,top = (max(0,min(4096-size,k-padding)) for k in (x,y))
+    surface = ImageSurface(size,assets,(left,top,size))
+    space = document['colorSpace']
+    def color(text):
+        return decode(np.array(list(bytes.fromhex(text[1:])),dtype=np.float32)/255,space)
+    def crop(values):
+        return np.ascontiguousarray(values.reshape(size,size,-1)[::-1][y-top:y-top+side,x-left:x-left+side],dtype='<f4')
+    def flatten(items):
+        out = np.zeros((size*size,4),dtype=np.float32)
+        composite_stack(out,document_stack(items),surface,assets,space,color)
+        return crop(out)
+    planes = [flatten([{**layer,'maskEnabled':False,'opacity':1}])]
+    flags = 0
+    for flag,items in [(1,layers[:active]),(2,layers[active+1:])]:
+        if items:
+            flags |= flag
+            planes.append(flatten(items))
+    if layer.get('maskEnabled'):
+        flags |= 4
+        ids = np.arange(size*size)
+        raw = image_mask({**layer,'maskDensity':1,'maskFeather':0},surface)
+        values = raw(ids) if raw else np.ones(size*size,dtype=np.float32)
+        planes.append(crop(values))
+        if layer.get('maskFeather'):
+            flags |= 8
+            blurred = values.reshape(size,size,1).copy()
+            blur_gaussian(blurred,*gaussian_box(layer['maskFeather']))
+            planes.append(crop(blurred))
+    return gzip.compress(struct.pack('<I',flags)+b''.join(p.tobytes() for p in planes),compresslevel=1)
 
 
 def composite_document(document,assets,size=4096,inspect_mask=None,alpha_only=False,window=None):

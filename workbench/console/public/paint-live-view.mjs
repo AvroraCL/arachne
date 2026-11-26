@@ -57,13 +57,14 @@ function strokeWindow(edits,visible,bleed=0){
   return side?[...ranges.map(([start,end])=>clamp(Math.round((start+end-side)/2),0,4096-side)),side]:undefined;
 }
 
-export function createLiveView({viewport,canvas,guide,context:readContext,onStatus,onFrame=()=>{},renderCanvas=true,rgba=false,retryDelays=defaultRetryDelays}){
+export function createLiveView({viewport,canvas,guide,context:readContext,localBrush,onStatus,onFrame=()=>{},renderCanvas=true,rgba=false,retryDelays=defaultRetryDelays}){
   const ctx=canvas.getContext('2d',{alpha:rgba,...(rgba?{colorSpace:preferredDisplaySpace()}:{})});
   const canvasSpace=ctx.getContextAttributes?.().colorSpace??'srgb';
   const guideContext=guide.getContext('2d');
   const page=canvas.ownerDocument;
   let intent=null,inFlight=null,queued=null,detailInFlight=null,baseFrame=null,frame=null,drawn=null;
   let image=null,imageSpace=null,guideFrame=null,detailTimer=null,retryTimer=null,retrying=null;
+  let localInk=null;
   let detailFailure=null,fastFailure=null,visible=true,disposed=false,patched=null;
   const context=()=>visible&&!disposed&&!page?.hidden?readContext():null;
   const fastSize=state=>rgba&&[512,1024].includes(state?.fastSize)?state.fastSize:workingSize;
@@ -128,6 +129,10 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     const channel=state.inspectMask?'color':state.channel;
     const solo=!!(state.inspectMask||state.solo);
     const {preview3D}=state;
+    if(localInk){
+      if(intent?.operation&&request!==intent || localInk.holdKey===state.key&&size!==detailSize&&!request.operation&&state.detail&&!detailFailure)return;
+      localInk=null;drawn=null;
+    }
     if(patched&&size!==detailSize&&!request.operation&&state.detail&&!detailFailure&&
        patched.holdKey===request.key){
       status('refining');return;
@@ -188,6 +193,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     if(request.size===detailSize)status('refining');
     const {id,revision,inspectMask,isolatedLayer,operation,key,size,window}=request;
     const isCurrent=()=>!request.controller.signal.aborted&&context()?.key===key&&intent?.group===request.group&&
+      (!operation||!localInk||request===intent)&&
       (operation||frame?.request.group!==request.group||frame.request.operation||frame.request.size<=size);
     try{
       if(context()?.modeling&&frame?.request.revision!==revision)onStatus('正在更新建模后的材质与表面…');
@@ -198,7 +204,9 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
         method:'POST',headers:{'Content-Type':'application/json'},signal:request.controller.signal,
         body
       }));
-      if(!isCurrent())return;
+      // A superseded response can still have megabytes left to deliver. Release
+      // its HTTP connection so subsequent strokes and saves can go through.
+      if(!isCurrent()){request.controller.abort();return;}
       if(response.status===204){
         if(size===detailSize&&context()?.key===key)throw Error('修订已更新，正在等待同步');
         return;
@@ -224,6 +232,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
         }
         const patch={window,request,pixels:next};
         drawPatch(patch,context().gamutWarning);
+        localInk=null;
         patched=!request.inspectMask&&hasWideGamut(request.colorSpace)?patch:{window,request};
         onFrame({request,pixels:next,window});
         return;
@@ -276,6 +285,27 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
     const window=rgba&&frame?.request.size===detailSize&&frame.request.key===state.key&&
       strokes.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke.stamps)?strokeWindow(strokes,state.visiblePixels,state.strokeBleed):undefined;
     intent={...state,operation,size,window,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
+    if(operation&&localBrush){
+      const sameCanvas=frame?.request.id===state.id&&frame.request.documentId===state.documentId&&frame.request.inspectMask===state.inspectMask;
+      const patch=localBrush(strokes);
+      if(patch&&(sameCanvas||patch.empty)){
+        const [ox,oy]=documentFrame(state.imageGeometry),[x,y,w,h]=patch.box;
+        const [width,height]=previewDimensions(state.imageGeometry,detailSize);
+        if(!sameCanvas){canvas.width=width;canvas.height=height;}
+        else if(canvas.width!==width||canvas.height!==height){
+          const previous=page.createElement('canvas');
+          previous.width=canvas.width;previous.height=canvas.height;
+          previous.getContext('2d',{colorSpace:canvasSpace}).drawImage(canvas,0,0);
+          canvas.width=width;canvas.height=height;
+          ctx.drawImage(previous,0,0,width,height);
+        }
+        const space=state.inspectMask?null:state.colorSpace,displaySpace=imageDisplaySpace(space,canvasSpace);
+        const dirty=new ImageData(patch.pixels,w,h,{colorSpace:displaySpace});
+        if(space&&space!=='srgb'&&space!=='linear')writeDisplayRGB(dirty.data,patch.pixels,space,state.gamutWarning,displaySpace);
+        ctx.putImageData(dirty,x-ox,y-oy);
+        localInk={request:intent};
+      }
+    }
     if(!operation&&baseFrame&&baseFrame.request.size>=size&&
        (baseFrame.request.key===state.key||baseFrame.request.key===state.reuseKey)){
       queued=null;
@@ -386,6 +416,9 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       if(!state)return;
       // Keep exact pixels through their own save. Later edits must show their
       // fast frame even when a previous patch is still waiting for detail.
+      if(localInk&&committedStroke&&localInk.request.revision+1===state.revision&&localInk.request.id===state.id&&
+         localInk.request.documentId===state.documentId&&localInk.request.inspectMask===state.inspectMask&&
+         JSON.stringify(localInk.request.operation)===JSON.stringify(committedStroke))localInk.holdKey=state.key;
       if(patched && committedStroke && patched.request.revision+1===state.revision &&
          patched.request.id===state.id && patched.request.documentId===state.documentId &&
          patched.request.inspectMask===state.inspectMask &&
@@ -394,7 +427,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,onStat
       requestFrame(state,operation);
     },
     clear(){
-      cancelPending();baseFrame=null;frame=null;drawn=null;patched=null;
+      cancelPending();baseFrame=null;frame=null;drawn=null;patched=null;localInk=null;
       onStatus('',false,{size:0,phase:'hidden'});
       guideFrame=null;
       viewport.showLivePaint(null);

@@ -17,7 +17,7 @@ from paint_mask_generators import preview_generator, smooth
 from material_graph import MaterialGraph, MaterialImages, PreviewImages
 from image_color_spaces import display_pixels
 from image_color_spaces import profiled_copy
-from image_documents import embedded_image_assets,document_pixels,document_pixel,framed_composite,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window
+from image_documents import embedded_image_assets,document_pixels,document_pixel,framed_composite,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window,brush_tile
 
 
 def decode(srgb):
@@ -724,6 +724,8 @@ def live_pixels(cfg):
         if 'imageSelectionSample' in cfg:
             return image_selection_sample(doc,cfg['assets'],cfg['imageSelectionSample'],cfg['liveResolution'])
         if cfg.get('isolatedImageLayer'):doc={**doc,'layers':[l for l in doc['layers'] if l['id']==cfg['isolatedImageLayer']]}
+        if cfg.get('imageBrushTile'):
+            return brush_tile(doc,cfg['assets'],cfg['imageBrushTile'])
         if cfg.get('imageWindow'):
             window = exact_stroke_window(doc,cfg['assets'],cfg['imageWindow'],cfg.get('imageInspectMask'))
             if window is not None:

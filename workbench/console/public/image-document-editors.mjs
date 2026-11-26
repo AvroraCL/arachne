@@ -1,3 +1,4 @@
+import {createBrushTiles} from './image-brush-tile.mjs';
 import {fillWorkingSpaces} from './image-color-spaces.mjs';
 import {menuShortcut} from './menu-shortcut.mjs';
 import {documentClip,documentFrame,editingSide,imageViewGeometry,previewDimensions} from './image-document-size.mjs';
@@ -553,7 +554,19 @@ export function createDocumentEditor(ctx,bridge){
   function save(op,origin){
     return submitEdit(mapOperation(op,origin),{id:origin.id||origin.projectId,revision:origin.revision});
   }
-  const live=createLiveView({rgba:true,viewport:{showLivePaint(){}},canvas,guide:el('canvas'),
+  const brushTiles=createBrushTiles(()=>{
+    const image=currentDocument(project),layer=currentLayer(project);
+    if(disposed||!shown||!image||!layer)return null;
+    const [x,y,w,h]=documentFrame(image);
+    if(w!==image.width||h!==image.height||!Number.isInteger(x)||!Number.isInteger(y))return null;
+    return {id:project.document.id,revision:project.document.revision,doc:project.imageContext.documentId,
+      layer,empty:image.layers.every(l=>!l.visible||l.kind==='pixel'&&!l.raster&&!l.strokes?.length&&!l.maskStrokes?.length&&!l.maskGradient&&!l.parentId&&!Object.values(l.styles??{}).some(e=>e.enabled)),
+      tip:imageControls.tipAsset.select.value,texture:imageControls.textureAsset.select.value,space:image.colorSpace,inspect:!!project.imageContext.inspectMask,center:[(x+w/2)/4096,(y+h/2)/4096]};
+  });
+  stage.addEventListener('pointermove',event=>{
+    if(event.target===canvas)brushTiles.prepare(canvasPoint(canvas,event));
+  },{capture:true,signal:life.signal});
+  const live=createLiveView({localBrush:edits=>brushTiles.render(edits),rgba:true,viewport:{showLivePaint(){}},canvas,guide:el('canvas'),
     context:()=>{
       const doc=project.document,c=project.imageContext;
       if(!doc||!currentDocument(project))return null;
@@ -598,7 +611,9 @@ export function createDocumentEditor(ctx,bridge){
     brushPreview=operations;
     brushPreviewRevision=origin.revision;
     const operation=operations.length>1?operations:operations[0]||null;
-    live.update(operation,operations.length ? null : strokeQueue.confirmedOperation(origin.revision));
+    const confirmed=strokeQueue.confirmedOperation(origin.revision);
+    brushTiles.advance(confirmed);
+    live.update(operation,operations.length?null:confirmed);
     project.draft(operation);
   }
   const recovery=el('div','document-save-recovery'),saveMessage=el('output');
@@ -1695,7 +1710,7 @@ export function createDocumentEditor(ctx,bridge){
     if((!image&&document.activeElement===canvas)||(image&&empty.contains(document.activeElement)))stage.focus({preventScroll:true});
     empty.hidden=!!image;canvas.hidden=!image;
     if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}
-    ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();live.refresh();uvGuide.sync();
+    ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();live.refresh();brushTiles.prepare();uvGuide.sync();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
   return {kind:'image',sync,handleKey,openPhotoFile(){if(!importing&&!writing())openInput.click();},travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,angle,mirror,gamutWarning,uvGuide:uvGuide.enabled,tool:mode,edgeRefine:edgeTool.getState(),selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),wand:readWand(),colorRange:readRange(),selectionRefineRadius:refineRadius.valueAsNumber,gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),move:moveTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
@@ -1735,7 +1750,7 @@ export function createDocumentEditor(ctx,bridge){
       if(!visible){stopAdjustmentPick();edgeTool.cancel();penTool.cancelDrag();canvasText.cancel();gradientTool.cancel();shapeTool.cancel();moveTool.cancel();warpTool.cancel();}
       if(visible)sync();
     },
-    dispose(){disposed=true;clearClipboardNotice();stopAdjustmentPick();exportRequest?.abort();exportMenu.dispose();unsub();stopClipboard();gradientTool.cancel();cloneTool.dispose();shapeTool.cancel();moveTool.dispose();warpTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();live.dispose();uvGuide.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
+    dispose(){disposed=true;clearClipboardNotice();stopAdjustmentPick();exportRequest?.abort();exportMenu.dispose();unsub();stopClipboard();gradientTool.cancel();cloneTool.dispose();shapeTool.cancel();moveTool.dispose();warpTool.cancel();imageView.dispose();life.abort();painter.dispose();selection.dispose();brushTiles.dispose();live.dispose();uvGuide.dispose();resize.disconnect();stripResize.disconnect();},setPaintMode(next){setMode(next);}};
 }
 
 export function createImagePanel(type,ctx){

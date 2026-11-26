@@ -413,12 +413,17 @@ assert 10<patch.max()<200
       if(request.url().endsWith('/image-live'))requests.push(request.postDataJSON());
     };
     page.on('request',record);
-    const pending=page.waitForResponse(r=>r.ok()&&r.url().endsWith('/image-live')&&
-      r.request().postDataJSON()?.resolution===grid&&predicate(r.request().postDataJSON()?.operation?.stroke));
+    // Superseded drafts may be cancelled after their headers arrive. Only
+    // completed responses contain pixels the browser can inspect.
+    const pending=page.waitForEvent('requestfinished',{predicate:async request=>{
+      if(!request.url().endsWith('/image-live'))return false;
+      const body=request.postDataJSON();
+      return body.resolution===grid&&predicate(body.operation?.stroke)&&(await request.response())?.ok();
+    }});
     try{
       await page.mouse.move(...await point(...from));await page.mouse.down();
       await page.mouse.move(...await point(...to),{steps:7});
-      const response=await pending;
+      const response=await (await pending).response();
       await stage.locator('xpath=self::*[@data-preview-size="1024"]').waitFor();
       return new Uint8Array(await response.body());
     }catch(error){

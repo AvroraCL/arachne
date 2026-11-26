@@ -888,9 +888,15 @@ export function livePaintInput(doc,{revision,operation,operations,inspectMask,is
   if(rawLayer){input.paint={...input.paint,base:{color:'#383838',metallic:0,roughness:.5}};delete input.paint.baseChannels;delete input.paint.materialGraph;input.materialPlan=null;delete input.materialFingerprint;}
   return {...input,inspectMask,isolatedLayer,uvGuide:uvGuide===true,liveResolution:resolution,liveFormat:format};
 }
-export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,documentView=false,resolution=256}){
+export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,brushTile,documentView=false,resolution=256}){
   if(doc.revision!==revision)throw revisionError(doc);
   const edits=liveDraftOperations(doc,operation,operations,documentId);
+  if(brushTile!==undefined){
+    const box=brushTile?.window;
+    if(edits.length||window||inspectMask||isolatedImageLayer||beforeImageLayer!==undefined||resolution!==256||
+       typeof brushTile?.layerId!=='string'||!Array.isArray(box)||box.length!==3||box[2]!==512||
+       !box.slice(0,2).every(n=>Number.isInteger(n)&&n>=0&&n+512<=4096))throw Error('笔刷局部底图范围无效');
+  }
   if(window!==undefined){
     if(!Array.isArray(window)||window.length!==3||!window.every(Number.isInteger))throw Error('局部预览范围无效');
     const [x,y,side]=window;
@@ -931,7 +937,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
     imageDocumentId:documentId,
     ...(thumbnail?{imageThumbnail:true,imageViewSize:thumbnailDimensions(image,resolution)}:
       documentView?{imageViewSize:previewDimensions(image,resolution)}:{}),
-    imageInspectMask:inspectMask,...(window?{imageWindow:window}:{}),
+    imageInspectMask:inspectMask,...(brushTile?{imageBrushTile:brushTile}:{}),...(window?{imageWindow:window}:{}),
     liveResolution:resolution,
     liveFormat:'rgba'
   };

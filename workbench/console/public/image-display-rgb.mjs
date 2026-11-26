@@ -72,7 +72,7 @@ function outsideSRGB(m,r,g,b){
 const powerCurve={'gray-g22':2.2,'dci-p3':2.6,'rec2020-g24':2.4,'rec709-g24':2.4,'adobe-rgb':563/256};
 const linearSpaces=new Set(['gray-linear','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','linear-prophoto-rgb','acescg','aces2065-1']);
 const videoCurve={'rec709':.909912109375,'rec2020':.90966796875};
-function decodeComponent(x,space){
+export function decodeComponent(x,space){
   if(linearSpaces.has(space))return x;
   if(powerCurve[space])return x**powerCurve[space];
   const a=videoCurve[space];
@@ -81,7 +81,7 @@ function decodeComponent(x,space){
   if(space==='prophoto-rgb')return x<1/32?x/16:x**1.8;
   return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;
 }
-function encodeComponent(x,space){
+export function encodeComponent(x,space){
   if(linearSpaces.has(space))return x;
   if(powerCurve[space])return x**(1/powerCurve[space]);
   const a=videoCurve[space];

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {test} from 'node:test';
+import {gunzipSync} from 'node:zlib';
+import {renderBrushTile} from '../public/image-brush-tile.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
 import {writeDisplayRGB,workingHexToLab,labToWorkingHex} from '../public/image-display-rgb.mjs';
 import {createSmoothMesh,smoothMesh,validImageWarp,warpPoint} from '../public/image-warp.mjs';
@@ -63,6 +65,49 @@ with tempfile.TemporaryDirectory() as tmp:
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8',env:{...process.env,OPENBLAS_NUM_THREADS:'1'}}));
   assert.ok(result.changed_pixels>700);
   console.log(result);
+});
+
+test('brush contact blends against both neighbours and promotes feathered mask edits once',()=>{
+  const layer={id:'ink',opacity:.76,maskEnabled:true,maskDensity:.8,maskFeather:4};
+  const state={layer,space:'srgb'},images=new Map();
+  const stroke={uv:true,radius:.004,hardness:.65,opacity:.73,flow:.25,spacing:.18,stamps:[[.489,.496],[.50,.501],[.51,.504]]};
+  const op=(target,patch)=>({action:'stroke',layerId:'ink',target,stroke:{...stroke,...patch}});
+  const edits=[op('pixels',{color:'#bd4d33',erase:false}),op('mask',{value:.05}),
+    op('pixels',{color:'#000000',erase:true,radius:.0015})];
+  const oracle=JSON.parse(execFileSync(pythonExecutable(),['-B','-c',`
+import base64,json,sys
+from image_documents import brush_tile,exact_stroke_window
+state, edits = json.load(sys.stdin)
+def layer(id,ink,alpha):
+    return dict(id=id,kind='pixel',opacity=alpha,visible=True,blend='normal',maskEnabled=False,
+                strokes=[dict(uv=True,rect=[.42,.45,.55,.54],color=ink,opacity=.8,erase=False)])
+ink=layer('ink','#689782',1)
+ink.update(**state['layer'],maskBase=1)
+doc=dict(colorSpace='srgb',layers=[layer('back','#163276',.6),ink,layer('front','#dfb072',.39)])
+pack=lambda data:base64.b64encode(data).decode()
+tile=brush_tile(doc,{},dict(window=[1792,1792,512],layerId='ink'))
+for edit in edits:
+    key='maskStrokes' if edit['target']=='mask' else 'strokes'
+    ink.setdefault(key,[]).append(edit['stroke'])
+pixels=exact_stroke_window(doc,{},[1920,1920,256],None)
+print(json.dumps([pack(tile),pack(pixels.tobytes())]))
+`],{cwd:new URL('..',import.meta.url),input:JSON.stringify([state,edits]),encoding:'utf8'}));
+  const buffer=gunzipSync(Buffer.from(oracle[0],'base64')),reference=Buffer.from(oracle[1],'base64');
+  assert.equal(buffer.readUInt32LE(0),15);
+  const floats=new Float32Array(buffer.buffer,buffer.byteOffset+4,(buffer.length-4)/4);
+  let offset=0;
+  function plane(n){const result=floats.slice(offset,offset+n*512**2);offset+=result.length;return result;}
+  const tile={x:1792,y:1792,active:plane(4),below:plane(4),above:plane(4),raw:plane(1),soft:plane(1)};
+  const patch=renderBrushTile(tile,edits,state,images);
+  function check({box:[left,top,width,height],pixels}){
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const p=4*(y*width+x),q=4*((top+y-1920)*256+left+x-1920);
+      for(let c=0;c<4;c++)assert.ok(Math.abs(pixels[p+c]-reference[q+c])<=1,'display byte for layered stroke at '+[left+x,top+y,c]);
+    }
+  }
+  check(patch);
+  for(const edit of edits.slice(0,2))assert.ok(renderBrushTile(tile,[edit],state,images,true));
+  check(renderBrushTile(tile,edits.slice(2),state,images));
 });
 
 test('smooth net is continuous across cell boundaries and keeps invertible local coordinates',()=>{
