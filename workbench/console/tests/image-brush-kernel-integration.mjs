@@ -92,17 +92,19 @@ try{
         const body=JSON.parse(options.body),read=response.arrayBuffer.bind(response);
         response.arrayBuffer=async()=>{
           const data=await read();
-          buffers.set(data,{revision:body.revision,resolution:body.resolution,draft:!!(body.operation||body.operations)});
+          const nativePatch=body.window&&!body.operation&&!body.operations&&response.headers.has('X-Paint-Window');
+          buffers.set(data,{revision:body.revision,resolution:nativePatch?4096:body.resolution,patch:!!nativePatch,draft:!!(body.operation||body.operations)});
           return data;
         };
       }
       if(typeof url==='string'&&url.endsWith('/image-live')&&response.ok&&window.brushBurst){
-        const {resolution,revision}=JSON.parse(options.body);
-        if(resolution===4096&&revision===window.brushBurst.heldRevision){
+        const {resolution,revision,window:region,operation,operations}=JSON.parse(options.body);
+        if((resolution===4096||region&&!operation&&!operations)&&[window.brushBurst.heldRevision,window.brushBurst.heldRevision+3].includes(revision)){
           const read=response.arrayBuffer.bind(response);
           response.arrayBuffer=async ()=>{
             const data=await read();
-            await new Promise(resolve=>{window.brushBurst.release=resolve;});
+            if(revision===window.brushBurst.heldRevision)window.brushBurst.held=true;
+            await window.brushBurst.gate;
             return data;
           };
         }
@@ -177,6 +179,23 @@ try{
       window.brushBench.armed={kind,u,v,x,y,before};
     },{kind,u,v});
   }
+  async function compareCanvas(){
+    const different=await canvas.evaluate(async(canvas,{url,revision})=>{
+      const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({documentId:'design',resolution:4096,revision})});
+      if(!response.ok)throw Error('failed to read reference pixels');
+      const raw=new Uint8ClampedArray(await response.arrayBuffer());
+      const expected=document.createElement('canvas');expected.width=expected.height=4096;
+      const ctx=expected.getContext('2d'),actual=canvas.getContext('2d');
+      ctx.putImageData(new ImageData(raw,4096,4096),0,0);
+      for(let y=0;y<4096;y+=128){
+        const a=actual.getImageData(0,y,4096,128).data,b=ctx.getImageData(0,y,4096,128).data;
+        const i=a.findIndex((v,i)=>v!==b[i]);if(i!==-1)return [Math.floor(i/4)%4096,y+Math.floor(i/16384),i%4,a[i],b[i]];
+      }
+      return null;
+    },{url:origin+paint+'/image-live',revision:doc.revision});
+    assert.equal(different,null,'the visible canvas matches the independent full composite at '+different);
+  }
   async function numeric(scope,label,value){
     await scope.locator('input[aria-label="'+label+'"]').locator('..').dblclick();
     const number=scope.getByRole('spinbutton',{name:'输入数值'});
@@ -243,8 +262,12 @@ try{
       const releaseToCanvas=await page.evaluate(()=>window.brushBench.detail.drawnAt-window.brushBench.pointerup);
       results.push({first:Math.round(initial),move:Math.round(continuing),settled:Math.round(settled),
         pointerToCanvas:Math.round(feedback.pointerToCanvas),firstChanged:feedback.firstChanged,local:feedback.local,down:feedback.down,exactDelta:feedback.exactDelta,canvasToObserved:Math.round(feedback.canvasToObserved),
-        releaseToCanvas:Math.round(releaseToCanvas)});
-      if(run===counts-1)digests[name]=await hash();
+        releaseToCanvas:Math.round(releaseToCanvas),patch:detail.patch});
+      if(run===counts-1){
+        digests[name]=await hash();
+        assert.ok(detail.patch,'saved brush was reconciled at native resolution using its affected pixels');
+        await compareCanvas();
+      }
       await stage.focus();
       await nextRevision(()=>page.keyboard.press(mod+'+z'));
     }
@@ -259,13 +282,24 @@ try{
     await stage.focus();
     await nextRevision(()=>page.keyboard.press(mod+'+z'));
   }
+  async function roundBrush(radius){
+    await popup.click();
+    await tipPanel.getByRole('button',{name:'图片笔尖',exact:true}).click();
+    await page.getByRole('option',{name:'圆形',exact:true}).click();
+    await numeric(tipPanel,'圆度',100);await numeric(tipPanel,'纹理深度',0);
+    await page.keyboard.press('Escape');
+    await numeric(editor,'像素半径',radius);await numeric(editor,'硬度',100);await numeric(editor,'流量',100);
+  }
   // Hold a real 4K result after its body is read. New strokes must publish
   // fast frames before that body is released, then refine only their revision.
   await layer.locator('.document-layer-select').click();
   await editor.getByRole('button',{name:'画笔',exact:true}).click();
   await editor.getByRole('button',{name:'实际像素',exact:true}).click();
+  await roundBrush(9);
+  await editor.getByLabel('图像前景色',{exact:true}).fill('#e76832');
   await stage.evaluate((el,heldRevision)=>{
     const brushBurst=window.brushBurst={heldRevision,displayed:[]};
+    brushBurst.gate=new Promise(resolve=>{brushBurst.release=resolve;});
     const read=()=>{
       const {previewRevision,previewSize,previewPhase}=el.dataset;
       brushBurst.displayed.push([Number(previewRevision),Number(previewSize),previewPhase]);
@@ -277,7 +311,7 @@ try{
     await page.mouse.move(...await point(.525,y),{steps:4});await page.mouse.up();
   };
   await nextRevision(()=>drag(.455),{detail:false});
-  await page.waitForFunction(()=>Boolean(window.brushBurst.release));
+  await page.waitForFunction(()=>Boolean(window.brushBurst.held));
   const held=doc.revision;
   const target=held+3;
   const endPixels=()=>canvas.evaluate(canvas=>{
@@ -316,14 +350,6 @@ try{
   await layer.locator('.document-layer-select').click();
   const brush=editor.getByRole('button',{name:'画笔',exact:true});
   await brush.click();
-  async function roundBrush(radius){
-    await popup.click();
-    await tipPanel.getByRole('button',{name:'图片笔尖',exact:true}).click();
-    await page.getByRole('option',{name:'圆形',exact:true}).click();
-    await numeric(tipPanel,'圆度',100);await numeric(tipPanel,'纹理深度',0);
-    await page.keyboard.press('Escape');
-    await numeric(editor,'像素半径',radius);await numeric(editor,'硬度',100);await numeric(editor,'流量',100);
-  }
   await roundBrush(15);await editor.getByLabel('图像前景色',{exact:true}).fill('#e72c20');
   const y=.532,sites=[.506,.518,.531];
   await canvas.evaluate((canvas,{sites,y})=>{

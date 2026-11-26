@@ -576,13 +576,15 @@ export function createDocumentEditor(ctx,bridge){
       let visiblePixels,strokeBleed=0;
       const image=currentDocument(project),frame=documentFrame(image);
       const patchable=frame[2]===image.width&&frame[3]===image.height&&frame.every(Number.isInteger);
-      if(patchable&&extent()*zoom>=4096*.9){
-        const layers=currentDocument(project).layers;
-        for(let item=layers.find(layer=>layer.id===c.layerId);item;item=layers.find(layer=>layer.id===layerParent(item))){
+      const selected=image.layers.find(layer=>layer.id===c.layerId);
+      if(patchable){
+        for(let item=selected;item;item=image.layers.find(layer=>layer.id===layerParent(item))){
           const {outline,shadow}=item.styles??{};
           strokeBleed+=(outline?.enabled?outline.width:0)+(shadow?.enabled?Math.max(Math.abs(shadow.x),Math.abs(shadow.y))+3*shadow.blur:0)+
             3*(item.maskFeather??0);
         }
+      }
+      if(patchable&&extent()*zoom>=4096*.9){
         const rect=stage.getBoundingClientRect(),at=canvasCoordinates(canvas).fromClient;
         const corners=[[rect.left,rect.top],[rect.right,rect.top],[rect.right,rect.bottom],[rect.left,rect.bottom]].map(([x,y])=>at(x,y));
         visiblePixels=[0,1].map(axis=>[
@@ -590,15 +592,20 @@ export function createDocumentEditor(ctx,bridge){
           Math.min(4096,Math.max(...corners.map(point=>point[axis]))*4096)
         ]);
       }
+      const localEdits=patchable&&image.layers.every(layer=>
+        !layer.parentId&&!layer.clipped&&!layer.warp&&!layer.maskTransform&&!layer.maskWarpSteps?.length&&
+        !layer.edgeDecontaminate&&!Object.values(layer.styles??{}).some(effect=>effect.enabled)&&
+        !['group','adjustment'].includes(layer.kind));
       return {id:doc.id,revision:doc.revision,documentId:c.documentId,inspectMask:c.inspectMask?c.layerId:null,channel:'color',
         colorSpace:image.colorSpace,gamutWarning:gamutWarning&&canWarnGamut(),imageGeometry:imageViewGeometry(image),
+        nativeCanvas:prefs.autoDetail,patchLayer:localEdits?selected?.id:null,maskEnabled:selected?.maskEnabled,
         fastSize,visiblePixels,strokeBleed,detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};
     },
     onFrame:frame=>{stage.dataset.strokeWindow=frame.window?.join(',')??'';},
     onStatus:(text,error,detail)=>{if(disposed)return;if(!detail){previewCaption='';status.title=status.textContent=text;return;}const {size=0,revision,phase,message,failedSize}=detail;stage.dataset.previewSize=String(size);stage.dataset.previewRevision=String(revision??'');stage.dataset.previewPhase=phase||'';status.title=message||text;
       if(sampleNotice.dataset.pending&&sampleFrame(imageOrigin()))showSampleNotice();
       const [pw,ph]=previewDimensions(currentDocument(project),size);
-      const actual=size?`实际预览 ${pw} × ${ph}${size===4096&&pw===4096&&ph===4096?' · 4K':''}`:'等待实时预览',suffix=phase==='refining'?(currentDocument(project)?.width===4096&&currentDocument(project)?.height===4096?' · 正在提升到 4K…':' · 正在细化至文档尺寸…'):phase==='retrying'?' · 预览暂不可用，正在重试…':phase==='error'?` · ${failedSize===4096?'全尺寸更新失败':'预览更新失败'} · 点击重试`:'';
+      const actual=size?`实际预览 ${pw} × ${ph}${size===4096&&pw===4096&&ph===4096?' · 4K':''}`:'等待实时预览',suffix=phase==='refining'?(size?' · 正在更新图像…':''):phase==='retrying'?' · 预览暂不可用，正在重试…':phase==='error'?` · ${failedSize===4096?'全尺寸更新失败':'预览更新失败'} · 点击重试`:'';
       const target=detail.displaySpace==='display-p3'?'Display P3':detail.displaySpace==='srgb'?'sRGB':'';
       previewCaption=actual+(target?' · '+target+' 预览':'')+suffix;status.tabIndex=phase==='error'?0:-1;if(phase==='error')status.setAttribute('role','button');else status.removeAttribute('role');layout();}});
   let brushPreview=[],brushPreviewRevision=null;

@@ -132,8 +132,9 @@ try{
   const raw=[[.41,.51],[.422,.525],[.434,.505],[.447,.521],[.461,.510],[.478,.523],[.49,.51]];
   await page.mouse.move(...await point(...raw[0]));await page.mouse.down();
   for(const uv of raw.slice(1))await page.mouse.move(...await point(...uv));
-  await response;
-  await stage.locator('xpath=self::*[@data-preview-size="512"]').waitFor();
+  const smoothResponse=await response;
+  const smoothSize=smoothResponse.headers()['x-paint-window']?4096:512;
+  await stage.locator('xpath=self::*[@data-preview-size="'+smoothSize+'"]').waitFor();
   await page.mouse.up();await saved('保存平滑笔触');
   const stamps=layer().strokes[2].stamps;
   assert.ok(stamps[1][1]>.5105&&stamps[1][1]<.523,JSON.stringify(stamps.slice(0,2)));
@@ -424,15 +425,19 @@ assert 10<patch.max()<200
       await page.mouse.move(...await point(...from));await page.mouse.down();
       await page.mouse.move(...await point(...to),{steps:7});
       const response=await (await pending).response();
-      await stage.locator('xpath=self::*[@data-preview-size="1024"]').waitFor();
-      return new Uint8Array(await response.body());
+      const window=response.headers()['x-paint-window']?.split(',').map(Number);
+      await stage.locator('xpath=self::*[@data-preview-size="'+(window?4096:grid)+'"]').waitFor();
+      return {pixels:new Uint8Array(await response.body()),window};
     }catch(error){
       await page.screenshot({path:path.join(data,'fine-'+label+'-error.png')});
       console.log(label,JSON.stringify(requests.slice(-5)));
       throw error;
     }finally{page.off('request',record);}
   }
-  const sample=(frame,u,v)=>frame.slice(4*(v*grid+u),4*(v*grid+u)+4);
+  const sample=({pixels,window},u,v)=>{
+    const index=window?(Math.floor((v+.5)*4096/grid)-window[1])*window[2]+Math.floor((u+.5)*4096/grid)-window[0]:v*grid+u;
+    return pixels.slice(4*index,4*index+4);
+  };
   const ink=await heldPreview('brush',[left,atY],[right,atY],stroke=>!stroke?.erase&&stroke?.stamps?.at(-1)?.[0]>(left+right)/2);
   assert.ok(sample(ink,col+4,line)[0]>190&&sample(ink,col+4,line)[3]>128);
   await page.screenshot({path:path.join(data,'fine-stroke-while-drawing.png')});

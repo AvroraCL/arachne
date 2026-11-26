@@ -199,7 +199,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       if(context()?.modeling&&frame?.request.revision!==revision)onStatus('正在更新建模后的材质与表面…');
       const draft=rgba&&operation?.textDraft?{textDraft:operation.textDraft}:
         Array.isArray(operation)?{operations:operation}:{operation};
-      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:size,window,...(request.imageGeometry?{documentView:true}:{})}:{revision,...draft,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
+      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:request.savedWindow?256:size,window,...(request.imageGeometry?{documentView:true}:{})}:{revision,...draft,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
       const response=await transport(()=>fetch('/api/projects/'+id+'/paint/'+(rgba?'image-live':'live'),{
         method:'POST',headers:{'Content-Type':'application/json'},signal:request.controller.signal,
         body
@@ -217,8 +217,11 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       }
       const reportedSize=response.headers?.get('X-Paint-Resolution');
       const reportedRevision=response.headers?.get('X-Paint-Revision');
-      if(reportedSize&&Number(reportedSize)!==size||reportedRevision&&Number(reportedRevision)!==revision)
+      if(reportedSize&&Number(reportedSize)!==(request.savedWindow?256:size)||reportedRevision&&Number(reportedRevision)!==revision)
         throw Error('实时贴图修订或尺寸不一致');
+      if(request.savedWindow&&response.headers.get('X-Paint-Window')!==window.join(',')){
+        request.controller.abort();requestFrame(context(),null,detailSize);return;
+      }
       const next=new Uint8Array(await transport(()=>response.arrayBuffer()));
       if(window&&response.headers?.get('X-Paint-Window')===window.join(',')){
         if(!isCurrent())return;
@@ -226,6 +229,24 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
         const [ox,oy]=documentFrame(request.imageGeometry);
         const [width,height]=previewDimensions(request.imageGeometry,detailSize);
         if(next.length!==side*side*4||canvas.width!==width||canvas.height!==height||!image)throw Error('局部预览尺寸无效');
+        if(request.savedWindow){
+          // The receipt advances exactly one saved stroke. Keep the untouched
+          // document pixels and replace the complete affected area in both buffers.
+          const left=Math.max(0,ox-window[0]),top=Math.max(0,oy-window[1]);
+          const right=Math.min(side,ox+width-window[0]),bottom=Math.min(side,oy+height-window[1]);
+          const tile=ctx.createImageData(side,side,{colorSpace:imageSpace});
+          writeDisplayRGB(tile.data,next,request.inspectMask?null:request.colorSpace,context().gamutWarning,imageSpace);
+          for(let y=top;y<bottom&&right>left;y++){
+            const offset=((window[1]+y-oy)*width+window[0]+left-ox)*4;
+            const start=(y*side+left)*4,end=(y*side+right)*4;
+            baseFrame.pixels.set(next.subarray(start,end),offset);
+            image.data.set(tile.data.subarray(start,end),offset);
+          }
+          ctx.putImageData(tile,window[0]-ox,window[1]-oy);
+          frame=baseFrame={request,pixels:baseFrame.pixels};
+          patched=localInk=null;detailFailure=null;
+          onFrame({request,pixels:next,window});status();return;
+        }
         if(patched&&patched.window.join(',')!==window.join(',')){
           const [left,top,side]=patched.window;
           ctx.putImageData(image,0,0,left-ox,top-oy,side,side);
@@ -269,7 +290,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     }
   }
 
-  function requestFrame(state,operation,size=fastSize(state)){
+  function requestFrame(state,operation,size=state.nativeCanvas&&!operation?detailSize:fastSize(state),savedWindow){
     cancelRetry();fastFailure=null;
     // Consecutive moves in one gesture can display intermediate frames. A
     // cancel, revision change or source switch invalidates the whole gesture.
@@ -282,9 +303,9 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     detailInFlight?.controller.abort();
     if(size!==detailSize)detailFailure=null;
     const strokes=Array.isArray(operation)?operation:[operation];
-    const window=rgba&&frame?.request.size===detailSize&&frame.request.key===state.key&&
-      strokes.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke.stamps)?strokeWindow(strokes,state.visiblePixels,state.strokeBleed):undefined;
-    intent={...state,operation,size,window,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
+    const window=savedWindow??(rgba&&frame?.request.size===detailSize&&frame.request.key===state.key&&
+      strokes.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke.stamps)?strokeWindow(strokes,state.visiblePixels??(state.nativeCanvas&&state.patchLayer?[[0,detailSize],[0,detailSize]]:null),state.strokeBleed):undefined);
+    intent={...state,operation,size,window,savedWindow,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
     if(operation&&localBrush){
       const sameCanvas=frame?.request.id===state.id&&frame.request.documentId===state.documentId&&frame.request.inspectMask===state.inspectMask;
       const patch=localBrush(strokes);
@@ -378,7 +399,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       const state=context();
       if(!state||intent?.key!==state.key)return;
       const edits=Array.isArray(intent.operation)?intent.operation:[intent.operation];
-      const moved=intent.window&&intent.window.join(',')!==strokeWindow(edits,state.visiblePixels,state.strokeBleed)?.join(',');
+      const moved=intent.operation&&intent.window&&state.visiblePixels&&intent.window.join(',')!==strokeWindow(edits,state.visiblePixels,state.strokeBleed)?.join(',');
       if(moved||intent.size<fastSize(state))requestFrame(state,intent.operation);
     },
     preferencesChanged(){
@@ -424,6 +445,16 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
          patched.request.inspectMask===state.inspectMask &&
          JSON.stringify(patched.request.operation)===JSON.stringify(committedStroke))
         patched.holdKey=state.key;
+      const before=baseFrame?.request;
+      if(!operation&&state.nativeCanvas&&committedStroke?.stroke?.stamps&&before?.size===detailSize&&
+         before.revision+1===state.revision&&before.id===state.id&&before.documentId===state.documentId&&
+         before.inspectMask===state.inspectMask&&state.patchLayer===committedStroke.layerId&&
+         (committedStroke.target!=='mask'||intent?.maskEnabled)&&image&&drawn?.pixels===baseFrame.pixels&&
+         !committedStroke.stroke.clone){
+        // Use the whole stroke, including off-screen stamps and mask feather.
+        const box=strokeWindow([committedStroke],[[0,detailSize],[0,detailSize]],state.strokeBleed);
+        if(box){requestFrame(state,null,detailSize,box);return;}
+      }
       requestFrame(state,operation);
     },
     clear(){

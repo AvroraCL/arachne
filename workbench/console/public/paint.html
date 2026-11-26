@@ -412,10 +412,10 @@
         <label>地面粗糙度<span><input data-group="display" data-setting="groundRoughness" aria-label="地面粗糙度" type="range" min="0" max="1" step=".05"><output></output></span></label>
       </section>
       <section id="settings-preview" role="tabpanel" aria-labelledby="settings-tab-preview" data-settings-section="preview" hidden>
-        <h2>实时预览</h2><p class="settings-hint">绘制期间使用 256 × 256 快速预览。</p>
-        <label class="settings-check"><input id="settings-auto-detail" data-group="preferences" data-setting="autoDetail" type="checkbox">停笔后自动提升到 4K</label>
-        <label>停笔等待<span><input id="settings-detail-delay" data-group="preferences" data-setting="detailDelay" aria-label="停笔等待时间" type="range" min="300" max="5000" step="100"><output></output></span></label>
-        <p class="settings-hint">4K 合成完成后，颜色、金属度与粗糙度一起更新。关闭自动提升可降低连续制作时的后台计算量。</p>
+        <h2>实时预览</h2>
+        <label class="settings-check"><input id="settings-auto-detail" data-group="preferences" data-setting="autoDetail" type="checkbox">全分辨率预览</label>
+        <label>材质预览停笔等待<span><input id="settings-detail-delay" data-group="preferences" data-setting="detailDelay" aria-label="材质预览停笔等待时间" type="range" min="300" max="5000" step="100"><output></output></span></label>
+        <p class="settings-hint">开启后，二维画布按文档尺寸更新。材质预览在停笔后按所设时间更新 4K 贴图。</p>
       </section>
       <section id="settings-shortcuts" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-settings-section="shortcuts" hidden>
         <h2>快捷键参考</h2><p class="settings-hint">⌘ 对应 Mac；Windows 与 Linux 使用 Ctrl。</p>
