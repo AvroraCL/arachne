@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
-from image_color_spaces import GRAY_SPACES, PROFILE_FILES, png_source_space, profile_bytes, rgb_transform
+from image_color_spaces import GRAY_SPACES, PROFILE_FILES, gray16_to_working_bytes, png_source_space, profile_bytes, rgb_transform
 
 
 MIB = 1024 * 1024
@@ -44,6 +44,8 @@ def open_document_image(image, item):
         raise ValueError('绘制文档宽高须在 4096 像素以内，可先缩小图片或置入现有图像')
     assigned=item.get('sourceSpace') or item.get('profileFile')
     named=png_source_space(image) if not assigned and item['openWorkingSpace']!='linear' else None
+    # Pillow expands 16-bit gray + alpha PNG to RGBA during load.
+    gray_alpha_png=image.format=='PNG' and any(tile.args=='LA;16B' for tile in image.tile)
     oriented=ImageOps.exif_transpose(image)
     embedded=oriented.info.get('icc_profile')
     if named:
@@ -54,7 +56,7 @@ def open_document_image(image, item):
         embedded=Path(item['profileFile']).read_bytes()
     known=next((key for key in PROFILE_FILES if embedded==profile_bytes(key)),None) if embedded else None
     mode=oriented.mode
-    gray=mode in ('1','L','LA') or mode.startswith('I;16')
+    gray=gray_alpha_png or mode in ('1','L','LA') or mode.startswith('I;16')
     # A gray PNG may use an RGB cICP transfer; its three equal values are
     # interpreted in the declared RGB space just like a neutral RGB pixel.
     if named and gray:
@@ -83,12 +85,9 @@ def open_document_image(image, item):
         source_space=('gray-linear' if linear else 'gray-g22') if gray else ('linear-srgb' if linear else 'srgb')
         description=('无 ICC · '+{'gray-g22':'灰度 Gamma 2.2','gray-linear':'线性灰度','linear-srgb':'线性 RGB','srgb':'sRGB'}[source_space])
     target=source_space if item['openWorkingSpace']=='auto' else item['openWorkingSpace']
-    if mode.startswith('I;16'):
-        import numpy as np
-        reduced=np.asarray(oriented,dtype=np.uint32)
-        oriented=Image.fromarray(((reduced+128)//257).astype(np.uint8))
-    elif mode in ('I','F'):
+    if mode in ('I','F'):
         raise ValueError('此图像使用整数或浮点通道，请先导出为 8 位或 16 位图像')
+    oriented=gray16_to_working_bytes(oriented)
     rgba=oriented.convert('RGBA') if mode not in ('LAB','CMYK') else None
     if target=='linear':
         if rgba is None:
@@ -147,12 +146,7 @@ def convert(item):
                     # A placed photo must remain convertible when the document reopens.
                     rgb_transform(profile,profile_bytes(item['workingSpace']))
                 if orientation.mode.startswith('I;16'):
-                    import numpy as np
-                    normalized=Image.new('L',orientation.size)
-                    for top in range(0,orientation.height,256):
-                        box=(0,top,orientation.width,min(top+256,orientation.height))
-                        values=np.asarray(orientation.crop(box),dtype=np.uint32)
-                        normalized.paste(Image.fromarray(((values+128)//257).astype(np.uint8)),(0,top))
+                    normalized=gray16_to_working_bytes(orientation)
                 elif orientation.mode in ('I','F'):
                     raise ValueError('请先将整数或浮点 TIFF 转为 8 位或 16 位图像')
                 else:

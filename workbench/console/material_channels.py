@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import numpy as np
 from PIL import Image
+from image_color_spaces import gray16_to_working_bytes
 
 def scalar_canvas(spec, registration, directory):
     w,h=registration['canonicalSize'];rw,rh=registration['registeredSize'];x,y=registration['offset']
@@ -15,9 +16,10 @@ def scalar_canvas(spec, registration, directory):
     with Image.open(p) as im:
         im.load()
         if list(im.size)!=registration['originalSize']:raise ValueError('Scalar map must match the complete original artwork dimensions')
-        rgba=np.array(im.convert('RGBA'))
+        image=gray16_to_working_bytes(im)
+        rgba=np.array(image.convert('RGBA'))
         if np.any(rgba[:,:,3]!=255) or not np.array_equal(rgba[:,:,0],rgba[:,:,1]) or not np.array_equal(rgba[:,:,0],rgba[:,:,2]):raise ValueError('Scalar map must be opaque grayscale, not colored artwork')
-        data=np.array(im.convert('L').resize((rw,rh),Image.Resampling.BICUBIC),dtype=np.float32)
+        data=np.array(image.convert('L').resize((rw,rh),Image.Resampling.BICUBIC),dtype=np.float32)
     result=np.zeros((h,w),dtype=np.float32);result[y:y+rh,x:x+rw]=data
     return result
 

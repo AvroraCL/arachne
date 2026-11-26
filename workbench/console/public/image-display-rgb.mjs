@@ -7,6 +7,7 @@ const toSRGB={
   'gray-g22':grayMatrix,'gray-linear':grayMatrix,
   'rec709':[.99991849,.00009716,-.00001566,.00008821,.9999266,-.00001481,.00001097,.00000809,.99998095],
   'rec2020':rec2020,'rec2020-g24':rec2020,'linear-srgb':[1,0,0,0,1,0,0,0,1],
+  'eci-rgb-v2':[1.52001043,-.44880075,-.07125750,-.02263178,.98151958,.04112713,-.02651847,-.02972066,1.05623803],
   'dci-p3':[1.15743957,-.15484122,-.00259835,-.04140836,1.04547255,-.00406419,-.01801717,-.07859357,1.09661074],
   'acescg':[1.70494801,-.62164526,-.08330275,-.13011616,1.14067849,-.01056233,-.02396787,-.12897918,1.15294705],
   'aces2065-1':[2.52154161,-1.13394309,-.38757385,-.27628209,1.37253264,-.09627978,-.01533337,-.1529886,1.16832546],
@@ -14,6 +15,8 @@ const toSRGB={
   'adobe-rgb':[1.3982751,-.3982212,-.0000539,.0001025,.9998916,.0000059,.0000325,-.0429497,1.0429172],
   'prophoto-rgb':[2.0342011,-.7274671,-.306734,-.2286419,1.2316059,-.002964,-.0085179,-.1532819,1.1617999]
 };
+toSRGB['rec709-g24']=toSRGB['linear-srgb'];
+toSRGB['linear-prophoto-rgb']=toSRGB['prophoto-rgb'];
 toSRGB['linear-p3']=toSRGB['display-p3'];
 toSRGB['linear-rec2020']=rec2020;
 toSRGB['linear-adobe-rgb']=toSRGB['adobe-rgb'];
@@ -54,7 +57,7 @@ export function setWorkingSwatch(input,space){
 const decoders=new Map();
 let encoded;
 export function hasWideGamut(space){
-  return Boolean(toSRGB[space])&&toSRGB[space]!==grayMatrix&&space!=='rec709'&&space!=='linear-srgb';
+  return Boolean(toSRGB[space])&&toSRGB[space]!==grayMatrix&&space!=='rec709'&&space!=='rec709-g24'&&space!=='linear-srgb';
 }
 
 function outsideSRGB(m,r,g,b){
@@ -66,14 +69,15 @@ function outsideSRGB(m,r,g,b){
   return false;
 }
 
-const powerCurve={'gray-g22':2.2,'dci-p3':2.6,'rec2020-g24':2.4,'adobe-rgb':563/256};
-const linearSpaces=new Set(['gray-linear','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','acescg','aces2065-1']);
+const powerCurve={'gray-g22':2.2,'dci-p3':2.6,'rec2020-g24':2.4,'rec709-g24':2.4,'adobe-rgb':563/256};
+const linearSpaces=new Set(['gray-linear','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','linear-prophoto-rgb','acescg','aces2065-1']);
 const videoCurve={'rec709':.909912109375,'rec2020':.90966796875};
 function decodeComponent(x,space){
   if(linearSpaces.has(space))return x;
   if(powerCurve[space])return x**powerCurve[space];
   const a=videoCurve[space];
   if(a)return x<.081?x/4.5:(a*x+1-a)**(1/.45);
+  if(space==='eci-rgb-v2')return x<=.08?x*(2700/24389):((x+.16)/1.16)**3;
   if(space==='prophoto-rgb')return x<1/32?x/16:x**1.8;
   return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;
 }
@@ -82,6 +86,7 @@ function encodeComponent(x,space){
   if(powerCurve[space])return x**(1/powerCurve[space]);
   const a=videoCurve[space];
   if(a)return x<.018?x*4.5:(x**.45-1+a)/a;
+  if(space==='eci-rgb-v2')return x<=(6/29)**3?x*(24389/2700):1.16*Math.cbrt(x)-.16;
   if(space==='prophoto-rgb')return x<1/512?x*16:x**(1/1.8);
   return x<=.0031308?x*12.92:1.055*x**(1/2.4)-.055;
 }
@@ -101,7 +106,7 @@ export function linearSRGBToWorkingMatrix(space){
   return fromSRGB.get(space);
 }
 const identity=[1,0,0,0,1,0,0,0,1];
-const sceneSpaces={srgb:defaultExrSpace,rec709:defaultExrSpace,'linear-srgb':defaultExrSpace,
+const sceneSpaces={srgb:defaultExrSpace,rec709:defaultExrSpace,'rec709-g24':defaultExrSpace,'linear-srgb':defaultExrSpace,
   'gray-linear':defaultExrSpace,'gray-g22':defaultExrSpace,'display-p3':'lin_p3d65_scene','linear-p3':'lin_p3d65_scene',
   rec2020:'lin_rec2020_scene','rec2020-g24':'lin_rec2020_scene','linear-rec2020':'lin_rec2020_scene',
   'adobe-rgb':'lin_adobergb_scene','linear-adobe-rgb':'lin_adobergb_scene',acescg:'lin_ap1_scene','aces2065-1':'lin_ap0_scene'};

@@ -9,6 +9,7 @@ from PIL import Image, ImageCms
 
 PROFILE_FILES = {'srgb':'sRGB-v4.icc','gray-g22':'Gray-g22.icc','gray-linear':'Gray-linear.icc','display-p3':'DisplayP3-v4.icc',
                  'adobe-rgb':'AdobeCompat-v2.icc','prophoto-rgb':'ProPhoto-v4.icc',
+                 'eci-rgb-v2':'eciRGB-v2.icc','rec709-g24':'Rec709-g24.icc','linear-prophoto-rgb':'ROMM-linear.icc',
                  'rec709':'Rec709-v4.icc','rec2020':'Rec2020-v4.icc',
                  'rec2020-g24':'Rec2020-g24-v4.icc','dci-p3':'DCI-P3-v4.icc',
                  'linear-p3':'P3-D65-linear.icc','linear-rec2020':'Rec2020-linear.icc','linear-adobe-rgb':'AdobeRGB-linear.icc',
@@ -16,9 +17,9 @@ PROFILE_FILES = {'srgb':'sRGB-v4.icc','gray-g22':'Gray-g22.icc','gray-linear':'G
 # Inverse OETF coefficients (a, b) from the packaged BT.709/BT.2020 ICC rTRC tags.
 VIDEO_TRC = {'rec709':(0.909912109375,0.090087890625),
              'rec2020':(0.90966796875,0.09033203125)}
-POWER_TRC = {'adobe-rgb':563/256,'dci-p3':2.6,'rec2020-g24':2.4}
+POWER_TRC = {'adobe-rgb':563/256,'dci-p3':2.6,'rec2020-g24':2.4,'rec709-g24':2.4}
 GRAY_SPACES = {'gray-g22', 'gray-linear'}
-LINEAR_RGB = {'linear','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','acescg','aces2065-1'}
+LINEAR_RGB = {'linear','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','linear-prophoto-rgb','acescg','aces2065-1'}
 PROFILED_SPACES = PROFILE_FILES.keys() - {'srgb'}
 
 
@@ -115,6 +116,8 @@ def decode(c, space='srgb'):
     if space in VIDEO_TRC:
         a,b = VIDEO_TRC[space]
         return np.where(c < .081, c/4.5, np.maximum(a*c+b,0)**(1/.45))
+    if space == 'eci-rgb-v2':
+        return np.where(c <= .08, c*(2700/24389), ((c+.16)/1.16)**3)
     if space == 'prophoto-rgb':
         return np.where(c < 1/32, c/16, np.maximum(c,0)**1.8)
     return np.where(c<=.04045,c/12.92,((c+.055)/1.055)**2.4)
@@ -131,9 +134,28 @@ def encode(c, space='srgb'):
     if space in VIDEO_TRC:
         a,b = VIDEO_TRC[space]
         return np.where(c < .018, c*4.5, (np.maximum(c,0)**.45-b)/a)
+    if space == 'eci-rgb-v2':
+        return np.where(c <= (6/29)**3, c*(24389/2700), 1.16*np.cbrt(c)-.16)
     if space == 'prophoto-rgb':
         return np.where(c < 1/512, c*16, np.maximum(c,0)**(1/1.8))
     return np.where(c<=.0031308,c*12.92,1.055*np.maximum(c,0)**(1/2.4)-.055)
+
+
+def gray16_to_working_bytes(image):
+    """Reduce full-range unsigned gray before Pillow's RGBA conversion clips it."""
+    if not image.mode.startswith('I;16'):
+        return image
+    transparent=image.info.get('transparency')
+    output=Image.new('LA' if transparent is not None else 'L',image.size)
+    for top in range(0,image.height,256):
+        box=(0,top,image.width,min(top+256,image.height))
+        values=np.asarray(image.crop(box),dtype=np.uint32)
+        strip=Image.fromarray(((values+128)//257).astype(np.uint8))
+        if transparent is not None:
+            # tRNS specifies the original 16-bit sample, before quantization.
+            strip.putalpha(Image.fromarray(np.where(values==transparent,0,255).astype(np.uint8)))
+        output.paste(strip,(0,top))
+    return output
 
 
 def image_input(image, space, box=None, authored=False):
@@ -141,7 +163,7 @@ def image_input(image, space, box=None, authored=False):
     info = image.info
     named = png_source_space(image) if space != 'linear' and not authored else None
     source = profile_bytes(named) if named else info.get('icc_profile')
-    rgba = (image.crop(box) if box else image).convert('RGBA')
+    rgba = gray16_to_working_bytes(image.crop(box) if box else image).convert('RGBA')
     if space == 'linear':
         return np.asarray(rgba), 'srgb' if 'srgb' in info else 'linear'
     if authored and not source:

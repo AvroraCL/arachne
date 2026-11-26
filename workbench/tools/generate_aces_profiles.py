@@ -31,6 +31,7 @@ def generate(lib, folder, family):
         return fn
     ptr,u32 = c.c_void_p,c.c_uint32
     gamma = bind('cmsBuildGamma',ptr,ptr,c.c_double)
+    parametric = bind('cmsBuildParametricToneCurve',ptr,ptr,c.c_int,c.POINTER(c.c_double))
     create = bind('cmsCreateRGBProfile',ptr,c.POINTER(Chromaticity),c.POINTER(Primaries),c.POINTER(ptr))
     gray = bind('cmsCreateGrayProfile',ptr,c.POINTER(Chromaticity),ptr)
     lab = bind('cmsCreateLab4Profile',ptr,c.POINTER(Chromaticity))
@@ -46,20 +47,30 @@ def generate(lib, folder, family):
         spaces.extend((name,xy,1.,name+'-linear',name+' - Arachne Linear RGB') for name,xy in SPACES.items())
     if family in ('all','linear-rgb'):
         spaces.extend((name,xy,1.,name+'-linear',name+' - Arachne Linear RGB') for name,xy in D65_SPACES.items())
+    if family in ('all','photo-video'):
+        spaces.extend([('Rec709',[(.64,.33),(.30,.60),(.15,.06)],2.4,'Rec709-g24','Arachne Rec.709 Gamma 2.4'),
+                       ('ROMM',[(.7347,.2653),(.1596,.8404),(.0366,.0001)],1.,'ROMM-linear','Arachne Linear ProPhoto RGB')])
+    if family in ('all','prepress'):
+        spaces.append(('eciRGB',[(.67,.33),(.21,.71),(.14,.08)],'L*','eciRGB-v2','Arachne eciRGB v2'))
     if family in ('all','gray'):
         spaces.extend([('Gray Gamma 2.2',None,2.2,'Gray-g22','Arachne Gray Gamma 2.2'),
                        ('Gray Linear',None,1.,'Gray-linear','Arachne Linear Gray')])
     if family in ('all','lab'):
         spaces.append(('Lab D50',None,None,'Lab-D50','Arachne CIELAB D50'))
     for name,xy,exponent,filename,description in spaces:
-        curve=gamma(None,exponent) if exponent is not None else None
+        if exponent=='L*':
+            # ICC parametric curve decodes normalized L* to relative linear light.
+            curve=parametric(None,4,(c.c_double*5)(3.,1/1.16,.16/1.16,2700/24389,.08))
+        else:
+            curve=gamma(None,exponent) if exponent is not None else None
         if exponent is not None and not curve:
             raise RuntimeError('Tone curve creation failed')
         try:
             if exponent is None:
                 profile=lab(None)
             elif xy:
-                white=Chromaticity(.3127,.3290,1.) if name in D65_SPACES else Chromaticity(.32168,.33767,1.)
+                white_xy=(.32168,.33767) if name in SPACES else (.3457,.3585) if name in ('ROMM','eciRGB') else (.3127,.3290)
+                white=Chromaticity(*white_xy,1.)
                 primaries = Primaries(*(Chromaticity(x,y,1.) for x,y in xy))
                 profile = create(c.byref(white),c.byref(primaries),(ptr*3)(curve,curve,curve))
             else:
@@ -98,7 +109,7 @@ def generate(lib, folder, family):
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--lcms',default=find_library('lcms2'),help='Path to the LittleCMS 2 shared library')
-    parser.add_argument('--family',choices=['all','aces','linear-rgb','gray','lab'],default='all')
+    parser.add_argument('--family',choices=['all','aces','linear-rgb','photo-video','prepress','gray','lab'],default='all')
     args = parser.parse_args()
     if not args.lcms:
         parser.error('Pass the LittleCMS 2 library path with --lcms')

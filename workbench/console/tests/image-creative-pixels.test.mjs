@@ -475,7 +475,7 @@ import json, numpy as np
 from image_documents import composite_document, png_bytes, read_placed_image
 from image_color_spaces import decode,profile_bytes
 rows=[]
-for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec2020-g24','dci-p3','acescg','aces2065-1','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb'):
+for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec2020-g24','dci-p3','acescg','aces2065-1','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','linear-prophoto-rgb','rec709-g24','eci-rgb-v2'):
     # Midtones, near-black transfer curves and out-of-sRGB primaries.
     pixels=np.array([[[68,119,170,161],[4,12,3,39],[145,50,99,255],[0,250,32,128],[253,226,241,192]]],np.uint8)
     data=png_bytes(pixels,space)
@@ -497,7 +497,7 @@ for space in ('display-p3','adobe-rgb','prophoto-rgb','rec709','rec2020','rec202
     doc=dict(colorSpace=space,layers=[layer('base','#000000',1),layer('light','#ffffff',.5)])
     # Half-light encoded in each document's working space.
     middle={'display-p3':188,'adobe-rgb':186,'prophoto-rgb':174,'rec709':180,'rec2020':180,
-            'rec2020-g24':191,'dci-p3':195,'acescg':128,'aces2065-1':128,'linear-srgb':128,'linear-p3':128,'linear-rec2020':128,'linear-adobe-rgb':128}[space]
+            'rec2020-g24':191,'dci-p3':195,'acescg':128,'aces2065-1':128,'linear-srgb':128,'linear-p3':128,'linear-rec2020':128,'linear-adobe-rgb':128,'linear-prophoto-rgb':128,'rec709-g24':191,'eci-rgb-v2':194}[space]
     assert list(composite_document(doc,{},16)[8,8])==[middle,middle,middle,255]
     rows.append([space,pixels.flatten().tolist(),expected.flatten().tolist(),wide.flatten().tolist()])
 print(json.dumps(rows))
@@ -777,5 +777,39 @@ with tempfile.TemporaryDirectory() as folder:
  try:open_as('auto')
  except ValueError as error:assert 'HDR PQ' in str(error)
  else:raise AssertionError('untagged HDR was treated as SDR')
+`],{cwd:new URL('..',import.meta.url)});
+});
+
+test('16-bit gray ramps and coverage survive opening, placement, and material sampling',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import json, struct, tempfile, zlib
+from pathlib import Path
+import numpy as np
+from PIL import Image
+from image_color_spaces import image_input, profile_bytes
+from material_image_import import convert
+from material_graph import decode_image
+def chunk(kind, data):
+    return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data))
+with tempfile.TemporaryDirectory() as temp:
+    root=Path(temp);source=root/'ramp.png';dest=root/'opened.png';info=root/'doc.json'
+    values=np.array([0,255,256,32767,32768,65535],dtype='>u2')
+    for explicit_alpha in (False,True):
+        header=struct.pack('>IIBBBBB',len(values),1,16,4 if explicit_alpha else 0,0,0,0)
+        profile=chunk(b'iCCP',b'Gray'+bytes(2)+zlib.compress(profile_bytes('gray-linear')))
+        key=b'' if explicit_alpha else chunk(b'tRNS',struct.pack('>H',32767))
+        raw=np.stack([values, values[::-1]],axis=1).astype('>u2') if explicit_alpha else values
+        source.write_bytes(bytes.fromhex('89504e470d0a1a0a')+chunk(b'IHDR',header)+profile+key+
+                           chunk(b'IDAT',zlib.compress(bytes(1)+raw.tobytes()))+chunk(b'IEND',b''))
+        # Pillow's packed 16-bit gray+alpha decoder exposes the upper byte of
+        # both channels. Single-channel gray retains the entire original word.
+        gray=(values.astype(np.uint32)//256 if explicit_alpha else (values.astype(np.uint32)+128)//257).astype(np.uint8)
+        alpha=gray[::-1] if explicit_alpha else np.where(values==32767,0,255).astype(np.uint8)
+        expected=np.stack([gray,gray,gray,alpha],axis=1)[None,:,:]
+        convert(dict(source=str(source),name=source.name,destination=str(dest),documentInfo=str(info),openWorkingSpace='auto'))
+        assert json.loads(info.read_text())['colorSpace']=='gray-linear'
+        with Image.open(dest) as im:np.testing.assert_array_equal(np.asarray(im.convert('RGBA')),expected)
+        with Image.open(source) as im:np.testing.assert_array_equal(image_input(im,'linear',(1,0,5,1))[0],expected[:,1:5])
+        np.testing.assert_array_equal(decode_image(source,'RGBA'),expected)
 `],{cwd:new URL('..',import.meta.url)});
 });
