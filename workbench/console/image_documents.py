@@ -1566,14 +1566,17 @@ def framed_pixels(pixels, document, limit=None, target=None, window=None):
     return np.asarray(image.resize((width,height),Image.Resampling.BICUBIC,box=tuple(box)))
 
 
-def thumbnail_pixels(document, assets, target, inspect_mask=None):
+def framed_composite(document, assets, target, inspect_mask=None, resolution=None):
     x,y,w,h = document_frame(document)
-    resolution = min(4096,max(1,math.ceil(4096*max(target[0]/w,target[1]/h))))
+    if resolution is None:
+        resolution = min(4096,max(1,math.ceil(4096*max(target[0]/w,target[1]/h))))
+    # Fractional boxes must use the same resampling origin as the final document.
+    aligned = all(float(v).is_integer() for v in (x,y,w,h))
     left,top = math.floor(x),math.floor(y)
     side = max(math.ceil(x+w)-left,math.ceil(y+h)-top)
     # The exact brush window already accounts for stroke/filter neighborhoods.
     # Use it when the local tile costs less than sampling the whole editing grid.
-    if side <= min(2048,resolution):
+    if aligned and side <= min(2048,resolution):
         window = (min(left,4096-side),min(top,4096-side),side)
         pixels = exact_stroke_window(document,assets,window,inspect_mask)
         if pixels is not None:
@@ -1591,9 +1594,16 @@ def document_pixels(document,assets,size):
         frame = document_frame(document)
         scale = min(1,size/max(width,height))
         resolution = 4096 if scale==1 else min(4096,max(1,math.ceil(4096*scale*max(width/frame[2],height/frame[3]))))
-        pixels=framed_pixels(composite_document(document,assets,resolution),document,size)
+        if resolution==4096:
+            target=max(1,round(width*scale)),max(1,round(height*scale))
+            pixels=framed_composite(document,assets,target,resolution=resolution)
+        else:
+            pixels=framed_pixels(composite_document(document,assets,resolution),document,size)
         if shared:
             return pixels
+        # A crop may still own its entire editing grid through a NumPy view.
+        if isinstance(pixels.base,np.ndarray) and pixels.base.nbytes>pixels.nbytes:
+            pixels=pixels.copy()
         _cache[key]=pixels
         while len(_cache)>1:_cache.popitem(last=False)
     return _cache[key]

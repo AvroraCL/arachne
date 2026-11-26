@@ -529,17 +529,17 @@ test('sRGB proof warning marks wide-gamut visible colors and preserves neutral, 
 test('a small off-center document thumbnail preserves opaque details and its soft mask at either canvas edge',()=>{
   execFileSync(pythonExecutable(),['-B','-c',`
 import numpy as np
-from image_documents import thumbnail_pixels
+from image_documents import framed_composite
 for x,y in [(13,4065),(4043,0)]:
     rect=lambda left,top,right,bottom:[(x+left)/4096,(y+top)/4096,(x+right)/4096,(y+bottom)/4096]
     layer=dict(id='badge',kind='pixel',opacity=1,visible=True,blend='normal',
                strokes=[dict(uv=True,rect=rect(0,0,53,31),color='#00ff00',opacity=1,erase=False)],
                maskEnabled=True,maskBase=1,maskStrokes=[dict(uv=True,rect=rect(1,0,3,31),value=0,opacity=.5)])
     doc=dict(width=53,height=31,frame=[x,y,53,31],colorSpace='display-p3',layers=[layer])
-    image=thumbnail_pixels(doc,{},[53,31])
+    image=framed_composite(doc,{},[53,31])
     assert image.shape==(31,53,4)
     assert image[20,1].tolist()==[0,255,0,128] and image[20,3].tolist()==[0,255,0,255]
-    mask=thumbnail_pixels(doc,{},[53,31],'badge')
+    mask=framed_composite(doc,{},[53,31],'badge')
     np.testing.assert_array_equal(image[:,:,3],mask[:,:,0])
     assert np.all(mask[:,:,3]==255)
 `],{cwd:new URL('..',import.meta.url)});
@@ -639,4 +639,26 @@ for key,intent in [('relative',1),('perceptual',0)]:
             assert pair.crop((3,0,6,1)).tobytes()==actual.tobytes()
             assert list(pair.getchannel('A').getdata())==[0,47,255]*2
 `],{cwd:new URL('..',import.meta.url)});
+});
+
+test('framed linked sources and final exports match the full editing grid for odd sizes, soft masks and fractional crops',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import numpy as np
+from image_documents import document_pixels, composite_document, framed_pixels, framed_composite
+ink=dict(uv=True,radius=.007,hardness=.65,color='#fb5222',opacity=.74,flow=.4,spacing=.15,erase=False,
+    stamps=[[.492,.494],[.496,.498],[.502,.501],[.509,.505]])
+mask=dict(uv=True,radius=.004,hardness=.5,opacity=.8,spacing=.2,value=0,stamps=[[.499,.497],[.504,.502]])
+layer=dict(id='paint',kind='pixel',visible=True,opacity=.87,blend='normal',maskEnabled=True,maskBase=1,
+    strokes=[ink],maskStrokes=[mask],maskFeather=4.5)
+doc=dict(width=127,height=53,colorSpace='adobe-rgb',layers=[layer])
+reference=composite_document(doc,{},4096)
+for frame in [None,[1987.25,2026.75,106.5,69.5]]:
+    if frame: doc['frame']=frame
+    wanted=framed_pixels(reference,doc)
+    assert 0<wanted[:,:,3].max()<255 and len(np.unique(wanted[:,:,3]))>16
+    np.testing.assert_array_equal(framed_composite(doc,{},(127,53),resolution=4096),wanted)
+    cached=document_pixels(doc,{},4096)
+    np.testing.assert_array_equal(cached,wanted)
+    assert not isinstance(cached.base,np.ndarray) or cached.base.nbytes<=cached.nbytes
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
 });
