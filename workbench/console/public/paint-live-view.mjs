@@ -247,7 +247,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
           patched=localInk=null;detailFailure=null;
           onFrame({request,pixels:next,window});status();return;
         }
-        if(patched&&patched.window.join(',')!==window.join(',')){
+        if(patched&&patched.request.key===key&&patched.window.join(',')!==window.join(',')){
           const [left,top,side]=patched.window;
           ctx.putImageData(image,0,0,left-ox,top-oy,side,side);
         }
@@ -303,7 +303,14 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     detailInFlight?.controller.abort();
     if(size!==detailSize)detailFailure=null;
     const strokes=Array.isArray(operation)?operation:[operation];
-    const window=savedWindow??(rgba&&frame?.request.size===detailSize&&frame.request.key===state.key&&
+    // A later stroke can land before the preceding full-size save is displayed.
+    // Its worker tile already includes the saved history for the new revision.
+    const previous=frame?.request;
+    const nativeSurface=previous?.size===detailSize&&(previous.key===state.key||
+      state.nativeCanvas&&previous.id===state.id&&previous.documentId===state.documentId&&
+      previous.inspectMask===state.inspectMask&&previous.colorSpace===state.colorSpace&&
+      JSON.stringify(previous.imageGeometry)===JSON.stringify(state.imageGeometry));
+    const window=savedWindow??(rgba&&nativeSurface&&
       strokes.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke.stamps)?strokeWindow(strokes,state.visiblePixels??(state.nativeCanvas&&state.patchLayer?[[0,detailSize],[0,detailSize]]:null),state.strokeBleed):undefined);
     intent={...state,operation,size,window,savedWindow,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
     if(operation&&localBrush){

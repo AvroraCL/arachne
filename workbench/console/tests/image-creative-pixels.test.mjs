@@ -3,7 +3,7 @@ import {existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {test} from 'node:test';
 import {gunzipSync} from 'node:zlib';
-import {renderBrushTile} from '../public/image-brush-tile.mjs';
+import {createBrushTiles,renderBrushTile} from '../public/image-brush-tile.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
 import {writeDisplayRGB,workingHexToLab,labToWorkingHex} from '../public/image-display-rgb.mjs';
 import {createSmoothMesh,smoothMesh,validImageWarp,warpPoint} from '../public/image-warp.mjs';
@@ -37,6 +37,10 @@ with tempfile.TemporaryDirectory() as tmp:
         dict(uv=True,radius=.0017,hardness=.35,color='#000000',opacity=.85,erase=True,flow=.28,spacing=.2,
              stamps=[[.46,.494],[.48,.493],[.50,.498]]),
     ]
+    # Move already painted pixels across the requested tile boundary twice, then erase.
+    strokes[3:3]=[dict(transformUV=dict(rect=[0,0,1,1],offset=offset,scale=[1,1],angle=0,
+                                       interpolation=sampling))
+                  for offset,sampling in [([.0142,-.008],'linear'),([-.006,.012],'nearest')]]
     mask=dict(uv=True,radius=.008,hardness=.35,opacity=.8,flow=.5,spacing=.2,
               stamps=[[.48,.45],[.49,.49],[.502,.515]],value=0)
     document=dict(colorSpace='srgb',layers=[layer('ink','pixel',strokes=strokes)])
@@ -65,6 +69,27 @@ with tempfile.TemporaryDirectory() as tmp:
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8',env:{...process.env,OPENBLAS_NUM_THREADS:'1'}}));
   assert.ok(result.changed_pixels>700);
   console.log(result);
+});
+
+test('moving the brush between tiles preserves acknowledged ink until the native frame arrives',()=>{
+  const layer={id:'ink',kind:'pixel',visible:true,opacity:1,blend:'normal'};
+  const request={id:'p',documentId:'d',size:4096,revision:3};
+  const state={id:'p',doc:'d',revision:3,space:'srgb',layer,center:[.5,.5],
+    flatFrame:{request,pixels:new Uint8Array(4096*4096*4)}};
+  const tiles=createBrushTiles(()=>state);
+  const stroke={action:'stroke',layerId:'ink',target:'pixels',stroke:{stamps:[[.5,.5]],radius:.002,
+    flow:1,hardness:1,opacity:1,spacing:.18,color:'#c9283f'}};
+  tiles.prepare();
+  const before=tiles.render([stroke]);
+  assert.ok(before.pixels.some(v=>v===255));
+  state.revision++;
+  tiles.advance(stroke);
+  for(const point of [[.8,.8],[.2,.2],[.5,.5]])tiles.prepare(point);
+  const unchanged=tiles.render([{...stroke,stroke:{...stroke.stroke,opacity:0}}]);
+  assert.deepEqual(unchanged.pixels,before.pixels);
+  state.revision++; // An unrelated edit has no matching stroke receipt.
+  assert.equal(tiles.render([stroke]),undefined);
+  tiles.dispose();
 });
 
 test('brush contact blends against both neighbours and promotes feathered mask edits once',()=>{

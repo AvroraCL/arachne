@@ -498,9 +498,9 @@ export function createDocumentEditor(ctx,bridge){
   }
   // The wheel and keyboard share the same document-pixel range at any panel size.
   function clampZoom(value){return Math.max(.03,Math.min(16/fitScale(),value));}
-  function updateViewStatus(size){
+  function updateViewStatus(){
     if(previewCaption){
-      const pending=strokeQueue?.size>0?` · ${strokeQueue.failure?'待恢复':'保存中'} ${strokeQueue.size} 笔`:'';
+      const pending=strokeQueue?.failure||strokeQueue?.size>1?` · ${strokeQueue.failure?'待恢复':'保存中'} ${strokeQueue.size} 笔`:'';
       const doc=currentDocument(project);
       const label=`${(fitScale()*zoom*100).toFixed(1)}%　文档 ${doc?.width??4096} × ${doc?.height??4096}　${project.imageContext?.inspectMask?'蒙版 · ':''}${previewCaption}${gamutWarning&&canWarnGamut()?' · sRGB 色域警告':''}${pending}`;
       if(status.textContent!==label)status.textContent=label;
@@ -526,7 +526,7 @@ export function createDocumentEditor(ctx,bridge){
       compass.style.top=Math.max(32,Math.min(box.height-58,center[1]-box.top))+'px';
       compass.style.setProperty('--view-angle',angle+'deg');degree.value=angle+'°';
     }
-    updateViewStatus(size);
+    updateViewStatus();
     painter?.refreshUVCursor();
     live?.interactionResolutionChanged();
     selection?.sync();gradientTool?.layout();cloneTool?.layout();shapeTool?.layout();moveTool?.layout();warpTool?.layout();canvasText?.layout();penTool?.layout();edgeTool?.sync();layoutBrushOptions();ctx.onChange();
@@ -561,6 +561,12 @@ export function createDocumentEditor(ctx,bridge){
     if(w!==image.width||h!==image.height||!Number.isInteger(x)||!Number.isInteger(y))return null;
     return {id:project.document.id,revision:project.document.revision,doc:project.imageContext.documentId,
       layer,empty:image.layers.every(l=>!l.visible||l.kind==='pixel'&&!l.raster&&!l.strokes?.length&&!l.maskStrokes?.length&&!l.maskGradient&&!l.parentId&&!Object.values(l.styles??{}).some(e=>e.enabled)),
+      // A sole, unmasked pixel layer is already available in the saved native frame.
+      // Its bytes are used for feedback only. The worker confirms the saved pixels.
+      flatFrame:layer.kind==='pixel'&&layer.opacity===1&&layer.blend==='normal'&&!layer.maskEnabled&&
+        !layer.parentId&&!layer.clipped&&!layer.blendIf&&!layer.edgeDecontaminate&&!layer.warp&&
+        !Object.values(layer.styles??{}).some(effect=>effect.enabled)&&image.layers.every(l=>l===layer||!l.visible||!l.opacity)&&
+        !project.imageContext.inspectMask&&x===0&&y===0&&w===editingSide&&h===editingSide?live.getFrame():undefined,
       tip:imageControls.tipAsset.select.value,texture:imageControls.textureAsset.select.value,space:image.colorSpace,inspect:!!project.imageContext.inspectMask,center:[(x+w/2)/4096,(y+h/2)/4096]};
   });
   stage.addEventListener('pointermove',event=>{
@@ -605,9 +611,9 @@ export function createDocumentEditor(ctx,bridge){
     onStatus:(text,error,detail)=>{if(disposed)return;if(!detail){previewCaption='';status.title=status.textContent=text;return;}const {size=0,revision,phase,message,failedSize}=detail;stage.dataset.previewSize=String(size);stage.dataset.previewRevision=String(revision??'');stage.dataset.previewPhase=phase||'';status.title=message||text;
       if(sampleNotice.dataset.pending&&sampleFrame(imageOrigin()))showSampleNotice();
       const [pw,ph]=previewDimensions(currentDocument(project),size);
-      const actual=size?`实际预览 ${pw} × ${ph}${size===4096&&pw===4096&&ph===4096?' · 4K':''}`:'等待实时预览',suffix=phase==='refining'?(size?' · 正在更新图像…':''):phase==='retrying'?' · 预览暂不可用，正在重试…':phase==='error'?` · ${failedSize===4096?'全尺寸更新失败':'预览更新失败'} · 点击重试`:'';
+      const actual=size?`实际预览 ${pw} × ${ph}${size===4096&&pw===4096&&ph===4096?' · 4K':''}`:'等待实时预览',suffix=phase==='refining'&&size>0&&size!==editingSide?' · 正在更新图像…':phase==='retrying'?' · 预览暂不可用，正在重试…':phase==='error'?` · ${failedSize===4096?'全尺寸更新失败':'预览更新失败'} · 点击重试`:'';
       const target=detail.displaySpace==='display-p3'?'Display P3':detail.displaySpace==='srgb'?'sRGB':'';
-      previewCaption=actual+(target?' · '+target+' 预览':'')+suffix;status.tabIndex=phase==='error'?0:-1;if(phase==='error')status.setAttribute('role','button');else status.removeAttribute('role');layout();}});
+      previewCaption=actual+(target?' · '+target+' 预览':'')+suffix;status.tabIndex=phase==='error'?0:-1;if(phase==='error')status.setAttribute('role','button');else status.removeAttribute('role');updateViewStatus();}});
   let brushPreview=[],brushPreviewRevision=null;
   function syncStrokePreview(){
     if(disposed||!shown)return;
@@ -642,7 +648,8 @@ export function createDocumentEditor(ctx,bridge){
   }
   function syncStrokeSave(){
     const failure=strokeQueue.failure;
-    if(shown)updateViewStatus(extent());
+    ctx.root.toggleAttribute('data-saving-strokes',strokeQueue.saving);
+    if(shown)updateViewStatus();
     recovery.hidden=!failure;
     if(failure)saveMessage.textContent=`${strokeQueue.size} 笔待保存。 ${failure.message}${journal.unavailable?' '+unavailableStrokeJournal:''}`;
     rebaseStroke.hidden=!strokeQueue.canRebase;
@@ -1665,6 +1672,7 @@ export function createDocumentEditor(ctx,bridge){
         openEmbeddedSource(project,currentDocument(project).layers.find(l=>l.id===result.hit));
     });
   },{signal});
+  let geometryKey='';
   const resize=new ResizeObserver(layout);resize.observe(stage);resize.observe(parameters);
   function sync(reselect=false){
     if(disposed||!shown||!project.document)return;const doc=project.document;
@@ -1716,6 +1724,8 @@ export function createDocumentEditor(ctx,bridge){
     // this editor so Redo can restore the image even after the empty state paints.
     if((!image&&document.activeElement===canvas)||(image&&empty.contains(document.activeElement)))stage.focus({preventScroll:true});
     empty.hidden=!!image;canvas.hidden=!image;
+    const geometry=image?[image.width,image.height,...documentFrame(image)].join(','):'';
+    if(geometry!==geometryKey){geometryKey=geometry;layout();}
     if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}
     ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();live.refresh();brushTiles.prepare();uvGuide.sync();
   }

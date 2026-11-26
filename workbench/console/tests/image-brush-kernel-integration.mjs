@@ -310,7 +310,25 @@ try{
     await page.mouse.move(...await point(.474,y));await page.mouse.down();
     await page.mouse.move(...await point(.525,y),{steps:4});await page.mouse.up();
   };
-  await nextRevision(()=>drag(.455),{detail:false});
+  // Inspect the rendered controls while a real stroke is waiting for its write.
+  const chrome=()=>page.evaluate(()=>({
+    titleX:document.querySelector('#project-name').getBoundingClientRect().x,
+    blendEnabled:!document.querySelector('.document-layer-controls select').disabled,
+    canvas:document.querySelector('.document-image-stage canvas').getBoundingClientRect().toJSON()
+  }));
+  const restingChrome=await chrome();
+  assert.equal(restingChrome.blendEnabled,true);
+  let releaseSave;
+  const saveGate=new Promise(resolve=>{releaseSave=resolve;});
+  const started=page.waitForRequest('**/paint/commands');
+  await page.route('**/paint/commands',async route=>{await saveGate;await route.continue();},{times:1});
+  await nextRevision(async()=>{
+    try{
+      await drag(.455);await started;
+      assert.equal(await page.locator('#project-save-state').getAttribute('data-state'),'saving');
+      assert.deepEqual(await chrome(),restingChrome,'saving a stroke must leave the title, layer controls and canvas stable');
+    }finally{releaseSave();}
+  },{detail:false});
   await page.waitForFunction(()=>Boolean(window.brushBurst.held));
   const held=doc.revision;
   const target=held+3;

@@ -765,6 +765,8 @@ class Surface:
         if not len(affected) or not paint:
             return affected,paint
         height,width = self.uv_shape
+        raster_x,ox,oy = getattr(self,'uv_window',(width,0,0))
+        raster_y = raster_x if hasattr(self,'uv_window') else height
         left,top,right,bottom = transform['rect']
         cx,cy = transform.get('pivot', ((left+right)/2,(top+bottom)/2))
         sx,sy = transform['scale']
@@ -782,18 +784,19 @@ class Surface:
         # Limit inverse sampling to the transformed bounds of the selected pixels.
         linear = transform.get('interpolation') == 'linear'
         pad = 1 if linear else .5
-        ax,bx = x[selected].min()-pad/width,x[selected].max()+pad/width
-        ay,by = y[selected].min()-pad/height,y[selected].max()+pad/height
+        ax,bx = x[selected].min()-pad/raster_x,x[selected].max()+pad/raster_x
+        ay,by = y[selected].min()-pad/raster_y,y[selected].max()+pad/raster_y
         corners = [((u-cx)*sx*c-(v-cy)*sy*s+cx+dx,(u-cx)*sx*s+(v-cy)*sy*c+cy+dy)
                    for u in (ax,bx) for v in (ay,by)]
         cols,rows = zip(*corners)
-        x0,x1 = max(0,math.floor(min(cols)*width)),min(width,math.ceil(max(cols)*width))
-        y0,y1 = max(0,math.floor((1-max(rows))*height)),min(height,math.ceil((1-min(rows))*height))
+        x0,x1 = max(0,math.floor(min(cols)*raster_x)-ox),min(width,math.ceil(max(cols)*raster_x)-ox)
+        y0,y1 = max(0,math.floor((1-max(rows))*raster_y)-oy),min(height,math.ceil((1-min(rows))*raster_y)-oy)
         tiles = []
         for row in range(y0,y1,64):
             ids = (np.arange(row,min(row+64,y1))[:,None]*width+np.arange(x0,x1)).ravel()
             ids = ids[self.allowed[ids]]
-            u,v = (ids%width+.5)/width-cx-dx,1-(ids//width+.5)/height-cy-dy
+            u,v = self._texel_uv(ids)
+            u,v = u-cx-dx,v-cy-dy
             src_x,src_y = (u*c+v*s)/sx+cx,(-u*s+v*c)/sy+cy
             if linear:
                 present,incoming = self._sample_uv_paint(src_x,src_y,affected,selected,paint,coverage if soft else None)
@@ -802,7 +805,10 @@ class Surface:
             else:
                 bounds = (0,0,1,1) if soft else (left,top,right,bottom)
                 keep = self._inside_uv(src_x, src_y, bounds)
-                src = np.minimum(height-1,((1-src_y[keep])*height).astype(int))*width+(src_x[keep]*width).astype(int)
+                cols = (src_x*raster_x).astype(int)-ox
+                rows = np.minimum(raster_y-1,((1-src_y)*raster_y).astype(int))-oy
+                keep &= (cols>=0)&(cols<width)&(rows>=0)&(rows<height)
+                src = rows[keep]*width+cols[keep]
                 index = np.minimum(len(affected)-1,np.searchsorted(affected,src))
                 found = (affected[index]==src)&selected[index]
                 if np.any(found):
@@ -829,7 +835,9 @@ class Surface:
         # Interpolate premultiplied material values against transparent pixels
         # beyond the selection, so rotations cannot pull colors across the cut.
         height,width = self.uv_shape
-        x,y = u*width-.5,(1-v)*height-.5
+        raster_x,ox,oy = getattr(self,'uv_window',(width,0,0))
+        raster_y = raster_x if hasattr(self,'uv_window') else height
+        x,y = u*raster_x-.5-ox,(1-v)*raster_y-.5-oy
         left,bottom = np.floor(x).astype(int),np.floor(y).astype(int)
         fx,fy = x-left,y-bottom
         samples = {name:(np.zeros(len(u),dtype=np.float32),

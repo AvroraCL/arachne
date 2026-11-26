@@ -103,7 +103,7 @@ function featherDelta(values,w,h,half,edge){
   return values;
 }
 
-export function renderBrushTile(tile,edits,state,images,commit=false){
+export function renderBrushTile(tile,edits,state,images,commit=false,clipToTile=false){
   const {layer,space,inspect}=state;
   if(inspect&&!layer.maskEnabled||edits.some(e=>e?.target==='mask')&&!layer.maskEnabled)return;
   let l=grid,t=grid,r=0,b=0;
@@ -117,6 +117,10 @@ export function renderBrushTile(tile,edits,state,images,commit=false){
     for(const [u,v] of s.stamps){l=Math.min(l,u*grid-reach);r=Math.max(r,u*grid+reach);t=Math.min(t,v*grid-reach);b=Math.max(b,v*grid+reach);}
   }
   l=Math.max(0,Math.floor(l));r=Math.min(grid,Math.ceil(r));t=Math.max(0,Math.floor(t));b=Math.min(grid,Math.ceil(b));
+  if(clipToTile&&!feather){
+    l=Math.max(tile.x,l);t=Math.max(tile.y,t);r=Math.min(tile.x+side,r);b=Math.min(tile.y+side,b);
+    if(l>=r||t>=b)return commit?true:null;
+  }
   const w=r-l,h=b-t;
   if(w<=0||h<=0||l<tile.x||t<tile.y||r>tile.x+side||b>tile.y+side)return;
   const box=[l,t,w,h],amounts=edits.map(e=>weights(e.stroke,images,box));
@@ -174,7 +178,7 @@ export function renderBrushTile(tile,edits,state,images,commit=false){
 
 export function createBrushTiles(read){
   const images=new Map();
-  let tile=null,previous=null,key='',loading=null,point=null;
+  let tile=null,previous=null,key='',loading=null,point=null,flat=null;
   function loadImage(state,id,isTip){
     const assetKey=(isTip?'tip:':'texture:')+id;
     if(images.has(assetKey))return;
@@ -197,13 +201,19 @@ export function createBrushTiles(read){
   function prepare(uv){
     if(uv)point=uv;
     const state=read();
-    if(!state){loading?.abort();tile=null;previous=null;key='';return;}
+    if(!state){loading?.abort();tile=null;previous=null;flat=null;key='';return;}
     const {layer}=state;
     for(const [id,isTip] of [[state.tip,true],[state.texture,false]])if(id)loadImage(state,id,isTip);
     if(!layer?.visible||!layer.opacity||layer.blend!=='normal')return;
     const pointIn=point??state.center;
     const [x,y]=pointIn.map(v=>clamp(Math.round((v*grid-side/2)/64)*64,0,grid-side));
     const identity=[state.id,state.doc,state.revision,layer.id].join('/');
+    const layerKey=[state.id,state.doc,layer.id].join('/');
+    const frame=state.flatFrame,source=frame?.request;
+    if(state.flatFrame===undefined||flat?.layerKey!==layerKey)flat=null;
+    if(source?.size===grid&&!source.operation&&source.id===state.id&&source.revision===state.revision&&
+       source.documentId===state.doc&&!source.inspectMask&&flat?.frame!==frame)
+      flat={layerKey,frame,revision:source.revision,edits:[]};
     if(previous?.key===identity&&Math.abs(previous.x-x)<side/4&&Math.abs(previous.y-y)<side/4)[tile,previous]=[previous,tile];
     if(tile?.key===identity&&Math.abs(tile.x-x)<side/4&&Math.abs(tile.y-y)<side/4)return;
     if(key===identity&&loading&&Math.abs(loading.x-x)<side/4&&Math.abs(loading.y-y)<side/4)return;
@@ -216,6 +226,23 @@ export function createBrushTiles(read){
         if(layer.maskFeather)tile.soft=tile.raw.slice();
       }
       return;
+    }
+    if(flat?.revision===state.revision){
+      const active=new Float32Array(area*4),curve=colorCurve(state.space).decode;
+      for(let row=0;row<side;row++){
+        let src=((y+row)*grid+x)*4,dst=row*side*4;
+        for(let col=0;col<side;col++,src+=4,dst+=4){
+          const alpha=flat.frame.pixels[src+3]/255;
+          for(let c=0;c<3;c++)active[dst+c]=curve[flat.frame.pixels[src+c]]*alpha;
+          active[dst+3]=alpha;
+        }
+      }
+      const candidate={key,x,y,active};
+      if(flat.edits.every(edit=>renderBrushTile(candidate,[edit],state,images,true,true))){
+        previous=tile?.key===identity?tile:null;tile=candidate;return;
+      }
+      flat=null;
+
     }
     const controller=new AbortController();Object.assign(controller,{x,y});loading=controller;
     fetch('/api/projects/'+state.id+'/paint/image-live',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},
@@ -238,8 +265,16 @@ export function createBrushTiles(read){
   }
   return {prepare,advance(edit){
     const state=read();
-    if(!edit||!tile?.active||!state||tile.key!==[state.id,state.doc,state.revision-1,state.layer?.id].join('/'))return;
-    if(renderBrushTile(tile,[edit],state,images,true))tile.key=[state.id,state.doc,state.revision,state.layer.id].join('/');
+    if(!edit||!state)return;
+    const layerKey=[state.id,state.doc,state.layer.id].join('/');
+    if(state.flatFrame!==undefined&&flat?.layerKey===layerKey&&flat.revision===state.revision-1){
+      flat.edits.push(edit);flat.revision=state.revision;
+    }
+    const old=[state.id,state.doc,state.revision-1,state.layer.id].join('/');
+    for(const candidate of [tile,previous]){
+      if(candidate?.active&&candidate.key===old&&renderBrushTile(candidate,[edit],state,images,true,true))
+        candidate.key=[state.id,state.doc,state.revision,state.layer.id].join('/');
+    }
   },render(edits){
     const state=read();
     if(!state)return;
@@ -255,5 +290,9 @@ export function createBrushTiles(read){
         if(patch)return {...patch,empty:state.empty};
       }
     }
-  },dispose(){loading?.abort();images.clear();tile=null;previous=null;}};
+    if(tile?.active&&tile.key===identity){
+      const patch=renderBrushTile(tile,edits,state,images,false,true);
+      if(patch)return {...patch,empty:state.empty};
+    }
+  },dispose(){loading?.abort();images.clear();tile=null;previous=null;flat=null;}};
 }

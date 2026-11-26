@@ -25,8 +25,8 @@ export function setupPaintAreas(hooks){
   let materialVisible=false,materialDetail=false,visibleEditors=[],inspection=null,inspectionFrame=null,inspectionStatus=null;
   let adjustmentPreview=null;
   let materialStrokes;
-  const write=async(action,errorOutput)=>{
-    let value,failure;const ok=await hooks.run(async()=>{try{value=await action();}catch(error){failure=error;throw error;}},errorOutput);
+  const write=async(action,errorOutput,options)=>{
+    let value,failure;const ok=await hooks.run(async()=>{try{value=await action();}catch(error){failure=error;throw error;}},errorOutput,options);
     if(ok!==true)throw failure||Error('操作未完成，请结束当前编辑后重试');return value;
   };
   const project=createProjectState({
@@ -39,7 +39,7 @@ export function setupPaintAreas(hooks){
       }
       return hooks.api(endpoint+'commands',{revision:origin.revision,operations,
         ...(origin.strokeRequestId?{strokeRequestId:origin.strokeRequestId}:{})});
-    },origin.strokeRequestId?false:undefined),
+    },origin.strokeRequestId?false:undefined,{backgroundStroke:!!origin.strokeRequestId&&operations.every(op=>op.op==='image')}),
     beforeTravel:async()=>{
       if(materialStrokes.editing)throw Error('请先完成当前材质笔触');
       if(materialStrokes.size&&!await materialStrokes.flush())throw Error('请先保存或放弃待保存的材质笔触');

@@ -82,6 +82,7 @@ let uvPose={scale:1,x:0,y:0},uvPan=null;
 let locatingUV=false,uvPin=null;
 let uvHandHeld=false,showUVGuide=true,placingText=false;
 let uvZoomTool=false,uvZoomDirection='in',uvPointerInside=false,uvZoomMode='fit';
+let savingImageStroke=false;
 let doc=null,jobs=[],selected=null,busy=false,polling=false,view='uv',textureKey='',selectedAsset=null,drag=null,transform='move';
 const projectWrites=new Map(),projectSaveErrors=new Map();
 let snapshotTag=null,projectGeneration=0,refreshSequence=0,appliedRefresh=0;
@@ -261,6 +262,7 @@ const renderOnlyOps=new Set(['renderCamera','renderBookmark','renderLighting','r
 async function api(url,data,signal){
   const write=data!==undefined&&url.match(/^\/api\/projects\/([^/]+)\/paint\/(?:commands|model|undo|redo|assets|text|library-import|image-layer-bake|mesh-bake|mesh-mask)$/);
   const id=write?.[1];
+  if(id&&savingImageStroke&&!data.strokeRequestId)throw Error('正在保存笔触，请稍后再试');
   if(id){projectWrites.set(id,(projectWrites.get(id)||0)+1);renderProjectState();}
   try{
     const response=await fetch(url,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal,
@@ -1799,13 +1801,20 @@ async function refreshGeometry(){
     if(generation===projectGeneration&&doc.revision===revision)showGeometryStatus(geometryStatusNodes,geometry);
   }else showGeometryStatus(geometryStatusNodes,null);
 }
-async function run(action,errorOutput=null){
+async function run(action,errorOutput=null,{backgroundStroke=false}={}){
   if(busy)return;
+  if(savingImageStroke){
+    if(errorOutput!==false)(errorOutput||$('status')).textContent='正在保存笔触，请稍后再试';
+    return false;
+  }
   if(surfaceTools.isEditing()||modelMarquee||modeler.isDragging()||uvSelection.isDragging())return false;
   if(maskEditor.isOpen()){ $('mask-status').textContent='请先保存或取消当前蒙版';return; }
   const focusedProperties=document.activeElement?.closest('form[data-material-properties]');
-  busy=true;$('status').textContent='';$('delivery-error').textContent='';
-  syncBusyControls();
+  if(backgroundStroke)savingImageStroke=true;
+  else{
+    busy=true;$('status').textContent='';$('delivery-error').textContent='';
+    syncBusyControls();
+  }
   try{await action();await refresh();return true;}
   catch(error){
     if(error.status===409)await refresh();
@@ -1813,8 +1822,8 @@ async function run(action,errorOutput=null){
     return false;
   }
   finally{
-    busy=false;
-    syncBusyControls();
+    if(backgroundStroke)savingImageStroke=false;
+    else{busy=false;syncBusyControls();}
     surfaceTools.render();uvSelection.sync();areaSystem?.sync();
     if(document.activeElement===document.body&&focusedProperties?.getClientRects().length)focusedProperties.focus({preventScroll:true});
   }

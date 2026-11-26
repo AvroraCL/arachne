@@ -1103,9 +1103,15 @@ def stroke_window_padding(document):
         if layer.get('gradient',{}).get('feather') or layer.get('maskGradient',{}).get('feather'):
             return None
         for key in ('strokes','maskStrokes'):
-            if any(stroke.get('feather') or any(key in stroke for key in ('transformUV','clone','flood'))
-                   for stroke in iter_strokes(layer.get(key) or [])):
-                return None
+            for stroke in iter_strokes(layer.get(key) or []):
+                if stroke.get('feather') or 'clone' in stroke or 'flood' in stroke:
+                    return None
+                if 'transformUV' in stroke:
+                    t = stroke['transformUV']
+                    if (key!='strokes' or t['scale']!=[1,1] or t['angle'] or t.get('coverage') or t.get('feather')):
+                        return None
+                    # Replay prior moves with enough source pixels for inverse sampling.
+                    padding += math.ceil(max(map(abs,t['offset']))*4096)+1
         padding += active.get('outline',{}).get('width',0)
         if 'shadow' in active:
             shadow = active['shadow']
