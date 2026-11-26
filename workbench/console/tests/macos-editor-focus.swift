@@ -59,6 +59,32 @@ import WebKit
             """) as? [Int]
         precondition(sourceTexels == [255,0,0,128,255,255,255,0], "Embedded GLB pigment and alpha should both survive native decoding")
         print("PASS native WebKit embedded GLB color under transparent texels")
+        let displayCheck = try await js("""
+            const T=await import('three'),{watchViewportColor}=await import('/viewport-display-color.mjs');
+            const renderer=new T.WebGLRenderer({preserveDrawingBuffer:true});
+            renderer.setSize(32,32);document.body.append(renderer.domElement);
+            const gl=renderer.getContext(),scene=new T.Scene(),camera=new T.OrthographicCamera(-1,1,1,-1,.1,4);
+            camera.position.z=1;
+            const rgb=[1.09,.01,.04],surface=new T.MeshBasicMaterial({color:new T.Color(...rgb),toneMapped:false});
+            const plane=new T.PlaneGeometry(2,2);scene.add(new T.Mesh(plane,surface));
+            let chosen;const settings=watchViewportColor(renderer,'srgb',space=>{chosen=space;});
+            const rows=[];
+            try{
+              for(const mode of ['srgb','auto','srgb','auto']){
+                settings.setPreference(mode);renderer.render(scene,camera);
+                const bytes=new Uint8Array(4);gl.readPixels(16,16,1,1,gl.RGBA,gl.UNSIGNED_BYTE,bytes);
+                const [r,g,b]=rgb,p3=chosen==='display-p3';
+                const linear=p3?[.822462*r+.177538*g,.033194*r+.966806*g,.017083*r+.072397*g+.91052*b]:rgb;
+                const expected=linear.map(v=>Math.round(255*Math.min(1,v<=.0031308?12.92*v:1.055*v**(1/2.4)-.055)));
+                if(expected.some((v,i)=>Math.abs(v-bytes[i])>1))throw Error(chosen+' '+bytes+' vs '+expected);
+                // Trigger WebKit's normal snapshot path before switching again.
+                renderer.domElement.toDataURL();
+                rows.push(chosen+' ['+bytes.slice(0,3)+']');
+              }
+              return rows.join(' → ');
+            }finally{settings.dispose();surface.dispose();plane.dispose();renderer.dispose();renderer.domElement.remove();}
+            """) as? String
+        print("PASS native WebKit viewport RGB transforms: "+(displayCheck ?? ""))
         _ = try await js("""
             document.querySelector('[data-area-mode=modeling]').click();
             """)

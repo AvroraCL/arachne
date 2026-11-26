@@ -413,6 +413,24 @@ try{
     assert.deepEqual([next.cssWidth,next.cssHeight],[first.cssWidth,first.cssHeight]);
     assert.deepEqual([next.width,next.height],[Math.floor(first.cssWidth*ratio),Math.floor(first.cssHeight*ratio)]);
   }
+  const shadingMenu=page.locator('.editor-area[data-editor=viewport]').first().getByRole('button',{name:'着色设置',exact:true});
+  const displaySpace=page.getByRole('button',{name:'视口显示空间',exact:true});
+  const readDisplay=()=>viewport.evaluate(host=>[host.dataset.displayColorSpace,host.querySelector('canvas').getContext('webgl2').drawingBufferColorSpace]);
+  const expectDisplay=space=>until(async()=>(await readDisplay()).every(value=>value===space),'工作台视口 '+space);
+  await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'color-gamut',value:'p3'}]});
+  await expectDisplay('display-p3');
+  await shadingMenu.click();assert.match(await displaySpace.innerText(),/Display P3/);
+  await shadingMenu.locator('..').screenshot({path:path.join(evidence,'viewport-p3-menu.png')});
+  await displaySpace.click();await page.getByRole('option',{name:'sRGB 校对',exact:true}).click();
+  await expectDisplay('srgb');await page.keyboard.press('Escape');
+  await page.evaluate(()=>window.arachneNativeHost.prepareToCloseAsync());
+  await page.reload();await viewport.waitFor();await expectDisplay('srgb');
+  await shadingMenu.click();assert.match(await displaySpace.innerText(),/sRGB 校对/);
+  await displaySpace.click();await page.getByRole('option',{name:'跟随屏幕',exact:true}).click();
+  await expectDisplay('display-p3');
+  await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'color-gamut',value:'srgb'}]});
+  await expectDisplay('srgb');assert.match(await displaySpace.innerText(),/跟随屏幕 · sRGB/);
+  await page.keyboard.press('Escape');
   await cdp.detach();
   const split=page.getByRole('separator',{name:'调整区域高度',exact:true}).first();
   const ratio=()=>split.getAttribute('aria-valuenow');

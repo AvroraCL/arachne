@@ -138,7 +138,7 @@ test('P3 PNG settings survive presets and distinguish queued renders from sRGB a
 
 test('16-bit PNG keeps its precision and target primaries across project preferences',async()=>{
   const {pathTraceOptions}=await import('../path-trace-render.mjs');
-  for(const pngSpace of ['display-p3','rec2020','adobe-rgb','prophoto-rgb']){
+  for(const pngSpace of ['display-p3','rec2020','adobe-rgb','prophoto-rgb','rec709','rec709-g24']){
     const options=updateDeliveryOptions({},{fileFormat:'PNG',bitDepth:16,pngSpace});
     const saved=captureRenderPreset(options);
     const render=pathTraceOptions(captureDeliverySettings(renderPresetPreferences(saved),null));

@@ -6,9 +6,14 @@ const contrastByLook={'AgX - Medium High Contrast':1.2,'AgX - Medium Low Contras
 const displayCode=`
   uniform float arachneInverseGamma;
   uniform float arachneContrast;
-  vec3 arachneDisplayLook(vec3 color) {
-    vec3 bounded = clamp(color, 0., 1.);
-    return clamp(.5 + (pow(bounded, vec3(arachneInverseGamma)) - .5) * arachneContrast, 0., 1.);
+  vec3 arachneDisplayLook(vec3 linearColor) {
+    if (arachneInverseGamma == 1. && arachneContrast == 1.) return linearColor;
+    // Apply the look in the same reference space on every monitor and export.
+    // Extend the transfer curves through zero to retain out-of-sRGB colors.
+    vec3 encoded = sign(linearColor) * sRGBTransferOETF(vec4(abs(linearColor), 1.)).rgb;
+    vec3 adjusted = sign(encoded) * pow(abs(encoded), vec3(arachneInverseGamma));
+    adjusted = .5 + (adjusted - .5) * arachneContrast;
+    return sign(adjusted) * sRGBTransferEOTF(vec4(abs(adjusted), 1.)).rgb;
   }
 `;
 
@@ -17,11 +22,11 @@ export function setPathTraceDisplay(material,appearance=renderAppearanceDefaults
   if(!uniforms){
     uniforms={arachneInverseGamma:{value:1},arachneContrast:{value:1}};
     const shader=material.fragmentShader;
-    const anchor='#include <premultiplied_alpha_fragment>';
+    const anchor='return linearToOutputTexel( res );';
     if(!shader.includes(anchor))throw Error('路径追踪显示着色器不兼容');
     Object.assign(material.uniforms,uniforms);
     material.fragmentShader=displayCode+shader.replace(anchor,`
-      gl_FragColor.rgb = arachneDisplayLook(gl_FragColor.rgb);
+      res.rgb = arachneDisplayLook(res.rgb);
       ${anchor}`);
     material.needsUpdate=true;
     transforms.set(material,uniforms);

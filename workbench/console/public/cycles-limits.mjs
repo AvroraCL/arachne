@@ -10,7 +10,7 @@ export const cyclesFormats=Object.freeze({
 });
 
 export const renderPngSpaces={srgb:'sRGB','display-p3':'Display P3','adobe-rgb':'Adobe RGB (1998)',
-  'prophoto-rgb':'ProPhoto RGB',rec2020:'Rec.2020'};
+  'prophoto-rgb':'ProPhoto RGB',rec709:'Rec.709','rec709-g24':'Rec.709（Gamma 2.4）',rec2020:'Rec.2020'};
 export function usesPackedPng({fileFormat='PNG',bitDepth,pngSpace='srgb'}){
   return fileFormat==='PNG'&&(bitDepth===16||(pngSpace!=='srgb'&&pngSpace!=='display-p3'));
 }

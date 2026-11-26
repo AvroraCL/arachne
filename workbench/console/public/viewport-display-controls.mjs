@@ -89,6 +89,21 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
   channelLabel.append('查看通道',channelSelect);shadingMenu.content.append(channelLabel);
   channelSelect.onchange=()=>setChannel(channelSelect.value);
   enhanceSelectMenu(channelSelect);
+  const colorRow=el('label','viewport-display-field'),colorSelect=document.createElement('select');
+  colorSelect.setAttribute('aria-label','视口显示空间');
+  const autoColor=new Option('跟随屏幕','auto');
+  colorSelect.append(autoColor,new Option('sRGB 校对','srgb'));
+  colorSelect.value=state.displayColorPreference==='srgb'?'srgb':'auto';
+  colorRow.append('显示空间',colorSelect);shadingMenu.content.append(colorRow);
+  enhanceSelectMenu(colorSelect);
+  function showDisplayColor(){
+    const space=view.dataset.displayColorSpace;
+    autoColor.textContent=colorSelect.value==='auto'&&space?'跟随屏幕 · '+(space==='display-p3'?'Display P3':'sRGB'):'跟随屏幕';
+    syncSelectMenu(colorSelect);
+  }
+  view.addEventListener('viewport-display-color',showDisplayColor,{signal});
+  colorSelect.onchange=()=>{viewport.setDisplayColorPreference(colorSelect.value);showDisplayColor();ctx.onChange();};
+  viewport.setDisplayColorPreference(colorSelect.value);showDisplayColor();
   const useProject=check(shadingMenu.content,'使用工程布光',projectLighting,value=>{projectLighting=value;update();onMode();});
   root.append(renderPlayback);
   const fields=el('div','viewport-display-fields');
@@ -146,7 +161,7 @@ export function createViewportDisplayControls({ctx,view,viewport,change,onMode,o
     if((event.target===document.body||event.target.classList?.contains('source-material-fields'))&&['c','m'].includes(event.key.toLowerCase())&&view.matches(':hover'))viewportKey(event);
   },{signal});
   return {get mode(){return mode;},get channel(){return channel;},get projectLighting(){return projectLighting;},refresh,setChannels,
-    getState:()=>({display:mode,channelDisplay:channel,xray,overlays,gizmos,axis,transformGizmo:transform,projectLighting,scene:scene.getSettings()}),
+    getState:()=>({display:mode,displayColorPreference:colorSelect.value,channelDisplay:channel,xray,overlays,gizmos,axis,transformGizmo:transform,projectLighting,scene:scene.getSettings()}),
     close(){for(const details of root.querySelectorAll('details[open]'))details.open=false;},
     dispose(){lifecycle.abort();scene.dispose();root.remove();}};
 }

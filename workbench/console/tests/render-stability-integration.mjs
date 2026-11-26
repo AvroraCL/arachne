@@ -48,6 +48,7 @@ try{
   const url=new URL(route.request().url());
   if(url.origin!==origin)return route.abort();
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:'<script type="importmap">'+JSON.stringify(importMap)+'</script>'});
+  if(url.pathname==='/input/signal-red.glb')return route.fulfill({path:path.join(dir,'signal-red.glb')});
   if(files[url.pathname])return route.fulfill({path:files[url.pathname]});
   if(url.pathname.startsWith('/vendor/'))return route.fulfill({path:root+'/node_modules/'+url.pathname.slice(8),contentType:'text/javascript'});
   return route.fulfill({path:root+'/public/'+url.pathname.slice(1),contentType:'text/javascript'});
@@ -58,6 +59,7 @@ try{
   const {createViewportPathTracer}=await import('/viewport-path-tracer.mjs');
   const renderer=new T.WebGLRenderer({alpha:true,preserveDrawingBuffer:true,antialias:false});
   renderer.setSize(settings.width,settings.height,false);
+  document.body.append(renderer.domElement);
   const root=(await new GLTFLoader().loadAsync('/input/model.glb')).scene;
   const camera=new T.OrthographicCamera(-1.2,1.2,1.2,-1.2,.00001,10);
   camera.position.fromArray(settings.camera.eye);camera.lookAt(...settings.camera.target);camera.updateMatrixWorld();
@@ -73,6 +75,46 @@ try{
     await new Promise(r=>setTimeout(r,0));
    }
    throw Error('preview timeout');
+  };
+  globalThis.startRedPreview=async (project)=>{
+   trace.setOptions({enabled:false});
+   const red=(await new GLTFLoader().loadAsync('/input/signal-red.glb')).scene;
+   const {watchViewportColor}=await import('/viewport-display-color.mjs');
+   const color=watchViewportColor(renderer,'auto',space=>{host.dataset.displayColorSpace=space;});
+   const options={enabled:true,project,sampling:{maxSamples:settings.samples,denoise:false}};
+   const viewport={resolution:1,bounces:6,samples:settings.samples,ground:false};
+   trace.setOptions(options);
+   for(let i=0;i<1000;i++){
+    trace.render(red,camera,bounds,viewport,[]);
+    if(trace.state().phase==='ready')break;
+    if(trace.state().phase==='error')throw Error(trace.state().text);
+    await new Promise(r=>setTimeout(r,0));
+   }
+   if(trace.state().phase!=='ready')throw Error('signal red preview timeout');
+   trace.setOptions({...options,paused:true});
+   globalThis.previewStudioSwatch=preference=>{
+    color.setPreference(preference);
+    const scene=new T.Scene(),hex='#cc3355';
+    scene.background=new T.Color(hex);
+    renderer.render(scene,camera);
+    const gl=renderer.getContext(),background=new Uint8Array(4);
+    gl.readPixels(64,64,1,1,gl.RGBA,gl.UNSIGNED_BYTE,background);
+    const c=document.createElement('canvas'),ctx=c.getContext('2d',{colorSpace:gl.drawingBufferColorSpace});
+    ctx.fillStyle=hex;ctx.fillRect(0,0,1,1);
+    return {background:[...background],expected:[...ctx.getImageData(0,0,1,1,{colorSpace:gl.drawingBufferColorSpace}).data]};
+   };
+   globalThis.redSnapshot=preference=>{
+    color.setPreference(preference);
+    trace.render(red,camera,bounds,viewport,[],false);
+    const gl=renderer.getContext(),pixel=new Uint8Array(4);
+    gl.readPixels(64,64,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
+    const c=document.createElement('canvas');c.width=c.height=128;
+    const ctx=c.getContext('2d',{colorSpace:'display-p3'});
+    ctx.drawImage(renderer.domElement,0,0);
+    return {space:host.dataset.displayColorSpace,buffer:gl.drawingBufferColorSpace,
+      phase:trace.state().phase,samples:host.dataset.renderSamples,pixel:[...pixel],
+      p3:[...ctx.getImageData(64,64,1,1,{colorSpace:'display-p3'}).data]};
+   };
   };
  },settings);
  const cases=[['default',1,'None',true],['gamma',1.8,'None',true],['low',1.8,'AgX - Medium Low Contrast',true],['high',1.8,'AgX - Medium High Contrast',true],['opaque',1.8,'AgX - Medium High Contrast',false]];
@@ -96,6 +138,39 @@ try{
    const render=await renderPathTrace({...signalRed,settings:{...settings,fileFormat:'PNG',bitDepth:8,pngSpace}},redFiles,{onSample(){}});
    await fs.writeFile(path.join(dir,'red-'+pngSpace+'.png'),render.png);
  }
+ // Hold the scene and display look constant. Changing the delivery profile
+ // should only re-encode the image, including with nondefault gamma/contrast.
+ for(const pngSpace of ['srgb','display-p3','prophoto-rgb','rec709','rec709-g24']){
+   const render=await renderPathTrace({...signalRed,
+     appearance:{...signalRed.appearance,gamma:1.8,look:'AgX - Medium High Contrast'},
+     settings:{...settings,samples:1,maxBounces:1,fileFormat:'PNG',bitDepth:8,pngSpace}},files,{onSample(){}});
+   await fs.writeFile(path.join(dir,'look-'+pngSpace+'.png'),render.png);
+ }
+ const monitor=await page.context().newCDPSession(page);
+ const setMonitor=async gamut=>{
+   await monitor.send('Emulation.setEmulatedMedia',{features:[{name:'color-gamut',value:gamut}]});
+   await page.waitForFunction(wide=>matchMedia('(color-gamut: p3)').matches===wide,gamut==='p3');
+ };
+ await setMonitor('p3');
+ await page.evaluate(project=>globalThis.startRedPreview(project),{appearance:signalRed.appearance,lighting:signalRed.lighting,transparent:true});
+ const native=await page.evaluate(()=>globalThis.redSnapshot('auto'));
+ const proof=await page.evaluate(()=>globalThis.redSnapshot('srgb'));
+ await setMonitor('srgb');const ordinary=await page.evaluate(()=>globalThis.redSnapshot('auto'));
+ await setMonitor('p3');const restored=await page.evaluate(()=>globalThis.redSnapshot('auto'));
+ assert.deepEqual(restored,native);
+ assert.deepEqual(ordinary,proof);
+ for(const item of [native,proof]){
+   assert.equal(item.space,item.buffer);assert.equal(item.phase,'paused');assert.equal(+item.samples,settings.samples);
+ }
+ assert.equal(native.space,'display-p3');assert.equal(proof.space,'srgb');
+ assert.ok(native.p3[0]>proof.p3[0]+8,JSON.stringify({native,proof}));
+ for(const preference of ['auto','srgb']){
+   const {background,expected}=await page.evaluate(pref=>globalThis.previewStudioSwatch(pref),preference);
+   assert.ok(background.every((v,i)=>Math.abs(v-expected[i])<=1),JSON.stringify({preference,background,expected}));
+ }
+ await fs.writeFile(path.join(dir,'red-preview.json'),JSON.stringify({native,proof}));
+ console.log('Paused display switch',native,proof);
+ await monitor.detach();
  const redLinear=await renderPathTrace({...signalRed,settings},redFiles,{onSample(){}});
  await fs.writeFile(path.join(dir,'red.exr'),redLinear.exr);
  const rampFiles={'/input/model.glb':path.join(dir,'ramp.glb'),'/input/emission.png':path.join(dir,'ramp.png')};
@@ -135,6 +210,13 @@ def exr(file,bits=32,space='lin_rec709_scene'):
  return np.frombuffer(data, dtype='<f'+str(bits//8),count=size//(bits//8),offset=offset+8).reshape(4,128)
 from PIL import ImageCms
 from io import BytesIO
+reference=img('look-srgb.png')
+for space in ['display-p3','prophoto-rgb','rec709','rec709-g24']:
+ tagged=Image.open(root/('look-'+space+'.png'))
+ converted=ImageCms.profileToProfile(tagged,BytesIO(tagged.info['icc_profile']),ImageCms.createProfile('sRGB'),outputMode='RGBA',renderingIntent=1)
+ delta=np.abs(reference[40:88,40:88]-np.asarray(converted)[40:88,40:88]).max()
+ assert delta<=2,(space,delta)
+ print('Same display look in',space,'max channel delta',delta)
 wide=Image.open(root/'red-display-p3.png')
 tag=ImageCms.ImageCmsProfile(BytesIO(wide.info['icc_profile']))
 assert 'P3' in ImageCms.getProfileDescription(tag) and wide.size==(128,128)
@@ -144,6 +226,10 @@ encoded=lambda v:np.rint(np.clip(np.where(v<=.0031308,12.92*v,1.055*v**(1/2.4)-.
 got=np.array(wide.getpixel((64,64))[:3]);assert np.max(np.abs(got-encoded(p3)))<=2,(linear,p3,got)
 small=Image.open(root/'red-srgb.png')
 clipped=ImageCms.profileToProfile(small,ImageCms.createProfile('sRGB'),tag,outputMode='RGBA').getpixel((64,64))
+import json
+monitor=json.loads((root/'red-preview.json').read_text())
+for report,image in [(monitor['native'],wide),(monitor['proof'],small)]:
+ assert np.max(np.abs(np.array(report['pixel'])-image.getpixel((64,64))))<=1,(report,image.getpixel((64,64)))
 assert got[0]>int(clipped[0])+8 and wide.getpixel((0,0))[3]==small.getpixel((0,0))[3]==0
 print('Display P3 PNG',got,'from scene linear',linear,'vs clipped sRGB converted to P3',clipped)
 # Read the PNG samples at their declared precision. Pillow exposes RGB PNG

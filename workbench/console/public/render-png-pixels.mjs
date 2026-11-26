@@ -3,7 +3,7 @@ import {completedPathTraceTarget} from './path-trace-display.mjs';
 import {linearSRGBToWorkingMatrix} from './image-display-rgb.mjs';
 import {projectTone} from './path-trace-lighting.mjs';
 
-// Run the output-primary conversion before the look and quantization. Only
+// Encode the shared display look into the selected output primaries. Only
 // sRGB and Display P3 share the sRGB display curve.
 export function setPngOutputSpace(material,space){
   if(!space||space==='srgb')return;
@@ -11,6 +11,8 @@ export function setPngOutputSpace(material,space){
     'display-p3':'sRGBTransferOETF(vec4(c,1.)).rgb',
     'adobe-rgb':'pow(c,vec3(256./563.))',
     'prophoto-rgb':'mix(16.*c,pow(c,vec3(1./1.8)),greaterThanEqual(c,vec3(1./512.)))',
+    rec709:'mix(4.5*c,(pow(c,vec3(.45))-.090087890625)/.909912109375,greaterThanEqual(c,vec3(.018)))',
+    'rec709-g24':'pow(c,vec3(1./2.4))',
     rec2020:'mix(4.5*c,(pow(c,vec3(.45))-.09033203125)/.90966796875,greaterThanEqual(c,vec3(.018)))'
   };
   material.uniforms.arachneOutputMatrix={value:new THREE.Matrix3().set(...linearSRGBToWorkingMatrix(space))};
