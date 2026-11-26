@@ -84,7 +84,7 @@ function openEmbeddedSource(project,item){
 }
 async function command(project,op){return project.commands([{op:'image',documentId:project.imageContext?.documentId,...op}]);}
 async function commandAt(project,origin,op){return project.commands([{op:'image',documentId:origin.documentId,...op}],origin);}
-export function imageSelectionOrigin(project){const c=project.imageContext;return {...project.origin(),documentId:c?.documentId,layerId:c?.layerId,target:c?.target};}
+export function imageSelectionOrigin(project){const c=project.imageContext;return {...project.origin(),documentId:c?.documentId,layerId:c?.layerId,target:c?.target,layerIds:c?.layerIds};}
 async function combineImageLayers(project,origin,action,ids){
   const layers=currentDocument(project)?.layers;
   if(!layers)throw Error('请先打开图像文档');
@@ -98,7 +98,15 @@ async function combineImageLayers(project,origin,action,ids){
   if(current.layerId===origin.layerId||!nextLayers.some(layer=>layer.id===origin.layerId))
     selectImage(project,{layerId,layerIds:[layerId],target:'pixels'});
 }
-function selectAddedLayer(project,origin,layerId){const c=project.imageContext;if(project.document?.id===origin.id&&c?.documentId===origin.documentId&&c?.layerId===origin.layerId&&c?.target===origin.target)selectImage(project,{layerId,target:'pixels'});}
+function stillOnImageSelection(project,origin){
+  const current=project.imageContext;
+  return project.document?.id===origin.id&&current?.documentId===origin.documentId&&
+    current?.layerId===origin.layerId&&current?.target===origin.target&&
+    JSON.stringify(current?.layerIds??[])===JSON.stringify(origin.layerIds??[]);
+}
+function selectAddedLayer(project,origin,layerId){
+  if(stillOnImageSelection(project,origin))selectImage(project,{layerId,target:'pixels'});
+}
 async function addPixel(project,origin){
   const layerId=crypto.randomUUID(),layers=project.document.paint.imageDocuments[origin.documentId].layers;
   await commandAt(project,origin,{action:'addLayer',layerId,kind:'pixel',...imageLayerInsertion(layers,origin.layerId)});
@@ -2167,16 +2175,15 @@ export function createImagePanel(type,ctx){
     if(item?.text&&!layerLockOwner(currentDocument(project).layers,item)&&!ctx.busy?.())ctx.openImageText?.(origin,item);
   }
   function selectLayerMask(item,origin=imageSelectionOrigin(project),{inspect=false,reveal=true}={}){
-    if(!item||ctx.busy?.())return;
+    if(!item)return;
     const hasMask=hasImageLayerMask(item);
-    if(layerLockOwner(currentDocument(project).layers,item)&&!hasMask)return;
+    if(!hasMask&&(ctx.busy?.()||layerLockOwner(currentDocument(project).layers,item)))return;
     const selection=hasMask?null:ctx.imageSelection?.(origin);
     void run(async()=>{
       if(!hasMask)await commandAt(project,origin,{action:'createMask',layerId:item.id,reveal,
         ...(selection?{rect:selection.clip,...uvShapePayload(selection)}:{})});
       const current=project.imageContext;
-      if(project.document?.id===origin.id&&current?.documentId===origin.documentId&&
-         current?.layerId===origin.layerId&&current?.target===origin.target){
+      if(stillOnImageSelection(project,origin)){
         const inspectMask=inspect&&!(current.layerId===item.id&&current.inspectMask);
         selectImage(project,{layerId:item.id,target:'mask',inspectMask});
       }
@@ -2280,6 +2287,7 @@ export function createImagePanel(type,ctx){
     const lock=button('',()=>setLayer({locked:!view.item.locked}));
     function loadThumbnail(event,source){
       if(!(event.metaKey||event.ctrlKey))return false;
+      if(ctx.busy?.())return true;
       const operation=event.shiftKey?(event.altKey?'intersect':'add'):event.altKey?'subtract':'replace';
       const origin=imageSelectionOrigin(project);
       void run(()=>ctx.sampleLayerSelection?.(origin,view.item.id,source,operation));
@@ -2295,7 +2303,6 @@ export function createImagePanel(type,ctx){
     select.ondblclick=event=>view.item.embedded?openEmbeddedSource(project,view.item):event.target.closest('.document-text-thumbnail')?editText(view.item):startRename(view);
     name.setAttribute('aria-hidden','true');
     name.onclick=event=>{
-      if(select.disabled)return;
       select.focus({preventScroll:true});
       selectRow(view.item,event);
     };
@@ -2303,7 +2310,7 @@ export function createImagePanel(type,ctx){
     const mask=button('',event=>{
       const layer=view.item;
       if(hasImageLayerMask(layer)&&loadThumbnail(event,'mask'))return;
-      if(event.shiftKey){if(!view.lockOwner)setLayer({maskEnabled:!layer.maskEnabled});return;}
+      if(event.shiftKey){if(!view.lockOwner&&!ctx.busy?.())setLayer({maskEnabled:!layer.maskEnabled});return;}
       selectLayerMask(layer,imageSelectionOrigin(project),{inspect:event.altKey});
     });
     mask.className='document-layer-mask';
@@ -2398,8 +2405,6 @@ export function createImagePanel(type,ctx){
       maskPreview.remove();
     }
     eye.disabled=lock.disabled=busy||!!inheritedLock;
-    select.disabled=busy;
-    mask.disabled=busy;
     mask.draggable=hasMask&&!busy;
     name.draggable=select.draggable=!busy&&!lockOwner;
     view.item=item;
@@ -2889,7 +2894,7 @@ export function createImagePanel(type,ctx){
       }if(!refs.length)body.append(el('div','document-muted','尚未绑定材质通道'));
       const assets=Object.entries(doc.paint.assets).filter(([,asset])=>!isSelectionAsset(asset));if(assets.length){const select=choice('图像层素材',[['','选择素材…'],...assets.map(([id,a])=>[id,a.name])],'',asset=>{if(!asset)return;const origin=imageSelectionOrigin(project),name=doc.paint.assets[asset].name;void run(()=>addImageAsset(project,origin,asset,name));});body.append(select);enhanceSelectMenu(select);}
     }
-    if(ctx.busy?.())for(const control of body.querySelectorAll('input,select,button'))control.disabled=true;
+    if(ctx.busy?.())for(const control of body.querySelectorAll('input,select,button:not(.document-layer-select,.document-layer-mask)'))control.disabled=true;
   }
   const unsub=project.subscribe(sync);
   sync();

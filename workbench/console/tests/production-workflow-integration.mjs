@@ -296,13 +296,32 @@ try{
   await addPixel.click();
   const second=await until(async()=>{const doc=await readDoc();return image(doc).layers.length===2&&doc;},'新建第二像素层');
   const secondId=image(second).layers.find(item=>item.id!==baseId).id;
-  await addPixel.click();
-  const third=await until(async()=>{const doc=await readDoc();return image(doc).layers.length===3&&doc;},'新建第三像素层');
-  const thirdId=image(third).layers.find(item=>![baseId,secondId].includes(item.id)).id;
+  // Click an existing layer while the third layer is already stored but its acknowledgement is still in flight.
+  let releaseAdd;
+  const addGate=new Promise(resolve=>{releaseAdd=resolve;});
+  const holdAdd=async intercepted=>{
+    const response=await intercepted.fetch();
+    await addGate;
+    await intercepted.fulfill({response});
+  };
+  await page.route(commandUrl,holdAdd);
+  let third,thirdId;
   const modifier=process.platform==='darwin'?'Meta':'Control';
-  await row(baseId).locator('.document-layer-name').click();
-  await row(secondId).locator('.document-layer-name').click({modifiers:[modifier]});
-  assert.equal(await panel().locator('.document-layer-row[data-selected]').count(),2);
+  const selectedIds=()=>panel().locator('.document-layer-row[data-selected]').evaluateAll(rows=>rows.map(row=>row.dataset.imageLayerId).sort());
+  try{
+    await addPixel.click();
+    third=await until(async()=>{const doc=await readDoc();return image(doc).layers.length===3&&doc;},'新建第三像素层');
+    thirdId=image(third).layers.find(item=>![baseId,secondId].includes(item.id)).id;
+    await row(baseId).locator('.document-layer-name').click();
+    assert.deepEqual(await selectedIds(),[baseId],'保存回复抵达前可以选择其余图层');
+    await row(secondId).locator('.document-layer-name').click({modifiers:[modifier]});
+    assert.deepEqual(await selectedIds(),[baseId,secondId].sort());
+  }finally{
+    releaseAdd();
+    await page.unrouteAll({behavior:'wait'});
+  }
+  await row(thirdId).waitFor();
+  assert.deepEqual(await selectedIds(),[baseId,secondId].sort(),'迟到的新增图层回复应保留之后的多选');
   await select(secondId).focus();await page.keyboard.press(modifier+'+j');
   const duplicate=await until(async()=>{const doc=await readDoc();return image(doc).layers.length===5&&doc;},'复制两个选中图层');
   const copies=image(duplicate).layers.filter(item=>![baseId,secondId,thirdId].includes(item.id));
