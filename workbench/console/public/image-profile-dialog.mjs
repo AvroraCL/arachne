@@ -17,6 +17,10 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
     <output aria-live="polite">选择显示器、印刷或灰度配置文件。</output>
     <div class="profile-proof-options"><button class="profile-proof-action" type="button" disabled>预览校样</button>
       <label hidden><input type="checkbox">模拟纸白</label></div>
+    <label class="profile-plates" hidden>校样视图<select aria-label="CMYK 校样视图">
+      <option value="">彩色校样</option><option value="C">青版 C</option><option value="M">品红版 M</option>
+      <option value="Y">黄版 Y</option><option value="K">黑版 K</option><option value="limit">总墨量超限</option></select></label>
+    <label class="profile-ink-limit" hidden>警戒线 %<input type="number" min="0" max="400" value="300" step="any" aria-label="总墨量警戒线（%）"></label>
     <figure hidden><img alt="左侧为原稿，右侧为目标配置的校样"><figcaption><span>原稿</span><span>输出校样</span></figcaption></figure>
     <span class="profile-proof-status" role="status"></span>
     <footer><button type="button">取消</button><button type="submit" class="primary" disabled>导出副本</button></footer>
@@ -25,6 +29,9 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
   const installed=form.querySelector('.profile-installed select'),lifetime=new AbortController();
   const message=form.querySelector('output'),submit=form.querySelector('[type=submit]');
   const preview=form.querySelector('.profile-proof-action'),paper=form.querySelector('[type=checkbox]');
+  const plate=form.querySelector('.profile-plates select'),limit=form.querySelector('.profile-ink-limit input');
+  const rightCaption=form.querySelector('figcaption span:last-child');
+  enhanceSelectMenu(plate);
   const chooseFile=form.querySelector('.profile-choose-file');
   chooseFile.onclick=()=>file.click();
   const figure=form.querySelector('figure'),comparison=figure.querySelector('img'),status=form.querySelector('.profile-proof-status');
@@ -38,27 +45,36 @@ export function chooseOutputProfile(image,sourceLabel,signal,requestProof){
   }
   async function refreshProof(){
     clearProof();
+    const selectedPlate=mode==='CMYK'&&showProof?plate.value:'';
+    plate.closest('label').hidden=mode!=='CMYK'||!showProof;
+    paper.closest('label').hidden=mode!=='CMYK'||!!selectedPlate;
+    limit.closest('label').hidden=selectedPlate!=='limit';limit.disabled=selectedPlate!=='limit';
     if(!showProof||!mode)return;
+    if(selectedPlate==='limit'&&(!limit.value||!limit.validity.valid)){status.textContent='请输入 0–400% 的总墨量警戒线';return;}
     const request=proofRequest=new AbortController();
     const space=preferredDisplaySpace();
     status.textContent='正在生成校样…';
     try{
       const blob=await requestProof({file:selectedFile,intent:intent.value},
-        {space,paper:mode==='CMYK'&&paper.checked},request.signal);
+        {space,paper:mode==='CMYK'&&!selectedPlate&&paper.checked,...(selectedPlate?{plate:selectedPlate}:{}),
+          ...(selectedPlate==='limit'?{inkLimit:limit.valueAsNumber}:{})},request.signal);
       if(request.signal.aborted)return;
       proofUrl=URL.createObjectURL(blob);comparison.src=proofUrl;
       await comparison.decode();
       if(request.signal.aborted)return;
       figure.style.setProperty('--proof-ratio',comparison.naturalWidth/comparison.naturalHeight);
-      figure.hidden=false;status.textContent=(space==='display-p3'?'Display P3':'sRGB')+' 校样预览';
+      rightCaption.textContent=selectedPlate==='limit'?'总墨量 > '+limit.value+'%':selectedPlate?plate.selectedOptions[0].textContent:'输出校样';
+      figure.hidden=false;status.textContent=selectedPlate==='limit'?'橙色标出超过警戒线的区域':selectedPlate?'黑色表示满墨，白色表示无墨':(space==='display-p3'?'Display P3':'sRGB')+' 校样预览';
     }catch(error){if(!request.signal.aborted)status.textContent=error.message;}
   }
   preview.onclick=()=>{showProof=!showProof;preview.textContent=showProof?'收起校样':'预览校样';void refreshProof();};
-  intent.onchange=paper.onchange=refreshProof;
+  plate.onchange=limit.onchange=intent.onchange=paper.onchange=refreshProof;
   let selectionVersion=0;
   async function choose(read){
     const version=++selectionVersion;
-    submit.disabled=preview.disabled=true;mode=null;selectedFile=null;paper.parentElement.hidden=true;clearProof();
+    submit.disabled=preview.disabled=true;mode=null;selectedFile=null;paper.parentElement.hidden=true;
+    plate.closest('label').hidden=limit.closest('label').hidden=true;limit.disabled=true;
+    plate.value='';syncSelectMenu(plate);clearProof();
     message.textContent='正在读取配置…';
     try{
       const selected=await read();

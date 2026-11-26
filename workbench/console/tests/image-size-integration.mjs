@@ -298,7 +298,7 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
         }
         const initialProof=await readProof();
         assert.deepEqual(initialProof.slice(0,2),[126,31]);
-        let paperProof;
+        let paperProof;const plates=[];
         if(mode==='CMYK'){
           const url=await comparison.getAttribute('src');
           await profileDialog.getByLabel('模拟纸白').check();
@@ -310,12 +310,33 @@ print(*im.getpixel((30,15)))`,converted],{encoding:'utf8'}).trim().split(/\s+/).
           assert.ok(bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=1000&&bounds.y+bounds.height<=680);
           await profileDialog.screenshot({path:path.join(data,'icc-proof-compact.png')});
           await page.setViewportSize(desktop);
+          async function plate(label){
+            const prev=await comparison.getAttribute('src');
+            await profileDialog.getByRole('button',{name:'CMYK 校样视图'}).click();
+            await profileDialog.getByRole('option',{name:label,exact:true}).click();
+            await until(async()=>await comparison.isVisible()&&(await comparison.getAttribute('src'))!==prev,label);
+            return (await readProof())[3];
+          }
+          for(const label of ['青版 C','品红版 M','黄版 Y','黑版 K'])plates.push(await plate(label));
+          await plate('总墨量超限');
+          const limit=profileDialog.getByRole('spinbutton',{name:'总墨量警戒线（%）'});
+          await limit.fill('0');await limit.press('Tab');
+          await until(async()=>await comparison.isVisible()&&profileDialog.locator('figcaption').innerText().then(s=>s.includes('> 0%')),'总墨量读数');
+          assert.deepEqual((await readProof())[3],[241,113,46,255]);
+          await limit.fill('400');await limit.press('Tab');
+          await until(async()=>await comparison.isVisible()&&profileDialog.locator('figcaption').innerText().then(s=>s.includes('> 400%')),'放宽总墨量限制');
+          const gray=(await readProof())[3];assert.equal(gray[0],gray[1]);assert.equal(gray[1],gray[2]);
+          await profileDialog.screenshot({path:path.join(data,'print-separations.png')});
         }else assert.equal(await profileDialog.getByLabel('模拟纸白').isVisible(),false);
         const fileName=path.join(data,'proof-'+mode+'.'+ext);
         const result=page.waitForEvent('download');
         await confirm.click();
         const file=await result;
         assert.equal(path.extname(file.suggestedFilename()),'.'+ext);await file.saveAs(fileName);
+        if(plates.length){
+          const inks=JSON.parse(execFileSync(pythonExecutable(),['-B','-c','from PIL import Image;import sys,json;print(json.dumps(Image.open(sys.argv[1]).getpixel((31,15))))',fileName],{encoding:'utf8'}));
+          assert.deepEqual(plates,inks.map(n=>[255-n,255-n,255-n,255]));
+        }
         execFileSync(pythonExecutable(),['-B','-c',`import sys
 from io import BytesIO
 from pathlib import Path

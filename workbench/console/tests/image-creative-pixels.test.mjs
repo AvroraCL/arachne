@@ -617,6 +617,18 @@ for key,intent in [('perceptual',0),('relative',1)]:
         expected=ImageCms.profileToProfile(paper,BytesIO(profile_bytes('srgb')),BytesIO(target),outputMode='CMYK',renderingIntent=intent)
         assert actual.format=='TIFF' and actual.mode=='CMYK' and actual.size==(3,1)
         assert actual.info['icc_profile']==target and actual.tobytes()==expected.tobytes()
+        def proof(options):
+            settings={'space':'srgb','paper':False,**options}
+            result=Image.open(BytesIO(profiled_copy(rgba,'srgb',target,'CMYK',key,settings)))
+            return np.asarray(result)[:,3:,:3]
+        for channel in 'CMYK':
+            plate=proof({'plate':channel})
+            np.testing.assert_array_equal(plate,np.repeat((255-np.asarray(expected.getchannel(channel)))[:,:,None],3,axis=2))
+        total=np.asarray(expected,dtype=float).sum(axis=2)*100/255
+        for limit in (0,100,400):
+            warning=proof({'plate':'limit','inkLimit':limit})
+            np.testing.assert_array_equal(np.all(warning==[241,113,46],axis=2),total>limit)
+            assert np.all(warning[:,:,0][total<=limit]==warning[:,:,2][total<=limit])
 `,cmykProfile],{cwd:new URL('..',import.meta.url)});
 });
 

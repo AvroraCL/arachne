@@ -134,8 +134,17 @@ def profiled_copy(pixels, space, target, mode, intent, proof=None):
             display=profile_bytes(proof['space'])
             # Display exactly the device codes used in the exported file, including
             # its quantization. Absolute colorimetry retains the target paper white.
-            right=ImageCms.profileToProfile(converted,BytesIO(target),BytesIO(display),outputMode='RGB',
-                renderingIntent=ImageCms.Intent.ABSOLUTE_COLORIMETRIC if proof['paper'] else ImageCms.Intent.RELATIVE_COLORIMETRIC)
+            plate = proof.get('plate')
+            if plate in ('C','M','Y','K'):
+                right = converted.getchannel(plate).point(lambda ink:255-ink).convert('RGB')
+            else:
+                right=ImageCms.profileToProfile(converted,BytesIO(target),BytesIO(display),outputMode='RGB',
+                    renderingIntent=ImageCms.Intent.ABSOLUTE_COLORIMETRIC if proof['paper'] else ImageCms.Intent.RELATIVE_COLORIMETRIC)
+                if plate == 'limit':
+                    total = np.asarray(converted).sum(axis=2,dtype=np.uint16)
+                    over = Image.fromarray(total > proof['inkLimit']*255/100)
+                    right = right.convert('L').convert('RGB')
+                    right.paste((241,113,46),(0,0,*right.size),over)
             left=convert_image(rgb.convert('RGBA'),profile_bytes(space),display)
             if not opaque_output:
                 alpha=image.getchannel('A')

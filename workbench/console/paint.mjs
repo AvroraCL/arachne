@@ -977,9 +977,11 @@ export function imageExportInput(doc,request){
       throw Error('ICC 文件或渲染意图无效');
     const bytes=Buffer.from(data,'base64'),mode=outputProfileMode(bytes,bytes.length);
     if(proof!==undefined){
-      const {space,paper}=fields(proof,['space','paper']);
+      const {space,paper,plate,inkLimit}=fields(proof,['space','paper','plate','inkLimit']);
       if(!['srgb','display-p3'].includes(space)||typeof paper!=='boolean'||paper&&mode!=='CMYK')throw Error('校样显示设置无效');
-      return {...input,imagePng:true,exportProfile:{data,mode,intent},imageProof:{space,paper},
+      if(plate!==undefined&&(mode!=='CMYK'||paper||!['C','M','Y','K','limit'].includes(plate)))throw Error('请选择有效的 CMYK 分色版');
+      if(plate==='limit'?(!Number.isFinite(inkLimit)||inkLimit<0||inkLimit>400):inkLimit!==undefined)throw Error('总墨量警戒线须在 0–400% 之间');
+      return {...input,imagePng:true,exportProfile:{data,mode,intent},imageProof:{space,paper,plate,inkLimit},
         imageViewSize:thumbnailDimensions(doc.paint.imageDocuments[documentId],512)};
     }
     return {...input,exportProfile:{data,mode,intent},exportDocument:true,...(['CMYK','LAB'].includes(mode)?{imageTiff:true}:{imagePng:true})};

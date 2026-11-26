@@ -632,7 +632,7 @@
 .image-profile-dialog{width:min(400px,calc(100vw - 24px))}
 .image-profile-dialog .profile-source,.image-profile-dialog output{margin:4px 0 8px;color:var(--ui-muted);font-size:12px;overflow-wrap:anywhere}
 .image-profile-dialog form>label:not([hidden]),.image-profile-dialog .profile-file{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:12px}
-.image-profile-dialog form>.profile-installed[hidden]{display:none}
+.image-profile-dialog form>label[hidden]{display:none}
 .image-profile-dialog .profile-file>label{display:block;white-space:nowrap}
 .image-profile-dialog form>label>.custom-select{width:100%;min-width:0}
 .image-profile-dialog form>label .custom-select-button{width:100%}
