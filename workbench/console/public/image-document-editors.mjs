@@ -12,7 +12,7 @@ import {createImageUVGuide} from './image-uv-guide.mjs';
 import {canvasCoordinates,canvasPoint,orientImageCanvas} from './image-canvas-coordinates.mjs';
 import {copyImagePixels,copiedImage,onImageClipboardChange,imageClipboardPlacement} from './image-clipboard.mjs';
 import {compositionKey} from './text-input.mjs';
-import {drawingImageTypes,brushImageTypes,acceptsDrawingImage,prepareDrawingImage} from './drawing-image-import.mjs';
+import {drawingImageTypes,chooseOpenImageSpace,brushImageTypes,acceptsDrawingImage,prepareDrawingImage} from './drawing-image-import.mjs';
 import {headerControls,chromeButton,chromeMenu,createContextActions} from './area-chrome.mjs';
 import {surfaceControls,selectionControls} from './area-paint-controls.mjs';
 import {createSurfaceTools} from './paint-tools.mjs';
@@ -181,6 +181,9 @@ export function createDocumentEditor(ctx,bridge){
   const importInput=el('input');
   importInput.type='file';importInput.accept=drawingImageTypes;importInput.hidden=true;
   importInput.setAttribute('aria-label','选择要导入的图片');
+  const openInput=el('input');openInput.type='file';openInput.accept=drawingImageTypes;openInput.hidden=true;
+  openInput.setAttribute('aria-label','选择图片作为新文档');
+  openInput.onchange=()=>{const file=openInput.files[0];openInput.value='';if(file)void run(()=>openPhoto(file));};
   const importButton=chromeButton(button('导入图片至画布',()=>importInput.click()),'importImage');
   importButton.title='导入 PNG、JPEG、WebP 或 TIFF 至当前画布';
   importInput.onchange=()=>{
@@ -318,7 +321,7 @@ export function createDocumentEditor(ctx,bridge){
   },{passive:false,signal});
   const sampleNotice=el('span','document-sample-status');
   sampleNotice.setAttribute('role','status');sampleNotice.hidden=true;
-  rail.setAttribute('aria-label','图像绘制工具');canvas.setAttribute('aria-label','图像文档画布');canvas.tabIndex=0;stage.tabIndex=0;stage.append(canvas,uvGuideImage,uvGuideNotice,empty,compass);empty.append(el('strong','','图像文档'),el('span','','新建图像，或从材质通道打开已有图像文档。'),button('新建图像',()=>create.click(),'创建第一个图像文档'));
+  rail.setAttribute('aria-label','图像绘制工具');canvas.setAttribute('aria-label','图像文档画布');canvas.tabIndex=0;stage.tabIndex=0;stage.append(canvas,uvGuideImage,uvGuideNotice,empty,compass);empty.append(el('strong','','图像文档'),el('span','','新建图像，或从材质通道打开已有图像文档。'),button('新建图像',()=>create.click(),'创建第一个图像文档'),button('打开图像…',()=>openInput.click(),'从图片打开图像文档'));
   const controls=surfaceControls(el('div'),{drawing:true}),elements=controls.elements;
   elements['brush-erase'].checked=state.eraser===true;
   elements['brush-radius'].closest('label').hidden=true;
@@ -456,7 +459,7 @@ export function createDocumentEditor(ctx,bridge){
     clipboardTimer=setTimeout(clearClipboardNotice,3500);
   }
   footer.append(clipboardNotice,status);
-  host.classList.add('document-editor');host.append(options,rail,stage,footer,importInput);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
+  host.classList.add('document-editor');host.append(options,rail,stage,footer,importInput,openInput);elements['live-uv']=canvas;elements['viewport']=controls.dummy;elements['uv-brush-cursor'].className='area-uv-cursor';stage.append(elements['uv-brush-cursor']);
   let mode=state.tool||'orbit',selectionShape=Object.hasOwn(selectionNames,state.selectionTool)?state.selectionTool:'rect',space=false,nav=null,pan=state.pan||[0,0],zoom=state.zoom||1,selection=null,disposed=false,shown=true,lastImage='',lastTarget=null,lastProject=null,sourceKey='',restoredProject=null;
   let angle=state.angle??0,mirror=state.mirror===true,gamutWarning=state.gamutWarning===true;
   function canWarnGamut(){
@@ -1310,6 +1313,22 @@ export function createDocumentEditor(ctx,bridge){
     }).finally(()=>{if(!disposed){copying=false;syncClipboard();}});
     return true;
   }
+  async function openPhoto(file){
+    if(importing||writing())throw Error('请先结束当前编辑，再打开图像');
+    const origin=imageSelectionOrigin(project);
+    const prepared=await prepareDrawingImage(file,{preserveProfile:true});
+    if(disposed||signal.aborted)return;
+    const space=await chooseOpenImageSpace(file,signal);
+    if(!space||disposed)return;
+    importing=true;syncClipboard();
+    try{
+      const result=await bridge.openDocumentAsset(prepared.file,origin,prepared.format??'png',space);
+      if(disposed||project.document?.id!==origin.id||project.imageContext?.documentId!==origin.documentId)return;
+      selectImage(project,{documentId:result.documentId,layerId:result.layerId,target:'pixels'});
+      const label=imageColorSpaces.find(([id])=>id===result.colorSpace)[1];
+      reportClipboard(imageSelectionOrigin(project),result.sourceProfile+' → '+label);
+    }finally{importing=false;if(!disposed)sync();}
+  }
   function importFile(file,position,pixelSize=false){
     if(!canPaste()||!canInsertImage(project))return;
     const origin=imageSelectionOrigin(project),layerId=crypto.randomUUID(),insertion=imageInsertion(project);
@@ -1416,11 +1435,17 @@ export function createDocumentEditor(ctx,bridge){
     if(layer.maskLinked===false)operations.push({...base,action:'updateLayer',patch:{maskLinked:false}});
     await project.commands(operations,origin);
   },onError:ctx.error,onChange:()=>{sync();ctx.onChange();}});
-  stage.addEventListener('dragover',event=>{const transfer=event.dataTransfer;if(!hasAssetDrag(transfer)&&!transfer?.types.includes('Files'))return;event.preventDefault();transfer.dropEffect=currentDocument(project)&&dropPosition(event)?'copy':'none';},{signal});
+  stage.addEventListener('dragover',event=>{const transfer=event.dataTransfer;if(!hasAssetDrag(transfer)&&!transfer?.types.includes('Files'))return;event.preventDefault();transfer.dropEffect=currentDocument(project)?(dropPosition(event)?'copy':'none'):(transfer.types.includes('Files')?'copy':'none');},{signal});
   stage.addEventListener('drop',event=>{
     const transfer=event.dataTransfer;if(!hasAssetDrag(transfer)&&!transfer?.types.includes('Files'))return;
-    event.preventDefault();event.stopPropagation();const position=dropPosition(event);
-    if(!currentDocument(project)){ctx.error(Error('请先新建图像'));return;}
+    event.preventDefault();event.stopPropagation();
+    if(!currentDocument(project)){
+      const files=[...transfer.files];
+      if(files.length===1&&acceptsDrawingImage(files[0]))void run(()=>openPhoto(files[0]));
+      else ctx.error(Error('请拖入一张图片以新建图像文档'));
+      return;
+    }
+    const position=dropPosition(event);
     if(!position){ctx.error(Error('请将图片放到画布内'));return;}
     if(transfer.types.includes('Files')){
       const files=[...transfer.files],file=files[0];
@@ -1663,7 +1688,7 @@ export function createDocumentEditor(ctx,bridge){
     ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();live.refresh();uvGuide.sync();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
-  return {kind:'image',sync,handleKey,travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,angle,mirror,gamutWarning,uvGuide:uvGuide.enabled,tool:mode,edgeRefine:edgeTool.getState(),selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),wand:readWand(),colorRange:readRange(),selectionRefineRadius:refineRadius.valueAsNumber,gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),move:moveTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
+  return {kind:'image',sync,handleKey,openPhotoFile(){if(!importing&&!writing())openInput.click();},travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,angle,mirror,gamutWarning,uvGuide:uvGuide.enabled,tool:mode,edgeRefine:edgeTool.getState(),selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),wand:readWand(),colorRange:readRange(),selectionRefineRadius:refineRadius.valueAsNumber,gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),move:moveTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),
     strokeSaveStatus:()=>({pending:strokeQueue.size,saving:strokeQueue.saving,failure:strokeQueue.failure}),retryStrokeSave,
     editCommand,canCopyMerged:()=>canCopy(true),copyMerged:()=>copySelection(true),
     canCut,cutSelection,pasteSystemImage,canPasteInPlace:()=>canPaste()&&canInsertImage(project)&&!!copiedImage(),pasteInPlace:()=>pasteSelection(true),

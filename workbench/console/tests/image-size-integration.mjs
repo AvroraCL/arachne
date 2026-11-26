@@ -78,6 +78,51 @@ try{
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
   assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
+  {
+    const photo=path.join(data,'有颜色的图 127.png'),opened=path.join(data,'打开的图.png');
+    const macP3='/System/Library/ColorSync/Profiles/Display P3.icc';
+    const sourceProfile=await fs.access(macP3).then(()=>macP3,()=>path.resolve('public/color-profiles/DisplayP3-v4.icc'));
+    execFileSync(pythonExecutable(),['-B','-c',`from PIL import Image
+from pathlib import Path
+import numpy as np,sys
+y,x=np.indices((53,127))
+pixels=np.stack((x*2,(y*7+x)%256,(x%2)*255,np.choose((x+y)%3,[51,163,255])),axis=2).astype('uint8')
+Image.fromarray(pixels).save(sys.argv[1],icc_profile=Path(sys.argv[2]).read_bytes())`,photo,sourceProfile]);
+    await page.locator('[data-area-mode=modeling]').click();
+    await page.getByText('文件',{exact:true}).filter({visible:true}).first().click();
+    const choose=page.waitForEvent('filechooser');
+    await page.locator('#open-image-file').click();await (await choose).setFiles(photo);
+    const options=page.getByRole('dialog',{name:'打开图像',exact:true});
+    await options.getByRole('button',{name:'取消',exact:true}).click();
+    assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
+    const select=page.waitForEvent('filechooser');
+    await editor.getByRole('button',{name:'从图片打开图像文档'}).click();await (await select).setFiles(photo);
+    await options.getByRole('button',{name:'打开',exact:true}).click();await saved('按原像素与源 ICC 打开图片');
+    const [id,image]=Object.entries(doc.paint.imageDocuments)[0];
+    assert.deepEqual([image.width,image.height,image.colorSpace,image.name],[127,53,'display-p3','有颜色的图 127']);
+    assert.deepEqual(image.layers.map(l=>l.kind),['image','pixel']);
+    await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+    await editor.locator('.document-image-stage[data-preview-size="4096"]').waitFor();
+    await editor.screenshot({path:path.join(data,'opened-p3-artwork.png')});
+    const download=page.waitForEvent('download');await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();
+    await (await download).saveAs(opened);
+    execFileSync(pythonExecutable(),['-B','-c',`from PIL import Image,ImageCms
+from io import BytesIO
+import sys,numpy as np
+src,out=[Image.open(p) for p in sys.argv[1:]]
+target=ImageCms.ImageCmsProfile(BytesIO(out.info['icc_profile']))
+assert 'P3' in ImageCms.getProfileDescription(target)
+reference=ImageCms.profileToProfile(src,BytesIO(src.info['icc_profile']),target,outputMode='RGBA',renderingIntent=1)
+np.testing.assert_array_equal(np.asarray(reference),np.asarray(out))`,photo,opened]);
+    await canvas.focus();await page.keyboard.press(mod+'+z');await saved('一次撤销打开图片');
+    assert.equal(Object.keys(doc.paint.imageDocuments??{}).length,0);
+    await page.keyboard.press(mod+'+Shift+z');await saved('重做打开带配置的图片');
+    assert.deepEqual(doc.paint.imageDocuments[id],image);
+    await page.reload();await editor.getByRole('button',{name:'图像文档',exact:true}).click();
+    await page.getByRole('listbox',{name:'图像文档',exact:true}).getByRole('option',{name:image.name,exact:true}).click();
+    await editor.locator('.document-image-stage[data-preview-revision="'+doc.revision+'"]').waitFor();
+    await canvas.focus();await page.keyboard.press(mod+'+z');await saved('清理本轮临时打开的图片');
+  }
   for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['acescg','ACEScg（AP1 线性）','ACEScg - Arachne Linear RGB'],['aces2065-1','ACES2065-1（AP0 线性）','ACES2065-1 - Arachne Linear RGB'],['linear-srgb','线性 sRGB（颜色）','cRGB'],['linear-p3','线性 Display P3','P3-D65 - Arachne Linear RGB'],['linear-rec2020','线性 Rec.2020','Rec2020 - Arachne Linear RGB'],['linear-adobe-rgb','线性 Adobe RGB','AdobeRGB - Arachne Linear RGB'],['gray-g22','灰度（Gamma 2.2）','Arachne Gray Gamma 2.2'],['gray-linear','灰度（线性光）','Arachne Linear Gray']]){
     await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
     await width.fill('63');await height.fill('31');

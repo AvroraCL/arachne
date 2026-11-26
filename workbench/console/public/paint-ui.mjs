@@ -121,7 +121,7 @@ function syncBusyControls(){
   for(const form of document.querySelectorAll('form[data-material-properties]'))syncPropertySaving(form);
   $('open-settings').disabled=busy;
   for(const control of $('empty').querySelectorAll('button'))control.disabled=busy;
-  for(const control of [...areaButtons,$('upload')])control.disabled=busy||!doc;
+  for(const control of [...areaButtons,$('upload'),$('open-image-file')])control.disabled=busy||!doc;
   for(const control of addLayerControls)control.disabled=busy||!canAddLayer();
   renderDrawingLayerSettings();
 }
@@ -250,6 +250,7 @@ function renderProjectState(){
   status.dataset.state=state;if(status.textContent!==label)status.textContent=label;
   status.title=failure?failureLabel+'：'+failure:'工程修改自动保存在本机';
   $('open-project-details').disabled=$('open-project-copy').disabled=!doc;
+  $('open-image-file').disabled=!doc||busy;
   $('project-detail-name').textContent=doc?.name||'未打开工程';
   $('project-detail-id').textContent=doc?.id||'—';
   $('project-detail-updated').textContent=doc?.updated?new Date(doc.updated).toLocaleString():'—';

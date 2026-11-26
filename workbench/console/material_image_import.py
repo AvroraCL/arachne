@@ -5,12 +5,94 @@ from pathlib import Path
 import sys
 
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
-from image_color_spaces import GRAY_SPACES, profile_bytes, rgb_transform
+from image_color_spaces import GRAY_SPACES, PROFILE_FILES, profile_bytes, rgb_transform
 
 
 MIB = 1024 * 1024
 FORMATS = {'.png': 'PNG', '.jpg': 'JPEG', '.jpeg': 'JPEG', '.webp': 'WEBP', '.tga': 'TGA',
            '.tif':'TIFF', '.tiff':'TIFF'}
+
+
+def matching_rgb_space(profile):
+    # Equivalent vendor profiles often have different descriptions and bytes.
+    # Compare matrix colorants and the entire 8-bit transfer ramps; always use
+    # the source ICC itself for the subsequent pixel conversion.
+    if not profile.profile.is_matrix_shaper or profile.profile.xcolor_space.strip()!='RGB':
+        return None
+    import numpy as np
+    def colorants(p):
+        return np.array([getattr(p.profile,c+'_colorant')[0] for c in ('red','green','blue')])
+    source=colorants(profile)
+    codes=np.arange(256,dtype=np.uint8)
+    ramp=np.zeros((4,256,3),dtype=np.uint8)
+    for i in range(3):ramp[i,:,i]=codes
+    ramp[3]=codes[:,None]
+    test=Image.fromarray(ramp)
+    for key in PROFILE_FILES.keys()-GRAY_SPACES:
+        target=ImageCms.ImageCmsProfile(BytesIO(profile_bytes(key)))
+        if np.max(np.abs(colorants(target)-source))>.0008:
+            continue
+        result=ImageCms.profileToProfile(test,profile,target,outputMode='RGB',renderingIntent=1)
+        if np.max(np.abs(np.asarray(result,dtype=np.int16)-ramp))<=1:
+            return key
+    return None
+
+
+def open_document_image(image, item):
+    # A file opens at its oriented pixel dimensions in a single project revision.
+    if max(image.size)>4096:
+        raise ValueError('绘制文档宽高须在 4096 像素以内，可先缩小图片或置入现有图像')
+    oriented=ImageOps.exif_transpose(image)
+    embedded=oriented.info.get('icc_profile')
+    known=next((key for key in PROFILE_FILES if embedded==profile_bytes(key)),None) if embedded else None
+    mode=oriented.mode
+    gray=mode in ('1','L','LA') or mode.startswith('I;16')
+    if embedded:
+        profile=ImageCms.ImageCmsProfile(BytesIO(embedded))
+        description=ImageCms.getProfileDescription(profile).strip()[:100]
+        family=profile.profile.xcolor_space.strip()
+        if family!=('CMYK' if mode=='CMYK' else 'Lab' if mode=='LAB' else 'GRAY' if gray else 'RGB'):
+            raise ValueError('嵌入 ICC 与图片通道不匹配')
+        source_space=known or matching_rgb_space(profile) or ('gray-g22' if gray else 'prophoto-rgb')
+    elif mode=='CMYK':
+        raise ValueError('CMYK 图片缺少印刷 ICC，请先嵌入印刷配置')
+    elif mode=='LAB':
+        white=image.tag_v2.get(318) if hasattr(image,'tag_v2') else None
+        if white and (abs(float(white[0])-.3457)>.001 or abs(float(white[1])-.3585)>.001):
+            raise ValueError('此 Lab 图片使用其他白点，请先嵌入 ICC')
+        embedded=(Path(__file__).parent/'public/color-profiles/Lab-D50.icc').read_bytes()
+        source_space,description='prophoto-rgb','Lab D50'
+    else:
+        linear=oriented.info.get('gamma')==1 and 'srgb' not in oriented.info
+        source_space=('gray-linear' if linear else 'gray-g22') if gray else ('linear-srgb' if linear else 'srgb')
+        description=('无 ICC · '+{'gray-g22':'灰度 Gamma 2.2','gray-linear':'线性灰度','linear-srgb':'线性 RGB','srgb':'sRGB'}[source_space])
+    target=source_space if item['openWorkingSpace']=='auto' else item['openWorkingSpace']
+    if mode.startswith('I;16'):
+        import numpy as np
+        reduced=np.asarray(oriented,dtype=np.uint32)
+        oriented=Image.fromarray(((reduced+128)//257).astype(np.uint8))
+    elif mode in ('I','F'):
+        raise ValueError('此图像使用整数或浮点通道，请先导出为 8 位或 16 位图像')
+    rgba=oriented.convert('RGBA') if mode not in ('LAB','CMYK') else None
+    if target=='linear':
+        if rgba is None:
+            raise ValueError('CMYK 和 Lab 文件须选择颜色工作空间')
+        output=rgba
+    else:
+        input_image=oriented if mode in ('LAB','CMYK') else (rgba.getchannel('R') if gray else rgba.convert('RGB'))
+        destination=profile_bytes(target)
+        source=embedded or profile_bytes(source_space)
+        output_mode='L' if target in GRAY_SPACES else 'RGB'
+        output=(input_image if source==destination and input_image.mode==output_mode else
+                ImageCms.profileToProfile(input_image,BytesIO(source),BytesIO(destination),outputMode=output_mode,
+                                          renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC))
+        if rgba is not None:
+            output.putalpha(rgba.getchannel('A'))
+    output.info.clear()
+    output.save(item['destination'],format='PNG',compress_level=3,
+                icc_profile=None if target=='linear' else profile_bytes(target))
+    Path(item['documentInfo']).write_text(json.dumps({'colorSpace':target,'sourceProfile':description}),encoding='utf8')
+    return Path(item['destination'])
 
 
 def convert(item):
@@ -23,6 +105,8 @@ def convert(item):
                 raise ValueError('宽高不能超过 8192 像素')
             if getattr(image, 'n_frames', 1) != 1:
                 raise ValueError('请选择单帧贴图')
+            if 'openWorkingSpace' in item:
+                return open_document_image(image,item)
             if expected == 'PNG':
                 image.verify()
                 return source

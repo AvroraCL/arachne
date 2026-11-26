@@ -56,7 +56,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate {
         app.addItem(.separator());app.addItem(withTitle:"隐藏阿拉克涅",action:#selector(NSApplication.hide(_:)),keyEquivalent:"h")
         app.addItem(withTitle:"退出阿拉克涅",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         let file=group("文件")
-        command(file,"新建工程…","newProject","n");command(file,"打开工程…","openProject","o")
+        command(file,"新建工程…","newProject","n");command(file,"打开工程…","openProject","o");command(file,"打开图像…","openImageFile")
         command(file,"打开涂装 ZIP…","importArchive");command(file,"迁移为 GLB 工程…","migrateModel")
         file.addItem(.separator());command(file,"保存工程","save","s")
         command(file,"另存为工程…","saveProjectCopy","s",[.command,.shift])

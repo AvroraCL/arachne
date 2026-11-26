@@ -1,6 +1,6 @@
 import {defaultExrSpace,exrSpaces} from './public/render-exr-color.mjs';
 import {outputProfileLimit,outputProfileMode} from './public/image-output-profile.mjs';
-import {previewDimensions,thumbnailDimensions} from './public/image-document-size.mjs';
+import {documentFrame,editingSide,previewDimensions,thumbnailDimensions} from './public/image-document-size.mjs';
 import {libraryFill,insertMaterialLayers} from './public/smart-material-placement.mjs';
 import {validPenPath,flattenPenPath} from './public/image-pen-path.mjs';
 import {textDefaults,textFonts,textEffects,checkStyleFields,hasImageStyle,paragraphOrigin} from './public/image-text-style.mjs';
@@ -1371,6 +1371,33 @@ export async function importPaintMaps(doc,revision,files,scratch){
     for(const png of unique.values())ensurePaintAsset(current,png);
   }
   return {document:saved,uploaded:pictures.map((png,index)=>({id:png.entry.id,name:files[index].name}))};
+}
+export async function openDocumentPhoto(doc,request){
+  const {revision,name,data,inputFormat,openWorkingSpace}=fields(request,['revision','name','data','inputFormat','openWorkingSpace']);
+  if(doc.revision!==revision)throw revisionError(doc);
+  if(!['png','jpeg','webp','tiff'].includes(inputFormat)||typeof name!=='string'||typeof data!=='string'||
+     openWorkingSpace!=='auto'&&!imageColorSpaces.some(([id])=>id===openWorkingSpace))throw Error('图片格式或文档颜色空间无效');
+  const bytes=Buffer.from(data,'base64');
+  if(!bytes.length||bytes.length>24*1024*1024)throw Error('图片大小须在 24 MiB 以内');
+  const scratch=await fsp.mkdtemp(path.join(projectDir(doc.id),'open-image-'));
+  try{
+    const source=path.join(scratch,'source'),destination=path.join(scratch,'picture.png'),documentInfo=path.join(scratch,'color.json');
+    await fsp.writeFile(source,bytes);
+    await normalizeImageFiles([{source,destination,documentInfo,name:'image.'+inputFormat,openWorkingSpace}],scratch);
+    const {colorSpace,sourceProfile}=JSON.parse(await fsp.readFile(documentInfo,'utf8'));
+    const title=(path.basename(name).replace(/\.[^.]*$/,'').trim()||'打开的图像').slice(0,100);
+    const png=describePng(doc,await fsp.readFile(destination),title,64);
+    const patch={name:title,colorSpace,width:png.entry.width,height:png.entry.height};
+    const [left,top,w,h]=documentFrame(patch);
+    const documentId=crypto.randomUUID(),layerId=crypto.randomUUID();
+    const result=writePaintAsset(doc,revision,png,'打开图像 · '+title,current=>applyOperations(current,[
+      {op:'image',action:'create',documentId,patch},
+      {op:'image',action:'addLayer',documentId,layerId:crypto.randomUUID(),kind:'image',
+       patch:{asset:png.entry.id,name:title,x:(left+w/2)/editingSide,y:(top+h/2)/editingSide,scale:Math.max(w,h)/editingSide}},
+      {op:'image',action:'addLayer',documentId,layerId,kind:'pixel'}
+    ]));
+    return {...result,documentId,layerId,sourceProfile,colorSpace};
+  }finally{await fsp.rm(scratch,{recursive:true,force:true});}
 }
 export async function importDocumentPhoto(doc,request){
   const {revision,imageLayer,inputFormat,name,data,pixelSize=false}=request;

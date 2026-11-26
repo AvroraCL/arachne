@@ -3,6 +3,7 @@ import {compositionKey} from './text-input.mjs';
 
 const commands=[
   {target:'new',name:'新建工程',group:'文件',keys:'create project'},
+  {target:'open-image-file',name:'打开图像',group:'文件',keys:'导入图片 文档 ICC open image'},
   {target:'open-projects',name:'打开工程',group:'文件',keys:'切换项目 open project'},
   {target:'open-paint-import',name:'打开涂装 ZIP',group:'文件',keys:'导入 zip archive import'},
   {target:'open-glb-migration',name:'迁移为 GLB 工程',group:'文件',keys:'blend blender migrate'},

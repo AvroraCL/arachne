@@ -241,7 +241,7 @@ final class NativeWorkbench: NSObject, NSWindowDelegate, WKNavigationDelegate, W
 
     func perform(_ command: String) {
         // The enum is fixed here, so no user string is interpolated into JS.
-        let allowed = ["newProject", "openProject", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo", "cut", "copy", "paste", "selectAll", "copyMerged", "pasteInPlace"]
+        let allowed = ["newProject", "openProject", "openImageFile", "saveProjectCopy", "projectDetails", "importArchive", "migrateModel", "searchCommands", "workspaceLayouts", "createBackup", "downloadBackup", "export", "history", "renderSettings", "renderTasks", "settings", "save", "undo", "redo", "cut", "copy", "paste", "selectAll", "copyMerged", "pasteInPlace"]
         guard allowed.contains(command), sameOrigin(webView.url) else { NSSound.beep(); return }
         webView.evaluateJavaScript("window.arachneNativeHost?.command('\(command)', {nativeEdit:true}) ?? false") { value, error in
             if value as? String == "native-text",

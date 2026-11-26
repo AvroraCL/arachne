@@ -1,3 +1,5 @@
+import {fillWorkingSpaces} from './image-color-spaces.mjs';
+import {enhanceSelectMenu} from './paint-select.mjs';
 import {clipboardImageLimit,clipboardPngSize} from './image-clipboard.mjs';
 
 export const brushImageTypes='image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp';
@@ -102,4 +104,30 @@ export async function prepareDrawingImage(file,{preserveProfile=false}={}){
     const name=(file.name.replace(/\.[^.]*$/,'')||'导入图片')+'.png';
     return {file:new File([blob],name,{type:'image/png'}),size:[width,height]};
   }finally{decoded.dispose();}
+}
+
+export function chooseOpenImageSpace(file,signal){
+  const dialog=document.createElement('dialog');
+  dialog.className='image-size-dialog image-profile-dialog';dialog.setAttribute('aria-label','打开图像');
+  dialog.innerHTML=`<form><h3>打开图像</h3><p class="profile-source"></p>
+    <label>文档空间<select aria-label="打开图像的颜色空间"></select></label>
+    <p class="profile-source profile-open-note"></p>
+    <footer><button type="button">取消</button><button class="primary" type="submit">打开</button></footer></form>`;
+  dialog.querySelector('.profile-source').textContent=file.name;
+  const select=dialog.querySelector('select'),note=dialog.querySelector('.profile-open-note');
+  fillWorkingSpaces(select);select.prepend(new Option('自动 · 读取源图像配置','auto'));select.value='auto';
+  function update(){
+    note.textContent=select.value==='auto'?'识别到的配置会作为文档空间。其他彩色 ICC 转入 ProPhoto RGB，未标记的彩色图按 sRGB 打开。':
+      select.value==='linear'?'保留通道数值，适用于粗糙度、法线和蒙版。':'按源图像配置转换到所选空间，绘制层使用 8 位通道。';
+  }
+  update();select.onchange=update;
+  return new Promise(resolve=>{
+    let result;
+    const close=()=>dialog.close();
+    dialog.querySelector('button[type=button]').onclick=close;
+    dialog.querySelector('form').onsubmit=event=>{event.preventDefault();result=select.value;close();};
+    dialog.onclose=()=>{signal.removeEventListener('abort',close);dialog.remove();resolve(result);};
+    document.body.append(dialog);enhanceSelectMenu(select,{menuClass:'image-profile-menu'});dialog.showModal();
+    signal.addEventListener('abort',close,{once:true});dialog.querySelector('[type=submit]').focus();
+  });
 }

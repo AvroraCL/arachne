@@ -180,6 +180,13 @@ export function setupPaintAreas(hooks){
       return result.asset;
     },
     importProjectMaps:hooks.importProjectMaps,
+    openDocumentAsset:async(file,origin,inputFormat,openWorkingSpace)=>{
+      const data=await hooks.pngData(file);
+      return write(()=>{
+        if(project.document?.id!==origin.id||project.document.revision!==origin.revision)throw Error('工程已变化，请重新打开图片');
+        return hooks.api('/api/projects/'+origin.id+'/paint/assets',{revision:origin.revision,name:file.name,data,inputFormat,openWorkingSpace});
+      });
+    },
     importDocumentAsset:async(file,origin,layerId,position,inputFormat,pixelSize)=>{
       const data=await hooks.pngData(file);
       const check=()=>{
@@ -265,6 +272,13 @@ export function setupPaintAreas(hooks){
     const editors=areas.editors();
     return preferredCanvas?.kind==='image'&&editors.includes(preferredCanvas)?preferredCanvas:editors.find(item=>item.kind==='image');
   }
+  $('open-image-file').onclick=()=>{
+    if(!project.document)return;
+    if(areas.name!=='drawing')switchWorkspace('drawing');
+    if(areas.name!=='drawing')return;
+    if(!imageEditor())areas.openEditor('image');
+    imageEditor()?.openPhotoFile?.();
+  };
   function focusedImageEditor(focused){
     if(project.editorDomain!=='image')return null;
     const editor=areas.editorFor(focused)??areas.active;

@@ -679,3 +679,55 @@ for frame in [None,[1987.25,2026.75,106.5,69.5]]:
     assert not isinstance(cached.base,np.ndarray) or cached.base.nbytes<=cached.nbytes
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
 });
+
+test('opening source artwork chooses its actual profile and converts oriented, gray and raw pixels correctly',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import json,tempfile,sys
+from io import BytesIO
+from pathlib import Path
+import numpy as np
+from PIL import Image,ImageCms,ImageOps
+from material_image_import import convert
+from image_color_spaces import profile_bytes
+
+with tempfile.TemporaryDirectory() as folder:
+    root=Path(folder)
+    dest=root/'opened.png'
+    def open_file(file,target='auto'):
+        convert(dict(source=str(file),destination=str(dest),name=file.name,
+                     openWorkingSpace=target,documentInfo=str(root/'info.json')))
+        return Image.open(dest),json.loads((root/'info.json').read_text())
+    source=root/'gray.tif'
+    a=np.array([[0,128,257,16384,65535]],dtype=np.uint16)
+    Image.fromarray(a).save(source,icc_profile=profile_bytes('gray-linear'))
+    with open_file(source)[0] as result:
+        assert result.size==(5,1) and result.mode=='LA'
+        assert np.array_equal(np.asarray(result)[:,:,0],((a.astype(np.uint32)+128)//257))
+        assert result.info['icc_profile']==profile_bytes('gray-linear')
+    source=root/'oriented.jpg'
+    picture=Image.new('RGB',(8,5),(105,45,160))
+    picture.paste((190,22,17),(0,0,4,5))
+    exif=Image.Exif();exif[274]=6
+    picture.save(source,quality=100,subsampling=0,icc_profile=profile_bytes('adobe-rgb'),exif=exif)
+    output,info=open_file(source,'linear-p3')
+    with output, Image.open(source) as original:
+        expected=ImageCms.profileToProfile(ImageOps.exif_transpose(original),BytesIO(original.info['icc_profile']),
+                  BytesIO(profile_bytes('linear-p3')),outputMode='RGB',renderingIntent=1)
+        assert info['colorSpace']=='linear-p3' and output.size==(5,8)
+        np.testing.assert_array_equal(np.asarray(output.convert('RGB')),np.asarray(expected))
+    with open_file(source,'linear')[0] as output, Image.open(source) as original:
+        np.testing.assert_array_equal(np.asarray(output),np.asarray(ImageOps.exif_transpose(original).convert('RGBA')))
+        assert 'icc_profile' not in output.info
+    source=root/'lab.tif'
+    lab=ImageCms.ImageCmsProfile(ImageCms.createProfile('LAB')).tobytes()
+    Image.new('LAB',(3,2),(180,160,132)).save(source,icc_profile=lab)
+    output,info=open_file(source)
+    with output,Image.open(source) as original:
+        ref=ImageCms.profileToProfile(original,BytesIO(lab),BytesIO(profile_bytes('prophoto-rgb')),outputMode='RGB',renderingIntent=1)
+        assert info['colorSpace']=='prophoto-rgb' and output.tobytes()==ref.tobytes()
+    source=root/'too-wide.png';Image.new('RGB',(4097,1)).save(source)
+    try:open_file(source)
+    except ValueError as error:assert '4096' in str(error)
+    else:raise AssertionError('oversize image silently resized')
+`],{cwd:new URL('..',import.meta.url)});
+});
