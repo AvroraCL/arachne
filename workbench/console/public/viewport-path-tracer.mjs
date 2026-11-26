@@ -92,7 +92,7 @@ export function createViewportPathTracer({renderer,host,request,accumulate=reque
           );
         }
         const rawMaterial=quad.material;
-        setPathTraceDisplay(denoiseMaterial,renderAppearance||renderAppearanceDefaults);
+        setPathTraceDisplay(denoiseMaterial,renderAppearance||renderAppearanceDefaults,true);
         denoiseMaterial.map=target.texture;
         quad.material=denoiseMaterial;
         try{drawRaw(target,renderer,quad);}

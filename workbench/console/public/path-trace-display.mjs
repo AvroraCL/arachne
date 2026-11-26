@@ -17,16 +17,17 @@ const displayCode=`
   }
 `;
 
-export function setPathTraceDisplay(material,appearance=renderAppearanceDefaults){
+export function setPathTraceDisplay(material,appearance=renderAppearanceDefaults,denoised=false){
   let uniforms=transforms.get(material);
   if(!uniforms){
     uniforms={arachneInverseGamma:{value:1},arachneContrast:{value:1}};
     const shader=material.fragmentShader;
-    const anchor='return linearToOutputTexel( res );';
+    const anchor=denoised?'#include <colorspace_fragment>':'return linearToOutputTexel( res );';
+    const rgb=denoised?'gl_FragColor.rgb':'res.rgb';
     if(!shader.includes(anchor))throw Error('路径追踪显示着色器不兼容');
     Object.assign(material.uniforms,uniforms);
     material.fragmentShader=displayCode+shader.replace(anchor,`
-      res.rgb = arachneDisplayLook(res.rgb);
+      ${rgb} = arachneDisplayLook(${rgb});
       ${anchor}`);
     material.needsUpdate=true;
     transforms.set(material,uniforms);

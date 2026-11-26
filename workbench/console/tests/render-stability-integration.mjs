@@ -81,7 +81,7 @@ try{
    const red=(await new GLTFLoader().loadAsync('/input/signal-red.glb')).scene;
    const {watchViewportColor}=await import('/viewport-display-color.mjs');
    const color=watchViewportColor(renderer,'auto',space=>{host.dataset.displayColorSpace=space;});
-   const options={enabled:true,project,sampling:{maxSamples:settings.samples,denoise:false}};
+   const options={enabled:true,project,sampling:{maxSamples:settings.samples,denoise:true,denoiseStart:1}};
    const viewport={resolution:1,bounces:6,samples:settings.samples,ground:false};
    trace.setOptions(options);
    for(let i=0;i<1000;i++){
@@ -90,7 +90,7 @@ try{
     if(trace.state().phase==='error')throw Error(trace.state().text);
     await new Promise(r=>setTimeout(r,0));
    }
-   if(trace.state().phase!=='ready')throw Error('signal red preview timeout');
+   if(trace.state().phase!=='ready'||host.dataset.renderDenoised!=='true')throw Error('denoised signal red preview did not finish: '+trace.state().text);
    trace.setOptions({...options,paused:true});
    globalThis.previewStudioSwatch=preference=>{
     color.setPreference(preference);
