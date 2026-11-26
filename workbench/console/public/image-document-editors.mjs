@@ -1,3 +1,4 @@
+import {fillWorkingSpaces} from './image-color-spaces.mjs';
 import {menuShortcut} from './menu-shortcut.mjs';
 import {documentClip,documentFrame,editingSide,imageViewGeometry,previewDimensions} from './image-document-size.mjs';
 import {hasWideGamut,setWorkingSwatch} from './image-display-rgb.mjs';
@@ -2812,7 +2813,9 @@ export function createImagePanel(type,ctx){
       const layerType={pixel:'像素层',image:'图像层',gradient:'渐变填充',adjustment:'调整图层',shape:'形状层',group:'图层组'};
       body.append(el('strong','document-properties-heading',c?.target==='mask'?'图层蒙版':layer?layer.text?'文字层':layerType[layer.kind]:'图像文档'));
       addControl(body,'文档名称','text',image.name,name=>command(project,{action:'update',patch:{name}}));
-      const colorSpace=choice('图像颜色空间',imageColorSpaces,image.colorSpace,value=>void run(()=>command(project,{action:'update',patch:{colorSpace:value}})));colorSpace.title='指定文档颜色空间，已有绘制色值按所选空间解释';body.append(colorSpace);enhanceSelectMenu(colorSpace);
+      const colorSpace=choice('图像颜色空间',[],image.colorSpace,value=>void run(()=>command(project,{action:'update',patch:{colorSpace:value}})));
+      fillWorkingSpaces(colorSpace,image.colorSpace);
+      colorSpace.title='指定文档颜色空间，已有绘制色值按所选空间解释';body.append(colorSpace);enhanceSelectMenu(colorSpace,{menuClass:'image-profile-menu'});
       const refs=doc.paint.layers.flatMap(layer=>Object.entries(layer.documentMaps??{}).filter(([,id])=>id===c.documentId).map(([channel])=>({layer,channel})));
       const documentActions=el('div','document-property-actions');
       const duplicate=button('复制图像',()=>{

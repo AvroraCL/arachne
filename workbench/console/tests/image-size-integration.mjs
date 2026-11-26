@@ -66,6 +66,14 @@ try{
   const confirm=await dialog.getByRole('button',{name:'创建',exact:true}).boundingBox();
   assert.ok(confirm.y>=0&&confirm.y+confirm.height<=600);
   await dialog.getByRole('button',{name:'颜色空间',exact:true}).click();
+  const spaceMenu=dialog.getByRole('listbox',{name:'颜色空间',exact:true});
+  const searchSpace=spaceMenu.getByRole('searchbox',{name:'搜索颜色空间'});
+  await searchSpace.fill('场景线性');
+  assert.equal(await spaceMenu.getByRole('option').count(),3);
+  assert.equal(await spaceMenu.getByRole('group').count(),1);
+  await searchSpace.fill('灰度');
+  assert.equal(await spaceMenu.getByRole('option').count(),2);
+  await searchSpace.fill('');
   await dialog.getByRole('option',{name:'数据（线性）',exact:true}).click();
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
@@ -284,6 +292,34 @@ print(json.dumps([original,screen(device,file.info['icc_profile'],1),screen(devi
         assert.deepEqual(initialProof.slice(2),expectedProof.slice(0,2));
         if(paperProof)assert.deepEqual(paperProof.slice(2),[expectedProof[0],expectedProof[2]]);
         console.log('PASS 选择 ICC 导出',mode,ext);
+      }
+      if(process.platform==='darwin'){
+        await editor.getByRole('button',{name:'选择导出颜色空间'}).click();
+        await page.getByRole('menuitem',{name:'按 ICC 导出副本…'}).click();
+        const sysDialog=page.getByRole('dialog',{name:'按 ICC 导出副本'});
+        await sysDialog.getByRole('button',{name:'本机 ICC 配置',exact:true}).click();
+        await sysDialog.getByRole('searchbox',{name:'搜索本机 ICC 配置'}).fill('Generic CMYK Profile');
+        await sysDialog.getByRole('option',{name:/Generic CMYK Profile\.icc/}).click();
+        await sysDialog.getByRole('button',{name:'预览校样'}).click();
+        await sysDialog.getByRole('img',{name:/校样/}).waitFor();
+        const profileLayout=await sysDialog.evaluate(el=>{
+          const label=el.querySelector('.profile-file>label');
+          const choice=el.querySelector('.profile-installed .custom-select-button');
+          return [label.getBoundingClientRect().height,choice.getBoundingClientRect().width];
+        });
+        assert.ok(profileLayout[0]<26&&profileLayout[1]>220,'配置名与文件标签有足够空间 '+profileLayout);
+        await sysDialog.screenshot({path:path.join(data,'installed-print-profile.png')});
+        const pickDownload=page.waitForEvent('download');
+        await sysDialog.getByRole('button',{name:'导出副本',exact:true}).click();
+        const picked=path.join(data,'system-CMYK.tif');await (await pickDownload).saveAs(picked);
+        execFileSync(pythonExecutable(),['-B','-c',`import sys
+from PIL import Image
+from pathlib import Path
+im=Image.open(sys.argv[1])
+assert im.mode=='CMYK' and im.size==(63,31)
+assert im.info['icc_profile']==Path('/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc').read_bytes()`,picked]);
+        assert.equal((await api(route)).revision,revisionBefore);
+        console.log('PASS 从真实 ColorSync 目录搜索印刷 ICC、校样并导出同配置 TIFF');
       }
       await editor.getByRole('button',{name:'选择导出颜色空间'}).click();
       const labDownload=page.waitForEvent('download');

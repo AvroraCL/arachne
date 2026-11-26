@@ -1,4 +1,4 @@
-import {imageColorSpaces} from './image-documents.mjs';
+import {fillWorkingSpaces} from './image-color-spaces.mjs';
 import {displayColorCss,imageDisplaySpace,preferredDisplaySpace,setWorkingSwatch} from './image-display-rgb.mjs';
 import {enhanceSelectMenu} from './paint-select.mjs';
 import {editingSide,resizedDocument} from './image-document-size.mjs';
@@ -33,7 +33,7 @@ function newImageSettings(form,width,height,defaultName){
       <div role="group" aria-label="方向" class="new-image-orientation">
         <span>方向</span><button type="button">横向</button><button type="button">纵向</button>
       </div>
-      <label>颜色空间<select></select></label>
+      <label>颜色空间<select class="working-color-space"></select></label>
       <p class="new-image-profile-note"></p>
       <label>背景内容<select class="new-image-background"><option value="">透明</option><option value="#ffffff">白色</option><option value="#000000">黑色</option><option value="custom">自定颜色</option></select></label>
       <label class="new-image-color" hidden>背景颜色<input type="color" value="#808080"></label>
@@ -41,7 +41,7 @@ function newImageSettings(form,width,height,defaultName){
   layout.querySelector('.new-image-size').append(width.parentElement,height.parentElement);
   form.append(layout);
   const name=layout.querySelector('input[type=text]'),space=layout.querySelector('select');
-  for(const [id,label] of imageColorSpaces)space.add(new Option(label,id));
+  fillWorkingSpaces(space);
   const background=layout.querySelector('.new-image-background'),color=layout.querySelector('input[type=color]');
   const profileNote=layout.querySelector('.new-image-profile-note');
   const paper=layout.querySelector('.new-image-paper'),preview=layout.querySelector('.new-image-preview');
@@ -203,7 +203,7 @@ export function editDocumentSize(action,doc,{canvas,signal,defaultName}={}){
       result=patch;dialog.close();
     };
     document.body.append(dialog);
-    if(creation)for(const select of dialog.querySelectorAll('select'))enhanceSelectMenu(select);
+    if(creation)for(const select of dialog.querySelectorAll('select'))enhanceSelectMenu(select,{menuClass:select.matches('.working-color-space')?'image-profile-menu':''});
     dialog.showModal();const first=creation?.name??width;first.focus();first.select();
   });
 }

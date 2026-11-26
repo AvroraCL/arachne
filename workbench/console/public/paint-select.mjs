@@ -101,7 +101,7 @@ function openMenu(select,wrapper,button){
       menu.classList.add('has-shortcuts');
     }
     item.disabled=option.disabled||option.parentElement.disabled===true;
-    item.dataset.search=[option.label,option.value,option.dataset.search||''].join(' ').toLocaleLowerCase();
+    item.dataset.search=[option.label,option.value,option.parentElement.tagName==='OPTGROUP'?option.parentElement.label:'',option.dataset.search||''].join(' ').toLocaleLowerCase();
     item.setAttribute('role','option');item.setAttribute('aria-selected',String(option.selected));
     item.classList.toggle('selected',option.selected);
     item.addEventListener('pointermove',()=>{if(!item.disabled)focus(item,{scroll:false});},{signal});
@@ -144,6 +144,7 @@ function openMenu(select,wrapper,button){
   search?.addEventListener('input',()=>{
     const query=search.value.trim().toLocaleLowerCase();
     for(const item of items)item.hidden=!item.dataset.search.includes(query);
+    for(const group of groups.values())group.hidden=!group.querySelector('[role=option]:not([hidden])');
     empty.hidden=items.some(item=>!item.hidden);
     focus(enabled()[0],{scroll:false});menu.scrollTop=0;reposition();
   },{signal});

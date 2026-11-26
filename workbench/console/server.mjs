@@ -1,3 +1,4 @@
+import {installedProfileCatalog} from './installed-color-profiles.mjs';
 import {createGeometryQueue} from './geometry-queue.mjs';
 import {readDesktopWorkspace,writeDesktopWorkspace} from './desktop-workspaces.mjs';
 import {readDesktopSettings,writeDesktopSettings} from './desktop-settings.mjs';
@@ -33,6 +34,7 @@ import {acquireServiceProfile} from './service-owner.mjs';
 
 const meshMapQueue=createGeometryQueue(),meshMapShutdown=new AbortController();
 
+const colorProfiles=installedProfileCatalog();
 const personalLibrary=createPersonalLibrary({root:path.join(DATA,'personal-library'),readProject:read,projectFolder:projectDir,commitProject:commit,validatePaint:validateProjectPaint});
 const portArg=process.argv.indexOf('--port');const PORT=portArg<0?8766:Number(process.argv[portArg+1]);
 if(!Number.isInteger(PORT)||PORT<1024||PORT>65535)throw Error('端口无效');
@@ -319,6 +321,14 @@ const server=http.createServer(async(req,res)=>{
       const name=url.pathname==='/'?'index.html':url.pathname.slice(1);
       if(!/^[\w.-]+$/.test(name)){send(res,404,{error:'页面不存在'});return;}
       file(res,path.join(ROOT,'public',name));return;
+    }
+    if(parts[1]==='color-profiles'&&req.method==='GET'){
+      if(parts.length===2){send(res,200,await colorProfiles.list());return;}
+      if(parts.length===3){
+        const bytes=await colorProfiles.read(parts[2]);
+        res.writeHead(200,{'Content-Type':'application/vnd.iccprofile','Cache-Control':'no-store'});
+        res.end(bytes);return;
+      }
     }
     if(parts[1]==='desktop-activity'&&parts.length===2&&req.method==='GET'){
       const state=importingFiles||importingPaintArchive?'saving':hasPendingJobs()||hasBlendMigrations()?'jobs':'ready';

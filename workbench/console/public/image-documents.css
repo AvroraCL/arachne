@@ -631,7 +631,11 @@
 
 .image-profile-dialog{width:min(400px,calc(100vw - 24px))}
 .image-profile-dialog .profile-source,.image-profile-dialog output{margin:4px 0 8px;color:var(--ui-muted);font-size:12px;overflow-wrap:anywhere}
-.image-profile-dialog .profile-file{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:12px}
+.image-profile-dialog form>label:not([hidden]),.image-profile-dialog .profile-file{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:12px}
+.image-profile-dialog form>.profile-installed[hidden]{display:none}
+.image-profile-dialog .profile-file>label{display:block;white-space:nowrap}
+.image-profile-dialog form>label>.custom-select{width:100%;min-width:0}
+.image-profile-dialog form>label .custom-select-button{width:100%}
 .image-profile-dialog .profile-choose-file{min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:start;white-space:nowrap}
 .image-profile-dialog .profile-proof-options{display:flex;align-items:center;gap:16px}
 .image-profile-dialog .profile-proof-options label:not([hidden]){display:inline-flex;align-items:center;gap:6px}
@@ -641,3 +645,6 @@
 .image-profile-dialog figcaption{display:grid;grid-template-columns:1fr 1fr;text-align:center;padding-top:4px;font-size:12px}
 .image-profile-dialog .profile-proof-status{color:var(--ui-muted);font-size:12px}
 .image-profile-dialog .profile-proof-status:empty{display:none}
+
+.image-profile-menu .custom-select-group{display:grid;min-width:0}
+.image-profile-menu .custom-select-group-title{padding:5px 8px 2px;font-size:11px;color:var(--ui-muted)}

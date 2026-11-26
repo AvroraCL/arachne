@@ -440,3 +440,5 @@
 }
 #welcome-recent-items span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #welcome-recent-items small{flex:none;font-variant-numeric:tabular-nums}
+
+.custom-select-menu .custom-select-group[hidden]{display:none}
