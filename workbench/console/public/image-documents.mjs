@@ -362,9 +362,23 @@ export function imageDocumentOperation(paint,o,{requireUnlocked}){
     if(!exact(o.patch,['width','height',...fields]))throw Error('图像尺寸参数无效');
     Object.assign(doc,resizedDocument(doc,o.action,o.patch));return;
   }
-  if(o.action==='duplicate'){
+  if(o.action==='duplicate'||o.action==='linkedColorCopy'){
     if(!id(o.newDocumentId)||Object.hasOwn(documents,o.newDocumentId))throw Error('图像副本编号无效');
     if(Object.keys(documents).length>=imageDocumentLimit)throw Error('工程最多包含 16 个图像文档');
+    if(o.action==='linkedColorCopy'){
+      const target=o.patch?.colorSpace,space=imageColorSpaces.find(([value])=>value===target);
+      if(!exact(o.patch,['colorSpace'])||!space||target==='linear'||doc.colorSpace==='linear'||target===doc.colorSpace||!id(o.newLayerId))
+        throw Error('请选择与原稿不同的颜色空间');
+      const {width,height}=doc,copy={width,height,colorSpace:target};
+      const suffix=' · '+space[1],name=doc.name.slice(0,100-suffix.length).trimEnd()+suffix;
+      copy.name=Object.values(documents).some(other=>other.name===name)?duplicateImageName(documents,name):name;
+      const [x,y]=documentFrame(copy);
+      copy.layers=[{...imageLayerDefaults,id:o.newLayerId,name:doc.name,kind:'image',
+        x:(x+width/2)/editingSide,y:(y+height/2)/editingSide,scale:Math.max(width,height)/editingSide,
+        rotation:0,stretch:[1,1],embedded:{documentId:o.documentId,width,height}}];
+      paint.imageDocuments={...documents,[o.newDocumentId]:copy};
+      return;
+    }
     paint.imageDocuments={...documents,[o.newDocumentId]:{...structuredClone(doc),name:duplicateImageName(documents,doc.name)}};
     return;
   }

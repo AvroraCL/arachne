@@ -2833,6 +2833,22 @@ export function createImagePanel(type,ctx){
       const remove=button('删除图像',()=>void run(()=>command(project,{action:'remove'})),'删除图像文档');
       const embeddedUsers=Object.values(doc.paint.imageDocuments).some(source=>source.layers.some(l=>l.embedded?.documentId===c.documentId));
       remove.disabled=!!refs.length||embeddedUsers;remove.title=embeddedUsers?'源稿仍被内嵌实例引用':refs.length?'请先解除材质通道引用':'删除图像文档';
+      if(image.colorSpace!=='linear'){
+        const convert=choice('建立关联色彩副本',[],'',value=>{
+          if(!value)return;
+          convert.value='';syncSelectMenu(convert);
+          const origin=imageSelectionOrigin(project),documentId=crypto.randomUUID(),layerId=crypto.randomUUID();
+          void run(async()=>{
+            await commandAt(project,origin,{action:'linkedColorCopy',newDocumentId:documentId,newLayerId:layerId,patch:{colorSpace:value}});
+            if(!disposed&&stillOnImageSelection(project,origin))selectImage(project,{documentId,layerId,target:'pixels'},{reveal:true});
+          });
+        });
+        fillWorkingSpaces(convert,'',space=>space!=='linear'&&space!==image.colorSpace);
+        convert.prepend(new Option('转换为关联副本…',''));convert.value='';
+        convert.title='在目标颜色空间建立副本，双击源图层可继续修改原稿';
+        convert.disabled=busy||documents.length>=imageDocumentLimit;
+        body.append(convert);enhanceSelectMenu(convert,{menuClass:'image-profile-menu'});
+      }
       documentActions.append(duplicate,remove);
       body.append(el('div','document-muted',`${image.width} × ${image.height} · RGBA`),documentActions);
       if(layer){addControl(body,'图层名称','text',layer.name,name=>command(project,{action:'updateLayer',layerId:layer.id,patch:{name}}),{disabled:!!lockOwner});addControl(body,'锁定图层','checkbox',layer.locked,locked=>command(project,{action:'updateLayer',layerId:layer.id,patch:{locked}}),{disabled:!!lockOwner&&lockOwner!==layer});

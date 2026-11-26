@@ -9,12 +9,12 @@ export const imageColorSpaces=workingGroups.flatMap(([,spaces])=>spaces);
 export const isGraySpace=space=>space==='gray-g22'||space==='gray-linear';
 export const textureColorSpaces=[['auto','读取图像配置（ICC）'],...imageColorSpaces.filter(([space])=>!isGraySpace(space))];
 
-export function fillWorkingSpaces(select,selected='srgb'){
-  select.replaceChildren(...workingGroups.map(([label,choices])=>{
+export function fillWorkingSpaces(select,selected='srgb',include=()=>true){
+  select.replaceChildren(...workingGroups.flatMap(([label,choices])=>{
     const group=document.createElement('optgroup');
     group.label=label;
-    for(const [id,name] of choices)group.append(new Option(name,id));
-    return group;
+    for(const [id,name] of choices)if(include(id))group.append(new Option(name,id));
+    return group.children.length?[group]:[];
   }));
   select.value=selected;
 }

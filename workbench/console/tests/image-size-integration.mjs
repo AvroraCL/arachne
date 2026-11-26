@@ -124,6 +124,59 @@ assert im.getextrema()==tuple((n,n) for n in expected),im.getextrema()`,backgrou
         return pixel.every((n,i)=>Math.abs(n-expectedDisplay[i])<=1);
       },label+' 画布与导出 ICC 色块一致');
     }
+    if(colorSpace==='adobe-rgb'){
+      const props=page.locator('[data-editor=imageProperties]').first();
+      const sourceId=Object.keys(doc.paint.imageDocuments)[0];
+      await props.getByRole('button',{name:'建立关联色彩副本',exact:true}).click();
+      await page.getByRole('listbox',{name:'建立关联色彩副本'}).getByRole('option',{name:'灰度（线性光）',exact:true}).click();await saved('从 Adobe RGB 建立关联线性灰度副本');
+      const copies=Object.entries(doc.paint.imageDocuments).filter(([key])=>key!==sourceId);
+      assert.equal(copies.length,1);
+      const [copyId,linked]=copies[0],instance=linked.layers[0];
+      assert.deepEqual(instance.embedded,{documentId:sourceId,width:63,height:31});
+      const layerRow=id=>stack.locator('[data-image-layer-id="'+id+'"] .document-layer-select');
+      await layerRow(instance.id).waitFor();
+      async function linkedPNG(name){
+        await editor.locator('.document-image-stage[data-preview-size="4096"][data-preview-revision="'+doc.revision+'"]').waitFor({timeout:90000});
+        const result=page.waitForEvent('download');
+        await editor.getByRole('button',{name:'导出当前图像 PNG'}).click();
+        const file=path.join(data,name+'.png');await (await result).saveAs(file);return file;
+      }
+      const converted=await linkedPNG('linked-converted');
+      execFileSync(pythonExecutable(),['-c',`import sys
+from io import BytesIO
+from PIL import Image,ImageCms
+original,out=map(Image.open,sys.argv[1:])
+def profile(im): return ImageCms.ImageCmsProfile(BytesIO(im.info['icc_profile']))
+reference=ImageCms.profileToProfile(original.convert('RGB'),profile(original),profile(out),outputMode='L',renderingIntent=1)
+assert out.mode=='LA' and out.size==original.size==(63,31)
+assert reference.tobytes()==out.getchannel('L').tobytes()
+assert original.getchannel('A').tobytes()==out.getchannel('A').tobytes()`,backgroundFile,converted]);
+      await layerRow(instance.id).dblclick();
+      await editor.getByRole('button',{name:'返回原稿',exact:true}).waitFor();
+      await editor.getByRole('button',{name:'画笔',exact:true}).click();
+      const b=await canvas.boundingBox();await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await saved('从关联副本打开原稿并修改像素');
+      await editor.getByRole('button',{name:'返回原稿',exact:true}).click();
+      const edited=await linkedPNG('linked-edited');
+      async function history(key,name){
+        await canvas.focus();await page.keyboard.press(mod+key);await saved(name);
+      }
+      await history('+z','撤销原稿笔触');const undone=await linkedPNG('linked-undone');
+      await history('+Shift+z','重做原稿笔触');const redone=await linkedPNG('linked-redone');
+      await page.reload();
+      await editor.getByRole('button',{name:'图像文档',exact:true}).click();
+      await page.getByRole('listbox',{name:'图像文档',exact:true}).getByRole('option',{name:linked.name,exact:true}).click();
+      const reopened=await linkedPNG('linked-reopened');
+      execFileSync(pythonExecutable(),['-c',`from PIL import Image
+import sys
+before,after,undone,redone,reopened=[Image.open(p).tobytes() for p in sys.argv[1:]]
+assert before!=after and before==undone and after==redone==reopened`,converted,edited,undone,redone,reopened]);
+      await history('+z','恢复原稿像素');await history('+z','撤销建立色彩副本');
+      assert.deepEqual(Object.keys(doc.paint.imageDocuments),[sourceId]);
+      await history('+Shift+z','重做建立色彩副本');
+      assert.deepEqual(doc.paint.imageDocuments[copyId].layers[0].embedded,instance.embedded);
+      await history('+z','返回单一原稿');
+      console.log('PASS 关联色彩副本实际像素、返工、双向历史及重开');
+    }
     if(colorSpace.startsWith('gray-')){
       await editor.getByLabel('图像前景色',{exact:true}).click();
       const chooser=page.getByRole('dialog',{name:'图像前景色选色'});
