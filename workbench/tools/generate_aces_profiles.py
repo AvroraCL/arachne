@@ -1,4 +1,4 @@
-"""Regenerate Arachne's bounded ACES RGB, neutral grayscale and D50 Lab ICC profiles."""
+"""Regenerate Arachne's scene-linear RGB, neutral grayscale and D50 Lab ICC profiles."""
 import argparse
 import ctypes as c
 from ctypes.util import find_library
@@ -18,6 +18,10 @@ class Primaries(c.Structure):
 # https://docs.acescentral.com/encodings/acescg/ and /encodings/aces2065-1/
 SPACES = {'ACEScg':[(.713,.293),(.165,.830),(.128,.044)],
           'ACES2065-1':[(.73470,.26530),(0.,1.),(.00010,-.07700)]}
+
+D65_SPACES = {'P3-D65':[(.68,.32),(.265,.69),(.15,.06)],
+              'Rec2020':[(.708,.292),(.170,.797),(.131,.046)],
+              'AdobeRGB':[(.64,.33),(.21,.71),(.15,.06)]}
 
 
 def generate(lib, folder, family):
@@ -40,6 +44,8 @@ def generate(lib, folder, family):
     spaces=[]
     if family in ('all','aces'):
         spaces.extend((name,xy,1.,name+'-linear',name+' - Arachne Linear RGB') for name,xy in SPACES.items())
+    if family in ('all','linear-rgb'):
+        spaces.extend((name,xy,1.,name+'-linear',name+' - Arachne Linear RGB') for name,xy in D65_SPACES.items())
     if family in ('all','gray'):
         spaces.extend([('Gray Gamma 2.2',None,2.2,'Gray-g22','Arachne Gray Gamma 2.2'),
                        ('Gray Linear',None,1.,'Gray-linear','Arachne Linear Gray')])
@@ -53,7 +59,7 @@ def generate(lib, folder, family):
             if exponent is None:
                 profile=lab(None)
             elif xy:
-                white=Chromaticity(.32168,.33767,1.)
+                white=Chromaticity(.3127,.3290,1.) if name in D65_SPACES else Chromaticity(.32168,.33767,1.)
                 primaries = Primaries(*(Chromaticity(x,y,1.) for x,y in xy))
                 profile = create(c.byref(white),c.byref(primaries),(ptr*3)(curve,curve,curve))
             else:
@@ -92,7 +98,7 @@ def generate(lib, folder, family):
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--lcms',default=find_library('lcms2'),help='Path to the LittleCMS 2 shared library')
-    parser.add_argument('--family',choices=['all','aces','gray','lab'],default='all')
+    parser.add_argument('--family',choices=['all','aces','linear-rgb','gray','lab'],default='all')
     args = parser.parse_args()
     if not args.lcms:
         parser.error('Pass the LittleCMS 2 library path with --lcms')

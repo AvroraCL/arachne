@@ -69,7 +69,7 @@ try{
   const spaceMenu=dialog.getByRole('listbox',{name:'颜色空间',exact:true});
   const searchSpace=spaceMenu.getByRole('searchbox',{name:'搜索颜色空间'});
   await searchSpace.fill('场景线性');
-  assert.equal(await spaceMenu.getByRole('option').count(),3);
+  assert.equal(await spaceMenu.getByRole('option').count(),6);
   assert.equal(await spaceMenu.getByRole('group').count(),1);
   await searchSpace.fill('灰度');
   assert.equal(await spaceMenu.getByRole('option').count(),2);
@@ -78,7 +78,7 @@ try{
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:1580,height:960});
   assert.equal(Object.keys((await api(route)).paint.imageDocuments??{}).length,0);
-  for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['acescg','ACEScg（AP1 线性）','ACEScg - Arachne Linear RGB'],['aces2065-1','ACES2065-1（AP0 线性）','ACES2065-1 - Arachne Linear RGB'],['linear-srgb','线性 sRGB（颜色）','cRGB'],['gray-g22','灰度（Gamma 2.2）','Arachne Gray Gamma 2.2'],['gray-linear','灰度（线性光）','Arachne Linear Gray']]){
+  for(const [colorSpace,label,description] of [['adobe-rgb','Adobe RGB (1998)','A98C'],['rec2020','Rec.2020','2020'],['acescg','ACEScg（AP1 线性）','ACEScg - Arachne Linear RGB'],['aces2065-1','ACES2065-1（AP0 线性）','ACES2065-1 - Arachne Linear RGB'],['linear-srgb','线性 sRGB（颜色）','cRGB'],['linear-p3','线性 Display P3','P3-D65 - Arachne Linear RGB'],['linear-rec2020','线性 Rec.2020','Rec2020 - Arachne Linear RGB'],['linear-adobe-rgb','线性 Adobe RGB','AdobeRGB - Arachne Linear RGB'],['gray-g22','灰度（Gamma 2.2）','Arachne Gray Gamma 2.2'],['gray-linear','灰度（线性光）','Arachne Linear Gray']]){
     await editor.getByRole('button',{name:'创建第一个图像文档'}).click();
     await width.fill('63');await height.fill('31');
     await dialog.getByRole('button',{name:'背景内容',exact:true}).click();

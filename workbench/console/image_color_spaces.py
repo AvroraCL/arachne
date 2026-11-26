@@ -10,12 +10,14 @@ PROFILE_FILES = {'srgb':'sRGB-v4.icc','gray-g22':'Gray-g22.icc','gray-linear':'G
                  'adobe-rgb':'AdobeCompat-v2.icc','prophoto-rgb':'ProPhoto-v4.icc',
                  'rec709':'Rec709-v4.icc','rec2020':'Rec2020-v4.icc',
                  'rec2020-g24':'Rec2020-g24-v4.icc','dci-p3':'DCI-P3-v4.icc',
+                 'linear-p3':'P3-D65-linear.icc','linear-rec2020':'Rec2020-linear.icc','linear-adobe-rgb':'AdobeRGB-linear.icc',
                  'acescg':'ACEScg-linear.icc','aces2065-1':'ACES2065-1-linear.icc','linear-srgb':'scRGB-v2.icc'}
 # Inverse OETF coefficients (a, b) from the packaged BT.709/BT.2020 ICC rTRC tags.
 VIDEO_TRC = {'rec709':(0.909912109375,0.090087890625),
              'rec2020':(0.90966796875,0.09033203125)}
 POWER_TRC = {'adobe-rgb':563/256,'dci-p3':2.6,'rec2020-g24':2.4}
 GRAY_SPACES = {'gray-g22', 'gray-linear'}
+LINEAR_RGB = {'linear','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','acescg','aces2065-1'}
 PROFILED_SPACES = PROFILE_FILES.keys() - {'srgb'}
 
 
@@ -62,7 +64,7 @@ def neutral_light(c):
 def decode(c, space='srgb'):
     if space in GRAY_SPACES:
         return neutral_light(np.maximum(c,0)**2.2 if space=='gray-g22' else c)
-    if space in ('linear','linear-srgb','acescg','aces2065-1'):
+    if space in LINEAR_RGB:
         return c
     if space in POWER_TRC:
         return np.maximum(c,0)**POWER_TRC[space]
@@ -78,7 +80,7 @@ def encode(c, space='srgb'):
     if space in GRAY_SPACES:
         gray=neutral_light(c)
         return np.maximum(gray,0)**(1/2.2) if space=='gray-g22' else gray
-    if space in ('linear','linear-srgb','acescg','aces2065-1'):
+    if space in LINEAR_RGB:
         return c
     if space in POWER_TRC:
         return np.maximum(c,0)**(1/POWER_TRC[space])

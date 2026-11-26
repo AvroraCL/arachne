@@ -13,6 +13,9 @@ const toSRGB={
   'adobe-rgb':[1.3982751,-.3982212,-.0000539,.0001025,.9998916,.0000059,.0000325,-.0429497,1.0429172],
   'prophoto-rgb':[2.0342011,-.7274671,-.306734,-.2286419,1.2316059,-.002964,-.0085179,-.1532819,1.1617999]
 };
+toSRGB['linear-p3']=toSRGB['display-p3'];
+toSRGB['linear-rec2020']=rec2020;
+toSRGB['linear-adobe-rgb']=toSRGB['adobe-rgb'];
 // Linear sRGB to Display P3 from those same packaged ICC colorants.
 const srgbToP3=[.822495627,.177482652,.00002172,.03311608,.966864215,.000019705,.01706429,.072398638,.910537071];
 const toP3=Object.fromEntries(Object.entries(toSRGB).map(([space,m])=>[space,
@@ -63,7 +66,7 @@ function outsideSRGB(m,r,g,b){
 }
 
 const powerCurve={'gray-g22':2.2,'dci-p3':2.6,'rec2020-g24':2.4,'adobe-rgb':563/256};
-const linearSpaces=new Set(['gray-linear','linear-srgb','acescg','aces2065-1']);
+const linearSpaces=new Set(['gray-linear','linear-srgb','linear-p3','linear-rec2020','linear-adobe-rgb','acescg','aces2065-1']);
 const videoCurve={'rec709':.909912109375,'rec2020':.90966796875};
 function decodeComponent(x,space){
   if(linearSpaces.has(space))return x;

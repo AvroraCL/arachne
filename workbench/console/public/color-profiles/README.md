@@ -7,3 +7,5 @@ Arachne generates ACEScg-linear.icc and ACES2065-1-linear.icc with LittleCMS 2 f
 Gray-g22.icc and Gray-linear.icc describe a single D50 grayscale channel with a gamma of 2.2 or 1.0. Arachne generates these profiles with the same LittleCMS script and distributes them under GPL-3.0-only.
 
 Lab-D50.icc is the D50 CIELAB profile generated with LittleCMS. The same GPL-3.0-only generator supplies its description, copyright and reproducible profile ID.
+
+P3-D65-linear.icc, Rec2020-linear.icc and AdobeRGB-linear.icc describe the D65 primaries of the corresponding render output with a linear transfer curve. Arachne generates them with the same LittleCMS tool under GPL-3.0-only.
