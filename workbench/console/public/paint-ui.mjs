@@ -2414,7 +2414,7 @@ function syncDeliveryPreferences(){
   setSelectValue($('delivery-png-space'),values.pngSpace??'srgb');
   $('delivery-exr-space').closest('label').hidden=values.fileFormat!=='OPEN_EXR';
   setSelectValue($('delivery-exr-space'),values.exrSpace??defaultExrSpace);
-  setSelectValue($('delivery-format'),values.fileFormat==='OPEN_EXR'?'exr'+(values.bitDepth??16):'png');
+  setSelectValue($('delivery-format'),values.fileFormat==='OPEN_EXR'?'exr'+(values.bitDepth??16):values.bitDepth===16?'png16':'png');
 }
 function changeDeliveryPreferences(change,{refresh=true,persist=true}={}){
   const before=JSON.stringify(workingDeliveryPreferences()),local=JSON.stringify(renderPreferences.local());
@@ -2435,7 +2435,7 @@ $('delivery-png-space').onchange=()=>applyDeliveryPreferences(updateDeliveryOpti
 $('delivery-exr-space').onchange=()=>applyDeliveryPreferences(updateDeliveryOptions(workingDeliveryPreferences(),{exrSpace:$('delivery-exr-space').value}));
 $('delivery-format').onchange=()=>{
   const format=$('delivery-format').value;
-  applyDeliveryPreferences(updateDeliveryOptions(workingDeliveryPreferences(),format==='png'?{fileFormat:'PNG',bitDepth:8}:
+  applyDeliveryPreferences(updateDeliveryOptions(workingDeliveryPreferences(),format.startsWith('png')?{fileFormat:'PNG',bitDepth:format==='png16'?16:8}:
     {fileFormat:'OPEN_EXR',bitDepth:format==='exr32'?32:16}));
 };
 window.addEventListener('storage',event=>{

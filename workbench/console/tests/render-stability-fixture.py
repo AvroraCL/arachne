@@ -36,3 +36,10 @@ g['materials'][0]['emissiveFactor']=[1,.01,.04]
 g['extensionsUsed']=['KHR_materials_emissive_strength']
 g['materials'][0]['extensions']={'KHR_materials_emissive_strength':{'emissiveStrength':1.14}}
 write_model('signal-red.glb')
+# A two-texel emission ramp exercises interpolated values between 8-bit codes.
+uv_offset=g['bufferViews'][1]['byteOffset']
+struct.pack_into('<12f',p,uv_offset,0,1,1,1,1,0,0,1,1,0,0,0)
+g['materials'][0].pop('extensions')
+g['materials'][0]['emissiveFactor']=[1,1,1]
+write_model('ramp.glb')
+Image.fromarray(np.array([[[0,0,0],[255,255,255]]],dtype=np.uint8)).save(out/'ramp.png')

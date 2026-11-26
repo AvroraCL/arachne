@@ -1056,6 +1056,8 @@ async function verifyModelWorkflows(){
   await page.getByRole('button',{name:'材质预览',exact:true}).first().click();
   await page.getByText('渲染',{exact:true}).filter({visible:true}).first().click();
   await page.locator('#open-paint-render').click();
+  await page.getByRole('button',{name:'出图格式',exact:true}).click();
+  await page.getByRole('option',{name:'PNG · 16 位',exact:true}).click();
   await page.getByRole('button',{name:'出图 PNG 颜色空间',exact:true}).click();
   await page.getByRole('option',{name:'Display P3',exact:true}).click();
   await page.locator('#start-paint-render').click();
@@ -1086,6 +1088,7 @@ async function verifyModelWorkflows(){
   const png=await fs.readFile(pngPath);
   assert.equal(digest(png),result.render.sha256);
   assert.equal(result.render.pngSpace,'display-p3');
+  assert.equal(result.render.bitDepth,16);assert.equal(png[24],16);
   execFileSync(pythonExecutable(),['-B','-c',`from PIL import Image,ImageCms
 from io import BytesIO
 import sys

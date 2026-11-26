@@ -135,3 +135,13 @@ test('P3 PNG settings survive presets and distinguish queued renders from sRGB a
   assert.equal(captureDeliverySettings(updateDeliveryOptions(p3,{fileFormat:'OPEN_EXR'}),null).pngSpace,undefined);
   assert.throws(()=>cyclesOptions({fileFormat:'OPEN_EXR',pngSpace:'display-p3'}),/PNG 输出颜色空间/);
 });
+
+test('16-bit PNG keeps its precision and target primaries across project preferences',async()=>{
+  const {pathTraceOptions}=await import('../path-trace-render.mjs');
+  for(const pngSpace of ['display-p3','rec2020','adobe-rgb','prophoto-rgb']){
+    const options=updateDeliveryOptions({},{fileFormat:'PNG',bitDepth:16,pngSpace});
+    const saved=captureRenderPreset(options);
+    const render=pathTraceOptions(captureDeliverySettings(renderPresetPreferences(saved),null));
+    assert.equal(render.bitDepth,16);assert.equal(render.pngSpace,pngSpace);
+  }
+});

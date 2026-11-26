@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import {exrSpaces,prepareExrPixels,taggedExr} from './render-exr-color.mjs';
+import {usesPackedPng} from './cycles-limits.mjs';
+import {downloadPngScanlines,setPngOutputSpace} from './render-png-pixels.mjs';
+import {prepareExrPixels,taggedExr} from './render-exr-color.mjs';
 import {createViewportModelLoader} from './viewport-model-loader.mjs';
 import {applySurfaceMarks,applySourceFactors} from './viewport-materials.mjs';
 import {applyModelState} from './paint-model-state.mjs';
@@ -145,24 +147,14 @@ export async function renderImage(input){
   try{
     const gl=renderer.getContext(),limit=gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
     if(settings.width>limit||settings.height>limit)throw Error('当前图形设备不支持所选输出分辨率');
-    if(settings.pngSpace==='display-p3'){
+    if(settings.pngSpace==='display-p3'&&!usesPackedPng(settings)){
       gl.drawingBufferColorSpace='display-p3';
       if(gl.drawingBufferColorSpace!=='display-p3')throw Error('当前图形设备不支持 Display P3 渲染输出');
     }
     renderer.setSize(settings.width,settings.height,false);
     const backend=await createPathTracingEngine(renderer);
     engine=backend.engine;
-    if(settings.pngSpace==='display-p3'){
-      // Convert the scene primaries before the shared sRGB/P3 display transfer.
-      // The drawing buffer is tagged P3 separately from Three's internal passes.
-      const quad=engine._quad.material;
-      quad.uniforms.arachneOutputMatrix={value:new THREE.Matrix3().set(...exrSpaces.lin_p3d65_scene.matrix)};
-      quad.fragmentShader=`uniform mat3 arachneOutputMatrix;
-        vec4 arachneOutputTexel(vec4 rgba){return linearToOutputTexel(vec4(arachneOutputMatrix*rgba.rgb,rgba.a));}
-        #define linearToOutputTexel arachneOutputTexel
-        `+quad.fragmentShader;
-      quad.needsUpdate=true;
-    }
+    setPngOutputSpace(engine._quad.material,settings.pngSpace);
     engine.tiles.set(4,4);
     engine.bounces=Math.max(1,settings.maxBounces);
     engine.transmissiveBounces=settings.maxBounces;
@@ -196,8 +188,13 @@ export async function renderImage(input){
       if(gl.isContextLost())throw Error('路径追踪过程中图形设备连接中断');
     }
     if(settings.fileFormat==='OPEN_EXR')await downloadLinearExr(renderer,completedPathTraceTarget(engine),settings,region);
+    const result={camera:view,samples:sample,textureSampling:textureAtlas.report()};
+    if(usesPackedPng(settings)){
+      await downloadPngScanlines(renderer,engine,settings,region,appearance);
+      return result;
+    }
     const canvas=outputCanvas(renderer.domElement,settings,region);
-    return {png:canvas.toDataURL('image/png').split(',')[1],camera:view,samples:sample,textureSampling:textureAtlas.report()};
+    return {...result,png:canvas.toDataURL('image/png').split(',')[1]};
   }finally{
     ground?.geometry.dispose();ground?.material.dispose();
     textureAtlas?.dispose();engine?.dispose();environment?.dispose();renderer.dispose();renderer.forceContextLoss();

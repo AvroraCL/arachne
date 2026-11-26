@@ -92,6 +92,10 @@ function inverse3([a,b,c,d,e,f,g,h,i]){
   return adj.map(x=>x/det);
 }
 const fromXYZ=inverse3(srgbXYZ),fromSRGB=new Map();
+export function linearSRGBToWorkingMatrix(space){
+  if(!fromSRGB.has(space))fromSRGB.set(space,inverse3(toSRGB[space]));
+  return fromSRGB.get(space);
+}
 export function workingHexToLab(hex,space){
   const linear=hex.slice(1).match(/../g).map(n=>decodeComponent(parseInt(n,16)/255,space));
   const xyz=transform3(srgbXYZ,toSRGB[space]?transform3(toSRGB[space],linear):linear);
@@ -105,8 +109,7 @@ export function labToWorkingHex([l,a,b],space){
   const y=(l+16)/116;
   const xyz=[y+a/500,y,y-b/200].map((v,i)=>d50[i]*(v>delta?v**3:3*delta**2*(v-4/29)));
   const rgb=transform3(fromXYZ,xyz);
-  if(toSRGB[space]&&!fromSRGB.has(space))fromSRGB.set(space,inverse3(toSRGB[space]));
-  const linear=fromSRGB.has(space)?transform3(fromSRGB.get(space),rgb):rgb;
+  const linear=toSRGB[space]?transform3(linearSRGBToWorkingMatrix(space),rgb):rgb;
   const clipped=linear.some(n=>n<-.0002||n>1.0002);
   const hex='#'+linear.map(n=>Math.round(255*encodeComponent(Math.max(0,Math.min(1,n)),space)).toString(16).padStart(2,'0')).join('');
   return {hex,clipped};

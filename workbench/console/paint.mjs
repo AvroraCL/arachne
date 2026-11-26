@@ -1915,7 +1915,7 @@ async function renderPaintFrame(j,doc,{model,report,textureSetBakes,input,out,bi
     if(!signal?.aborted)update(j,{progress:{phase:'sample',sample,total:settings.samples}});
   }});
   const resolution=region?.output||[settings.width,settings.height];
-  if(result.samples!==settings.samples||!pngSizeIs(result.png,...resolution)||result.png[24]!==8||
+  if(result.samples!==settings.samples||!pngSizeIs(result.png,...resolution)||result.png[24]!== (settings.fileFormat==='PNG'?settings.bitDepth:8)||
      !(settings.transparent?[6]:[2,6]).includes(result.png[25])||
      settings.camera&&!isDeepStrictEqual(settings.camera,result.camera))throw Error('渲染预览与冻结的出图设置不一致');
   await verifyPaintBake(doc,report,input,{binding,signal});

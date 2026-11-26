@@ -61,8 +61,8 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     const region=renderRegionPixels(doc?.paint.renderRegion,values.width,values.height);
     $('paint-render-summary').textContent=`${values.width} × ${values.height} · ${values.samples} 次采样 · ${framing}`+
       (region?` · ${region.crop?'裁切':'区域渲染'} ${region.output.join(' × ')}`:'');
-    pngSpace.closest('label').hidden=format.value!=='png';
-    start.disabled=format.disabled=pngSpace.disabled=space.disabled=!doc||blocked;space.closest('label').hidden=format.value==='png';
+    pngSpace.closest('label').hidden=!format.value.startsWith('png');
+    start.disabled=format.disabled=pngSpace.disabled=space.disabled=!doc||blocked;space.closest('label').hidden=format.value.startsWith('png');
     start.textContent=running?'加入渲染队列':'渲染当前修订';
     cancel.hidden=!active(selected);cancel.disabled=blocked;
     retry.hidden=!canRetry(selected);retry.disabled=blocked||!!running;
@@ -122,12 +122,12 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
   }
   start.onclick=()=>act(async()=>{
     const {doc,jobs}=read();
-    const output=format.value==='png'?{fileFormat:'PNG',bitDepth:8}:
+    const output=format.value.startsWith('png')?{fileFormat:'PNG',bitDepth:format.value==='png16'?16:8}:
       {fileFormat:'OPEN_EXR',bitDepth:format.value==='exr32'?32:16};
     const requested={...camera(),...output};
-    if(format.value==='png'&&pngSpace.value!=='srgb')requested.pngSpace=pngSpace.value;
+    if(format.value.startsWith('png')&&pngSpace.value!=='srgb')requested.pngSpace=pngSpace.value;
     else delete requested.pngSpace;
-    if(format.value==='png'||space.value===defaultExrSpace)delete requested.exrSpace;
+    if(format.value.startsWith('png')||space.value===defaultExrSpace)delete requested.exrSpace;
     else requested.exrSpace=space.value;
     const existing=pendingRenderFor(jobs,doc.revision,requested);
     const job=existing||await post('render',{requestId:crypto.randomUUID(),settings:requested});
@@ -142,7 +142,7 @@ export function createPaintRenderResults({read,run,post,settings,camera,openSett
     if(!read().doc||dialog.open)return;
     $('open-paint-render').closest('details').open=false;
     const preferences=settings();
-    setSelectValue(format,preferences.fileFormat==='OPEN_EXR'?(preferences.bitDepth===32?'exr32':'exr16'):'png');
+    setSelectValue(format,preferences.fileFormat==='OPEN_EXR'?(preferences.bitDepth===32?'exr32':'exr16'):preferences.bitDepth===16?'png16':'png');
     setSelectValue(pngSpace,preferences.pngSpace??'srgb');
     setSelectValue(space,preferences.exrSpace??defaultExrSpace);
     dialog.showModal();sync();

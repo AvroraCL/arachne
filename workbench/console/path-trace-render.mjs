@@ -1,6 +1,8 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import {chromium} from 'playwright-core';
+import {renderPngBytes} from './render-png-bytes.mjs';
+import {usesPackedPng} from './public/cycles-limits.mjs';
 import {cyclesOptions} from './cycles-options.mjs';
 
 const root=import.meta.dirname,origin='https://arachne-render.invalid';
@@ -15,7 +17,7 @@ const importMap={imports:{
 export function pathTraceOptions(raw){
   const {width,height,samples,camera,maxBounces=12,transparent=false,textureJobId,device='auto',fileFormat='PNG',bitDepth,pngSpace,exrSpace}=cyclesOptions(raw);
   if(textureJobId)throw Error('工程渲染使用冻结修订的贴图');
-  return {width,height,samples,camera,maxBounces,transparent,device,fileFormat,bitDepth:fileFormat==='OPEN_EXR'?bitDepth:8,...(exrSpace?{exrSpace}:{}),...(pngSpace?{pngSpace}:{})};
+  return {width,height,samples,camera,maxBounces,transparent,device,fileFormat,bitDepth:bitDepth??(fileFormat==='OPEN_EXR'?16:8),...(exrSpace?{exrSpace}:{}),...(pngSpace?{pngSpace}:{})};
 }
 
 export async function renderPathTrace(input,files,{signal,onSample,registerBrowser}){
@@ -53,15 +55,20 @@ export async function renderPathTrace(input,files,{signal,onSample,registerBrows
     });
     await page.exposeFunction('reportRenderSample',onSample);
     await page.goto(origin);
-    const download=input.settings.fileFormat==='OPEN_EXR'?page.waitForEvent('download',{timeout:0}):null;
+    const packed=usesPackedPng(input.settings);
+    const download=(input.settings.fileFormat==='OPEN_EXR'||packed)?page.waitForEvent('download',{timeout:0}):null;
     const render=page.evaluate(async config=>{
       const {renderImage}=await import('/path-trace-image.mjs');
       return renderImage(config);
     },input);
     const [{png,...result},file]=await Promise.race([fault.promise,Promise.all([render,download])]);
     signal?.throwIfAborted();
-    const exr=file?await fs.readFile(await file.path(),{signal}):null;
-    return {...result,png:Buffer.from(png,'base64'),exr};
+    const bytes=file?await fs.readFile(await file.path(),{signal}):null;
+    if(packed){
+      const {width,height,bitDepth,pngSpace}=input.settings;
+      return {...result,png:await renderPngBytes(bytes,input.region?.output??[width,height],bitDepth??8,pngSpace),exr:null};
+    }
+    return {...result,png:Buffer.from(png,'base64'),exr:bytes};
   }catch(error){
     signal?.throwIfAborted();
     if(expired)throw Error('路径追踪超过 30 分钟，请降低分辨率或采样数后重试');

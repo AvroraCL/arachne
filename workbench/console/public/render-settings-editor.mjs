@@ -278,14 +278,14 @@ export function createRenderSettingsEditor(ctx,settings,adapters){
       const exr=selected==='OPEN_EXR';
       bitDepth.setAttribute('aria-label',cyclesFormats[selected].label+' 位深');
       bitDepth.replaceChildren(...(exr?[new Option('16 位浮点','16'),new Option('32 位浮点','32')]:
-        [new Option('8 位','8')]));
+        [new Option('8 位','8'),new Option('16 位','16')]));
     }
-    bitDepth.value=String(selected==='OPEN_EXR'?value.bitDepth??16:8);
+    bitDepth.value=String(value.bitDepth??(selected==='OPEN_EXR'?16:8));
     pngSpace.closest('label').hidden=selected!=='PNG';
     pngSpace.value=value.pngSpace??'srgb';syncSelectMenu(pngSpace);
     exrSpace.closest('label').hidden=selected!=='OPEN_EXR';
     exrSpace.value=value.exrSpace??defaultExrSpace;syncSelectMenu(exrSpace);
-    bitDepth.disabled=selected==='PNG';syncSelectMenu(format);syncSelectMenu(bitDepth);
+    syncSelectMenu(format);syncSelectMenu(bitDepth);
   }
   bitDepth.onchange=()=>{try{settings.set({bitDepth:bitDepth.value?Number(bitDepth.value):null});}catch(error){ctx.error(error);sync();}};
   row(output,'位深',bitDepth);

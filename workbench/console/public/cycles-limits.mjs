@@ -9,7 +9,11 @@ export const cyclesFormats=Object.freeze({
   OPEN_EXR:Object.freeze({label:'OpenEXR',extension:'exr',depths:Object.freeze([16,32])})
 });
 
-export const renderPngSpaces={srgb:'sRGB','display-p3':'Display P3'};
+export const renderPngSpaces={srgb:'sRGB','display-p3':'Display P3','adobe-rgb':'Adobe RGB (1998)',
+  'prophoto-rgb':'ProPhoto RGB',rec2020:'Rec.2020'};
+export function usesPackedPng({fileFormat='PNG',bitDepth,pngSpace='srgb'}){
+  return fileFormat==='PNG'&&(bitDepth===16||(pngSpace!=='srgb'&&pngSpace!=='display-p3'));
+}
 export function fillPngSpaceSelect(select){
   select.replaceChildren(...Object.entries(renderPngSpaces).map(([id,name])=>new Option(name,id)));
 }
