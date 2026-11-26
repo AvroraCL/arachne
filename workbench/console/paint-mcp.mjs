@@ -1,8 +1,9 @@
+import {exrSpaces} from './public/render-exr-color.mjs';
 import {paintChannels} from './public/paint-channels.mjs';
 import {modelTemplates} from './public/model-templates.mjs';
 import {APP_VERSION} from './public/app-version.mjs';
 import {nodeTypes,brushNodeTypes} from './public/material-graph.mjs';
-import {cyclesLimits} from './public/cycles-limits.mjs';
+import {cyclesLimits,renderPngSpaces} from './public/cycles-limits.mjs';
 import {cyclesLightPaths} from './public/cycles-light-paths.mjs';
 import {cyclesRenderPasses} from './public/cycles-render-passes.mjs';
 import {renderTransforms,renderLooks,renderAppearanceLimits} from './public/render-appearance.mjs';
@@ -36,7 +37,7 @@ const renderSettings={type:'object',additionalProperties:false,properties:{
   width:integer(cyclesLimits.minDimension,cyclesLimits.maxDimension),height:integer(cyclesLimits.minDimension,cyclesLimits.maxDimension),
   samples:integer(1,cyclesLimits.maxSamples),device:{enum:['auto','cpu','gpu']},denoise:{type:'boolean'},adaptive:{type:'boolean'},
   noiseThreshold:number(0,1),maxBounces:integer(0,64),transparent:{type:'boolean'},
-  fileFormat:{enum:['PNG','OPEN_EXR']},bitDepth:{enum:[8,16,32],description:'PNG：8 或 16；OpenEXR：16（半精度）或 32（单精度）'},camera,lightPaths,
+  fileFormat:{enum:['PNG','OPEN_EXR']},pngSpace:{enum:Object.keys(renderPngSpaces)},exrSpace:{enum:Object.keys(exrSpaces)},bitDepth:{enum:[8,16,32],description:'PNG：8 或 16；OpenEXR：16（半精度）或 32（单精度）'},camera,lightPaths,
   renderPasses:{type:'array',items:{enum:Object.keys(cyclesRenderPasses)},uniqueItems:true,maxItems:Object.keys(cyclesRenderPasses).length}
 }};
 const renderAppearance={type:['object','null'],additionalProperties:false,required:['viewTransform','look','exposure','gamma'],properties:{

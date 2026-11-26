@@ -89,6 +89,15 @@ try{
     appearance:{viewTransform:'AgX',exposure:0,gamma:1,look:'None'}},files,{onSample(){}});
   await fs.writeFile(path.join(dir,space+'.exr'),render.exr);
  }
+ const redFiles={'/input/model.glb':path.join(dir,'signal-red.glb')};
+ const signalRed={...base,appearance:{viewTransform:'Raw',look:'None',exposure:0,gamma:1},
+   lighting:{preset:'custom',rotation:0,lights:[],lightStrength:0,environmentStrength:0,environmentColor:'#000000'}};
+ for(const pngSpace of ['srgb','display-p3']){
+   const render=await renderPathTrace({...signalRed,settings:{...settings,fileFormat:'PNG',bitDepth:8,pngSpace}},redFiles,{onSample(){}});
+   await fs.writeFile(path.join(dir,'red-'+pngSpace+'.png'),render.png);
+ }
+ const redLinear=await renderPathTrace({...signalRed,settings},redFiles,{onSample(){}});
+ await fs.writeFile(path.join(dir,'red.exr'),redLinear.exr);
  console.log(execFileSync(python,['-c',`
 from pathlib import Path
 import struct, sys
@@ -115,6 +124,19 @@ def exr(file,bits=32,space='lin_rec709_scene'):
  offset,=struct.unpack_from('<Q',data,at+64*8)
  y,size=struct.unpack_from('<II',data,offset)
  return np.frombuffer(data, dtype='<f'+str(bits//8),count=size//(bits//8),offset=offset+8).reshape(4,128)
+from PIL import ImageCms
+from io import BytesIO
+wide=Image.open(root/'red-display-p3.png')
+tag=ImageCms.ImageCmsProfile(BytesIO(wide.info['icc_profile']))
+assert 'P3' in ImageCms.getProfileDescription(tag) and wide.size==(128,128)
+linear=exr('red.exr')[[3,2,1],64];assert linear[0]>1.05
+p3=np.array([[.822462,.177538,0],[.033194,.966806,0],[.017083,.072397,.91052]])@linear
+encoded=lambda v:np.rint(np.clip(np.where(v<=.0031308,12.92*v,1.055*v**(1/2.4)-.055),0,1)*255).astype(int)
+got=np.array(wide.getpixel((64,64))[:3]);assert np.max(np.abs(got-encoded(p3)))<=2,(linear,p3,got)
+small=Image.open(root/'red-srgb.png')
+clipped=ImageCms.profileToProfile(small,ImageCms.createProfile('sRGB'),tag,outputMode='RGBA').getpixel((64,64))
+assert got[0]>int(clipped[0])+8 and wide.getpixel((0,0))[3]==small.getpixel((0,0))[3]==0
+print('Display P3 PNG',got,'from scene linear',linear,'vs clipped sRGB converted to P3',clipped)
 for name in ['default','gamma','low','high','opaque']:
  a,b=img(name+'-png.png'),img(name+'-view.png')
  diff=np.abs(a[38:90,38:90]-b[38:90,38:90])

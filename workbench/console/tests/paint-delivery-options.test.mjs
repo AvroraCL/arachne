@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeDeliveryOptions,deliveryEditorValues,updateDeliveryOptions,captureDeliverySettings,captureRenderPreset,checkRenderPreset,createRenderPreferences,sameDeliveryCamera} from '../public/paint-delivery-options.mjs';
+import {normalizeDeliveryOptions,deliveryEditorValues,updateDeliveryOptions,captureDeliverySettings,captureRenderPreset,checkRenderPreset,renderPresetPreferences,createRenderPreferences,sameDeliveryCamera} from '../public/paint-delivery-options.mjs';
 import {cyclesOptions,resolvePaintRenderSettings} from '../cycles-options.mjs';
 import {pendingRenderFor} from '../public/paint-render-results.mjs';
 
@@ -121,4 +121,17 @@ test('EXR primaries survive project presets and distinguish otherwise identical 
   assert.equal(captureDeliverySettings(updateDeliveryOptions(options,{fileFormat:'PNG'}),null,null).exrSpace,undefined);
   assert.throws(()=>cyclesOptions({fileFormat:'PNG',exrSpace:'lin_ap1_scene'}),/颜色空间/);
   assert.throws(()=>updateDeliveryOptions(options,{exrSpace:'unknown'}),/颜色空间/);
+});
+
+test('P3 PNG settings survive presets and distinguish queued renders from sRGB and linear EXR',()=>{
+  const p3=updateDeliveryOptions({},{fileFormat:'PNG',pngSpace:'display-p3',bitDepth:8});
+  const preset=captureRenderPreset(p3);
+  const settings=captureDeliverySettings(renderPresetPreferences(preset),null);
+  assert.equal(settings.pngSpace,'display-p3');
+  assert.equal(cyclesOptions(settings).pngSpace,'display-p3');
+  const job={id:'p3',type:'paint-render',status:'queued',revision:5,paintSettings:settings};
+  assert.equal(pendingRenderFor([job],5,settings),job);
+  assert.equal(pendingRenderFor([job],5,{...settings,pngSpace:undefined}),undefined);
+  assert.equal(captureDeliverySettings(updateDeliveryOptions(p3,{fileFormat:'OPEN_EXR'}),null).pngSpace,undefined);
+  assert.throws(()=>cyclesOptions({fileFormat:'OPEN_EXR',pngSpace:'display-p3'}),/PNG 输出颜色空间/);
 });

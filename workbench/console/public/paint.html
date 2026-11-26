@@ -530,6 +530,7 @@
         <option value="exr16">OpenEXR · 16 位浮点</option>
         <option value="exr32">OpenEXR · 32 位浮点</option>
       </select></label>
+      <label>颜色空间<select id="paint-render-png-space" aria-label="出图 PNG 颜色空间"></select></label>
       <label hidden>颜色空间 <select id="paint-render-space" aria-label="出图 EXR 颜色空间"></select></label>
       <small id="paint-render-summary"></small>
     </div>
@@ -564,6 +565,7 @@
       <label>尺寸<select id="delivery-size" aria-label="交付尺寸"><option value="960x720">960 × 720</option><option value="1440x1080">1440 × 1080</option><option value="1920x1080">1920 × 1080</option><option value="1080x1440">1080 × 1440</option><option value="3840x2160">3840 × 2160 · 4K</option><option value="2160x3840">2160 × 3840 · 4K</option><option value="custom" hidden>自定义尺寸</option></select></label>
       <label>质量<select id="delivery-quality" aria-label="交付质量"><option value="fast">快速</option><option value="standard" selected>标准</option><option value="high">精细</option><option value="custom" hidden>自定义采样</option></select></label>
       <label>格式<select id="delivery-format" aria-label="交付渲染格式"><option value="png">PNG · 8 位</option><option value="exr16">OpenEXR · 16 位浮点</option><option value="exr32">OpenEXR · 32 位浮点</option></select></label>
+      <label>颜色空间<select id="delivery-png-space" aria-label="交付 PNG 颜色空间"></select></label>
       <label hidden>颜色空间<select id="delivery-exr-space" aria-label="交付 EXR 颜色空间"></select></label>
       <small id="delivery-render-hint"></small>
     </fieldset>

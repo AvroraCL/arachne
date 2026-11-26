@@ -8,3 +8,8 @@ export const cyclesFormats=Object.freeze({
   PNG:Object.freeze({label:'PNG',extension:'png',depths:Object.freeze([8,16])}),
   OPEN_EXR:Object.freeze({label:'OpenEXR',extension:'exr',depths:Object.freeze([16,32])})
 });
+
+export const renderPngSpaces={srgb:'sRGB','display-p3':'Display P3'};
+export function fillPngSpaceSelect(select){
+  select.replaceChildren(...Object.entries(renderPngSpaces).map(([id,name])=>new Option(name,id)));
+}

@@ -1,5 +1,5 @@
 import {exrSpaces} from './public/render-exr-color.mjs';
-import {cyclesLimits,cyclesFormats} from './public/cycles-limits.mjs';
+import {cyclesLimits,cyclesFormats,renderPngSpaces} from './public/cycles-limits.mjs';
 import {captureDeliverySettings,renderPresetPreferences} from './public/paint-delivery-options.mjs';
 import {checkCyclesLightPaths} from './public/cycles-light-paths.mjs';
 import {checkCyclesRenderPasses} from './public/cycles-render-passes.mjs';
@@ -14,6 +14,7 @@ export function cyclesOptions(raw={},{minDimension=cyclesLimits.minDimension}={}
   if(raw.device!==undefined&&!['auto','cpu','gpu'].includes(raw.device))throw Error('Cycles 渲染设备无效');
   const format=raw.fileFormat===undefined?'PNG':raw.fileFormat;
   if(typeof format!=='string'||!Object.hasOwn(cyclesFormats,format))throw Error('Cycles 输出格式无效');
+  if(raw.pngSpace!==undefined&&(format!=='PNG'||!Object.hasOwn(renderPngSpaces,raw.pngSpace)))throw Error('PNG 输出颜色空间无效');
   if(raw.exrSpace!==undefined&&(format!=='OPEN_EXR'||!Object.hasOwn(exrSpaces,raw.exrSpace)))throw Error('EXR 输出颜色空间无效');
   if(raw.bitDepth!==undefined&&!cyclesFormats[format].depths.includes(raw.bitDepth))throw Error('位深与 Cycles 输出格式不匹配');
   for(const key of ['adaptive','transparent'])if(raw[key]!==undefined&&typeof raw[key]!=='boolean')throw Error('Cycles 开关无效');
@@ -31,7 +32,7 @@ export function cyclesOptions(raw={},{minDimension=cyclesLimits.minDimension}={}
     if(length(d)<1e-5||length(up)<1e-5||length(cross)/(length(d)*length(up))<1e-5)throw Error('相机方向或上方向退化');
     camera={projection:c.projection,eye,target,up,fov:n(c.fov,38,5,120),orthoHeight:n(c.orthoHeight,10,.00001,1e6)};
   }
-  return {width,height,samples,textureJobId,camera,...Object.fromEntries(['denoise','device','adaptive','noiseThreshold','maxBounces','transparent','fileFormat','bitDepth','exrSpace'].filter(key=>raw[key]!==undefined).map(key=>[key,raw[key]])),
+  return {width,height,samples,textureJobId,camera,...Object.fromEntries(['denoise','device','adaptive','noiseThreshold','maxBounces','transparent','fileFormat','bitDepth','pngSpace','exrSpace'].filter(key=>raw[key]!==undefined).map(key=>[key,raw[key]])),
     ...(lightPaths?{lightPaths}:{}),
     ...(renderPasses.length?{renderPasses}:{}),
     ...(format==='OPEN_EXR'&&raw.bitDepth===undefined?{bitDepth:16}:{})};

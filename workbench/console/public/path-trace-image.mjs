@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {prepareExrPixels,taggedExr} from './render-exr-color.mjs';
+import {exrSpaces,prepareExrPixels,taggedExr} from './render-exr-color.mjs';
 import {createViewportModelLoader} from './viewport-model-loader.mjs';
 import {applySurfaceMarks,applySourceFactors} from './viewport-materials.mjs';
 import {applyModelState} from './paint-model-state.mjs';
@@ -98,7 +98,9 @@ function pruneRenderHidden(root){
 function outputCanvas(source,settings,region){
   const canvas=document.createElement('canvas');
   [canvas.width,canvas.height]=region?.output||[settings.width,settings.height];
-  const context=canvas.getContext('2d',{alpha:settings.transparent===true});
+  const colorSpace=settings.pngSpace??'srgb';
+  const context=canvas.getContext('2d',{alpha:settings.transparent===true,colorSpace});
+  if(colorSpace==='display-p3'&&context.getContextAttributes().colorSpace!==colorSpace)throw Error('当前渲染运行时不支持 Display P3 PNG');
   if(region){
     const [left,top,right,bottom]=region.pixels,w=right-left,h=bottom-top;
     context.drawImage(source,left,top,w,h,region.crop?0:left,region.crop?0:top,w,h);
@@ -143,9 +145,24 @@ export async function renderImage(input){
   try{
     const gl=renderer.getContext(),limit=gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
     if(settings.width>limit||settings.height>limit)throw Error('当前图形设备不支持所选输出分辨率');
+    if(settings.pngSpace==='display-p3'){
+      gl.drawingBufferColorSpace='display-p3';
+      if(gl.drawingBufferColorSpace!=='display-p3')throw Error('当前图形设备不支持 Display P3 渲染输出');
+    }
     renderer.setSize(settings.width,settings.height,false);
     const backend=await createPathTracingEngine(renderer);
     engine=backend.engine;
+    if(settings.pngSpace==='display-p3'){
+      // Convert the scene primaries before the shared sRGB/P3 display transfer.
+      // The drawing buffer is tagged P3 separately from Three's internal passes.
+      const quad=engine._quad.material;
+      quad.uniforms.arachneOutputMatrix={value:new THREE.Matrix3().set(...exrSpaces.lin_p3d65_scene.matrix)};
+      quad.fragmentShader=`uniform mat3 arachneOutputMatrix;
+        vec4 arachneOutputTexel(vec4 rgba){return linearToOutputTexel(vec4(arachneOutputMatrix*rgba.rgb,rgba.a));}
+        #define linearToOutputTexel arachneOutputTexel
+        `+quad.fragmentShader;
+      quad.needsUpdate=true;
+    }
     engine.tiles.set(4,4);
     engine.bounces=Math.max(1,settings.maxBounces);
     engine.transmissiveBounces=settings.maxBounces;

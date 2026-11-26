@@ -1056,6 +1056,8 @@ async function verifyModelWorkflows(){
   await page.getByRole('button',{name:'材质预览',exact:true}).first().click();
   await page.getByText('渲染',{exact:true}).filter({visible:true}).first().click();
   await page.locator('#open-paint-render').click();
+  await page.getByRole('button',{name:'出图 PNG 颜色空间',exact:true}).click();
+  await page.getByRole('option',{name:'Display P3',exact:true}).click();
   await page.locator('#start-paint-render').click();
   const result=await until(async()=>{
     const job=(await api(route+'/jobs')).find(item=>item.type==='paint-render');
@@ -1083,6 +1085,13 @@ async function verifyModelWorkflows(){
   await file.saveAs(pngPath);
   const png=await fs.readFile(pngPath);
   assert.equal(digest(png),result.render.sha256);
+  assert.equal(result.render.pngSpace,'display-p3');
+  execFileSync(pythonExecutable(),['-B','-c',`from PIL import Image,ImageCms
+from io import BytesIO
+import sys
+im=Image.open(sys.argv[1])
+assert 'P3' in ImageCms.getProfileDescription(ImageCms.ImageCmsProfile(BytesIO(im.info['icc_profile'])))
+assert im.getextrema()[3]==(0,255)`,pngPath]);
   assert.deepEqual([png.readUInt32BE(16),png.readUInt32BE(20)],[384,288]);
   await page.goto(origin+'/?project='+id);
   await page.locator('.editor-viewport[data-state=ready]').first().waitFor({timeout:30000});

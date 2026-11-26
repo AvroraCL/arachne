@@ -1925,7 +1925,7 @@ async function renderPaintFrame(j,doc,{model,report,textureSetBakes,input,out,bi
     engine:'PATH_TRACING',revision:doc.revision,resolution,frameResolution:[settings.width,settings.height],
     ...(j.renderBookmark?{cameraBookmark:j.renderBookmark}:{}),
     region,camera:result.camera,samples:result.samples,fileFormat:settings.fileFormat,bitDepth:settings.bitDepth,
-    transparent:settings.transparent,...(result.exr?{colorSpace:settings.exrSpace?exrSpaces[settings.exrSpace].label:'scene-linear sRGB',colorInteropID:settings.exrSpace??defaultExrSpace,alphaMode:'premultiplied'}:{}),
+    transparent:settings.transparent,...(settings.pngSpace?{pngSpace:settings.pngSpace}:{}),...(result.exr?{colorSpace:settings.exrSpace?exrSpaces[settings.exrSpace].label:'scene-linear sRGB',colorInteropID:settings.exrSpace??defaultExrSpace,alphaMode:'premultiplied'}:{}),
     lighting:renderLighting,appearance:renderAppearance,optics:renderOptics,visibility:renderVisibility,
     textureSampling:result.textureSampling,
     ...(Object.keys(textureSets).length?{textureSets:Object.fromEntries(Object.entries(textureSets).map(([name,maps])=>

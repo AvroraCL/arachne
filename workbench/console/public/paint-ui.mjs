@@ -1,3 +1,4 @@
+import {fillPngSpaceSelect} from './cycles-limits.mjs';
 import {defaultExrSpace,fillExrSpaceSelect} from './render-exr-color.mjs';
 import {menuShortcut} from './menu-shortcut.mjs';
 import {connectDesktopWorkspace} from './paint-desktop-workspace.mjs';
@@ -2401,6 +2402,7 @@ function effectiveDeliveryPreferences(){
   const preferences=workingDeliveryPreferences();
   return preferences.framing==='saved'&&!doc?.paint.renderCamera?{...preferences,framing:'auto'}:preferences;
 }
+fillPngSpaceSelect($('delivery-png-space'));
 fillExrSpaceSelect($('delivery-exr-space'));
 function syncDeliveryPreferences(){
   const preferences=effectiveDeliveryPreferences(),values=deliveryEditorValues(preferences);
@@ -2408,6 +2410,8 @@ function syncDeliveryPreferences(){
   size.hidden=preferences.size!=='custom';size.textContent=`${values.width} × ${values.height} · 自定义`;
   quality.hidden=preferences.quality!=='custom';quality.textContent=`${values.samples} 次采样 · 自定义`;
   for(const [key,control] of Object.entries(deliveryControls))setSelectValue(control,preferences[key]);
+  $('delivery-png-space').closest('label').hidden=values.fileFormat!=='PNG';
+  setSelectValue($('delivery-png-space'),values.pngSpace??'srgb');
   $('delivery-exr-space').closest('label').hidden=values.fileFormat!=='OPEN_EXR';
   setSelectValue($('delivery-exr-space'),values.exrSpace??defaultExrSpace);
   setSelectValue($('delivery-format'),values.fileFormat==='OPEN_EXR'?'exr'+(values.bitDepth??16):'png');
@@ -2427,6 +2431,7 @@ syncDeliveryPreferences();
 for(const [key,control] of Object.entries(deliveryControls)){
   control.onchange=()=>applyDeliveryPreferences({...workingDeliveryPreferences(),[key]:control.value});
 }
+$('delivery-png-space').onchange=()=>applyDeliveryPreferences(updateDeliveryOptions(workingDeliveryPreferences(),{pngSpace:$('delivery-png-space').value}));
 $('delivery-exr-space').onchange=()=>applyDeliveryPreferences(updateDeliveryOptions(workingDeliveryPreferences(),{exrSpace:$('delivery-exr-space').value}));
 $('delivery-format').onchange=()=>{
   const format=$('delivery-format').value;
