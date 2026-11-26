@@ -1,3 +1,5 @@
+import {compositionKey} from './text-input.mjs';
+
 // Custom select, with the existing select as the source of value and events.
 const controls=new WeakMap();
 let active=null,sequence=0;
@@ -152,6 +154,7 @@ function openMenu(select,wrapper,button){
   },{signal});
   document.addEventListener('pointerdown',event=>{if(!menu.contains(event.target)&&!wrapper.contains(event.target))closeMenu();},{capture:true,signal});
   document.addEventListener('keydown',event=>{
+    if(compositionKey(event))return;
     if(event.key==='Tab'){closeMenu(true);return;}
     const columns=groups.size>1&&getComputedStyle(menu).gridTemplateColumns.split(' ').length>1;
     if(columns&&['ArrowLeft','ArrowRight'].includes(event.key)){

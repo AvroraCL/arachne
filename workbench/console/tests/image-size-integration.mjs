@@ -93,6 +93,16 @@ try{
   assert.ok(list.y>=0&&list.y+list.height<=600&&list.x>=0&&list.x+list.width<=390);
   assert.ok(list.height>260&&list.y+list.height<=picker.y+1);
   const searchSpace=spaceMenu.getByRole('searchbox',{name:'搜索颜色空间'});
+  const ime=await page.context().newCDPSession(page);
+  await searchSpace.focus();
+  await ime.send('Input.imeSetComposition',{text:'印前',selectionStart:2,selectionEnd:2});
+  await page.keyboard.press('Enter');
+  assert.ok(await spaceMenu.isVisible(),'committing Chinese input keeps the color-space menu open');
+  assert.equal(await dialog.locator('select.working-color-space').inputValue(),'srgb');
+  await ime.send('Input.insertText',{text:'印前'});await ime.detach();
+  await page.keyboard.press('Enter');
+  assert.equal(await dialog.locator('select.working-color-space').inputValue(),'eci-rgb-v2');
+  await dialog.getByRole('button',{name:'颜色空间',exact:true}).click();
   await searchSpace.fill('场景线性');
   assert.equal(await spaceMenu.getByRole('option').count(),7);
   assert.ok(await spaceMenu.getByRole('option',{name:'线性 ProPhoto RGB',exact:true}).isVisible());
