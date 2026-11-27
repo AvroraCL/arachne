@@ -579,9 +579,10 @@ export function createDocumentEditor(ctx,bridge){
     if(event.target===canvas&&usesBrushTiles())brushTiles.prepare(canvasPoint(canvas,event),!!event.buttons);
   },{capture:true,signal:life.signal});
   let moveSelection;
-  function selectedMoveSource(image,id,doc){
-    if(moveSelection?.image!==image||moveSelection.id!==id||moveSelection.revision!==doc.revision){
-      moveSelection={image,id,revision:doc.revision,source:moveSource(image,id,doc.paint.assets)};
+  function selectedMoveSource(image,ids,doc){
+    const key=ids.join(',');
+    if(moveSelection?.image!==image||moveSelection.key!==key||moveSelection.revision!==doc.revision){
+      moveSelection={image,key,revision:doc.revision,source:moveSource(image,ids,doc.paint.assets)};
     }
     return moveSelection.source;
   }
@@ -617,7 +618,7 @@ export function createDocumentEditor(ctx,bridge){
         !['group','adjustment'].includes(layer.kind));
       return {id:doc.id,revision:doc.revision,documentId:c.documentId,inspectMask:c.inspectMask?c.layerId:null,channel:'color',
         colorSpace:image.colorSpace,gamutWarning:gamutWarning&&canWarnGamut(),imageGeometry:imageViewGeometry(image),
-        moveSource:prefs.autoDetail&&mode==='move'&&!c.inspectMask&&c.target!=='mask'&&!(c.layerIds?.length>1)&&selectedMoveSource(image,c.layerId,doc),
+        moveSource:prefs.autoDetail&&mode==='move'&&!c.inspectMask&&c.target!=='mask'&&selectedMoveSource(image,c.layerIds?.length?c.layerIds:[c.layerId],doc),
         nativeCanvas:prefs.autoDetail,patchLayer:localEdits?selected?.id:null,maskEnabled:selected?.maskEnabled,
         draftBounds:patchable?op=>layoutDamage(image.layers,doc.paint.assets,op):undefined,
         fastSize,visiblePixels,strokeBleed,detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};

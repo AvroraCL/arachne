@@ -115,6 +115,139 @@ image.save(sys.stdout.buffer,format='PNG')
   await editor.getByRole('button',{name:'移动图层',exact:true,pressed:true}).waitFor();
   const box=await canvas.boundingBox();
   const point=([x,y])=>[box.x+x*box.width,box.y+y*box.height];
+  if(process.argv.includes('--joint-feedback')){
+    const stage=editor.locator('.document-image-stage');
+    const ready=()=>stage.locator('xpath=self::*[@data-preview-size="4096"][@data-preview-revision="'+doc.revision+'"]').waitFor({timeout:90000});
+    await select('logo').click();await select(text.layerId).click({modifiers:[modifier]});
+    assert.equal(await panel.locator('[data-image-layer-id][data-selected]').count(),2);
+    await editor.getByRole('checkbox',{name:'吸附参考线'}).uncheck();
+    await ready();
+    await canvas.evaluate(c=>{
+      const ctx=c.getContext('2d'),side=c.width;
+      const x=Math.floor(.47*side),y=Math.floor(.20*side),w=Math.floor(.3*side),h=Math.floor(.16*side);
+      const data=ctx.getImageData(x,y,w,h).data;
+      let title;
+      const ink=i=>data[i+3]===255&&data[i]===213&&data[i+1]===234;
+      for(let j=6;j<h-6&&!title;j++)for(let i=6;i<w-6;i++){
+        if([[0,0],[-5,-5],[5,-5],[-5,5],[5,5]].every(([a,b])=>ink(4*((j+b)*w+i+a)))){
+          title=[(x+i)/side,(y+j)/side];break;
+        }
+      }
+      if(!title)throw Error('没有找到标题笔画内部像素');
+      window.jointPixels=(dx,dy)=>{
+        const pixel=(u,v)=>ctx.getImageData(Math.floor(u*c.width),Math.floor(v*c.height),1,1).data;
+        const logo=pixel(.23+dx,.30+dy),letter=pixel(title[0]+dx,title[1]+dy);
+        return logo[2]>220&&logo[0]<70&&logo[3]>220&&letter[0]>180&&letter[1]>215&&letter[2]>225&&letter[3]>220;
+      };
+      window.jointMoved=(dst)=>new Promise((resolve,reject)=>{
+        document.addEventListener('pointermove',()=>{
+          const start=performance.now(),put=ctx.putImageData;
+          let write;
+          ctx.putImageData=function(...args){const result=put.apply(this,args);write=performance.now()-start;return result;};
+          function sample(){
+            const readStart=performance.now();
+            if(window.jointPixels(...dst)){
+              ctx.putImageData=put;resolve({write,observed:performance.now()-start,readback:performance.now()-readStart});return;
+            }
+            if(performance.now()-start>3500){ctx.putImageData=put;reject(Error('标题或标志没有跟到新位置'));return;}
+            requestAnimationFrame(sample);
+          }
+          requestAnimationFrame(sample);
+        },{capture:true,once:true});
+      });
+    });
+    let drafts=0;
+    page.on('request',req=>{if(req.url().endsWith('/image-live')&&req.postDataJSON().operation?.action==='layoutLayers')drafts++;});
+    const trajectory=[[0,.09],[-.035,.24],[.04,.38]];
+    for(let pass=0;pass<3;pass++){
+      const rect=await canvas.boundingBox();
+      const mouse=(dx,dy)=>page.mouse.move(rect.x+(.23+dx)*rect.width,rect.y+(.30+dy)*rect.height);
+      await mouse(0,0);await page.mouse.down();
+      const timing=[];
+      for(const dst of trajectory){
+        await page.evaluate(dst=>{window.jointSample=window.jointMoved(dst);},dst);
+        await mouse(...dst);timing.push(await page.evaluate(()=>window.jointSample));
+      }
+      await page.evaluate(()=>{
+        window.jointTrace={frames:0,wrong:0};
+        const trace=()=>{const t=window.jointTrace;t.frames++;if(!window.jointPixels(.04,.38))t.wrong++;t.id=requestAnimationFrame(trace);};
+        trace();
+      });
+      await page.mouse.up();await waitRevision('联合拖移');await ready();
+      const trace=await page.evaluate(()=>{cancelAnimationFrame(window.jointTrace.id);return window.jointTrace;});
+      console.log('JOINT MOVE',JSON.stringify({timing,trace,drafts}));
+      assert.ok(trace.frames>1);
+      assert.equal(trace.wrong,0,'松手后旧帧盖住了新位置');
+      assert.ok(Math.abs(layer('logo').y-.68)<.002&&Math.abs(layer(text.layerId).y-.66)<.002);
+      const moved=structuredClone(layers(doc));
+      await canvas.focus();await page.keyboard.press(modifier+'+z');await waitRevision('撤销联合拖移');await ready();
+      assert.deepEqual(layers(doc),original);assert.ok(await page.evaluate(()=>window.jointPixels(0,0)));
+      await page.keyboard.press(modifier+'+Shift+z');await waitRevision('重做联合拖移');await ready();
+      assert.deepEqual(layers(doc),moved);assert.ok(await page.evaluate(()=>window.jointPixels(.04,.38)));
+      await page.keyboard.press(modifier+'+z');await waitRevision('复位排版');await ready();
+    }
+    assert.equal(drafts,0,'联合平移重复请求了后台草稿');
+    // Put a translucent swatch above both moving layers. Compare what is shown
+    // under the mouse to the committed 4K compositor at the very same pixel.
+    await commands({...add('backdrop','有色底板','shape',{shape:{...shape,width:4096,height:4096,fill:'#487242'},x:.5,y:.5,scale:1}),index:0},
+      op('updateLayer',{layerId:'logo',patch:{x:.42,y:.35,opacity:.5}}),
+      add('front-swatch','半透明校色条','shape',{shape:{...shape,width:1400,height:260,fill:'#f09b34'},x:.27,y:.68,scale:.30,opacity:.55}));
+    const frontLoaded=page.waitForResponse(r=>r.url().endsWith('/image-live')&&r.request().postDataJSON()?.isolatedImageLayer==='front-swatch'
+      &&r.request().postDataJSON().window&&r.status()===200);
+    await page.reload();await select('logo').click();await select(text.layerId).click({modifiers:[modifier]});
+    await canvas.focus();await page.keyboard.press('v');await ready();
+    await (await frontLoaded).finished();
+    const rect=await canvas.boundingBox();
+    const at=(u,v)=>[rect.x+u*rect.width,rect.y+v*rect.height];
+    const sample=(u,v)=>canvas.evaluate((c,[u,v])=>[...c.getContext('2d').getImageData(Math.floor(u*c.width),Math.floor(v*c.height),1,1).data],[u,v]);
+    const before=await sample(.27,.68),ink=await sample(.42,.35);
+    await stage.screenshot({path:path.join(data,'joint-before.png')});
+    await page.mouse.move(...at(.42,.35));await page.mouse.down();
+    await page.mouse.move(...at(.27,.68),{steps:9});
+    const under=await sample(.27,.68);
+    assert.notDeepEqual(under,before);assert.notDeepEqual(under,ink);
+    await stage.screenshot({path:path.join(data,'joint-drag.png')});
+    await page.mouse.up();await waitRevision('在校色条下移动');await ready();
+    const saved=await sample(.27,.68);
+    assert.ok(under.every((v,i)=>Math.abs(v-saved[i])<=1),JSON.stringify({under,saved}));
+    await canvas.focus();await page.keyboard.press(modifier+'+z');await waitRevision('撤销遮挡');await ready();
+    assert.deepEqual(await sample(.27,.68),before);
+    await page.keyboard.press(modifier+'+Shift+z');await waitRevision('重做遮挡');await ready();
+    assert.deepEqual(await sample(.27,.68),saved);
+    assert.equal(drafts,0,'通过上方色条时应继续本地合成');
+    // Release preparation only after the worker draft is actually on the canvas.
+    // The ongoing gesture must switch to local writes without requiring a new press.
+    let releasePlane;
+    const gate=new Promise(resolve=>{releasePlane=resolve;});
+    const hold=async route=>{
+      if(route.request().postDataJSON().movePlane?.plane==='content')await gate;
+      await route.continue();
+    };
+    await page.route('**/image-live',hold);
+    await page.reload();await select('logo').click();await select(text.layerId).click({modifiers:[modifier]});
+    await canvas.focus();await page.keyboard.press('v');await ready();
+    const waitWidth=width=>canvas.evaluate((c,width)=>new Promise((resolve,reject)=>{
+      const start=performance.now();
+      function check(){
+        if((c.width===4096)===width){resolve();return;}
+        if(performance.now()-start>12000){reject(Error('联合平移预览没有交接'));return;}
+        requestAnimationFrame(check);
+      }
+      check();
+    }),width);
+    await page.mouse.move(...at(.27,.68));await page.mouse.down();await page.mouse.move(...at(.32,.74));
+    try{await waitWidth(false);}finally{releasePlane();}
+    await waitWidth(true);
+    const requests=drafts;
+    await page.mouse.move(...at(.35,.78));
+    await page.keyboard.press('Escape');await page.mouse.up();
+    assert.equal(drafts,requests);
+    assert.deepEqual(await sample(.27,.68),saved);
+    await page.unroute('**/image-live',hold);
+    console.log('PASS joint foreground overlap',JSON.stringify({under,saved,data}));
+    assert.deepEqual(errors,[]);
+    return;
+  }
   if(process.argv.includes('--move-feedback')){
     const stage=editor.locator('.document-image-stage');
     const ready=()=>stage.locator('xpath=self::*[@data-preview-size="4096"][@data-preview-revision="'+doc.revision+'"]').waitFor({timeout:90000});

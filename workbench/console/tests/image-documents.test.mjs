@@ -284,6 +284,13 @@ test('RGBA live input includes only the layers and assets required for the reque
  const mask=input({resolution:64,isolatedImageLayer:'photo',inspectMask:'photo'});
  assert.deepEqual(mask.paint.imageDocuments.doc.layers,[{id:'photo',maskBase:.25,maskStrokes:undefined}]);
  assert.deepEqual(mask.assets,{});
+ const window=[0,0,256],movePlane={ids:['hidden','photo'],plane:'content'};
+ const lifted=input({window,movePlane}),behind=input({window,movePlane:{...movePlane,plane:'background'}});
+ assert.deepEqual(lifted.paint.imageDocuments.doc.layers.map(l=>[l.id,l.maskBase]),[['photo',.25]]);
+ assert.deepEqual(Object.keys(lifted.assets),[visibleAsset]);
+ assert.deepEqual(behind.paint.imageDocuments.doc.layers.map(l=>l.id),['pixel']);
+ assert.deepEqual(behind.assets,{});
+ assert.throws(()=>input({window,movePlane:{ids:['photo','missing'],plane:'content'}}),/移动图层预览选择无效/);
  assert.throws(()=>input({isolatedImageLayer:'missing'}),/图像图层不存在/);
  assert.throws(()=>input({inspectMask:'missing'}),/图像蒙版不存在/);
 });

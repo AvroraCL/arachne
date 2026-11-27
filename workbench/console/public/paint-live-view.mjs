@@ -1,4 +1,4 @@
-import {createMovePreview} from './image-move-preview.mjs';
+import {createMovePreview,isMoveSelection} from './image-move-preview.mjs';
 import {hasWideGamut,imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
 import {previewDimensions,documentFrame} from './image-document-size.mjs';
 import {renderChannel,liveStride,effectiveValues,channelSpecs,paintChannels} from './paint-channels.mjs';
@@ -96,13 +96,12 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     const state=context();
     if(state&&intent?.key===state.key)drawMove(state,intent.operation);
   });
-  function restoreMove(separateSource){
+  function restoreMove(next){
     if(!moveDirty)return;
-    const {source,original,destination}=moveDirty;
-    if(separateSource&&source===separateSource)ctx.clearRect(...destination);
-    else{
-      ctx.putImageData(image,0,0,...original);
-      ctx.putImageData(image,0,0,...destination);
+    for(const {original,destination,empty} of moveDirty.regions){
+      if(moveDirty.source!==next)ctx.putImageData(image,0,0,...original);
+      if(empty&&moveDirty.source===next)ctx.clearRect(...destination);
+      else ctx.putImageData(image,0,0,...destination);
     }
     moveDirty=null;
   }
@@ -337,15 +336,29 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
   }
 
   function drawMove(state,operation){
-    if(operation?.action==='layoutLayers'&&state.moveSource&&moves&&baseFrame&&baseFrame===frame&&image&&drawn?.pixels===baseFrame.pixels&&
-       baseFrame.request.key===state.key&&baseFrame.request.size===detailSize&&!patched&&!localInk){
-      const moved=moves.draw(state,operation,ctx,image,baseFrame.pixels,restoreMove);
-      if(moved){
-        // The original bounds also need restoration when cancelling or leaving the local path.
-        const [ox,oy]=documentFrame(state.imageGeometry),[l,t,r,b]=state.moveSource.bounds;
-        moveDirty={source:state.moveSource,original:[l-ox,t-oy,r-l,b-t],destination:moved};
-        queued=null;inFlight?.controller.abort();return true;
-      }
+    if(operation?.action!=='layoutLayers'||!state.moveSource||!moves||localInk||
+       baseFrame?.request.key!==state.key||baseFrame.request.size!==detailSize||!image)return false;
+    const reenter=frame!==baseFrame||!!patched;
+    if(reenter&&(patched?.request??frame?.request)?.operation?.action!=='layoutLayers')return false;
+    const pixels=baseFrame.pixels;
+    if(!reenter&&drawn?.pixels!==pixels)return false;
+    // A worker draft may already be visible when selection preparation finishes.
+    // Lift sprites from the saved native revision and replace the draft in one
+    // canvas update, only after every member is ready.
+    let saved=image;
+    if(frame!==baseFrame){
+      const [width,height]=previewDimensions(state.imageGeometry,detailSize);
+      saved=new ImageData(new Uint8ClampedArray(pixels.buffer,pixels.byteOffset,pixels.byteLength),width,height,{colorSpace:'srgb'});
+    }
+    const moved=moves.draw(state,operation,ctx,saved,pixels,()=>{
+      if(!reenter){restoreMove(state.moveSource);return;}
+      if(canvas.width!==saved.width||canvas.height!==saved.height){canvas.width=saved.width;canvas.height=saved.height;}
+      image=saved;ctx.putImageData(image,0,0);frame=baseFrame;patched=null;
+      drawn={...drawn,pixels};moveDirty=null;
+    });
+    if(moved){
+      moveDirty={source:state.moveSource,regions:moved};
+      queued=null;inFlight?.controller.abort();if(reenter)status();return true;
     }
     return false;
   }
@@ -507,7 +520,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     moveSaveWindow(operation){
       const state=context(),source=state?.moveSource,tr=operation?.transforms?.[0];
       if(!state?.nativeCanvas||!source||operation?.action!=='layoutLayers'||operation.transforms.length!==1||
-         tr.layerIds.length!==1||tr.layerIds[0]!==source.id||tr.angle||tr.scale!==1||
+         !isMoveSelection(source,tr)||
          baseFrame?.request.key!==state.key||baseFrame.request.size!==detailSize||frame!==baseFrame||
          drawn?.pixels!==baseFrame.pixels||patched||localInk)return;
       const [dx,dy]=tr.offset.map(v=>v*detailSize),[l,t,r,b]=source.bounds;
@@ -515,6 +528,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       const right=Math.min(detailSize,Math.ceil(Math.max(r,r+dx))),bottom=Math.min(detailSize,Math.ceil(Math.max(b,b+dy)));
       const side=[256,512,768,1024,1536,2048].find(n=>n>=Math.max(right-left,bottom-top));
       if(side)return {frame:baseFrame,window:[Math.min(left,detailSize-side),Math.min(top,detailSize-side),side]};
+      if(moveDirty)return {frame:baseFrame};
     },
     finishMove(saved,revision){
       const state=context(),before=saved?.frame.request;

@@ -888,7 +888,7 @@ export function livePaintInput(doc,{revision,operation,operations,inspectMask,is
   if(rawLayer){input.paint={...input.paint,base:{color:'#383838',metallic:0,roughness:.5}};delete input.paint.baseChannels;delete input.paint.materialGraph;input.materialPlan=null;delete input.materialFingerprint;}
   return {...input,inspectMask,isolatedLayer,uvGuide:uvGuide===true,liveResolution:resolution,liveFormat:format};
 }
-export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,brushTile,documentView=false,resolution=256}){
+export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,movePlane,brushTile,documentView=false,resolution=256}){
   if(doc.revision!==revision)throw revisionError(doc);
   const edits=liveDraftOperations(doc,operation,operations,documentId);
   if(brushTile!==undefined){
@@ -916,9 +916,20 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
   if(beforeImageLayer!==undefined&&!before)throw Error('图像调整图层不存在');
 
   const thumbnail=documentView&&Boolean(isolatedImageLayer)&&resolution===64;
+  let planeLayers;
+  if(movePlane!==undefined){
+    const ids=movePlane?.ids,plane=movePlane?.plane;
+    if(!window||edits.length||brushTile||inspectMask||isolatedImageLayer||beforeImageLayer!==undefined||
+       !['background','content'].includes(plane)||!Array.isArray(ids)||!ids.length||ids.length>image.layers.length)
+      throw Error('移动图层预览参数无效');
+    const moving=new Set(ids),layers=image.layers.filter(layer=>moving.has(layer.id));
+    if(moving.size!==ids.length||layers.length!==ids.length||
+       layers.some(layer=>layer.parentId||!['image','shape'].includes(layer.kind)))throw Error('移动图层预览选择无效');
+    planeLayers=plane==='content'?layers:image.layers.filter(layer=>!moving.has(layer.id));
+  }
   const selected=isolatedImageLayer
     ?isolateImageLayer(image.layers,isolatedImageLayer)
-    :before??image.layers;
+    :planeLayers??before??image.layers;
   const layers=inspectMask
     ?selected.filter(layer=>layer.id===inspectMask).map(({id,maskBase,maskStrokes,maskGradient,maskDensity,maskFeather,selectionSources,maskTransform,maskWarpSteps,brushSources})=>({
       id,maskBase,maskStrokes,...(maskGradient?{maskGradient}:{}),...(maskDensity!==undefined?{maskDensity}:{}),

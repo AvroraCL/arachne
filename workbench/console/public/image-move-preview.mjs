@@ -1,6 +1,6 @@
 // Prepare the moving layer and the exposed background once per selection.
 // The saved canvas supplies the background outside the original layer bounds.
-import {placedImageBounds} from './image-layout.mjs';
+import {placedImageBounds,unionImageBounds} from './image-layout.mjs';
 import {documentFrame,editingSide as grid} from './image-document-size.mjs';
 import {decodeComponent,encodeComponent} from './image-display-rgb.mjs';
 
@@ -16,8 +16,12 @@ function colorCurve(space){
   return curves.get(space);
 }
 
-export function moveSource(image,id,assets){
-  const layer=image.layers.find(l=>l.id===id);
+function nativeWindow(rect){
+  const side=[256,512,768,1024,1536,2048].find(n=>n>=Math.max(rect[2]-rect[0],rect[3]-rect[1]));
+  if(side)return [Math.max(0,Math.min(rect[0],grid-side)),Math.max(0,Math.min(rect[1],grid-side)),side];
+}
+
+function placedSource(image,layer,selection,assets){
   if(!layer?.visible||layer.locked||!layer.opacity||layer.parentId||layer.clipped||layer.blend!=='normal'||layer.blendIf||layer.edgeDecontaminate||
      layer.maskEnabled&&layer.maskLinked===false||enabledStyle(layer)||layer.warp||!['shape','image'].includes(layer.kind))return;
   const [ox,oy,w,h]=documentFrame(image);
@@ -28,18 +32,20 @@ export function moveSource(image,id,assets){
   if(rect[0]<ox||rect[1]<oy||rect[2]>ox+w||rect[3]>oy+h)return;
   const front=[];
   for(const l of image.layers.slice(image.layers.indexOf(layer)+1)){
-    if(!l.visible||!l.opacity||l.parentId)continue;
+    if(selection.has(l.id)||!l.visible||!l.opacity||l.parentId)continue;
     if(l.kind==='pixel'&&!l.raster&&!l.strokes?.length&&!enabledStyle(l)&&!l.clipped)continue;
     const b=placedImageBounds(l,assets);
     if(!b||l.clipped||enabledStyle(l)||l.warp||l.gradient?.feather)return;
-    front.push(pixelBounds(b));
+    const bounds=pixelBounds(b);
+    const window=selection.size>1&&l.blend==='normal'&&!l.blendIf&&!l.edgeDecontaminate&&nativeWindow(bounds);
+    front.push({id:l.id,bounds,window});
   }
-  const side=[256,512,768,1024,1536,2048].find(n=>n>=Math.max(rect[2]-rect[0],rect[3]-rect[1]));
+  const window=nativeWindow(rect);
   // For disjoint artwork we already have both the layer and its transparent
   // backdrop in the saved frame. No preparation request is needed.
   const obstacles=[];
-  const separate=image.layers.every(other=>{
-    if(other===layer||!other.visible||!other.opacity)return true;
+  const known=image.layers.every(other=>{
+    if(selection.has(other.id)||!other.visible||!other.opacity)return true;
     if(enabledStyle(other)||other.warp||other.gradient?.feather)return false;
     if(other.kind==='group'||other.kind==='adjustment'&&other.adjustment.type==='invert')return true;
     if(other.kind==='pixel'&&!other.raster){
@@ -51,9 +57,51 @@ export function moveSource(image,id,assets){
     const box=placedImageBounds(other,assets);
     if(!box)return false;
     obstacles.push(pixelBounds(box));return true;
-  })&&!obstacles.some(box=>overlaps(box,rect));
-  if(separate||side)return {id,separate,bounds:rect,front:separate?obstacles:front,
-    window:side&&[Math.min(rect[0],grid-side),Math.min(rect[1],grid-side),side]};
+  });
+  const separate=known&&!obstacles.some(box=>overlaps(box,rect));
+  if(separate||window)return {id:layer.id,separate,bounds:rect,front,obstacles:known?obstacles:null,window};
+}
+
+export function moveSource(image,ids,assets){
+  const selection=new Set(ids);
+  const parts=[];
+  for(const layer of image.layers){
+    if(!selection.has(layer.id))continue;
+    const part=placedSource(image,layer,selection,assets);
+    if(!part)return;
+    parts.push(part);
+  }
+  if(!parts.length||parts.length!==selection.size)return;
+  // Coalesce intersecting source rectangles once. Preserve the authored stack
+  // order and isolate the moving pixels when the gap contains stationary artwork.
+  for(let i=0;i<parts.length;i++){
+    for(let j=i+1;j<parts.length;j++){
+      const a=parts[i],b=parts[j];
+      if(!overlaps(a.bounds,b.bounds))continue;
+      const bounds=unionImageBounds([a.bounds,b.bounds]);
+      if(a.front.length!==b.front.length||a.front.some(layer=>!b.front.some(other=>other.id===layer.id)))return;
+      const separate=a.separate&&b.separate&&!a.obstacles.some(box=>overlaps(box,bounds));
+      const window=nativeWindow(bounds);
+      if(!separate&&!window)return;
+      parts[i]={...a,bounds,separate,window,members:[...(a.members??[a.id]),...(b.members??[b.id])]};
+      parts.splice(j,1);
+      i=-1;break;
+    }
+  }
+  // Bound the two cached native planes by one document surface each.
+  if(parts.reduce((sum,p)=>sum+(p.separate?0:p.window[2]**2),0)>grid**2)return;
+  const front=new Map();
+  let pixels=0;
+  for(const part of parts)for(const layer of part.front){
+    if(!layer.window||front.has(layer.id))continue;
+    const area=layer.window[2]**2;
+    if(pixels+area<=grid**2){front.set(layer.id,layer);pixels+=area;}
+  }
+  return {ids:selection,parts,front,bounds:unionImageBounds(parts.map(p=>p.bounds))};
+}
+
+export function isMoveSelection(source,tr){
+  return source&&tr&&tr.scale===1&&!tr.angle&&tr.layerIds.length===source.ids.size&&tr.layerIds.every(id=>source.ids.has(id));
 }
 
 export function createMovePreview(onReady){
@@ -62,13 +110,12 @@ export function createMovePreview(onReady){
   function prepare(state){
     const source=state?.moveSource;
     if(!source){clear();return;}
-    if(cache?.key===state.key&&cache.source.id===source.id)return;
+    if(cache?.key===state.key&&cache.source===source)return;
     clear();
-    const entry=cache={key:state.key,source};
-    if(source.separate)return;
+    const entry=cache={key:state.key,source,front:new Map(),parts:source.parts.map(part=>({source:part}))};
+    if(!source.front.size&&source.parts.every(p=>p.separate))return;
     const controller=entry.controller=new AbortController();
-    const {id,window}=source;
-    async function read(fields){
+    async function read(window,fields){
       const response=await fetch('/api/projects/'+state.id+'/paint/image-live',{method:'POST',signal:controller.signal,
         headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:state.revision,documentId:state.documentId,resolution:256,window,...fields})});
       if(!response.ok||response.headers.get('X-Paint-Revision')!==String(state.revision)||response.headers.get('X-Paint-Window')!==window.join(',')){
@@ -80,17 +127,29 @@ export function createMovePreview(onReady){
     // A layer over transparent pixels can be lifted directly from the saved canvas.
     // Only request an isolated copy when something is actually underneath it.
     async function load(){
-      const back=await read({operation:{op:'image',documentId:state.documentId,action:'updateLayer',layerId:id,patch:{visible:false}}});
-      if(!back||cache!==entry)return;
-      const [tx,ty,side]=window,[l,t,r,b]=source.bounds;
-      let clear=!source.front.some(rect=>overlaps(rect,source.bounds));
-      for(let y=t;clear&&y<b;y++)for(let x=l;x<r;x++){
-        if(back[4*((y-ty)*side+x-tx)+3]){clear=false;break;}
+      for(const part of entry.parts){
+        const {id,window,bounds,separate,front}=part.source;
+        if(separate)continue;
+        const members=part.source.members;
+        const back=await read(window,members?{movePlane:{ids:members,plane:'background'}}:
+          {operation:{op:'image',documentId:state.documentId,action:'updateLayer',layerId:id,patch:{visible:false}}});
+        if(!back||cache!==entry)return;
+        const [tx,ty,side]=window,[l,t,r,b]=bounds;
+        let clear=!front.some(layer=>overlaps(layer.bounds,bounds));
+        for(let y=t;clear&&y<b;y++)for(let x=l;x<r;x++){
+          if(back[4*((y-ty)*side+x-tx)+3]){clear=false;break;}
+        }
+        const ink=clear?null:await read(window,members?{movePlane:{ids:members,plane:'content'}}:{isolatedImageLayer:id});
+        if(cache!==entry||!clear&&!ink)return;
+        Object.assign(part,{back,ink});
       }
-      const ink=clear?null:await read({isolatedImageLayer:id});
-      if(cache!==entry||!clear&&!ink)return;
-      Object.assign(entry,{back,ink});
-      onReady();
+      if(source.parts.some(p=>!p.separate))onReady();
+      for(const layer of source.front.values()){
+        const ink=await read(layer.window,{isolatedImageLayer:layer.id});
+        if(cache!==entry)return;
+        if(ink)entry.front.set(layer.id,{ink,window:layer.window});
+      }
+      if(source.front.size)onReady();
     }
     void load().catch(error=>{if(!controller.signal.aborted)console.warn('无法预备移动图层像素',error);});
   }
@@ -106,56 +165,118 @@ export function createMovePreview(onReady){
   }
 
   function draw(state,op,ctx,image,base,beforeDraw){
-    if(state.moveSource?.separate)prepare(state);
     const tr=op?.action==='layoutLayers'&&op.transforms.length===1&&op.transforms[0];
-    if(!tr||tr.angle||tr.scale!==1||tr.layerIds.length!==1||cache?.key!==state.key||cache.source.id!==tr.layerIds[0])return;
-    const {source,back}=cache;
-    if(!source.separate&&!back)return;
+    if(!isMoveSelection(state.moveSource,tr))return;
+    prepare(state);
     const [ox,oy]=documentFrame(state.imageGeometry);
-    const ink=cache.ink??base,[ix,iy,stride]=cache.ink?source.window:[ox,oy,image.width];
-    const painted=cache.painted??=paintedBounds(ink,stride,ix,iy,source.bounds);
-    if(!painted)return;
-    const [l,t,r,b]=painted;
-    const [dx,dy]=tr.offset.map(n=>Math.round(n*grid)),dst=[l+dx,t+dy,r+dx,b+dy];
-    if(source.front.some(rect=>overlaps(rect,dst)))return;
-    const w=r-l,h=b-t;
-    beforeDraw(source.separate&&source);
-    // Keep the saved ImageData immutable so a cancel can restore it immediately.
-    if(source.separate){
-      ctx.clearRect(l-ox,t-oy,w,h);
-      if(!cache.sprite){
-        const sprite=ctx.createImageData(w,h,{colorSpace:image.colorSpace});
-        for(let y=0;y<h;y++){
-          const offset=((t-oy+y)*image.width+l-ox)*4;
-          sprite.data.set(image.data.subarray(offset,offset+w*4),y*w*4);
-        }
-        cache.sprite=sprite;
+    const [dx,dy]=tr.offset.map(n=>Math.round(n*grid));
+    const moving=[];
+    for(const part of cache.parts){
+      const {source,back}=part;
+      if(!source.separate&&!back)return;
+      const ink=part.ink??base,[ix,iy,stride]=part.ink?source.window:[ox,oy,image.width];
+      const painted=part.painted??=paintedBounds(ink,stride,ix,iy,source.bounds);
+      if(!painted)continue;
+      const [l,t,r,b]=painted,dst=[l+dx,t+dy,r+dx,b+dy];
+      const front=[];
+      for(const layer of source.front){
+        if(!overlaps(layer.bounds,dst))continue;
+        const plane=cache.front.get(layer.id);
+        if(!plane)return;
+        front.push(plane);
       }
-      ctx.putImageData(cache.sprite,l+dx-ox,t+dy-oy);
-    }else{
-      const [tx,ty,side]=source.window;
-      const background=cache.background??=new ImageData(new Uint8ClampedArray(back.buffer),side,side);
-      ctx.putImageData(background,tx-ox,ty-oy,l-tx,t-ty,w,h);
-      const left=Math.max(l+dx,ox),top=Math.max(t+dy,oy),right=Math.min(r+dx,ox+image.width),bottom=Math.min(b+dy,oy+image.height);
-      if(left<right&&top<bottom){
-        const patch=ctx.createImageData(right-left,bottom-top,{colorSpace:'srgb'}),output=patch.data;
-        let curve;
-        const words=buf=>new Uint32Array(buf.buffer,buf.byteOffset,buf.byteLength/4);
-        const out32=words(output),ink32=words(ink),back32=words(back),base32=words(base);
-        for(let y=top,k=0;y<bottom;y++)for(let x=left;x<right;x++,k+=4){
-          const a=((y-dy-iy)*stride+x-dx-ix)*4,inside=x>=l&&x<r&&y>=t&&y<b;
-          const pixels=inside?back:base,q=inside?((y-ty)*side+x-tx)*4:((y-oy)*image.width+x-ox)*4;
-          if(!ink[a+3]){out32[k/4]=(inside?back32:base32)[q/4];continue;}
-          if(ink[a+3]===255||!pixels[q+3]){out32[k/4]=ink32[a/4];continue;}
-          const alpha=ink[a+3]/255,bg=pixels[q+3]/255*(1-alpha),sum=alpha+bg;
-          output[k+3]=sum*255;
-          curve??=colorCurve(state.colorSpace);
-          for(let c=0;c<3;c++)output[k+c]=curve.byte[Math.round(65535*(curve.linear[ink[a+c]]*alpha+curve.linear[pixels[q+c]]*bg)/sum)];
+      if(!part.sprite){
+        const sprite=ctx.createImageData(r-l,b-t,{colorSpace:image.colorSpace});
+        for(let y=t;y<b;y++){
+          const offset=((y-iy)*stride+l-ix)*4;
+          sprite.data.set(ink.subarray(offset,offset+(r-l)*4),(y-t)*(r-l)*4);
         }
-        ctx.putImageData(patch,left-ox,top-oy);
+        part.sprite=sprite;
+      }
+      moving.push({part,painted,dst,front,empty:source.obstacles&&!source.obstacles.some(box=>overlaps(box,dst))});
+    }
+    if(!moving.length)return;
+    beforeDraw();
+    // First uncover every original position, then paint the complete selection.
+    // A destination may pass directly over another selected item's old position.
+    for(const {part,painted:[l,t,r,b]} of moving){
+      if(!part.back)ctx.clearRect(l-ox,t-oy,r-l,b-t);
+      else{
+        const [tx,ty,side]=part.source.window;
+        const background=part.background??=new ImageData(new Uint8ClampedArray(part.back.buffer),side,side);
+        ctx.putImageData(background,tx-ox,ty-oy,l-tx,t-ty,r-l,b-t);
       }
     }
-    return [dst[0]-ox,dst[1]-oy,w,h];
+    for(const {part,dst,front,empty} of moving){
+      const [x,y,r,b]=dst;
+      if(empty){ctx.putImageData(part.sprite,x-ox,y-oy);continue;}
+      const left=Math.max(x,ox),top=Math.max(y,oy),right=Math.min(r,ox+image.width),bottom=Math.min(b,oy+image.height);
+      if(left>=right||top>=bottom)continue;
+      const width=right-left,height=bottom-top;
+      const patch=part.patch?.width===width&&part.patch.height===height?part.patch:
+        (part.patch=ctx.createImageData(width,height,{colorSpace:image.colorSpace}));
+      const output=patch.data,src=part.sprite.data;
+      // Reuse saved pixels for stationary artwork. Inside a vacated area use
+      // the backdrop with that item hidden, even when it belongs to a sibling.
+      for(let row=0;row<height;row++){
+        const offset=((top-oy+row)*image.width+left-ox)*4;
+        output.set(base.subarray(offset,offset+width*4),row*width*4);
+      }
+      for(const {part:original,painted:[l,t,r,b]} of moving){
+        const start=Math.max(l,left),end=Math.min(r,right);
+        if(start>=end)continue;
+        for(let row=Math.max(t,top);row<Math.min(b,bottom);row++){
+          const offset=((row-top)*width+start-left)*4,length=(end-start)*4;
+          if(!original.back)output.fill(0,offset,offset+length);
+          else{
+            const [tx,ty,side]=original.source.window,pos=((row-ty)*side+start-tx)*4;
+            output.set(original.back.subarray(pos,pos+length),offset);
+          }
+        }
+      }
+      let curve,lastInk=-1,lastBack=-1,lastMix=0;
+      const ink32=new Uint32Array(src.buffer),out32=new Uint32Array(output.buffer);
+      for(let row=top,k=0;row<bottom;row++)for(let col=left;col<right;col++,k+=4){
+        const a=((row-y)*part.sprite.width+col-x)*4;
+        if(!src[a+3])continue;
+        if(!front.length){
+          const ink=ink32[a/4],back=out32[k/4];
+          if(src[a+3]===255||!output[k+3]){out32[k/4]=ink;continue;}
+          // Flat fills and lettering commonly repeat the same RGBA pair in a row.
+          if(ink===lastInk&&back===lastBack){out32[k/4]=lastMix;continue;}
+          lastInk=ink;lastBack=back;
+        }
+        // output already includes the stationary foreground. Insert the moving
+        // source underneath it in linear premultiplied RGB without blending
+        // the foreground twice. All overlapping front planes are normal layers.
+        let red=0,green=0,blue=0,cover=0;
+        for(const {ink,window:[tx,ty,side]} of front){
+          if(col<tx||col>=tx+side||row<ty||row>=ty+side)continue;
+          const i=4*((row-ty)*side+col-tx),alpha=ink[i+3]/255;
+          if(!alpha)continue;
+          curve??=colorCurve(state.colorSpace);
+          red=curve.linear[ink[i]]*alpha+red*(1-alpha);
+          green=curve.linear[ink[i+1]]*alpha+green*(1-alpha);
+          blue=curve.linear[ink[i+2]]*alpha+blue*(1-alpha);
+          cover=alpha+cover*(1-alpha);
+        }
+        if(cover===1)continue;
+        if(!cover&&(src[a+3]===255||!output[k+3])){out32[k/4]=ink32[a/4];continue;}
+        const alpha=src[a+3]/255,bg=output[k+3]/255*(1-alpha),sum=alpha+bg;
+        output[k+3]=sum*255;
+        curve??=colorCurve(state.colorSpace);
+        const contribution=alpha*(1-cover);
+        for(let c=0;c<3;c++){
+          const foreground=c===0?red:c===1?green:blue;
+          const value=curve.linear[src[a+c]]*contribution+curve.linear[output[k+c]]*bg+foreground*alpha;
+          output[k+c]=curve.byte[Math.min(65535,Math.round(65535*value/sum))];
+        }
+        if(!front.length)lastMix=out32[k/4];
+      }
+      ctx.putImageData(patch,left-ox,top-oy);
+    }
+    const rect=([l,t,r,b])=>[l-ox,t-oy,r-l,b-t];
+    return moving.map(({painted,dst,empty})=>({original:rect(painted),destination:rect(dst),empty}));
   }
   return {prepare,draw,clear};
 }
