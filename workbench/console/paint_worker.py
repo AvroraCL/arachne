@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import sys
+import zlib
 from pathlib import Path
 from functools import lru_cache
 
@@ -790,7 +791,14 @@ def interactive():
                 data = bytes([atlas[min(height-1,int((1-v)*height)),min(width-1,int(u*width))]])
             else:
                 data = live_pixels(cfg)
-            reply = {'pixels':base64.b64encode(data).decode('ascii')}
+            reply = {}
+            if request.get('compressWindow') and cfg.get('imageWindow') and len(data) >= 1024**2:
+                # Probe three scanline fragments before compressing a large, often mostly empty tile.
+                sample = b''.join(data[i:i+4096] for i in (0, len(data)//2, len(data)-4096))
+                if len(zlib.compress(sample, 1)) < len(sample)//2:
+                    data = zlib.compress(data, 1)
+                    reply['deflated'] = True
+            reply['pixels'] = base64.b64encode(data).decode('ascii')
         except Exception as error:
             reply = {'error':str(error)}
         print(json.dumps({'id':request['id'],**reply}),flush=True)

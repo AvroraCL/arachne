@@ -1,3 +1,4 @@
+import {createMovePreview} from './image-move-preview.mjs';
 import {hasWideGamut,imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
 import {previewDimensions,documentFrame} from './image-document-size.mjs';
 import {renderChannel,liveStride,effectiveValues,channelSpecs,paintChannels} from './paint-channels.mjs';
@@ -90,7 +91,21 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
   const page=canvas.ownerDocument;
   let intent=null,inFlight=null,queued=null,detailInFlight=null,baseFrame=null,frame=null,drawn=null;
   let image=null,imageSpace=null,guideFrame=null,detailTimer=null,retryTimer=null,retrying=null;
-  let localInk=null;
+  let localInk=null,moveDirty=null;
+  const moves=rgba&&createMovePreview(()=>{
+    const state=context();
+    if(state&&intent?.key===state.key)drawMove(state,intent.operation);
+  });
+  function restoreMove(separateSource){
+    if(!moveDirty)return;
+    const {source,original,destination}=moveDirty;
+    if(separateSource&&source===separateSource)ctx.clearRect(...destination);
+    else{
+      ctx.putImageData(image,0,0,...original);
+      ctx.putImageData(image,0,0,...destination);
+    }
+    moveDirty=null;
+  }
   let detailFailure=null,fastFailure=null,visible=true,disposed=false,patched=null;
   const context=()=>visible&&!disposed&&!page?.hidden?readContext():null;
   const fastSize=state=>(rgba||state?.textureSet)&&[512,1024].includes(state?.fastSize)?state.fastSize:workingSize;
@@ -151,6 +166,10 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     const state=context();
     if(!state||frame?.request.key!==state.key)return;
     if(!renderCanvas){status();return;}
+    if(moveDirty){
+      if(frame===baseFrame&&intent?.operation?.action==='layoutLayers')return;
+      moveDirty=null;drawn=null;
+    }
     const {pixels,request}=frame,{size}=request;
     const channel=state.inspectMask?'color':state.channel;
     const solo=!!(state.inspectMask||state.solo);
@@ -256,7 +275,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
         const [width,height]=previewDimensions(request.imageGeometry,detailSize);
         if(next.length!==side*side*4||canvas.width!==width||canvas.height!==height||!image)throw Error('局部预览尺寸无效');
         if(request.savedWindow){
-          // The receipt advances exactly one saved stroke. Keep the untouched
+          // The receipt advances exactly one saved edit. Keep the untouched
           // document pixels and replace the complete affected area in both buffers.
           const left=Math.max(0,ox-window[0]),top=Math.max(0,oy-window[1]);
           const right=Math.min(side,ox+width-window[0]),bottom=Math.min(side,oy+height-window[1]);
@@ -270,7 +289,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
           }
           ctx.putImageData(tile,window[0]-ox,window[1]-oy);
           frame=baseFrame={request,pixels:baseFrame.pixels};
-          patched=localInk=null;detailFailure=null;
+          patched=localInk=moveDirty=null;detailFailure=null;
           onFrame({request,pixels:next,window});status();return;
         }
         if(patched&&patched.request.key===key&&patched.window.join(',')!==window.join(',')){
@@ -278,6 +297,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
           ctx.putImageData(image,0,0,left-ox,top-oy,side,side);
         }
         const patch={window,request,pixels:next};
+        restoreMove();
         drawPatch(patch,context().gamutWarning);
         localInk=null;
         patched=!request.inspectMask&&hasWideGamut(request.colorSpace)?patch:{window,request};
@@ -316,6 +336,20 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     }
   }
 
+  function drawMove(state,operation){
+    if(operation?.action==='layoutLayers'&&state.moveSource&&moves&&baseFrame&&baseFrame===frame&&image&&drawn?.pixels===baseFrame.pixels&&
+       baseFrame.request.key===state.key&&baseFrame.request.size===detailSize&&!patched&&!localInk){
+      const moved=moves.draw(state,operation,ctx,image,baseFrame.pixels,restoreMove);
+      if(moved){
+        // The original bounds also need restoration when cancelling or leaving the local path.
+        const [ox,oy]=documentFrame(state.imageGeometry),[l,t,r,b]=state.moveSource.bounds;
+        moveDirty={source:state.moveSource,original:[l-ox,t-oy,r-l,b-t],destination:moved};
+        queued=null;inFlight?.controller.abort();return true;
+      }
+    }
+    return false;
+  }
+
   function requestFrame(state,operation,size=state.nativeCanvas&&!operation?detailSize:fastSize(state),savedWindow){
     cancelRetry();fastFailure=null;
     // Consecutive moves in one gesture can display intermediate frames. A
@@ -340,10 +374,13 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       JSON.stringify(previous.imageGeometry)===JSON.stringify(state.imageGeometry));
     const window=savedWindow??(rgba&&nativeSurface&&operation?draftWindow(strokes,state):undefined);
     intent={...state,operation,target,size,window,savedWindow,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
+    if(moveDirty&&!operation&&baseFrame?.request.key===state.key)restoreMove();
+    if(drawMove(state,operation))return;
     if(operation&&localBrush){
       const sameCanvas=frame?.request.id===state.id&&frame.request.documentId===state.documentId&&frame.request.inspectMask===state.inspectMask;
       const patch=localBrush(strokes);
       if(patch&&(sameCanvas||patch.empty)){
+        restoreMove();
         const [ox,oy]=documentFrame(state.imageGeometry),[x,y,w,h]=patch.box;
         const [width,height]=previewDimensions(state.imageGeometry,detailSize);
         if(!sameCanvas){canvas.width=width;canvas.height=height;}
@@ -406,13 +443,14 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     setVisible(next){
       if(visible===next)return;
       visible=next;
-      if(!visible)suspend();
+      if(!visible){suspend();moves&&moves.clear();}
     },
     refresh(){
       const state=context();
       if(!state)return;
+      moves&&moves.prepare(state);
       if(intent?.key!==state.key)requestFrame(state);
-      else if(retryTimer===null&&fastFailure?.request!==intent&&detailFailure?.key!==state.key&&frame?.request!==intent&&!queued&&!inFlight&&!detailInFlight)requestFrame(state,intent.operation);
+      else if(retryTimer===null&&fastFailure?.request!==intent&&detailFailure?.key!==state.key&&frame?.request!==intent&&!queued&&!inFlight&&!detailInFlight&&!moveDirty)requestFrame(state,intent.operation);
       draw();
       if(!inFlight&&!queued){
         if(retryTimer!==null&&retrying?.request===intent)status('retrying',retrying.message,intent.size);
@@ -466,6 +504,26 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       const state=context();
       return state&&!state.inspectMask&&frame?.request.key===state.key?sampleMaterialFrame(frame,u,v):null;
     },
+    moveSaveWindow(operation){
+      const state=context(),source=state?.moveSource,tr=operation?.transforms?.[0];
+      if(!state?.nativeCanvas||!source||operation?.action!=='layoutLayers'||operation.transforms.length!==1||
+         tr.layerIds.length!==1||tr.layerIds[0]!==source.id||tr.angle||tr.scale!==1||
+         baseFrame?.request.key!==state.key||baseFrame.request.size!==detailSize||frame!==baseFrame||
+         drawn?.pixels!==baseFrame.pixels||patched||localInk)return;
+      const [dx,dy]=tr.offset.map(v=>v*detailSize),[l,t,r,b]=source.bounds;
+      const left=Math.max(0,Math.floor(Math.min(l,l+dx))),top=Math.max(0,Math.floor(Math.min(t,t+dy)));
+      const right=Math.min(detailSize,Math.ceil(Math.max(r,r+dx))),bottom=Math.min(detailSize,Math.ceil(Math.max(b,b+dy)));
+      const side=[256,512,768,1024,1536,2048].find(n=>n>=Math.max(right-left,bottom-top));
+      if(side)return {frame:baseFrame,window:[Math.min(left,detailSize-side),Math.min(top,detailSize-side),side]};
+    },
+    finishMove(saved,revision){
+      const state=context(),before=saved?.frame.request;
+      if(!before||baseFrame!==saved.frame||!state||before.revision+1!==revision||state.revision!==revision||
+         state.id!==before.id||state.documentId!==before.documentId||state.inspectMask!==before.inspectMask||
+         frame!==baseFrame||drawn?.pixels!==baseFrame.pixels)return false;
+      requestFrame(state,null,detailSize,saved.window);
+      return true;
+    },
     update(operation,committedStroke){
       const state=context();
       if(!state)return;
@@ -489,9 +547,12 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
         const box=strokeWindow([committedStroke],[[0,detailSize],[0,detailSize]],state.strokeBleed);
         if(box){requestFrame(state,null,detailSize,box);return;}
       }
+      if(!operation&&intent?.key===state.key&&!intent.operation&&
+         (detailInFlight===intent&&!intent.controller.signal.aborted||frame?.request===intent&&!moveDirty))return;
       requestFrame(state,operation);
     },
     clear(){
+      moveDirty=null;moves&&moves.clear();
       cancelPending();baseFrame=null;frame=null;drawn=null;patched=null;localInk=null;
       onStatus('',false,{size:0,phase:'hidden'});
       guideFrame=null;

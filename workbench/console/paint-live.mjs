@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import {promisify} from 'node:util';
+import {inflate} from 'node:zlib';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
@@ -6,6 +8,7 @@ import {ROOT,hash} from './store.mjs';
 import {livePaintDetail,stopLivePaintDetails} from './paint-live-detail.mjs';
 import {createPaintLiveQueue,paintAbortError} from './paint-live-queue.mjs';
 
+const expandWindow=promisify(inflate);
 const verified=new Map();
 
 function checkFile(file,expected){
@@ -23,14 +26,14 @@ function start({result,fail}){
     {cwd:ROOT,stdio:['pipe','pipe','inherit'],windowsHide:true,env:{...process.env,OPENBLAS_NUM_THREADS:'1'}});
   createInterface({input:child.stdout}).on('line',line=>{
     try{
-      const {id,pixels,error}=JSON.parse(line);
-      result(id,pixels,error?Error(error):null);
+      const {id,pixels,deflated,error}=JSON.parse(line);
+      result(id,{pixels,deflated},error?Error(error):null);
     }catch(error){fail(error);}
   });
   child.on('error',fail);
   child.stdin.on('error',fail);
   child.on('close',()=>fail(Error('实时合成进程已退出')));
-  return {request(id,config){child.stdin.write(JSON.stringify({id,config})+'\n');},stop(){child.kill();}};
+  return {request(id,config){child.stdin.write(JSON.stringify({id,config,compressWindow:true})+'\n');},stop(){child.kill();}};
 }
 const fastQueue=createPaintLiveQueue(start);
 // Canvas hit tests are user input. Keep thumbnail and brush preview bursts
@@ -46,7 +49,10 @@ export function livePaint(config,options={}){
   for(const [id,file] of Object.entries(config.assets))checkFile(file,id);
   if(config.liveResolution===4096)return livePaintDetail(config,options);
   const queue=config.imageLayoutProbe?layoutQueue:fastQueue;
-  return queue.submit(config,options).then(pixels=>Buffer.from(pixels,'base64'));
+  return queue.submit(config,options).then(({pixels,deflated})=>{
+    const bytes=Buffer.from(pixels,'base64');
+    return deflated?expandWindow(bytes):bytes;
+  });
 }
 
 export function stopLivePaint(){

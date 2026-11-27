@@ -34,7 +34,7 @@ async function api(route,body,status=200){
 const op=(action,fields={})=>({op:'image',action,documentId:'layout',...fields});
 const add=(layerId,name,kind,patch={},parentId)=>op('addLayer',{layerId,parentId,kind,patch:{name,...patch}});
 const shape={kind:'rectangle',width:1800,height:450,fill:'#4ad978',stroke:null,strokeWidth:0,cornerRadius:0};
-try{
+async function run(){
   await until(()=>fetch(origin+'/api/health').then(r=>r.ok,()=>false),'启动');
   let doc=await api('/api/projects',{workflowType:'pbr_paint',name:'图片、文字与编号排版',modelTemplate:'plane'},201);
   const route='/api/projects/'+doc.id,paint=route+'/paint';
@@ -115,6 +115,102 @@ image.save(sys.stdout.buffer,format='PNG')
   await editor.getByRole('button',{name:'移动图层',exact:true,pressed:true}).waitFor();
   const box=await canvas.boundingBox();
   const point=([x,y])=>[box.x+x*box.width,box.y+y*box.height];
+  if(process.argv.includes('--move-feedback')){
+    const stage=editor.locator('.document-image-stage');
+    const ready=()=>stage.locator('xpath=self::*[@data-preview-size="4096"][@data-preview-revision="'+doc.revision+'"]').waitFor({timeout:90000});
+    await select('logo').click();
+    await editor.getByRole('checkbox',{name:'吸附参考线'}).uncheck();
+    await ready();
+    for(let n=0;n<4;n++){
+      const rect=await canvas.boundingBox();
+      const at=(u,v)=>[rect.x+u*rect.width,rect.y+v*rect.height];
+      await page.mouse.move(...at(.23,.30));await page.mouse.down();
+      const motion=[];
+      for(const b of [at(.30,.32),at(.34,.33),at(.38,.34),at(.42,.35)]){
+        await canvas.evaluate((c,[x,y])=>{
+          const ctx=c.getContext('2d'),box=c.getBoundingClientRect();
+          const u=(x-box.left)/box.width,v=(y-box.top)/box.height;
+          window.moveTime=new Promise(resolve=>{
+            document.addEventListener('pointermove',()=>{
+              const start=performance.now();
+              let write;
+              const put=ctx.putImageData;
+              ctx.putImageData=function(...args){
+                const result=put.apply(this,args);
+                write=performance.now()-start;
+                return result;
+              };
+              function see(){
+                const frame=performance.now();
+                const [r,,b,a]=ctx.getImageData(Math.floor(u*c.width),Math.floor(v*c.height),1,1).data;
+                if(b>160&&r<110&&a>180){
+                  ctx.putImageData=put;
+                  resolve({write,observed:performance.now()-start,readback:performance.now()-frame});
+                }
+                else requestAnimationFrame(see);
+              }
+              requestAnimationFrame(see);
+            },{capture:true,once:true});
+          });
+        },b);
+        await page.mouse.move(...b);
+        const elapsed=await page.evaluate(()=>Promise.race([window.moveTime,new Promise(resolve=>setTimeout(()=>resolve(null),3000))]));
+        if(elapsed===null){
+          const diagnostic=await stage.evaluate(el=>({stage:{...el.dataset},outline:el.querySelector('.document-layout-outline')?.getAttribute('points'),
+            canvas:el.querySelector('canvas').width}));
+          throw Error('拖动后没有读到标记像素 '+JSON.stringify({errors,diagnostic}));
+        }
+        motion.push(elapsed);
+      }
+      await stage.evaluate((el,revision)=>{
+        window.moveReady=new Promise(resolve=>{
+          document.addEventListener('pointerup',()=>{
+            const start=performance.now();
+            const observer=new MutationObserver(()=>{
+              if(Number(el.dataset.previewRevision)===revision&&el.dataset.previewSize==='4096'){
+                observer.disconnect();resolve(performance.now()-start);
+              }
+            });
+            observer.observe(el,{attributes:true});
+          },{capture:true,once:true});
+        });
+      },doc.revision+1);
+      const released=performance.now();await page.mouse.up();
+      await waitRevision('移动标志');await ready();
+      console.log('MOVE',n,JSON.stringify({motion,ready:performance.now()-released,canvasReady:await page.evaluate(()=>window.moveReady)}));
+      assert.ok(Math.abs(layer('logo').x-.42)<.005);
+      const colors=await sampleArtwork([[.42,.35],[.23,.30]]);
+      assert.deepEqual(colors,[[41,93,252,255],[0,0,0,0]]);
+      await canvas.focus();await page.keyboard.press(modifier+'+z');await waitRevision('撤销移动');await ready();
+      assert.deepEqual(layers(doc),original);
+    }
+    await canvas.focus();await page.keyboard.press(modifier+'+Shift+z');await waitRevision('重做移动');await ready();
+    await page.reload();await ready();
+    const center=await canvas.evaluate(c=>[...c.getContext('2d').getImageData(Math.floor(.42*c.width),Math.floor(.35*c.height),1,1).data]);
+    assert.deepEqual(center,[41,93,252,255]);
+    if(process.argv.includes('--check-move-blend')){
+      await commands({...add('backdrop','有色底板','shape',{shape:{...shape,width:4096,height:4096,fill:'#487242'},x:.5,y:.5,scale:1}),index:0},
+        op('updateLayer',{layerId:'logo',patch:{opacity:.5}}));
+      const prepared=page.waitForResponse(r=>r.url().endsWith('/image-live')&&r.request().postDataJSON().isolatedImageLayer==='logo'
+        &&Boolean(r.request().postDataJSON().window)&&r.status()===200);
+      await page.reload();await select('logo').click();await canvas.focus();await page.keyboard.press('v');
+      await ready();await (await prepared).finished();
+      await page.route('**/image-live',r=>r.request().postDataJSON().operation?.action==='layoutLayers'?r.abort():r.continue());
+      const rect=await canvas.boundingBox(),at=(u,v)=>[rect.x+u*rect.width,rect.y+v*rect.height];
+      const pixel=(u,v)=>canvas.evaluate((c,[u,v])=>[...c.getContext('2d').getImageData(Math.floor(u*c.width),Math.floor(v*c.height),1,1).data],[u,v]);
+      const start=await pixel(.42,.35),background=await pixel(.27,.35);
+      assert.notDeepEqual(start,background);
+      await page.mouse.move(...at(.42,.35));await page.mouse.down();await page.mouse.move(...at(.27,.35));
+      assert.deepEqual(await pixel(.27,.35),start);
+      assert.deepEqual(await pixel(.42,.35),background);
+      await page.keyboard.press('Escape');await page.mouse.up();
+      assert.deepEqual(await pixel(.27,.35),background);
+      assert.deepEqual(await pixel(.42,.35),start);
+      console.log('PASS translucent move over colored background and immediate cancel with worker drafts unavailable');
+    }
+    assert.deepEqual(errors,[]);
+    return;
+  }
   const pickRoute='**/image-layout-probe';
   let firstPick,releasePick,firstPickCancelled;
   const firstPickStarted=new Promise(resolve=>{firstPick=resolve;});
@@ -716,7 +812,8 @@ with Image.open(sys.argv[1]) as before, Image.open(sys.argv[2]) as after:
   await page.screenshot({path:path.join(data,'layout-fine-line-pick.png')});
   assert.deepEqual(errors,[]);
   console.log('PASS joint layout, four editable warps, linked and independent masks, named selections, pixels, undo and reopen:',data);
-}finally{
+}
+try{await run();}finally{
   try{await browser?.close();}finally{
     if(server.exitCode===null&&server.signalCode===null){const stopped=once(server,'exit');server.kill();await stopped;}
   }

@@ -36,6 +36,7 @@ import {pauseImageThumbnail,updateImageThumbnail} from './image-layer-thumbnails
 import {createImageGradientTool} from './image-gradient-tool.mjs';
 import {createImageFillTool} from './image-fill-tool.mjs';
 import {createImageCloneTool} from './image-clone-tool.mjs';
+import {moveSource} from './image-move-preview.mjs';
 import {layoutDamage} from './image-layout.mjs';
 import {createImageMoveTool} from './image-move-tool.mjs';
 import {createImageWarpTool} from './image-warp-tool.mjs';
@@ -474,7 +475,7 @@ export function createDocumentEditor(ctx,bridge){
     return !project.imageContext?.inspectMask&&hasWideGamut(currentDocument(project)?.colorSpace);
   }
   let lassoShape=state.lassoShape==='polygon'?'polygon':'lasso';
-  let painter,gradientTool,bucketTool,cloneTool,shapeTool,moveTool,warpTool,canvasText,penTool,edgeTool,pendingImageEdit=null,previewCaption='',fillGroup=state.fillGroup==='bucket'?'bucket':'gradient';
+  let painter,gradientTool,bucketTool,cloneTool,shapeTool,moveTool,warpTool,canvasText,penTool,edgeTool,pendingImageEdit=null,pendingMoveWindow=null,previewCaption='',fillGroup=state.fillGroup==='bucket'?'bucket':'gradient';
   function layoutBrushOptions(){
     const width=host.clientWidth,compact=width>0&&width<780,small=width>0&&width<440;
     const enabled=['paint','mask','clone','heal','spot'].includes(mode);
@@ -537,13 +538,15 @@ export function createDocumentEditor(ctx,bridge){
   function draft(op,origin){const mapped=mapOperation(op,origin);live.update(mapped);project.draft(mapped);}
   const writing=()=>canvasText?.isEditing()||penTool?.isEditing()||edgeTool?.isEditing()||bridge.busy()||!!pendingImageEdit||strokeQueue.size>0||importing||cutting;
   function submitEdit(operation,origin,onSaved){
+    const savedWindow=operation?.action==='layoutLayers'?live.moveSaveWindow(operation):null;
+    pendingMoveWindow=savedWindow;
     const task=(async()=>{
       try{
-        await project.commands([operation],origin);
-        if(!disposed)onSaved?.();
+        const saved=await project.commands([operation],origin);
+        if(!disposed){live.finishMove(savedWindow,saved?.revision);onSaved?.();}
         return true;
       }catch(error){if(!disposed)ctx.error(error);return false;}
-      finally{if(!disposed){live.update(null);project.draft(null);}}
+      finally{pendingMoveWindow=null;if(!disposed){live.update(null);project.draft(null);}}
     })();
     pendingImageEdit=task;
     sync();
@@ -555,7 +558,9 @@ export function createDocumentEditor(ctx,bridge){
   function save(op,origin){
     return submitEdit(mapOperation(op,origin),{id:origin.id||origin.projectId,revision:origin.revision});
   }
+  const usesBrushTiles=()=>['paint','mask'].includes(mode);
   const brushTiles=createBrushTiles(()=>{
+    if(!usesBrushTiles())return null;
     const image=currentDocument(project),layer=currentLayer(project);
     if(disposed||!shown||!image||!layer)return null;
     const [x,y,w,h]=documentFrame(image);
@@ -571,8 +576,15 @@ export function createDocumentEditor(ctx,bridge){
       tip:imageControls.tipAsset.select.value,texture:imageControls.textureAsset.select.value,space:image.colorSpace,inspect:!!project.imageContext.inspectMask,center:[(x+w/2)/4096,(y+h/2)/4096]};
   });
   stage.addEventListener('pointermove',event=>{
-    if(event.target===canvas)brushTiles.prepare(canvasPoint(canvas,event),!!event.buttons);
+    if(event.target===canvas&&usesBrushTiles())brushTiles.prepare(canvasPoint(canvas,event),!!event.buttons);
   },{capture:true,signal:life.signal});
+  let moveSelection;
+  function selectedMoveSource(image,id,doc){
+    if(moveSelection?.image!==image||moveSelection.id!==id||moveSelection.revision!==doc.revision){
+      moveSelection={image,id,revision:doc.revision,source:moveSource(image,id,doc.paint.assets)};
+    }
+    return moveSelection.source;
+  }
   const live=createLiveView({localBrush:edits=>brushTiles.render(edits),rgba:true,viewport:{showLivePaint(){}},canvas,guide:el('canvas'),
     context:()=>{
       const doc=project.document,c=project.imageContext;
@@ -605,6 +617,7 @@ export function createDocumentEditor(ctx,bridge){
         !['group','adjustment'].includes(layer.kind));
       return {id:doc.id,revision:doc.revision,documentId:c.documentId,inspectMask:c.inspectMask?c.layerId:null,channel:'color',
         colorSpace:image.colorSpace,gamutWarning:gamutWarning&&canWarnGamut(),imageGeometry:imageViewGeometry(image),
+        moveSource:prefs.autoDetail&&mode==='move'&&!c.inspectMask&&c.target!=='mask'&&!(c.layerIds?.length>1)&&selectedMoveSource(image,c.layerId,doc),
         nativeCanvas:prefs.autoDetail,patchLayer:localEdits?selected?.id:null,maskEnabled:selected?.maskEnabled,
         draftBounds:patchable?op=>layoutDamage(image.layers,doc.paint.assets,op):undefined,
         fastSize,visiblePixels,strokeBleed,detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};
@@ -1080,6 +1093,7 @@ export function createDocumentEditor(ctx,bridge){
   function setMode(next){
     if(canvasText?.isEditing()&&next!==mode)return;
     stopAdjustmentPick();
+    const previous=mode;
     mode=next;showSampleNotice();
     if(next==='bucket'||next==='gradient')fillGroup=next;
     stage.toggleAttribute('data-text-placement',next==='text');
@@ -1089,6 +1103,7 @@ export function createDocumentEditor(ctx,bridge){
     moveButton.setAttribute('aria-pressed',String(next==='move'));
     moveButton.title=colorTarget()==='mask'?'移动蒙版 · V · 解除链接后可拖动':'移动图层 · V · 单击画布选层 · Shift 加选';
     moveTool?.setActive(next==='move');
+    if(previous!==next&&(previous==='move'||next==='move')&&!pendingMoveWindow)live.refresh();
     warpButton.setAttribute('aria-pressed',String(next==='warp'));
     warpTool?.setActive(next==='warp');
     textTool.setAttribute('aria-pressed',String(next==='text'));
@@ -1767,7 +1782,7 @@ export function createDocumentEditor(ctx,bridge){
     const geometry=image?[image.width,image.height,...documentFrame(image)].join(','):'';
     if(geometry!==geometryKey){geometryKey=geometry;layout();}
     if(!image){live.clear();previewCaption='';status.textContent='';delete stage.dataset.previewSize;delete stage.dataset.previewRevision;}
-    ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();live.refresh();brushTiles.prepare();uvGuide.sync();
+    ctx.title.textContent=image?image.name+' · RGBA':'';syncToolName();painter.render();selection.sync();renderSelectionLibrary();syncColors();syncClipboard();syncStrokePreview();if(!pendingMoveWindow)live.refresh();brushTiles.prepare();uvGuide.sync();
   }
   const unsub=project.subscribe(event=>sync(event.kind==='resource'));sync();if(mode==='select')selection.choose(selectionShape,{focus:false});else setMode(mode);
   return {kind:'image',sync,handleKey,openPhotoFile(){if(!importing&&!writing())openInput.click();},travelHistory,getBrushSettings:()=>painter.getSettings(),preferencesChanged:()=>live.preferencesChanged(),activate(){imageView.activate();project.setEditorDomain('image');},getState:()=>({zoom,pan,angle,mirror,gamutWarning,uvGuide:uvGuide.enabled,tool:mode,edgeRefine:edgeTool.getState(),selectionTool:selectionShape,lassoShape,selectionMode:selection.getCombination(),selectionFeather:selection.getFeather(),selectionCoverage:coverageToggle.getAttribute('aria-pressed')==='true',wand:readWand(),colorRange:readRange(),selectionRefineRadius:refineRadius.valueAsNumber,gradient:gradientTool.getState(),bucket:bucketTool.getState(),clone:cloneTool.getState(),shape:shapeTool.getState(),move:moveTool.getState(),fillGroup,eraser:elements['brush-erase'].checked,channel:channel.value,imageSelections:imageView.getState()}),isEditing:()=>!!pendingImageEdit||importing||cutting||strokeQueue.size>0||drawingGesture()||selection.isDragging()||selection.isTransforming(),

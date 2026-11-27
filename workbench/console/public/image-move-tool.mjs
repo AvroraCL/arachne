@@ -124,9 +124,6 @@ export function createImageMoveTool({stage,canvas,parameters,signal,settings={},
       layout();
     });
   }
-  function svgPoint(point){
-    return canvasCoordinates(canvas).toLocal(stage.getBoundingClientRect())(point);
-  }
   function addLine(host,a,b,cls){
     const line=svg('line',cls);
     line.setAttribute('x1',a[0]);line.setAttribute('y1',a[1]);
@@ -165,6 +162,7 @@ export function createImageMoveTool({stage,canvas,parameters,signal,settings={},
     snapLabel.hidden=arrangeButton.hidden=!!state.mask;
     arrangeButton.disabled=!ready||items.length<2;
     guideButton.disabled=!state.image;
+    const svgPoint=canvasCoordinates(canvas).toLocal(stage.getBoundingClientRect());
     guides.replaceChildren();
     for(const [i,axis] of ['x','y'].entries()){
       for(const value of guidesVisible?referenceLines[axis]:[]){

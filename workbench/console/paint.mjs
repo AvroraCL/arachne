@@ -901,7 +901,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
     if(!Array.isArray(window)||window.length!==3||!window.every(Number.isInteger))throw Error('局部预览范围无效');
     const [x,y,side]=window;
     if(![256,512,768,1024,1536,2048].includes(side)||x<0||y<0||x+side>4096||y+side>4096||
-       isolatedImageLayer||beforeImageLayer!==undefined||(!edits.length&&resolution!==256)||edits.some(edit=>edit.op!=='image'))
+       isolatedImageLayer&&(edits.length||inspectMask)||beforeImageLayer!==undefined||(!edits.length&&resolution!==256)||edits.some(edit=>edit.op!=='image'))
       throw Error('局部预览范围无效');
   }
   if(![64,128,256,512,1024,4096].includes(resolution)||resolution===4096&&edits.length)throw Error('图像预览尺寸无效');
