@@ -736,6 +736,8 @@ def live_pixels(cfg):
             window = exact_stroke_window(doc,cfg['assets'],cfg['imageWindow'],cfg.get('imageInspectMask'))
             if window is not None:
                 return b'W'+window.tobytes()
+            if cfg.get('imageWindowOnly'):
+                return b''
         if cfg.get('imageThumbnail'):
             pixels=framed_composite(doc,cfg['assets'],cfg['imageViewSize'],cfg.get('imageInspectMask'))
             return memoryview(np.ascontiguousarray(pixels)).cast('B')

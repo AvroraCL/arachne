@@ -31,8 +31,51 @@ export function placedImageBounds(layer,assets){
   const placement=imagePlacement(layer,assets);
   return placement&&unionImageBounds((layer.warp?.points??quadPoints).map(placement.toCanvas).map(([x,y])=>[x,y,x,y]));
 }
+const placementFields=['opacity','blend','visible','maskEnabled','maskDensity','maskFeather','x','y','scale','rotation','stretch'];
+
+// Only patch a saved canvas when the two authoritative stacks establish that
+// every other input is identical. This also works for undo and remote updates.
+export function savedLayerDamage(before,after,assets){
+  if(!before||before.layers.length!==after.layers.length||after.layers.some(l=>l.embedded))return null;
+  let change;
+  for(let i=0;i<after.layers.length;i++){
+    const old=before.layers[i],layer=after.layers[i];
+    if(old.id!==layer.id)return null;
+    if(!['shape','image'].includes(layer.kind))continue;
+    const patch={};
+    for(const key of placementFields){
+      if(key==='stretch'?String(old.stretch)!==String(layer.stretch):old[key]!==layer[key])patch[key]=layer[key];
+    }
+    if(!Object.keys(patch).length)continue;
+    if(change)return null;
+    change={index:i,patch};
+  }
+  if(!change)return null;
+  const {index,patch}=change;
+  const bounds=layoutDamage(before.layers,assets,{action:'updateLayer',layerId:before.layers[index].id,patch});
+  if(!bounds)return null;
+  return matchesLayerPatch(before,after,index,patch)?bounds:null;
+}
+
+export function matchesLayerPatch(before,after,index,patch){
+  if(!before||index<0||before.layers.length!==after.layers.length||after.layers.some(l=>l.embedded))return false;
+  return after.layers.every((next,i)=>{
+    const old=before.layers[i];
+    return (i!==index&&old===next)||JSON.stringify(i===index?{...old,...patch}:old)===JSON.stringify(next);
+  });
+}
 // Exterior pixels are unchanged when moving independently composited placed layers.
 export function layoutDamage(layers,assets,operation){
+  if(operation?.action==='updateLayer'){
+    const index=layers.findIndex(l=>l.id===operation.layerId),layer=layers[index];
+    if(!layer||layer.parentId||layer.warp||!['shape','image'].includes(layer.kind)||
+       Object.values(layer.styles??{}).some(effect=>effect.enabled))return null;
+    // Only these edits preserve the source footprint or have a known new placement.
+    if(!Object.keys(operation.patch).every(key=>placementFields.includes(key)))return null;
+    if(layers.slice(index+1).some(l=>l.kind==='adjustment'||l.kind==='group'||l.parentId))return null;
+    const before=placedImageBounds(layer,assets),after=placedImageBounds({...layer,...operation.patch},assets);
+    return before&&after?unionImageBounds([before,after]):null;
+  }
   if(operation?.action!=='layoutLayers'||layers.some(l=>l.kind==='adjustment'||l.parentId||l.clipped||
       l.kind==='group'||Object.values(l.styles??{}).some(style=>style.enabled)))return null;
   const boxes=[];

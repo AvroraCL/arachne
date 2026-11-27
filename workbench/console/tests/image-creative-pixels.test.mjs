@@ -961,3 +961,24 @@ before[y:y+side,x:x+side]=exact_stroke_window(b,{},box,None)
 assert np.array_equal(before,final)
 `],{cwd:new URL('..',import.meta.url),input:JSON.stringify([original,after,box])});
 });
+
+test('a long translated fill outside a changed layer does not force a full draft or hide its destination',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import numpy as np
+from image_documents import exact_stroke_window,composite_document
+def layer(id,strokes,**extra):
+    return dict(id=id,kind='pixel',visible=True,opacity=1,blend='normal',maskEnabled=False,strokes=strokes,**extra)
+def fill(rect,color):
+    return dict(uv=True,rect=rect,color=color,opacity=.6,erase=False)
+moved=layer('ink',[fill([.45,.50,.53,.56],'#ee22bb'),dict(transformUV=dict(rect=[0,0,1,1],
+    offset=[-.36,.105],scale=[1,1],angle=0,interpolation='linear'))])
+doc=dict(colorSpace='srgb',layers=[moved,layer('overlay',[fill([.6,.5,.65,.55],'#11aa55')])])
+full=composite_document(doc,{},4096)
+x,y,s=2100,1700,1024
+tile=exact_stroke_window(doc,{},[x,y,s],None)
+assert tile is not None and np.any(tile[:,:,3]) and np.array_equal(tile,full[y:y+s,x:x+s])
+x,y=0,2100
+dest=exact_stroke_window(doc,{},[x,y,s],None)
+assert np.any(full[y:y+s,x:x+s,3]) and (dest is None or np.array_equal(dest,full[y:y+s,x:x+s]))
+`],{cwd:new URL('..',import.meta.url)});
+});

@@ -226,18 +226,23 @@ image.save(sys.stdout.buffer,format='PNG')
     await page.route('**/image-live',hold);
     await page.reload();await select('logo').click();await select(text.layerId).click({modifiers:[modifier]});
     await canvas.focus();await page.keyboard.press('v');await ready();
-    const waitWidth=width=>canvas.evaluate((c,width)=>new Promise((resolve,reject)=>{
-      const start=performance.now();
-      function check(){
-        if((c.width===4096)===width){resolve();return;}
-        if(performance.now()-start>12000){reject(Error('联合平移预览没有交接'));return;}
-        requestAnimationFrame(check);
-      }
-      check();
-    }),width);
+    await canvas.evaluate(c=>{
+      const ctx=c.getContext('2d'),put=ctx.putImageData;
+      window.dragWrites={full:0,region:0,widths:[]};
+      ctx.putImageData=function(image,...args){
+        const result=put.call(this,image,...args),trace=window.dragWrites;
+        trace[image.width===4096&&args.length===2?'full':'region']++;
+        trace.widths.push(c.width);
+        return result;
+      };
+    });
     await page.mouse.move(...at(.27,.68));await page.mouse.down();await page.mouse.move(...at(.32,.74));
-    try{await waitWidth(false);}finally{releasePlane();}
-    await waitWidth(true);
+    try{
+      await page.waitForFunction(()=>window.dragWrites.full>0);
+      assert.notDeepEqual(await sample(.27,.68),saved,'原位置应已显示后台草稿');
+    }finally{releasePlane();}
+    await page.waitForFunction(()=>window.dragWrites.region>0);
+    assert.ok(await page.evaluate(()=>window.dragWrites.widths.every(w=>w===4096)));
     const requests=drafts;
     await page.mouse.move(...at(.35,.78));
     await page.keyboard.press('Escape');await page.mouse.up();

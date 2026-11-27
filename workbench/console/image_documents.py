@@ -1141,6 +1141,32 @@ def stroke_window_padding(document):
     return padding
 
 
+def translated_fill_bounds(layer):
+    # A moved selection fill may be far outside the requested tile. Track a
+    # conservative pixel box for this sparse history, including bilinear taps.
+    if layer['kind']!='pixel' or layer.get('raster'):
+        return None
+    box = None
+    moved = False
+    for stroke in iter_strokes(layer.get('strokes', [])):
+        transform = stroke.get('transformUV')
+        if transform:
+            if (box is None or tuple(transform['rect'])!=(0,0,1,1) or
+                    set(transform)-{'rect','pivot','offset','scale','angle','interpolation'} or
+                    transform['scale']!=[1,1] or transform['angle']):
+                return None
+            dx,dy = (d*4096 for d in transform['offset'])
+            box = [box[0]+dx-2,box[1]+dy-2,box[2]+dx+2,box[3]+dy+2]
+            moved = True
+        elif 'rect' in stroke and 'flood' not in stroke and 'clone' not in stroke and not stroke.get('feather'):
+            rect = [v*4096 for v in stroke['rect']]
+            box = rect if box is None else [min(box[0],rect[0]),min(box[1],rect[1]),
+                                              max(box[2],rect[2]),max(box[3],rect[3])]
+        else:
+            return None
+    return box if moved else None
+
+
 def exact_stroke_window(document,assets,window,inspect_mask):
     padding = stroke_window_padding(document)
     if padding is None:
@@ -1148,7 +1174,24 @@ def exact_stroke_window(document,assets,window,inspect_mask):
     x,y,side = window
     wide = side+2*padding
     if wide>2048:
-        return None
+        # Keep the group and clipping stack intact. Omit only strokes proven
+        # empty throughout the tile AND its filter/style neighbourhood.
+        layers = document['layers']
+        boxes = [translated_fill_bounds(layer) for layer in layers]
+        if not any(boxes):
+            return None
+        trimmed = [{**layer,'strokes':[]} if box else layer for layer,box in zip(layers,boxes)]
+        document = {**document,'layers':trimmed}
+        margin = stroke_window_padding(document)
+        if margin is None or side+2*margin>2048:
+            return None
+        for i,box in enumerate(boxes):
+            if box and box[0]<=x+side+margin and box[2]>=x-margin and box[1]<=y+side+margin and box[3]>=y-margin:
+                trimmed[i] = layers[i]
+        padding = stroke_window_padding(document)
+        wide = side+2*padding
+        if wide>2048:
+            return None
     left,top = (max(0,min(4096-wide,k-padding)) for k in (x,y))
     pixels = composite_document(document,assets,wide,inspect_mask,window=(left,top,wide))
     return pixels[y-top:y-top+side,x-left:x-left+side]

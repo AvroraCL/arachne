@@ -37,7 +37,7 @@ import {createImageGradientTool} from './image-gradient-tool.mjs';
 import {createImageFillTool} from './image-fill-tool.mjs';
 import {createImageCloneTool} from './image-clone-tool.mjs';
 import {moveSource} from './image-move-preview.mjs';
-import {layoutDamage} from './image-layout.mjs';
+import {layoutDamage,savedLayerDamage} from './image-layout.mjs';
 import {createImageMoveTool} from './image-move-tool.mjs';
 import {createImageWarpTool} from './image-warp-tool.mjs';
 import {createImageStrokeQueue} from './image-stroke-queue.mjs';
@@ -693,6 +693,7 @@ export function createDocumentEditor(ctx,bridge){
         colorSpace:image.colorSpace,gamutWarning:gamutWarning&&canWarnGamut(),imageGeometry:imageViewGeometry(image),
         moveSource:prefs.autoDetail&&mode==='move'&&!c.inspectMask&&c.target!=='mask'&&selectedMoveSource(image,c.layerIds?.length?c.layerIds:[c.layerId],doc),
         nativeCanvas:prefs.autoDetail,patchLayer:localEdits?selected?.id:null,maskEnabled:selected?.maskEnabled,
+        imageDocument:image,savedBounds:patchable&&!c.inspectMask?previous=>savedLayerDamage(previous,image,doc.paint.assets):undefined,
         draftBounds:patchable?op=>layoutDamage(image.layers,doc.paint.assets,op):undefined,
         fastSize,visiblePixels,strokeBleed,detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};
     },

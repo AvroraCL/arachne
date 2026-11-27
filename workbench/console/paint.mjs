@@ -888,7 +888,7 @@ export function livePaintInput(doc,{revision,operation,operations,inspectMask,is
   if(rawLayer){input.paint={...input.paint,base:{color:'#383838',metallic:0,roughness:.5}};delete input.paint.baseChannels;delete input.paint.materialGraph;input.materialPlan=null;delete input.materialFingerprint;}
   return {...input,inspectMask,isolatedLayer,uvGuide:uvGuide===true,liveResolution:resolution,liveFormat:format};
 }
-export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,movePlane,brushTile,documentView=false,resolution=256}){
+export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,windowOnly=false,movePlane,brushTile,documentView=false,resolution=256}){
   if(doc.revision!==revision)throw revisionError(doc);
   const edits=liveDraftOperations(doc,operation,operations,documentId);
   if(brushTile!==undefined){
@@ -897,6 +897,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
        typeof brushTile?.layerId!=='string'||!Array.isArray(box)||box.length!==3||box[2]!==512||
        !box.slice(0,2).every(n=>Number.isInteger(n)&&n>=0&&n+512<=4096))throw Error('笔刷局部底图范围无效');
   }
+  if(typeof windowOnly!=='boolean'||windowOnly&&!window)throw Error('局部预览范围无效');
   if(window!==undefined){
     if(!Array.isArray(window)||window.length!==3||!window.every(Number.isInteger))throw Error('局部预览范围无效');
     const [x,y,side]=window;
@@ -904,7 +905,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
        isolatedImageLayer&&(edits.length||inspectMask)||beforeImageLayer!==undefined||(!edits.length&&resolution!==256)||edits.some(edit=>edit.op!=='image'))
       throw Error('局部预览范围无效');
   }
-  if(![64,128,256,512,1024,4096].includes(resolution)||resolution===4096&&edits.length)throw Error('图像预览尺寸无效');
+  if(![64,128,256,512,1024,4096].includes(resolution)||resolution===4096&&window)throw Error('图像预览尺寸无效');
   const next=edits.length?applyOperations(structuredClone(doc),edits):doc;
   if(!Object.hasOwn(next.paint.imageDocuments??{},documentId))throw Error('图像文档不存在');
   const image=next.paint.imageDocuments[documentId];
@@ -949,7 +950,7 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
     imageDocumentId:documentId,
     ...(thumbnail?{imageThumbnail:true,imageViewSize:thumbnailDimensions(image,resolution)}:
       documentView?{imageViewSize:previewDimensions(image,resolution)}:{}),
-    imageInspectMask:inspectMask,...(brushTile?{imageBrushTile:brushTile}:{}),...(window?{imageWindow:window}:{}),
+    imageInspectMask:inspectMask,...(brushTile?{imageBrushTile:brushTile}:{}),...(window?{imageWindow:window}:{}),...(windowOnly?{imageWindowOnly:true}:{}),
     liveResolution:resolution,
     liveFormat:'rgba'
   };
@@ -1574,7 +1575,7 @@ function replaceTextLayer(doc,layer,style,entry,assetField,origin){
 export async function previewImageText(doc,request,{signal,materialInput}={}){
   const {revision,documentId,resolution,textDraft,inspectMask,documentView}=fields(request,['revision','documentId','resolution','textDraft','inspectMask','documentView']);
   if(doc.revision!==revision)throw revisionError(doc);
-  if(![256,512,1024].includes(resolution)||inspectMask!=null)throw Error('文字预览参数无效');
+  if(![256,512,1024,4096].includes(resolution)||resolution===4096&&materialInput||inspectMask!=null)throw Error('文字预览参数无效');
   const {layerId,content,box}=fields(textDraft,['layerId','content','box']);
   const documents=doc.paint.imageDocuments??{};
   const layer=Object.hasOwn(documents,documentId)&&documents[documentId].layers.find(item=>item.id===layerId&&item.text);

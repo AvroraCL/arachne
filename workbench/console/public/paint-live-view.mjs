@@ -1,3 +1,4 @@
+import {matchesLayerPatch} from './image-layout.mjs';
 import {createMovePreview,isMoveSelection} from './image-move-preview.mjs';
 import {hasWideGamut,imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
 import {previewDimensions,documentFrame} from './image-document-size.mjs';
@@ -60,20 +61,23 @@ function strokeWindow(edits,visible,bleed=0){
 
 function draftWindow(edits,state){
   if(edits.every(edit=>edit?.op==='image'&&edit.action==='stroke'&&edit.stroke?.stamps))
-    return strokeWindow(edits,state.visiblePixels??(state.nativeCanvas&&state.patchLayer?[[0,detailSize],[0,detailSize]]:null),state.strokeBleed);
-  // For a transform or adjustment every visible pixel may change. Use a
-  // native window only when its cost is bounded by the ordinary draft size.
+    return strokeWindow(edits,state.visiblePixels??(state.nativeCanvas&&state.draftBounds?[[0,detailSize],[0,detailSize]]:null),state.strokeBleed);
+  // At high zoom the visible region can be smaller than the affected layer.
   if(!edits.every(edit=>edit?.op==='image'&&!edit.textDraft))return;
-  const bounds=edits.length===1&&state.draftBounds?.(edits[0]);
+  const bounds=!state.inspectMask&&edits.length===1&&state.draftBounds?.(edits[0]);
   if(!bounds&&!state.visiblePixels)return;
-  const [x,y,w,h]=documentFrame(state.imageGeometry);
-  const ranges=(state.visiblePixels??[[x,x+w],[y,y+h]]).map(([start,end],i)=>[
+  return boundedWindow(bounds,state.imageGeometry,state.visiblePixels,state.nativeCanvas?2048:(state.fastSize??256));
+}
+
+function boundedWindow(bounds,geometry,visible,limit){
+  const [x,y,w,h]=documentFrame(geometry);
+  const ranges=(visible??[[x,x+w],[y,y+h]]).map(([start,end],i)=>[
     Math.max(i?y:x,Math.floor(start),bounds?Math.floor(bounds[i]*detailSize)-2:0),
     Math.min(i?y+h:x+w,Math.ceil(end),bounds?Math.ceil(bounds[i+2]*detailSize)+2:detailSize)
   ]);
   if(ranges.some(([start,end])=>end<=start))return;
   const needed=Math.max(...ranges.map(([start,end])=>end-start));
-  const side=[256,512,768,1024].find(value=>value>=needed&&value<=(state.fastSize??256));
+  const side=[256,512,768,1024,1536,2048].find(value=>value>=needed&&value<=limit);
   if(side)return [...ranges.map(([start,end])=>clamp(Math.floor((start+end-side)/2),0,detailSize-side)),side];
 }
 
@@ -223,7 +227,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
   }
 
   function send(request){
-    if(request.size===detailSize){
+    if(request.size===detailSize&&!request.operation){
       detailInFlight=request;
       void load(request);
     }else{
@@ -234,7 +238,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
 
   async function load(request){
     request.controller=new AbortController();
-    if(request.size===detailSize)status('refining');
+    if(request.size===detailSize&&!request.operation)status('refining');
     const {id,revision,inspectMask,isolatedLayer,operation,key,size,window}=request;
     const isCurrent=()=>!request.controller.signal.aborted&&context()?.key===key&&intent?.group===request.group&&
       (!operation||!localInk||request===intent)&&
@@ -243,7 +247,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       if(context()?.modeling&&frame?.request.revision!==revision)onStatus('正在更新建模后的材质与表面…');
       const draft=operation?.textDraft?{textDraft:operation.textDraft,documentId:operation.documentId}:
         Array.isArray(operation)?{operations:operation}:{operation};
-      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:request.savedWindow?256:size,window,...(request.imageGeometry?{documentView:true}:{})}:{revision,...draft,textureSet:request.textureSet,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
+      const body=JSON.stringify(rgba?{revision,...draft,documentId:request.documentId,inspectMask:request.inspectMask,resolution:request.savedWindow?256:size,window,...(window&&request.nativeCanvas?{windowOnly:true}:{}),...(request.imageGeometry?{documentView:true}:{})}:{revision,...draft,textureSet:request.textureSet,inspectMask,isolatedLayer,uvGuide:true,resolution:size,format:'pbr8'});
       const response=await transport(()=>fetch('/api/projects/'+id+'/paint/'+(rgba?'image-live':'live'),{
         method:'POST',headers:{'Content-Type':'application/json'},signal:request.controller.signal,
         body
@@ -265,6 +269,13 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
         throw Error('实时贴图修订或尺寸不一致');
       if(request.savedWindow&&response.headers.get('X-Paint-Window')!==window.join(',')){
         request.controller.abort();requestFrame(context(),null,detailSize);return;
+      }
+      if(operation&&window&&request.nativeCanvas&&response.headers.get('X-Paint-Window')!==window.join(',')){
+        // A filter may need pixels outside the requested tile. Keep the native
+        // canvas intact and render only the latest draft with the full compositor.
+        request.controller.abort();
+        if(intent?.group===request.group&&intent.window?.join(',')===window.join(','))requestFrame(context(),intent.operation,detailSize);
+        return;
       }
       const next=new Uint8Array(await transport(()=>response.arrayBuffer()));
       // Keep responding from the previous selection while its saved pixels and
@@ -328,7 +339,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     }catch(error){
       if(error.name==='AbortError'||request.controller.signal.aborted||intent!==request||context()?.key!==key)return;
       if(retryTransient(request,error))return;
-      if(size===detailSize){
+      if(size===detailSize&&!operation){
         detailFailure={key,message:error.message};
         if(patched)draw();
         status('error',error.message,size);
@@ -391,7 +402,8 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       previous.id===state.id&&previous.documentId===state.documentId&&
       previous.inspectMask===state.inspectMask&&previous.colorSpace===state.colorSpace&&
       JSON.stringify(previous.imageGeometry)===JSON.stringify(state.imageGeometry));
-    const window=savedWindow??(rgba&&nativeSurface&&operation?draftWindow(strokes,state):undefined);
+    const window=savedWindow??(rgba&&size!==detailSize&&nativeSurface&&(!previous.operation||!state.nativeCanvas)&&operation?draftWindow(strokes,state):undefined);
+    if(rgba&&state.nativeCanvas&&operation&&!window)size=detailSize;
     intent={...state,operation,target,size,window,savedWindow,movePreparation,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
     if(moveDirty&&!operation&&baseFrame?.request.key===state.key)restoreMove();
     if(drawMove(state,operation))return;
@@ -437,6 +449,31 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     scheduleDetail();
   }
 
+  function requestSaved(state){
+    const matchesBase=previous=>previous?.size===detailSize&&previous.id===state.id&&
+      previous.documentId===state.documentId&&previous.revision+1===state.revision&&
+      previous.colorSpace===state.colorSpace&&previous.inspectMask===state.inspectMask&&
+      JSON.stringify(previous.imageGeometry)===JSON.stringify(state.imageGeometry);
+    const shown=frame?.request,edit=shown?.operation;
+    // A whole native draft already includes every pixel. Adopt it only when
+    // the saved stack exactly matches the edit that produced those pixels.
+    if(state.nativeCanvas&&edit?.action==='updateLayer'&&state.imageDocument&&matchesBase(shown)&&
+       !localInk&&!patched&&!moveDirty&&drawn?.pixels===frame.pixels&&
+       matchesLayerPatch(shown.imageDocument,state.imageDocument,state.imageDocument.layers.findIndex(l=>l.id===edit.layerId),edit.patch)){
+      baseFrame={request:{...shown,key:state.key},pixels:frame.pixels};
+      return requestFrame(state,null,detailSize);
+    }
+    const before=baseFrame?.request;
+    if(state.nativeCanvas&&state.savedBounds&&!localInk&&!moveDirty&&frame===baseFrame&&matchesBase(before)){
+      const bounds=state.savedBounds(before.imageDocument);
+      if(bounds){
+        const box=boundedWindow(bounds,state.imageGeometry,undefined,2048);
+        if(box&&(!patched||patched.window.every((n,i)=>n===box[i])))return requestFrame(state,null,detailSize,box);
+      }
+    }
+    requestFrame(state,null);
+  }
+
   function scheduleDetail(){
     const state=context();
     if(detailTimer!==null||!state?.detail||intent?.key!==state.key||intent.operation||intent.size===detailSize||
@@ -468,8 +505,8 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       const state=context();
       if(!state)return;
       moves&&moves.prepare(state);
-      if(intent?.key!==state.key)requestFrame(state);
-      else if(retryTimer===null&&fastFailure?.request!==intent&&detailFailure?.key!==state.key&&frame?.request!==intent&&!queued&&!inFlight&&!detailInFlight&&!moveDirty)requestFrame(state,intent.operation);
+      if(intent?.key!==state.key)requestSaved(state);
+      else if(retryTimer===null&&fastFailure?.request!==intent&&detailFailure?.key!==state.key&&frame?.request!==intent&&patched?.request!==intent&&!queued&&!inFlight&&!detailInFlight&&!moveDirty)requestFrame(state,intent.operation);
       draw();
       if(!inFlight&&!queued){
         if(retryTimer!==null&&retrying?.request===intent)status('retrying',retrying.message,intent.size);
@@ -580,7 +617,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       }
       if(!operation&&intent?.key===state.key&&!intent.operation&&
          (detailInFlight===intent&&!intent.controller.signal.aborted||frame?.request===intent&&!moveDirty))return;
-      requestFrame(state,operation);
+      if(operation)requestFrame(state,operation);else requestSaved(state);
     },
     clear(){
       moveDirty=null;moves&&moves.clear();

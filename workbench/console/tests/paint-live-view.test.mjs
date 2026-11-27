@@ -462,3 +462,40 @@ test('switching layers rejects an older same-revision draft and targets the new 
   assert.ok(x<=3072 && x+side>=3195 && y<=2048 && y+side>=2171);
   assert.equal(requests[3].data.operation.layerId,'b');
 });
+
+test('native document rejects a reduced substitute for a tile and coalesces full drafts until cancel',async t=>{
+  const {view,requests,drawn,configure,finish}=fixture(t,true,{rgba:true});
+  t.after(()=>view.dispose());
+  configure({nativeCanvas:true,documentId:'poster',draftBounds:()=>[0,0,.20,.20]});
+  view.refresh();await finish(0,10,4096);
+  const opacity=value=>({op:'image',action:'updateLayer',layerId:'logo',patch:{opacity:value}});
+  view.update(opacity(.4));assert.deepEqual(requests[1].data.window,[0,0,1024]);
+  await finish(1,99);assert.equal(drawn.at(-1),10);
+  assert.equal(requests[2].data.resolution,4096);assert.equal(requests[2].data.window,undefined);
+  view.update(null);await finish(2,99,4096);
+  assert.equal(drawn.at(-1),10);
+  configure({draftBounds:()=>null});
+  view.update(opacity(.2));view.update(opacity(.3));view.update(opacity(.4));
+  assert.equal(requests.length,4);
+  await finish(3,23,4096);assert.equal(requests[4].data.operation.patch.opacity,.4);
+  await finish(4,42,4096);assert.equal(drawn.at(-1),42);
+  view.update(null);assert.equal(drawn.at(-1),10);
+});
+
+test('only the matching saved layer stack adopts a full native opacity draft',async t=>{
+  const {view,requests,drawn,configure,revise,finish}=fixture(t,true,{rgba:true});
+  t.after(()=>view.dispose());
+  const poster=opacity=>({layers:[{id:'base',opacity},{id:'label',opacity:1}]});
+  const opacity=value=>({op:'image',action:'updateLayer',layerId:'base',patch:{opacity:value}});
+  configure({nativeCanvas:true,documentId:'poster',imageDocument:poster(1)});
+  view.refresh();await finish(0,10,4096);
+  view.update(opacity(.5));await finish(1,15,4096);
+  configure({imageDocument:poster(.5)});revise(2);view.refresh();
+  assert.equal(requests.length,2);assert.equal(view.getFrame().request.revision,2);
+  assert.equal(view.getFrame().request.operation,null);assert.equal(drawn.at(-1),15);
+  view.update(opacity(.25));await finish(2,21,4096);
+  const changed=poster(.25);changed.layers[1].opacity=.8;
+  configure({imageDocument:changed});revise(3);view.refresh();
+  assert.equal(requests[3].data.resolution,4096);
+  await finish(3,31,4096);assert.equal(drawn.at(-1),31);
+});

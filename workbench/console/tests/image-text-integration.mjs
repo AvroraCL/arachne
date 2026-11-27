@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -269,6 +270,28 @@ assert np.count_nonzero((number[:,:,3]>0)&(number[:,:,3]<150))>500
   await input.waitFor();
   assert.equal(await input.inputValue(),'A-073-L');
   await editor.getByText('在输入框修改文字，画布实时预览网格变形',{exact:true}).waitFor();
+  // Inspect the exact bytes consumed by the editor. A native RGBA response
+  // is larger than Chromium's per-request DevTools body cache.
+  await page.evaluate(()=>{
+    const original=window.fetch;
+    window.textDigests={};
+    window.fetch=async(url,options)=>{
+      const response=await original(url,options);
+      if(String(url).endsWith('/image-live')&&options?.body){
+        const content=JSON.parse(options.body).textDraft?.content;
+        if(content==='099'||content==='073'){
+          const read=response.arrayBuffer.bind(response);
+          response.arrayBuffer=async()=>{
+            const bytes=await read();
+            window.textDigests[content]=crypto.subtle.digest('SHA-256',bytes).then(hash=>
+              ({length:bytes.byteLength,digest:Array.from(new Uint8Array(hash),v=>v.toString(16).padStart(2,'0')).join('')}));
+            return bytes;
+          };
+        }
+      }
+      return response;
+    };
+  });
   const draftResponse=content=>page.waitForResponse(response=>response.url().endsWith('/image-live')&&
     response.request().postDataJSON()?.textDraft?.content===content);
   async function previewText(content){
@@ -277,9 +300,10 @@ assert np.count_nonzero((number[:,:,3]>0)&(number[:,:,3]<150))>500
     const rendered=await response;
     assert.equal(rendered.status(),200,rendered.ok()?'':await rendered.text());
     const size=Number(rendered.headers()['x-paint-resolution']);
-    const pixels=await rendered.body();
-    assert.equal(pixels.length,size*size*4);
-    return {size,pixels};
+    await page.waitForFunction(key=>Boolean(window.textDigests[key]),content);
+    const {length,digest}=await page.evaluate(key=>window.textDigests[key],content);
+    assert.equal(length,size*size*4);
+    return {size,digest};
   }
   const snapshot=structuredClone(number());
   const assetsPath=path.join(data,'projects',doc.id,'assets');
@@ -301,7 +325,7 @@ assert np.count_nonzero((number[:,:,3]>0)&(number[:,:,3]<150))>500
   await ime.detach();
   const draft=await previewText('073');
   assert.equal(draft.size,cancelled.size);
-  assert.notDeepEqual(draft.pixels,cancelled.pixels);
+  assert.notEqual(draft.digest,cancelled.digest);
   assert.deepEqual((await fs.readdir(assetsPath)).sort(),originalFiles);
   await page.screenshot({path:path.join(data,'mesh-number-live.png')});
   await input.press(modifier+'+Enter');await saved('在网格变形后恢复编号');
@@ -312,7 +336,7 @@ assert np.count_nonzero((number[:,:,3]>0)&(number[:,:,3]<150))>500
     revision:doc.revision,documentId:'design',resolution:draft.size
   })});
   assert.equal(committed.status,200);
-  assert.deepEqual(Buffer.from(await committed.arrayBuffer()),draft.pixels);
+  assert.equal(createHash('sha256').update(Buffer.from(await committed.arrayBuffer())).digest('hex'),draft.digest);
   await page.reload();await canvas.waitFor();await waitCanvas();
   assert.deepEqual((await api(route)).paint.imageDocuments.design.layers.find(layer=>layer.id===numberId),number());
   doc=await api(paint+'/commands',{revision:doc.revision,operations:[

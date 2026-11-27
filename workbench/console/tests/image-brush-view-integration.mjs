@@ -419,27 +419,26 @@ assert 10<patch.max()<200
     const pending=page.waitForEvent('requestfinished',{predicate:async request=>{
       if(!request.url().endsWith('/image-live'))return false;
       const body=request.postDataJSON();
-      return body.resolution===grid&&predicate(body.operation?.stroke)&&(await request.response())?.ok();
+      if(!predicate(body.operation?.stroke))return false;
+      const response=await request.response();
+      return response?.ok()&&(body.resolution===4096||Boolean(response.headers()['x-paint-window']));
     }});
     try{
       await page.mouse.move(...await point(...from));await page.mouse.down();
       await page.mouse.move(...await point(...to),{steps:7});
-      const response=await (await pending).response();
-      const window=response.headers()['x-paint-window']?.split(',').map(Number);
-      await stage.locator('xpath=self::*[@data-preview-size="'+(window?4096:grid)+'"]').waitFor();
-      return {pixels:new Uint8Array(await response.body()),window};
+      await pending;
+      const pixel=()=>canvas.evaluate((c,[x,y])=>c.width===4096&&[...c.getContext('2d').getImageData(x,y,1,1).data],
+        [Math.floor((col+4.5)*4096/grid),Math.floor((line+.5)*4096/grid)]);
+      await until(async()=>{const p=await pixel();return p&&(label==='eraser'?p[3]===0:p[0]>190&&p[3]>128);},label+' 笔尖像素上屏');
+      return pixel();
     }catch(error){
       await page.screenshot({path:path.join(data,'fine-'+label+'-error.png')});
       console.log(label,JSON.stringify(requests.slice(-5)));
       throw error;
     }finally{page.off('request',record);}
   }
-  const sample=({pixels,window},u,v)=>{
-    const index=window?(Math.floor((v+.5)*4096/grid)-window[1])*window[2]+Math.floor((u+.5)*4096/grid)-window[0]:v*grid+u;
-    return pixels.slice(4*index,4*index+4);
-  };
   const ink=await heldPreview('brush',[left,atY],[right,atY],stroke=>!stroke?.erase&&stroke?.stamps?.at(-1)?.[0]>(left+right)/2);
-  assert.ok(sample(ink,col+4,line)[0]>190&&sample(ink,col+4,line)[3]>128);
+  assert.ok(ink[0]>190&&ink[3]>128);
   await page.screenshot({path:path.join(data,'fine-stroke-while-drawing.png')});
   await page.mouse.up();await saved('保存近距离细笔触');
   assert.ok(detailLayer().strokes[0].clip);
@@ -454,7 +453,7 @@ assert 10<patch.max()<200
   await numeric(editor,'不透明度',100);
   await numeric(editor,'像素半径',3);
   const erasedPreview=await heldPreview('eraser',[left+4/grid,atY],[left,atY],stroke=>stroke?.erase===true&&stroke.stamps?.length>1);
-  assert.equal(sample(erasedPreview,col+4,line)[3],0);
+  assert.equal(erasedPreview[3],0);
   await page.mouse.up();await saved('保存近距离擦除');
   assert.ok(detailLayer().strokes[1].clip);
   await editor.getByRole('button',{name:'仿制图章',exact:true}).click();
@@ -466,7 +465,7 @@ assert 10<patch.max()<200
   await stage.locator('.document-clone-source').waitFor();
   await numeric(editor,'像素半径',3);
   const cloned=await heldPreview('clone',[left+4/grid,atY],[left+2/grid,atY],stroke=>!!stroke?.clone);
-  assert.ok(sample(cloned,col+4,line)[0]>190&&sample(cloned,col+4,line)[3]>128);
+  assert.ok(cloned[0]>190&&cloned[3]>128);
   await page.mouse.up();await saved('保存近距离仿制');
   assert.ok(detailLayer().strokes[2].clip);
   assert.ok(Math.abs(detailLayer().strokes[2].clone.offset[0]-8/grid)<.001);
@@ -475,7 +474,7 @@ assert 10<patch.max()<200
   await stage.focus();await page.keyboard.press(mod+'+Shift+z');await saved('重做细节仿制');
   await stage.locator('xpath=self::*[@data-preview-size="4096"][@data-preview-revision="'+doc.revision+'"]').waitFor({timeout:65000});
   assert.deepEqual(errors,[]);
-  console.log('PASS oriented canvas, independent pressure, 512/1024px live brush/eraser/clone pixels, 4K idle, custom tips, presets, and reopen:',data);
+  console.log('PASS oriented canvas, independent pressure, native brush/eraser/clone pixels, custom tips, presets, and reopen:',data);
 }finally{
   try{await browser?.close();}finally{
     if(server.exitCode===null&&server.signalCode===null){const done=once(server,'exit');server.kill();await done;}
