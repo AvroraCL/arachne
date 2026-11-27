@@ -117,9 +117,17 @@ export function renderBrushTile(tile,edits,state,images,commit=false,clipToTile=
     for(const [u,v] of s.stamps){l=Math.min(l,u*grid-reach);r=Math.max(r,u*grid+reach);t=Math.min(t,v*grid-reach);b=Math.max(b,v*grid+reach);}
   }
   l=Math.max(0,Math.floor(l));r=Math.min(grid,Math.ceil(r));t=Math.max(0,Math.floor(t));b=Math.min(grid,Math.ceil(b));
-  if(clipToTile&&!feather){
-    l=Math.max(tile.x,l);t=Math.max(tile.y,t);r=Math.min(tile.x+side,r);b=Math.min(tile.y+side,b);
-    if(l>=r||t>=b)return commit?true:null;
+  let left=l,top=t,right=r,bottom=b;
+  if(clipToTile){
+    // A preview can draw the interior for which all blur samples are known.
+    // Advancing a saved tile requires correct mask values at every edge.
+    if(commit&&feather&&(l<tile.x||t<tile.y||r>tile.x+side||b>tile.y+side))return;
+    const halo=feather?3*(half+1):0;
+    if(l<tile.x){l=tile.x;left=l+halo;}
+    if(t<tile.y){t=tile.y;top=t+halo;}
+    if(r>tile.x+side){r=tile.x+side;right=r-halo;}
+    if(b>tile.y+side){b=tile.y+side;bottom=b-halo;}
+    if(left>=right||top>=bottom)return commit?true:null;
   }
   const w=r-l,h=b-t;
   if(w<=0||h<=0||l<tile.x||t<tile.y||r>tile.x+side||b>tile.y+side)return;
@@ -143,9 +151,9 @@ export function renderBrushTile(tile,edits,state,images,commit=false,clipToTile=
     maskDelta[k]=v-source;
   }
   if(feather)featherDelta(maskDelta,w,h,half,edge);
-  const pixels=new Uint8ClampedArray(w*h*4);
-  for(let j=t,k=0;j<b;j++)for(let i=l;i<r;i++,k++){
-    const at=(j-tile.y)*side+i-tile.x,a=at*4,q=k*4;
+  const pixels=commit?null:new Uint8ClampedArray((right-left)*(bottom-top)*4);
+  for(let j=top;j<bottom;j++)for(let i=left;i<right;i++){
+    const at=(j-tile.y)*side+i-tile.x,a=at*4,k=(j-t)*w+i-l,q=((j-top)*(right-left)+i-left)*4;
     const m=1-(layer.maskDensity??1)*(1-clamp((tile.soft?.[at]??tile.raw?.[at]??1)+(maskDelta?.[k]??0),0,1));
     if(inspect&&!commit){pixels[q]=pixels[q+1]=pixels[q+2]=m*255;pixels[q+3]=255;continue;}
     let alpha=tile.active[a+3];const rgb=[tile.active[a],tile.active[a+1],tile.active[a+2]];
@@ -173,7 +181,7 @@ export function renderBrushTile(tile,edits,state,images,commit=false,clipToTile=
       pixels[q+c]=curve.encode[Math.round(v*65535)];
     }
   }
-  return {pixels,box};
+  return commit?true:{pixels,box:[left,top,right-left,bottom-top]};
 }
 
 export function createBrushTiles(read){

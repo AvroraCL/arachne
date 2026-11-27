@@ -137,6 +137,37 @@ print(json.dumps([pack(tile),pack(pixels.tobytes())]))
   check(renderBrushTile(tile,edits.slice(2),state,images));
 });
 
+test('feathered brush crossing tile edges agrees with an uncut preview at every published pixel',()=>{
+  const layer={id:'ink',opacity:1,maskEnabled:true,maskFeather:5.5};
+  const state={layer,space:'srgb'},images=new Map();
+  function makeTile(x,y){
+    const active=new Float32Array(512*512*4);
+    const raw=new Float32Array(512*512);
+    for(let j=0;j<512;j++)for(let i=0;i<512;i++){
+      const k=j*512+i;
+      active[k*4]=.5;active[k*4+3]=1;
+      raw[k]=((x+i+3*(y+j))%47)/46;
+    }
+    return {x,y,active,raw,soft:new Float32Array(raw.length).fill(.5)};
+  }
+  const edit={action:'stroke',layerId:'ink',target:'mask',stroke:{radius:14/4096,
+    hardness:.55,flow:.32,opacity:.81,spacing:.17,value:0,stamps:[[.46,.46],[.5,.5],[.54,.54]]}};
+  const whole=renderBrushTile(makeTile(1792,1792),[edit],state,images);
+  const [x,y,w]=whole.box;
+  for(const [tx,ty] of [[1952,1952],[1632,1632],[1952,1632],[1632,1952]]){
+    const tile=makeTile(tx,ty);
+    const part=renderBrushTile(tile,[edit],state,images,false,true);
+    const [left,top,width,height]=part.box;
+    assert.ok(left<=2048&&2048<left+width&&top<=2048&&2048<top+height);
+    for(let row=0;row<height;row++){
+      const start=((top+row-y)*w+left-x)*4;
+      assert.deepEqual(part.pixels.subarray(row*width*4,(row+1)*width*4),
+        whole.pixels.subarray(start,start+width*4));
+    }
+    assert.equal(renderBrushTile(tile,[edit],state,images,true,true),undefined);
+  }
+});
+
 test('smooth net is continuous across cell boundaries and keeps invertible local coordinates',()=>{
   const mesh=createSmoothMesh(3);
   mesh.points[5]=[.63,.265];

@@ -31,7 +31,8 @@ async function api(route,body){
   return result.json();
 }
 const counts=Number(process.env.ARACHNE_BRUSH_BENCH_SAMPLES||5),timings={},digests={};
-const longLine=process.argv.includes('--long-line');
+const maskLine=process.argv.includes('--mask-line');
+const longLine=maskLine||process.argv.includes('--long-line');
 async function run(){
   for(let n=0;n<100;n++){
     if(await fetch(origin+'/api/health').then(r=>r.ok,()=>false))break;
@@ -180,10 +181,10 @@ async function run(){
       window.brushBench.armed={kind,u,v,x,y,before};
     },{kind,u,v});
   }
-  async function compareCanvas(){
-    const different=await canvas.evaluate(async(canvas,{url,revision})=>{
+  async function compareCanvas(inspectMask){
+    const different=await canvas.evaluate(async(canvas,{url,revision,inspectMask})=>{
       const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({documentId:'design',resolution:4096,revision})});
+        body:JSON.stringify({documentId:'design',resolution:4096,revision,inspectMask})});
       if(!response.ok)throw Error('failed to read reference pixels');
       const raw=new Uint8ClampedArray(await response.arrayBuffer());
       const expected=document.createElement('canvas');expected.width=expected.height=4096;
@@ -194,7 +195,7 @@ async function run(){
         const i=a.findIndex((v,i)=>v!==b[i]);if(i!==-1)return [Math.floor(i/4)%4096,y+Math.floor(i/16384),i%4,a[i],b[i]];
       }
       return null;
-    },{url:origin+paint+'/image-live',revision:doc.revision});
+    },{url:origin+paint+'/image-live',revision:doc.revision,inspectMask});
     assert.equal(different,null,'the visible canvas matches the independent full composite at '+different);
   }
   async function numeric(scope,label,value){
@@ -217,8 +218,12 @@ async function run(){
   await layer.locator('.document-layer-select').click();
   await editor.getByRole('button',{name:'画笔',exact:true}).click();
   if(longLine){
-    await editor.getByLabel('图像前景色',{exact:true}).fill('#ff135b');
-    await numeric(editor,'像素半径',3);await numeric(editor,'流量',75);
+    if(maskLine){
+      await layer.locator('.document-layer-mask').click({modifiers:['Alt']});
+      await wait4K();
+    }
+    await editor.getByLabel('图像前景色',{exact:true}).fill(maskLine?'#000000':'#ff135b');
+    await numeric(editor,'像素半径',maskLine?14:3);await numeric(editor,'流量',75);
     const length=700;
     for(let pass=0;pass<=counts;pass++){
       const box=await canvas.boundingBox(),left=box.x+(box.width-length)/2,top=box.y+box.height/2;
@@ -226,30 +231,56 @@ async function run(){
       await canvas.evaluate((c,{left,top,length})=>{
         const ctx=c.getContext('2d'),box=c.getBoundingClientRect(),x=Math.floor(left-box.left),y=Math.floor(top-box.top);
         const before=ctx.getImageData(x,y,length+1,1).data;
-        const sites=Array.from({length:16},(_,i)=>({x:Math.floor((i+1)*length/16)}));
+        const sites=Array.from({length:16},(_,i)=>({x:(2*i+3)*length/35}));
+        const prototype=CanvasRenderingContext2D.prototype,put=prototype.putImageData;
+        const changed=(data,i,siteX)=>[0,1,2,3].some(k=>Math.abs(data[i+k]-before[4*siteX+k])>8);
         function move(e){
-          if(e.buttons)for(const site of sites)if(site.event===undefined&&e.clientX-left>=site.x-.5)site.event=performance.now();
+          if(!e.buttons)return;
+          for(const site of sites){
+            if(site.event!==undefined||e.clientX-left<site.x-.5)continue;
+            site.event=performance.now();
+            // Probe ahead of the tip, before this event's coverage has been drawn.
+            const siteX=site.x+2;
+            site.skip=changed(ctx.getImageData(x+siteX,y,1,1).data,0,siteX);
+          }
         }
         document.addEventListener('pointermove',move,true);
-        let frame;
-        function sample(){
-          frame=requestAnimationFrame(sample);
-          if(!sites.some(s=>s.event!==undefined)||c.width!==4096)return;
-          const now=performance.now(),pixels=ctx.getImageData(x,y,length+1,1).data;
-          for(const site of sites)if(site.hit===undefined&&[0,1,2,3].some(k=>Math.abs(pixels[4*site.x+k]-before[4*site.x+k])>8))site.hit=now;
-        }
-        frame=requestAnimationFrame(sample);
+        prototype.putImageData=function(image,...args){
+          put.call(this,image,...args);
+          if(this!==ctx||c.width!==4096)return;
+          const now=performance.now(),[dx,dy]=args;
+          for(const site of sites){
+            if(site.skip||site.event===undefined||site.hit!==undefined)continue;
+            const siteX=site.x+2;
+            if(x+siteX<dx||x+siteX>=dx+image.width||y<dy||y>=dy+image.height)continue;
+            if(changed(ctx.getImageData(x+siteX,y,1,1).data,0,siteX))site.hit=now;
+          }
+        };
+        window.motionTailReady=()=>sites.at(-1).hit!==undefined;
         window.finishMotion=()=>{
-          cancelAnimationFrame(frame);document.removeEventListener('pointermove',move,true);
-          return sites.filter(s=>s.event!==undefined&&s.hit!==undefined).map(s=>Math.round(Math.max(0,s.hit-s.event)));
+          prototype.putImageData=put;document.removeEventListener('pointermove',move,true);
+          return sites.filter(s=>s.hit!==undefined).map(s=>({x:s.x,ms:+(s.hit-s.event).toFixed(2)}));
         };
       },{left,top,length});
       await page.mouse.down();await page.mouse.move(left+length,top,{steps:35});
-      await nextRevision(()=>page.mouse.up());await page.waitForTimeout(75);
+      await page.waitForFunction(()=>window.motionTailReady());
       const times=await page.evaluate(()=>window.finishMotion());
+      const released=performance.now();
+      await nextRevision(()=>page.mouse.up());
+      const settled=Math.round(performance.now()-released);
       assert.ok(times.length>=15,'crossing pixels reached the drawing canvas');
-      console.log('MOTION',3,length,pass,JSON.stringify({covered:times.length,ms:times}));
+      console.log('MOTION',maskLine?'mask':'ink',length,pass,JSON.stringify({times,settled}));
+      if(maskLine&&pass===counts)await compareCanvas('ink');
       await stage.focus();await nextRevision(()=>page.keyboard.press(mod+'+z'));
+      if(maskLine&&pass===counts){
+        assert.equal(await hash(),digests.history);
+        await nextRevision(()=>page.keyboard.press(mod+'+Shift+z'));
+        await compareCanvas('ink');
+        const saved=await hash();
+        assert.notEqual(saved,digests.history);
+        await page.reload();await wait4K();
+        assert.equal(await hash(),saved);
+      }
     }
     assert.deepEqual(errors,[]);return;
   }
