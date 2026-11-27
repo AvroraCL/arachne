@@ -134,10 +134,13 @@ def sparse_mask(mask, ids):
     return alpha[index]*keep,value[index]*keep
 
 
-def transformed_mask(mask, ids, surface, coords):
-    size = surface.uv_shape[0]
+def transformed_mask(mask, ids, size, window, coords):
     u,v = coords
-    x,y = u*size-.5,(1-v)*size-.5
+    raster,left,bottom = size,0,0
+    if window:
+        left,top,size=window
+        raster,bottom=4096,4096-top-size
+    x,y = u*raster-.5-left,(1-v)*raster-.5-bottom
     left,top = np.floor(x).astype(int),np.floor(y).astype(int)
     fx,fy = x-left,y-top
     alpha,value = (np.zeros(len(ids),dtype=np.float32) for _ in range(2))
@@ -172,7 +175,7 @@ def mask_values(layer,masks,ids,surface,mapping,gradient_space):
         values=(1-t)*(first*a+base*(1-a))+t*(last*b+base*(1-b))
         result[valid]=values if coverage is None else base+(values-base)*coverage[valid]
     if len(ids):
-        for authored,mask in masks:
+        for authored,mask,source_window in masks:
             coords=mapping(ids,authored)
             if coords is None:
                 affected,alpha,value=mask
@@ -181,7 +184,7 @@ def mask_values(layer,masks,ids,surface,mapping,gradient_space):
                 at=index[keep]
                 result[keep]=result[keep]*(1-alpha[at])+value[at]
             else:
-                alpha,value=transformed_mask(mask,ids,surface,coords)
+                alpha,value=transformed_mask(mask,ids,surface.uv_shape[0],source_window,coords)
                 result=result*(1-alpha)+value
     return result
 
@@ -246,12 +249,23 @@ def image_mask(layer, surface):
     gradient_space=space_of(layer.get('maskGradient') or {})
     transformed = 'maskTransform' in layer or bool(steps)
     if transformed:
-        groups=((space,surface.mask(list(group))) for space,group in
-                groupby(iter_strokes(strokes),key=space_of))
-        masks=[(space,mask) for space,mask in groups if mask is not None and len(mask[0])]
+        masks=[]
+        for authored,group in groupby(iter_strokes(strokes),key=space_of):
+            source=surface
+            if surface.window and authored[0]!=current:
+                # Stroke coordinates belong to the mask's space at paint time.
+                # Replay the inverse-translated footprint plus a bilinear halo.
+                x,y,side=surface.window
+                side+=2
+                sx,sy=(math.floor(pos+(old-new)*4096)-1 for pos,old,new in
+                       zip((x,y),authored[0][4:],current[4:]))
+                source=ImageSurface(side,surface.assets,(max(0,min(4096-side,sx)),max(0,min(4096-side,sy)),side))
+            mask=source.mask(list(group))
+            if mask is not None and len(mask[0]):
+                masks.append((authored,mask,source.window))
     else:
         mask=surface.mask(strokes)
-        masks=[((IDENTITY_MASK,0),mask)] if mask is not None and len(mask[0]) else []
+        masks=[((IDENTITY_MASK,0),mask,surface.window)] if mask is not None and len(mask[0]) else []
     feather = layer.get('maskFeather', 0)
     size = surface.uv_shape[0]
     if feather and (masks or layer.get('maskGradient')):
@@ -1096,7 +1110,10 @@ def stroke_window_padding(document):
     padding = 0
     for layer in document['layers']:
         active = {key:effect for key,effect in layer.get('styles',{}).items() if effect['enabled']}
-        if layer.get('maskTransform') or layer.get('maskWarpSteps') or layer.get('gradientTransform') or 'gradient' in active:
+        transform = layer.get('maskTransform')
+        if transform and (tuple(transform[:4])!=IDENTITY_MASK[:4] or layer.get('maskGradient')):
+            return None
+        if layer.get('maskWarpSteps') or layer.get('gradientTransform') or 'gradient' in active:
             return None
         if layer.get('kind') == 'adjustment' and layer['adjustment']['type'] in ('gaussianBlur','unsharpMask'):
             return None
@@ -1104,6 +1121,8 @@ def stroke_window_padding(document):
             return None
         for key in ('strokes','maskStrokes'):
             for stroke in iter_strokes(layer.get(key) or []):
+                if transform and key=='maskStrokes' and tuple(stroke.get('maskSpace',IDENTITY_MASK)[:4])!=IDENTITY_MASK[:4]:
+                    return None
                 if stroke.get('feather') or 'clone' in stroke or 'flood' in stroke:
                     return None
                 if 'transformUV' in stroke:

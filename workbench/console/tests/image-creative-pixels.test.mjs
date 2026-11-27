@@ -73,6 +73,25 @@ with tempfile.TemporaryDirectory() as tmp:
   console.log(result);
 });
 
+test('native crop follows a feathered mask painted before and after fractional translation',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import numpy as np
+from image_documents import exact_stroke_window, composite_document
+current=[1,0,0,1,-.24328,.09215]
+strokes=[dict(uv=True,rect=[.22,.29,.32,.35],opacity=1,value=1),
+         dict(uv=True,rect=[.015,.39,.045,.47],opacity=.8,value=0,maskSpace=current)]
+doc=dict(colorSpace='srgb',layers=[dict(id='logo',kind='pixel',maskBase=0,maskEnabled=True,
+    maskTransform=current,maskStrokes=strokes,maskFeather=19)])
+full=composite_document(doc,{},4096,'logo')
+for box in [[0,1510,256],[215,1540,256]]:
+    x,y,side=box
+    tile=exact_stroke_window(doc,{},box,'logo')
+    ref=full[y:y+side,x:x+side]
+    assert len(np.unique(ref[:,:,0]))>60
+    assert np.array_equal(tile,ref)
+`],{cwd:new URL('..',import.meta.url)});
+});
+
 test('moving the brush between tiles preserves acknowledged ink until the native frame arrives',()=>{
   const layer={id:'ink',kind:'pixel',visible:true,opacity:1,blend:'normal'};
   const request={id:'p',documentId:'d',size:4096,revision:3};

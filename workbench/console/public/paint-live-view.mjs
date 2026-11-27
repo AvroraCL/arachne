@@ -267,6 +267,12 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
         request.controller.abort();requestFrame(context(),null,detailSize);return;
       }
       const next=new Uint8Array(await transport(()=>response.arrayBuffer()));
+      // Keep responding from the previous selection while its saved pixels and
+      // the next drag's planes load in parallel. Superseded receipts never draw.
+      if(request.movePreparation){
+        await request.movePreparation;
+        if(!isCurrent())return;
+      }
       if(window&&response.headers?.get('X-Paint-Window')===window.join(',')){
         if(!isCurrent())return;
         const side=window[2];
@@ -363,7 +369,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     return false;
   }
 
-  function requestFrame(state,operation,size=state.nativeCanvas&&!operation?detailSize:fastSize(state),savedWindow){
+  function requestFrame(state,operation,size=state.nativeCanvas&&!operation?detailSize:fastSize(state),savedWindow,movePreparation){
     cancelRetry();fastFailure=null;
     // Consecutive moves in one gesture can display intermediate frames. A
     // cancel, revision change or source switch invalidates the whole gesture.
@@ -386,7 +392,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       previous.inspectMask===state.inspectMask&&previous.colorSpace===state.colorSpace&&
       JSON.stringify(previous.imageGeometry)===JSON.stringify(state.imageGeometry));
     const window=savedWindow??(rgba&&nativeSurface&&operation?draftWindow(strokes,state):undefined);
-    intent={...state,operation,target,size,window,savedWindow,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
+    intent={...state,operation,target,size,window,savedWindow,movePreparation,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
     if(moveDirty&&!operation&&baseFrame?.request.key===state.key)restoreMove();
     if(drawMove(state,operation))return;
     if(operation&&localBrush){
@@ -543,7 +549,10 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       if(!before||baseFrame!==saved.frame||!state||before.revision+steps!==revision||state.revision!==revision||
          state.id!==before.id||state.documentId!==before.documentId||state.inspectMask!==before.inspectMask||
          frame!==baseFrame||drawn?.pixels!==baseFrame.pixels)return false;
-      requestFrame(state,null,detailSize,steps===1?saved.window:undefined);
+      const ids=saved.state.moveSource.ids,nextIds=state.moveSource?.ids;
+      const continuing=saved.local&&ids.size>1&&ids.size===nextIds?.size&&[...ids].every(id=>nextIds.has(id));
+      const preparation=continuing&&moves.prepare(state,true);
+      requestFrame(state,null,detailSize,steps===1?saved.window:undefined,preparation);
       return true;
     },
     update(operation,committedStroke){

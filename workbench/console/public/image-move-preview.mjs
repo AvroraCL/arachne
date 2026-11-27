@@ -37,8 +37,8 @@ function placedSource(image,layer,selection,assets){
     const b=placedImageBounds(l,assets);
     if(!b||l.clipped||enabledStyle(l)||l.warp||l.gradient?.feather)return;
     const bounds=pixelBounds(b);
-    const window=selection.size>1&&l.blend==='normal'&&!l.blendIf&&!l.edgeDecontaminate&&nativeWindow(bounds);
-    front.push({id:l.id,bounds,window});
+    const window=selection.size>1&&['normal','multiply'].includes(l.blend)&&!l.blendIf&&!l.edgeDecontaminate&&nativeWindow(bounds);
+    front.push({id:l.id,blend:l.blend,bounds,window});
   }
   const window=nativeWindow(rect);
   // For disjoint artwork we already have both the layer and its transparent
@@ -115,14 +115,32 @@ export function isMoveSelection(source,tr){
 }
 
 export function createMovePreview(onReady){
-  let cache=null;
-  function clear(){cache?.controller?.abort();cache=null;}
-  function prepare(state){
+  let cache=null,next=null;
+  function clear(){
+    cache?.controller?.abort();next?.controller?.abort();
+    cache=next=null;
+  }
+  function prepare(state,upcoming=false){
     const source=state?.moveSource;
-    if(!source){clear();return;}
-    if(cache?.key===state.key&&cache.source===source)return;
-    clear();
-    const entry=cache={key:state.key,source,front:new Map(),parts:source.parts.map(part=>({source:part}))};
+    if(!source){if(!upcoming)clear();return;}
+    if(cache?.key===state.key&&cache.source===source)return cache.loaded;
+    if(next?.key===state.key&&next.source===source){
+      if(upcoming)return next.loaded;
+      cache?.controller?.abort();
+      cache=next;next=null;
+      return cache.loaded;
+    }
+    if(upcoming){next?.controller?.abort();next=null;}
+    else clear();
+    const entry={key:state.key,source,front:new Map(),parts:source.parts.map(part=>({source:part}))};
+    // Only selected layers moved. The stationary foreground for the next
+    // revision is the very same isolated ink in the same native window.
+    if(upcoming)for(const layer of source.front.values()){
+      const plane=cache?.front.get(layer.id);
+      if(plane&&plane.window.join(',')===layer.window.join(','))entry.front.set(layer.id,plane);
+    }
+    if(upcoming)next=entry;else cache=entry;
+    const valid=()=>entry===cache||entry===next;
     if(!source.front.size&&source.parts.every(p=>p.separate))return;
     const controller=entry.controller=new AbortController();
     async function read(window,fields){
@@ -144,25 +162,27 @@ export function createMovePreview(onReady){
         const hidden=source.interleaved?[...source.ids]:members;
         const back=await read(window,hidden?{movePlane:{ids:hidden,plane:'background'}}:
           {operation:{op:'image',documentId:state.documentId,action:'updateLayer',layerId:id,patch:{visible:false}}});
-        if(!back||cache!==entry)return;
+        if(!back||!valid())return;
         const [tx,ty,side]=window,[l,t,r,b]=bounds;
         let clear=!source.interleaved&&!front.some(layer=>overlaps(layer.bounds,bounds));
         for(let y=t;clear&&y<b;y++)for(let x=l;x<r;x++){
           if(back[4*((y-ty)*side+x-tx)+3]){clear=false;break;}
         }
         const ink=clear?null:await read(window,members?{movePlane:{ids:members,plane:'content'}}:{isolatedImageLayer:id});
-        if(cache!==entry||!clear&&!ink)return;
+        if(!valid()||!clear&&!ink)return;
         Object.assign(part,{back,ink});
       }
-      if(source.parts.some(p=>!p.separate))onReady();
+      if(entry===cache&&source.parts.some(p=>!p.separate))onReady();
       for(const layer of source.front.values()){
+        if(entry.front.has(layer.id))continue;
         const ink=await read(layer.window,{isolatedImageLayer:layer.id});
-        if(cache!==entry)return;
-        if(ink)entry.front.set(layer.id,{ink,window:layer.window});
+        if(!valid())return;
+        if(ink)entry.front.set(layer.id,{ink,blend:layer.blend,window:layer.window});
       }
-      if(source.front.size)onReady();
+      if(entry===cache&&source.front.size)onReady();
     }
-    void load().catch(error=>{if(!controller.signal.aborted)console.warn('无法预备移动图层像素',error);});
+    entry.loaded=load().catch(error=>{if(!controller.signal.aborted)console.warn('无法预备移动图层像素',error);});
+    return entry.loaded;
   }
 
   function paintedBounds(bytes,stride,ox,oy,bounds){
@@ -268,29 +288,28 @@ export function createMovePreview(onReady){
           if(ink===lastInk&&back===lastBack){out32[k/4]=lastMix;continue;}
           lastInk=ink;lastBack=back;
         }
-        // output already includes the stationary foreground. Insert the moving
-        // source underneath it in linear premultiplied RGB without blending
-        // the foreground twice. All overlapping front planes are normal layers.
-        let red=0,green=0,blue=0,cover=0;
-        for(const {ink,window:[tx,ty,side]} of front){
-          if(col<tx||col>=tx+side||row<ty||row>=ty+side)continue;
-          const i=4*((row-ty)*side+col-tx),alpha=ink[i+3]/255;
-          if(!alpha)continue;
-          curve??=colorCurve(state.colorSpace);
-          red=curve.linear[ink[i]]*alpha+red*(1-alpha);
-          green=curve.linear[ink[i+1]]*alpha+green*(1-alpha);
-          blue=curve.linear[ink[i+2]]*alpha+blue*(1-alpha);
-          cover=alpha+cover*(1-alpha);
-        }
-        if(cover===1)continue;
-        if(!cover&&(src[a+3]===255||!output[k+3])){out32[k/4]=ink32[a/4];continue;}
+        // For normal and multiply, the foreground stack is affine in the
+        // backdrop's premultiplied RGB and alpha. Blend the saved composite
+        // with that same stack over opaque moving ink, using the ink's masked
+        // alpha. This also works when the underlying document is transparent.
         const alpha=src[a+3]/255,bg=output[k+3]/255*(1-alpha),sum=alpha+bg;
-        output[k+3]=sum*255;
         curve??=colorCurve(state.colorSpace);
-        const contribution=alpha*(1-cover);
+        let red=curve.linear[src[a]],green=curve.linear[src[a+1]],blue=curve.linear[src[a+2]];
+        for(const {ink,blend,window:[tx,ty,side]} of front){
+          if(col<tx||col>=tx+side||row<ty||row>=ty+side)continue;
+          const i=4*((row-ty)*side+col-tx),cover=ink[i+3]/255;
+          if(!cover)continue;
+          const r=curve.linear[ink[i]],g=curve.linear[ink[i+1]],b=curve.linear[ink[i+2]];
+          if(blend==='multiply'){
+            red*=1+cover*(r-1);green*=1+cover*(g-1);blue*=1+cover*(b-1);
+          }else{
+            red+=cover*(r-red);green+=cover*(g-green);blue+=cover*(b-blue);
+          }
+        }
+        output[k+3]=sum*255;
         for(let c=0;c<3;c++){
-          const foreground=c===0?red:c===1?green:blue;
-          const value=curve.linear[src[a+c]]*contribution+curve.linear[output[k+c]]*bg+foreground*alpha;
+          const overInk=c===0?red:c===1?green:blue;
+          const value=overInk*alpha+curve.linear[output[k+c]]*bg;
           output[k+c]=curve.byte[Math.min(65535,Math.round(65535*value/sum))];
         }
         if(!front.length)lastMix=out32[k/4];

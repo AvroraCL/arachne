@@ -303,6 +303,57 @@ image.save(sys.stdout.buffer,format='PNG')
     }
     console.log('PASS interleaved translucent band and immediate second drag with first save held');
 
+    // A soft mask crosses the multiply band's bottom edge at the final stop.
+    // Inspect both sides of the crossing at native resolution before release.
+    await commands(op('updateLayer',{layerId:'midband',patch:{blend:'multiply'}}),
+      op('createMask',{layerId:'logo',rect:[.44,.39,.615,.72],reveal:true}),
+      op('updateLayer',{layerId:'logo',patch:{maskFeather:72}}));
+    const multiplyPlane=page.waitForResponse(r=>r.url().endsWith('/image-live')&&
+      r.request().postDataJSON()?.isolatedImageLayer==='midband'&&r.ok());
+    await page.reload();await select('logo').click();await select(text.layerId).click({modifiers:[modifier]});
+    await editor.getByRole('button',{name:'移动图层',exact:true}).click();await ready();await (await multiplyPlane).finished();
+    const readCrossing=dx=>canvas.evaluate((c,dx)=>{
+      if(c.width!==4096)throw Error('正片叠底拖动期间丢失原尺寸画布');
+      const x=Math.floor((.615+dx)*4096)-48,y=Math.floor(.59*4096)-32;
+      const d=c.getContext('2d').getImageData(x,y,97,65).data;
+      const values=[];
+      for(let row=0;row<65;row+=16)for(let col=0;col<97;col+=2){
+        const at=4*(row*97+col);values.push(...d.subarray(at,at+4));
+      }
+      return values;
+    },dx);
+    const noDrafts=drafts;
+    const startRevision=doc.revision;
+    await page.mouse.move(...at(.59,.56));await page.mouse.down();
+    await page.mouse.move(...at(.465,.575625));
+    const heldEdge=await readCrossing(-.125);
+    await page.mouse.up();await waitRevision('移动羽化蒙版经过正片叠底色带');await ready();
+    const savedEdge=await readCrossing(-.125);
+    assert.ok(new Set(savedEdge.filter((_,i)=>i%4===0)).size>10,'交叠区域应包含实际渐变边缘');
+    assert.ok(savedEdge.every((v,i)=>Math.abs(v-heldEdge[i])<=2),'松手前后蒙版和色带交叠像素不一致');
+    assert.equal(doc.revision,startRevision+1);
+    // Start a new pair immediately on the reconciled canvas. The first save
+    // of the pair may still be in flight when the second press arrives.
+    await page.mouse.down();await page.mouse.move(...at(.4025,.56));
+    const secondEdge=await readCrossing(-.1875);
+    await page.mouse.up();await page.mouse.down();await page.mouse.move(...at(.5275,.59125));
+    const thirdEdge=await readCrossing(-.0625);
+    await page.mouse.up();
+    doc=await until(async()=>{const current=await api(route);return current.revision===startRevision+3&&current;},'连续两次移动蒙版');
+    await ready();
+    const checkEdge=async(dx,expected)=>{
+      const current=await readCrossing(dx);
+      assert.ok(current.every((v,i)=>Math.abs(v-expected[i])<=2),'连续移动的软边与保存结果不同');
+      assert.ok(Math.abs(layer('logo').x-.59-dx)<.002&&Math.abs(layer(text.layerId).x-.79-dx)<.002);
+    };
+    await checkEdge(-.0625,thirdEdge);
+    for(const [key,dx,edge] of [['+z',-.1875,secondEdge],['+z',-.125,heldEdge],
+      ['+Shift+z',-.1875,secondEdge],['+Shift+z',-.0625,thirdEdge]]){
+      await canvas.focus();await page.keyboard.press(modifier+key);await waitRevision('正片叠底与蒙版移动历史');await ready();await checkEdge(dx,edge);
+    }
+    assert.equal(drafts,noDrafts);
+    console.log('PASS feathered logo moves underneath multiply band at native resolution');
+
     assert.deepEqual(errors,[]);
     return;
   }
