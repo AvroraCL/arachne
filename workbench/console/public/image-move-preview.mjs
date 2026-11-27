@@ -143,6 +143,50 @@ function replayOverlay(plate,layers,x,y,color,curve,output,offset){
   output[offset+3]=255*alpha;
 }
 
+// The common single-overlay stack is underlay -> masked sprite -> band.
+// Walk the native buffers together. Keep the first blend in linear float
+// until the second blend is complete, even at partially transparent edges.
+function blendOverlayBand(sprite,patch,x,y,left,top,band,curve){
+  const {ink,underlay,window:[bx,by,side]}=band;
+  const src=sprite.data;
+  const {data:out,width,height}=patch;
+  const src32=new Uint32Array(src.buffer),out32=new Uint32Array(out.buffer);
+  const ink32=new Uint32Array(ink.buffer),under32=new Uint32Array(underlay.buffer);
+  let lastInk=-1,lastUnder=-1,lastTint=-1,lastMix=0;
+  for(let rowOffset=0,outPixel=0;rowOffset<height;rowOffset++){
+    const row=top+rowOffset;
+    const onBandRow=row>=by&&row<by+side;
+    let spritePixel=(row-y)*sprite.width+left-x,bandPixel=(row-by)*side+left-bx;
+    for(let col=left;col<left+width;col++,spritePixel++,bandPixel++,outPixel++){
+      const alphaByte=src[4*spritePixel+3];
+      if(!alphaByte)continue;
+      const inside=onBandRow&&col>=bx&&col<bx+side;
+      const back=inside?under32[bandPixel]:out32[outPixel];
+      const tint=inside?ink32[bandPixel]:0,source=src32[spritePixel];
+      if(source===lastInk&&back===lastUnder&&tint===lastTint){out32[outPixel]=lastMix;continue;}
+      lastInk=source;lastUnder=back;lastTint=tint;
+      const ground=inside?underlay:out,backOffset=4*(inside?bandPixel:outPixel);
+      const bandAlpha=inside?ink[4*bandPixel+3]/255:0;
+      if(!bandAlpha&&(alphaByte===255||!ground[backOffset+3])){lastMix=out32[outPixel]=source;continue;}
+      const spriteAlpha=alphaByte/255,underWeight=ground[backOffset+3]/255*(1-spriteAlpha);
+      const baseAlpha=spriteAlpha+underWeight;
+      const resultAlpha=bandAlpha+baseAlpha*(1-bandAlpha);
+      for(let c=0;c<3;c++){
+        const base=(curve.linear[src[4*spritePixel+c]]*spriteAlpha+curve.linear[ground[backOffset+c]]*underWeight)/baseAlpha;
+        let value=base;
+        if(bandAlpha){
+          const color=curve.linear[ink[4*bandPixel+c]];
+          const mixed=base<=.5?2*base*color:1-2*(1-base)*(1-color);
+          value=(base*baseAlpha*(1-bandAlpha)+bandAlpha*(color+baseAlpha*(mixed-color)))/resultAlpha;
+        }
+        out[4*outPixel+c]=curve.byte[Math.min(65535,Math.round(65535*value))];
+      }
+      out[4*outPixel+3]=255*resultAlpha;
+      lastMix=out32[outPixel];
+    }
+  }
+}
+
 export function createMovePreview(onReady){
   let cache=null,next=null;
   function clear(){
@@ -324,69 +368,71 @@ export function createMovePreview(onReady){
       const overlays=front.filter(layer=>layer.underlay);
       // Higher selected sprites are drawn in their own pass.
       const layers=overlays.length?stack.filter(l=>l.order===undefined||l.order<=order):null;
-      const color=[0,0,0];
-      // A single band often has long flat runs. Reuse a result only when
-      // every contributing RGBA value (including the overlay underlay) matches.
-      const band=front.length===1&&(!layers||layers.length===2)?front[0]:null;
-      const band32=band&&new Uint32Array(band.ink.buffer);
-      const under32=band?.underlay&&new Uint32Array(band.underlay.buffer);
-      const [bx,by,side]=band?.window??[0,0,0];
-      let curve,lastInk=-1,lastBack=-1,lastBand=-1,lastUnder=-1,lastMix=0;
-      const ink32=new Uint32Array(src.buffer),out32=new Uint32Array(output.buffer);
-      for(let row=top,k=0;row<bottom;row++)for(let col=left;col<right;col++,k+=4){
-        const a=((row-y)*part.sprite.width+col-x)*4;
-        if(!src[a+3])continue;
-        if(band){
-          const pos=col>=bx&&row>=by&&col<bx+side&&row<by+side?(row-by)*side+col-bx:-1;
-          const tint=band32[pos]??0,under=under32?.[pos]??0,ink=ink32[a/4],back=out32[k/4];
-          if(ink===lastInk&&back===lastBack&&tint===lastBand&&under===lastUnder){
-            out32[k/4]=lastMix;continue;
+      if(front.length===1&&layers?.length===2){
+        blendOverlayBand(part.sprite,patch,x,y,left,top,front[0],colorCurve(state.colorSpace));
+      }else{
+        const color=[0,0,0];
+        // A single band often has long flat runs. Reuse a result only when
+        // every contributing RGBA value matches.
+        const band=front.length===1&&!layers?front[0]:null;
+        const band32=band&&new Uint32Array(band.ink.buffer);
+        const [bx,by,side]=band?.window??[0,0,0];
+        let curve,lastInk=-1,lastBack=-1,lastBand=-1,lastMix=0;
+        const ink32=new Uint32Array(src.buffer),out32=new Uint32Array(output.buffer);
+        for(let row=top,k=0;row<bottom;row++)for(let col=left;col<right;col++,k+=4){
+          const a=((row-y)*part.sprite.width+col-x)*4;
+          if(!src[a+3])continue;
+          if(band){
+            const pos=col>=bx&&row>=by&&col<bx+side&&row<by+side?(row-by)*side+col-bx:-1;
+            const tint=band32[pos]??0,ink=ink32[a/4],back=out32[k/4];
+            if(ink===lastInk&&back===lastBack&&tint===lastBand){
+              out32[k/4]=lastMix;continue;
+            }
+            lastInk=ink;lastBack=back;lastBand=tint;
           }
-          lastInk=ink;lastBack=back;lastBand=tint;lastUnder=under;
-        }
-        if(overlays.length){
-          const plate=overlays.find(({window:[tx,ty,side]})=>col>=tx&&col<tx+side&&row>=ty&&row<ty+side);
-          if(plate){
-            curve??=colorCurve(state.colorSpace);
-            replayOverlay(plate,layers,col,row,color,curve,output,k);
-            if(band)lastMix=out32[k/4];
-            continue;
+          if(overlays.length){
+            const plate=overlays.find(({window:[tx,ty,side]})=>col>=tx&&col<tx+side&&row>=ty&&row<ty+side);
+            if(plate){
+              curve??=colorCurve(state.colorSpace);
+              replayOverlay(plate,layers,col,row,color,curve,output,k);
+              continue;
+            }
           }
-        }
-        if(!front.length){
-          const ink=ink32[a/4],back=out32[k/4];
-          if(src[a+3]===255||!output[k+3]){out32[k/4]=ink;continue;}
-          // Flat fills and lettering commonly repeat the same RGBA pair in a row.
-          if(ink===lastInk&&back===lastBack){out32[k/4]=lastMix;continue;}
-          lastInk=ink;lastBack=back;
-        }
-        // For normal, multiply and screen, the foreground stack is affine in the
-        // backdrop's premultiplied RGB and alpha. Blend the saved composite
-        // with that same stack over opaque moving ink, using the ink's masked
-        // alpha. This also works when the underlying document is transparent.
-        const alpha=src[a+3]/255,bg=output[k+3]/255*(1-alpha),sum=alpha+bg;
-        curve??=colorCurve(state.colorSpace);
-        let red=curve.linear[src[a]],green=curve.linear[src[a+1]],blue=curve.linear[src[a+2]];
-        for(const {ink,blend,window:[tx,ty,side]} of front){
-          if(col<tx||col>=tx+side||row<ty||row>=ty+side)continue;
-          const i=4*((row-ty)*side+col-tx),cover=ink[i+3]/255;
-          if(!cover)continue;
-          const r=curve.linear[ink[i]],g=curve.linear[ink[i+1]],b=curve.linear[ink[i+2]];
-          if(blend==='multiply'){
-            red*=1+cover*(r-1);green*=1+cover*(g-1);blue*=1+cover*(b-1);
-          }else if(blend==='screen'){
-            red+=cover*r*(1-red);green+=cover*g*(1-green);blue+=cover*b*(1-blue);
-          }else{
-            red+=cover*(r-red);green+=cover*(g-green);blue+=cover*(b-blue);
+          if(!front.length){
+            const ink=ink32[a/4],back=out32[k/4];
+            if(src[a+3]===255||!output[k+3]){out32[k/4]=ink;continue;}
+            // Flat fills and lettering commonly repeat the same RGBA pair in a row.
+            if(ink===lastInk&&back===lastBack){out32[k/4]=lastMix;continue;}
+            lastInk=ink;lastBack=back;
           }
+          // For normal, multiply and screen, the foreground stack is affine in the
+          // backdrop's premultiplied RGB and alpha. Blend the saved composite
+          // with that same stack over opaque moving ink, using the ink's masked
+          // alpha. This also works when the underlying document is transparent.
+          const alpha=src[a+3]/255,bg=output[k+3]/255*(1-alpha),sum=alpha+bg;
+          curve??=colorCurve(state.colorSpace);
+          let red=curve.linear[src[a]],green=curve.linear[src[a+1]],blue=curve.linear[src[a+2]];
+          for(const {ink,blend,window:[tx,ty,side]} of front){
+            if(col<tx||col>=tx+side||row<ty||row>=ty+side)continue;
+            const i=4*((row-ty)*side+col-tx),cover=ink[i+3]/255;
+            if(!cover)continue;
+            const r=curve.linear[ink[i]],g=curve.linear[ink[i+1]],b=curve.linear[ink[i+2]];
+            if(blend==='multiply'){
+              red*=1+cover*(r-1);green*=1+cover*(g-1);blue*=1+cover*(b-1);
+            }else if(blend==='screen'){
+              red+=cover*r*(1-red);green+=cover*g*(1-green);blue+=cover*b*(1-blue);
+            }else{
+              red+=cover*(r-red);green+=cover*(g-green);blue+=cover*(b-blue);
+            }
+          }
+          output[k+3]=sum*255;
+          for(let c=0;c<3;c++){
+            const overInk=c===0?red:c===1?green:blue;
+            const value=overInk*alpha+curve.linear[output[k+c]]*bg;
+            output[k+c]=curve.byte[Math.min(65535,Math.round(65535*value/sum))];
+          }
+          if(!front.length||band)lastMix=out32[k/4];
         }
-        output[k+3]=sum*255;
-        for(let c=0;c<3;c++){
-          const overInk=c===0?red:c===1?green:blue;
-          const value=overInk*alpha+curve.linear[output[k+c]]*bg;
-          output[k+c]=curve.byte[Math.min(65535,Math.round(65535*value/sum))];
-        }
-        if(!front.length||band)lastMix=out32[k/4];
       }
       ctx.putImageData(patch,left-ox,top-oy);
       if(cache.source.interleaved)composited.push({patch,left,top});

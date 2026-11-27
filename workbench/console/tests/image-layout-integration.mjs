@@ -310,6 +310,9 @@ image.save(sys.stdout.buffer,format='PNG')
       if(blend!=='multiply'){
         for(let step=0;step<3;step++)doc=await api(paint+'/undo',{revision:doc.revision});
       }
+      // Exercise both alpha blends on the native overlay path, including
+      // the band boundary where the partially transparent backdrop is exposed.
+      if(blend==='overlay')await commands(op('updateLayer',{layerId:'backdrop',patch:{opacity:.75}}));
       await commands(op('updateLayer',{layerId:'midband',patch:{blend}}));
       const bandPlane=page.waitForResponse(r=>r.url().endsWith('/image-live')&&
         r.request().postDataJSON()?.isolatedImageLayer==='midband'&&r.ok());
@@ -330,6 +333,7 @@ image.save(sys.stdout.buffer,format='PNG')
       await page.mouse.move(...at(.59,.56));await page.mouse.down();
       await page.mouse.move(...at(.465,.575625));
       const heldEdge=await readCrossing(-.125);
+      if(blend==='overlay')assert.ok(heldEdge.some((v,i)=>i%4===3&&v>0&&v<255));
       await page.mouse.up();await waitRevision('移动羽化蒙版经过色带');await ready();
       const savedEdge=await readCrossing(-.125);
       assert.ok(new Set(savedEdge.filter((_,i)=>i%4===0)).size>10,'交叠区域应包含实际渐变边缘');
