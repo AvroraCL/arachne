@@ -37,7 +37,7 @@ function placedSource(image,layer,selection,assets){
     const b=placedImageBounds(l,assets);
     if(!b||l.clipped||enabledStyle(l)||l.warp||l.gradient?.feather)return;
     const bounds=pixelBounds(b);
-    const window=selection.size>1&&['normal','multiply'].includes(l.blend)&&!l.blendIf&&!l.edgeDecontaminate&&nativeWindow(bounds);
+    const window=selection.size>1&&['normal','multiply','screen','overlay'].includes(l.blend)&&!l.blendIf&&!l.edgeDecontaminate&&nativeWindow(bounds);
     front.push({id:l.id,blend:l.blend,bounds,window});
   }
   const window=nativeWindow(rect);
@@ -104,14 +104,43 @@ export function moveSource(image,ids,assets){
   let pixels=0;
   for(const part of parts)for(const layer of part.front){
     if(!layer.window||front.has(layer.id))continue;
-    const area=layer.window[2]**2;
+    const area=layer.window[2]**2*(layer.blend==='overlay'?2:1);
     if(pixels+area<=grid**2){front.set(layer.id,layer);pixels+=area;}
   }
-  return {ids:selection,parts,front,interleaved,bounds:unionImageBounds(parts.map(p=>p.bounds))};
+  // Overlay branches on the backdrop color. Keep the ordering above the
+  // lowest moving layer so the soft edge can be blended before that decision.
+  const stack=[...front.values()].some(l=>l.blend==='overlay')
+    ?image.layers.slice(image.layers.findIndex(l=>selection.has(l.id))).map(l=>l.id):null;
+  return {ids:selection,parts,front,stack,interleaved,bounds:unionImageBounds(parts.map(p=>p.bounds))};
 }
 
 export function isMoveSelection(source,tr){
   return source&&tr&&tr.scale===1&&!tr.angle&&tr.layerIds.length===source.ids.size&&tr.layerIds.every(id=>source.ids.has(id));
+}
+
+// Recompose just the intersection of the dragged sprite and the overlay
+// tile. The underlay omits everything from the lowest selected layer upward.
+function replayOverlay(plate,layers,x,y,color,curve,output,offset){
+  const [tx,ty,side]=plate.window,pos=4*((y-ty)*side+x-tx);
+  let alpha=plate.underlay[pos+3]/255;
+  for(let c=0;c<3;c++)color[c]=curve.linear[plate.underlay[pos+c]];
+  for(const {bytes,bounds:[l,t,r,b],stride,blend} of layers){
+    if(x<l||x>=r||y<t||y>=b)continue;
+    const i=4*((y-t)*stride+x-l),cover=bytes[i+3]/255;
+    if(!cover)continue;
+    const back=alpha*(1-cover),sum=cover+back;
+    for(let c=0;c<3;c++){
+      const dst=color[c],src=curve.linear[bytes[i+c]];
+      let mix=src;
+      if(blend==='overlay')mix=dst<=.5?2*dst*src:1-2*(1-dst)*(1-src);
+      else if(blend==='screen')mix=dst+src-dst*src;
+      else if(blend==='multiply')mix=dst*src;
+      color[c]=(back*dst+cover*(src+alpha*(mix-src)))/sum;
+    }
+    alpha=sum;
+  }
+  for(let c=0;c<3;c++)output[offset+c]=curve.byte[Math.min(65535,Math.round(color[c]*65535))];
+  output[offset+3]=255*alpha;
 }
 
 export function createMovePreview(onReady){
@@ -175,9 +204,14 @@ export function createMovePreview(onReady){
       if(entry===cache&&source.parts.some(p=>!p.separate))onReady();
       for(const layer of source.front.values()){
         if(entry.front.has(layer.id))continue;
+        let underlay;
+        if(layer.blend==='overlay'){
+          underlay=await read(layer.window,{movePlane:{ids:[...source.ids],plane:'underlay'}});
+          if(!underlay||!valid())return;
+        }
         const ink=await read(layer.window,{isolatedImageLayer:layer.id});
         if(!valid())return;
-        if(ink)entry.front.set(layer.id,{ink,blend:layer.blend,window:layer.window});
+        if(ink)entry.front.set(layer.id,{ink,underlay,blend:layer.blend,window:layer.window});
       }
       if(entry===cache&&source.front.size)onReady();
     }
@@ -227,6 +261,8 @@ export function createMovePreview(onReady){
       moving.push({part,painted,dst,front,empty:!cache.source.interleaved&&source.obstacles&&!source.obstacles.some(box=>overlaps(box,dst))});
     }
     if(!moving.length)return;
+    if(cache.source.stack&&moving.some(m=>m.front.some(f=>f.underlay)&&
+      cache.source.parts[0].front.some(f=>overlaps(f.bounds,m.dst)&&!cache.front.has(f.id))))return;
     beforeDraw();
     // First uncover every original position, then paint the complete selection.
     // A destination may pass directly over another selected item's old position.
@@ -239,7 +275,16 @@ export function createMovePreview(onReady){
       }
     }
     const composited=[];
-    for(const {part,dst,front,empty} of moving){
+    const stack=cache.source.stack?.map(id=>{
+      const item=moving.find(m=>m.part.source.id===id);
+      if(item)return {bytes:item.part.sprite.data,bounds:item.dst,stride:item.part.sprite.width,blend:'normal',order:moving.indexOf(item)};
+      const layer=cache.front.get(id);
+      if(layer){
+        const [x,y,side]=layer.window;
+        return {bytes:layer.ink,bounds:[x,y,x+side,y+side],stride:side,blend:layer.blend};
+      }
+    }).filter(Boolean);
+    for(const [order,{part,dst,front,empty}] of moving.entries()){
       const [x,y,r,b]=dst;
       if(empty){ctx.putImageData(part.sprite,x-ox,y-oy);continue;}
       const left=Math.max(x,ox),top=Math.max(y,oy),right=Math.min(r,ox+image.width),bottom=Math.min(b,oy+image.height);
@@ -276,11 +321,38 @@ export function createMovePreview(onReady){
           output.set(prior.patch.data.subarray(pos,pos+4*(end-start)),4*((y-top)*width+start-left));
         }
       }
-      let curve,lastInk=-1,lastBack=-1,lastMix=0;
+      const overlays=front.filter(layer=>layer.underlay);
+      // Higher selected sprites are drawn in their own pass.
+      const layers=overlays.length?stack.filter(l=>l.order===undefined||l.order<=order):null;
+      const color=[0,0,0];
+      // A single band often has long flat runs. Reuse a result only when
+      // every contributing RGBA value (including the overlay underlay) matches.
+      const band=front.length===1&&(!layers||layers.length===2)?front[0]:null;
+      const band32=band&&new Uint32Array(band.ink.buffer);
+      const under32=band?.underlay&&new Uint32Array(band.underlay.buffer);
+      const [bx,by,side]=band?.window??[0,0,0];
+      let curve,lastInk=-1,lastBack=-1,lastBand=-1,lastUnder=-1,lastMix=0;
       const ink32=new Uint32Array(src.buffer),out32=new Uint32Array(output.buffer);
       for(let row=top,k=0;row<bottom;row++)for(let col=left;col<right;col++,k+=4){
         const a=((row-y)*part.sprite.width+col-x)*4;
         if(!src[a+3])continue;
+        if(band){
+          const pos=col>=bx&&row>=by&&col<bx+side&&row<by+side?(row-by)*side+col-bx:-1;
+          const tint=band32[pos]??0,under=under32?.[pos]??0,ink=ink32[a/4],back=out32[k/4];
+          if(ink===lastInk&&back===lastBack&&tint===lastBand&&under===lastUnder){
+            out32[k/4]=lastMix;continue;
+          }
+          lastInk=ink;lastBack=back;lastBand=tint;lastUnder=under;
+        }
+        if(overlays.length){
+          const plate=overlays.find(({window:[tx,ty,side]})=>col>=tx&&col<tx+side&&row>=ty&&row<ty+side);
+          if(plate){
+            curve??=colorCurve(state.colorSpace);
+            replayOverlay(plate,layers,col,row,color,curve,output,k);
+            if(band)lastMix=out32[k/4];
+            continue;
+          }
+        }
         if(!front.length){
           const ink=ink32[a/4],back=out32[k/4];
           if(src[a+3]===255||!output[k+3]){out32[k/4]=ink;continue;}
@@ -288,7 +360,7 @@ export function createMovePreview(onReady){
           if(ink===lastInk&&back===lastBack){out32[k/4]=lastMix;continue;}
           lastInk=ink;lastBack=back;
         }
-        // For normal and multiply, the foreground stack is affine in the
+        // For normal, multiply and screen, the foreground stack is affine in the
         // backdrop's premultiplied RGB and alpha. Blend the saved composite
         // with that same stack over opaque moving ink, using the ink's masked
         // alpha. This also works when the underlying document is transparent.
@@ -302,6 +374,8 @@ export function createMovePreview(onReady){
           const r=curve.linear[ink[i]],g=curve.linear[ink[i+1]],b=curve.linear[ink[i+2]];
           if(blend==='multiply'){
             red*=1+cover*(r-1);green*=1+cover*(g-1);blue*=1+cover*(b-1);
+          }else if(blend==='screen'){
+            red+=cover*r*(1-red);green+=cover*g*(1-green);blue+=cover*b*(1-blue);
           }else{
             red+=cover*(r-red);green+=cover*(g-green);blue+=cover*(b-blue);
           }
@@ -312,7 +386,7 @@ export function createMovePreview(onReady){
           const value=overInk*alpha+curve.linear[output[k+c]]*bg;
           output[k+c]=curve.byte[Math.min(65535,Math.round(65535*value/sum))];
         }
-        if(!front.length)lastMix=out32[k/4];
+        if(!front.length||band)lastMix=out32[k/4];
       }
       ctx.putImageData(patch,left-ox,top-oy);
       if(cache.source.interleaved)composited.push({patch,left,top});

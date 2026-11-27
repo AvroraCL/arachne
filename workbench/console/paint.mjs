@@ -8,7 +8,7 @@ import {textDefaults,textFonts,textEffects,checkStyleFields,hasImageStyle,paragr
 import {imageColorSpaces,materialImageSources,embeddedDependencies,validateImageDocuments,imageDocumentOperation,imageLayersBeforeAdjustment,visibleImageLayers,imageLayerDefaults,imageClippingBase,imageLayerAssets,clearImageLayerMask,imageCoverageSources,hasImageLayerMask} from './public/image-documents.mjs';
 import {layoutKinds} from './public/image-layout.mjs';
 import {imagePlacement,warpPoint} from './public/image-warp.mjs';
-import {imageLayersThrough,isolateImageLayer} from './public/image-layer-tree.mjs';
+import {imageLayersBefore,imageLayersThrough,isolateImageLayer} from './public/image-layer-tree.mjs';
 import {imageCombineLabels,planImageCombine} from './public/image-layer-combine.mjs';
 import {imageLayerLimit} from './public/image-layer-batch.mjs';
 import {imageStrokeQueueLimit,strokeReceiptLimit,strokeTarget} from './public/image-stroke-queue.mjs';
@@ -920,12 +920,13 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
   if(movePlane!==undefined){
     const ids=movePlane?.ids,plane=movePlane?.plane;
     if(!window||edits.length||brushTile||inspectMask||isolatedImageLayer||beforeImageLayer!==undefined||
-       !['background','content'].includes(plane)||!Array.isArray(ids)||!ids.length||ids.length>image.layers.length)
+       !['background','content','underlay'].includes(plane)||!Array.isArray(ids)||!ids.length||ids.length>image.layers.length)
       throw Error('移动图层预览参数无效');
     const moving=new Set(ids),layers=image.layers.filter(layer=>moving.has(layer.id));
     if(moving.size!==ids.length||layers.length!==ids.length||
        layers.some(layer=>layer.parentId||!['image','shape'].includes(layer.kind)))throw Error('移动图层预览选择无效');
-    planeLayers=plane==='content'?layers:image.layers.filter(layer=>!moving.has(layer.id));
+    if(plane==='underlay')planeLayers=imageLayersBefore(image.layers,layers[0]);
+    else planeLayers=plane==='content'?layers:image.layers.filter(layer=>!moving.has(layer.id));
   }
   const selected=isolatedImageLayer
     ?isolateImageLayer(image.layers,isolatedImageLayer)

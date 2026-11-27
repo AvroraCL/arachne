@@ -290,6 +290,12 @@ test('RGBA live input includes only the layers and assets required for the reque
  assert.deepEqual(Object.keys(lifted.assets),[visibleAsset]);
  assert.deepEqual(behind.paint.imageDocuments.doc.layers.map(l=>l.id),['pixel']);
  assert.deepEqual(behind.assets,{});
+ // Even when the selection is passed top first, the underlay ends at the
+ // lowest selected layer. A visible stationary layer above it must be excluded.
+ paint.imageDocuments.doc.layers.find(l=>l.id==='transparent').opacity=1;
+ const under=input({window,movePlane:{...movePlane,plane:'underlay'}});
+ assert.deepEqual(under.paint.imageDocuments.doc.layers.map(l=>l.id),['pixel']);
+ assert.deepEqual(under.assets,{});
  assert.throws(()=>input({window,movePlane:{ids:['photo','missing'],plane:'content'}}),/移动图层预览选择无效/);
  assert.throws(()=>input({isolatedImageLayer:'missing'}),/图像图层不存在/);
  assert.throws(()=>input({inspectMask:'missing'}),/图像蒙版不存在/);
