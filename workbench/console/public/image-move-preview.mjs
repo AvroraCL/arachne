@@ -74,7 +74,17 @@ export function moveSource(image,ids,assets){
   if(!parts.length||parts.length!==selection.size)return;
   // Coalesce intersecting source rectangles once. Preserve the authored stack
   // order and isolate the moving pixels when the gap contains stationary artwork.
-  for(let i=0;i<parts.length;i++){
+  // When a stationary layer separates overlapping sprites, keep their stack
+  // positions distinct and uncover the shared backdrop with both hidden.
+  const interleaved=parts.some((a,i)=>parts.slice(i+1).some(b=>overlaps(a.bounds,b.bounds)&&
+    a.front.some(layer=>!b.front.some(other=>other.id===layer.id))));
+  if(interleaved){
+    for(const part of parts){
+      if(!part.window)return;
+      part.separate=false;
+    }
+  }
+  for(let i=0;!interleaved&&i<parts.length;i++){
     for(let j=i+1;j<parts.length;j++){
       const a=parts[i],b=parts[j];
       if(!overlaps(a.bounds,b.bounds))continue;
@@ -97,7 +107,7 @@ export function moveSource(image,ids,assets){
     const area=layer.window[2]**2;
     if(pixels+area<=grid**2){front.set(layer.id,layer);pixels+=area;}
   }
-  return {ids:selection,parts,front,bounds:unionImageBounds(parts.map(p=>p.bounds))};
+  return {ids:selection,parts,front,interleaved,bounds:unionImageBounds(parts.map(p=>p.bounds))};
 }
 
 export function isMoveSelection(source,tr){
@@ -131,11 +141,12 @@ export function createMovePreview(onReady){
         const {id,window,bounds,separate,front}=part.source;
         if(separate)continue;
         const members=part.source.members;
-        const back=await read(window,members?{movePlane:{ids:members,plane:'background'}}:
+        const hidden=source.interleaved?[...source.ids]:members;
+        const back=await read(window,hidden?{movePlane:{ids:hidden,plane:'background'}}:
           {operation:{op:'image',documentId:state.documentId,action:'updateLayer',layerId:id,patch:{visible:false}}});
         if(!back||cache!==entry)return;
         const [tx,ty,side]=window,[l,t,r,b]=bounds;
-        let clear=!front.some(layer=>overlaps(layer.bounds,bounds));
+        let clear=!source.interleaved&&!front.some(layer=>overlaps(layer.bounds,bounds));
         for(let y=t;clear&&y<b;y++)for(let x=l;x<r;x++){
           if(back[4*((y-ty)*side+x-tx)+3]){clear=false;break;}
         }
@@ -193,7 +204,7 @@ export function createMovePreview(onReady){
         }
         part.sprite=sprite;
       }
-      moving.push({part,painted,dst,front,empty:source.obstacles&&!source.obstacles.some(box=>overlaps(box,dst))});
+      moving.push({part,painted,dst,front,empty:!cache.source.interleaved&&source.obstacles&&!source.obstacles.some(box=>overlaps(box,dst))});
     }
     if(!moving.length)return;
     beforeDraw();
@@ -207,6 +218,7 @@ export function createMovePreview(onReady){
         ctx.putImageData(background,tx-ox,ty-oy,l-tx,t-ty,r-l,b-t);
       }
     }
+    const composited=[];
     for(const {part,dst,front,empty} of moving){
       const [x,y,r,b]=dst;
       if(empty){ctx.putImageData(part.sprite,x-ox,y-oy);continue;}
@@ -232,6 +244,16 @@ export function createMovePreview(onReady){
             const [tx,ty,side]=original.source.window,pos=((row-ty)*side+start-tx)*4;
             output.set(original.back.subarray(pos,pos+length),offset);
           }
+        }
+      }
+      // A higher moving sprite must see the pixels of a lower moving sprite
+      // at the destination, including any stationary layers between them.
+      for(const prior of composited){
+        const start=Math.max(left,prior.left),end=Math.min(right,prior.left+prior.patch.width);
+        if(end<=start)continue;
+        for(let y=Math.max(top,prior.top);y<Math.min(bottom,prior.top+prior.patch.height);y++){
+          const pos=4*((y-prior.top)*prior.patch.width+start-prior.left);
+          output.set(prior.patch.data.subarray(pos,pos+4*(end-start)),4*((y-top)*width+start-left));
         }
       }
       let curve,lastInk=-1,lastBack=-1,lastMix=0;
@@ -274,9 +296,14 @@ export function createMovePreview(onReady){
         if(!front.length)lastMix=out32[k/4];
       }
       ctx.putImageData(patch,left-ox,top-oy);
+      if(cache.source.interleaved)composited.push({patch,left,top});
     }
     const rect=([l,t,r,b])=>[l-ox,t-oy,r-l,b-t];
     return moving.map(({painted,dst,empty})=>({original:rect(painted),destination:rect(dst),empty}));
   }
-  return {prepare,draw,clear};
+  function readyForRepeat(source){
+    return cache?.source===source&&cache.parts.every(p=>p.source.separate||p.back)&&
+      source.parts.every(p=>p.front.every(layer=>cache.front.has(layer.id)));
+  }
+  return {prepare,draw,clear,readyForRepeat};
 }

@@ -527,15 +527,23 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       const left=Math.max(0,Math.floor(Math.min(l,l+dx))),top=Math.max(0,Math.floor(Math.min(t,t+dy)));
       const right=Math.min(detailSize,Math.ceil(Math.max(r,r+dx))),bottom=Math.min(detailSize,Math.ceil(Math.max(b,b+dy)));
       const side=[256,512,768,1024,1536,2048].find(n=>n>=Math.max(right-left,bottom-top));
-      if(side)return {frame:baseFrame,window:[Math.min(left,detailSize-side),Math.min(top,detailSize-side),side]};
-      if(moveDirty)return {frame:baseFrame};
+      const local=!!moveDirty&&moves.readyForRepeat(source);
+      if(side)return {state,frame:baseFrame,local,window:[Math.min(left,detailSize-side),Math.min(top,detailSize-side),side]};
+      if(moveDirty)return {state,frame:baseFrame,local};
     },
-    finishMove(saved,revision){
+    continueMove(saved,operation){
+      if(baseFrame!==saved.frame||frame!==baseFrame)return false;
+      if(!drawMove(saved.state,operation))return false;
+      cancelPending();
+      intent={...saved.state,operation,target:draftTarget(operation),size:detailSize,group:Symbol()};
+      return true;
+    },
+    finishMove(saved,revision,steps=1){
       const state=context(),before=saved?.frame.request;
-      if(!before||baseFrame!==saved.frame||!state||before.revision+1!==revision||state.revision!==revision||
+      if(!before||baseFrame!==saved.frame||!state||before.revision+steps!==revision||state.revision!==revision||
          state.id!==before.id||state.documentId!==before.documentId||state.inspectMask!==before.inspectMask||
          frame!==baseFrame||drawn?.pixels!==baseFrame.pixels)return false;
-      requestFrame(state,null,detailSize,saved.window);
+      requestFrame(state,null,detailSize,steps===1?saved.window:undefined);
       return true;
     },
     update(operation,committedStroke){

@@ -15,7 +15,7 @@ const button=(label,action)=>{const node=element('button');node.type='button';no
 const guidesFrom=value=>Object.fromEntries(['x','y'].map(axis=>[axis,Array.isArray(value?.[axis])
   ?value[axis].filter(n=>Number.isFinite(n)&&n>=0&&n<=1):[]]));
 
-export function createImageMoveTool({stage,canvas,parameters,signal,settings={},context,select,preview,commit,onError,onChange}){
+export function createImageMoveTool({stage,canvas,parameters,signal,settings={},context,select,preview,continueSelection,commit,onError,onChange}){
   const options=element('div','editor-toolbar document-move-options');
   const overlay=svg('svg','document-layout-overlay'),guides=svg('g','document-layout-guides');
   const box=svg('g','document-layout-handles'),outline=svg('polygon','document-layout-outline');
@@ -93,7 +93,7 @@ export function createImageMoveTool({stage,canvas,parameters,signal,settings={},
   async function probe(state,fields,controller){
     const response=await fetch('/api/projects/'+state.origin.id+'/paint/image-layout-probe',{
       method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-      body:JSON.stringify({revision:state.origin.revision,documentId:state.origin.documentId,layerIds:[],...fields})
+      body:JSON.stringify({revision:state.probeRevision??state.origin.revision,documentId:state.origin.documentId,layerIds:[],...fields})
     });
     const result=await response.json();
     if(!response.ok)throw Error(result.error);
@@ -260,8 +260,9 @@ export function createImageMoveTool({stage,canvas,parameters,signal,settings={},
     inputSequence++;
     clearClicks();
     pick?.abort();pick=null;
-    release();
-    if(draft){draft=null;preview(null);}
+    const restore=!!draft||gesture?.continued;
+    release();draft=null;
+    if(restore)preview(null);
     layout();return true;
   }
   async function apply(){
@@ -269,7 +270,7 @@ export function createImageMoveTool({stage,canvas,parameters,signal,settings={},
     const {state,transform}=draft;
     release();draft=null;
     try{if(isChanged(transform))await commit(command(state,[transform]),state.origin);}
-    finally{preview(null);layout();}
+    finally{if(!isChanged(transform))preview(null);layout();}
   }
   function translate(base,delta,shift,allowSnap){
     const offset=base.offset.map((n,i)=>n+delta[i]);
@@ -324,11 +325,12 @@ export function createImageMoveTool({stage,canvas,parameters,signal,settings={},
     // resolve the hit on pointer-down so an unselected layer can be dragged.
     const items=state.ids.length?selectedBounds(state,planIfAvailable(state)):[];
     if(!items.some(({bounds})=>at[0]>=bounds[0]&&at[0]<=bounds[2]&&at[1]>=bounds[1]&&at[1]<=bounds[3])){
+      if(state.selectedOnly){release();return;}
       const g=gesture;
       const controller=new AbortController();pick=controller;
       g.controller=controller;
       g.hit=probeHit(g.state,at,controller).finally(()=>{if(pick===controller)pick=null;});
-    }
+    }else gesture.continued=continueSelection?.();
   },{capture:true,signal});
   function planIfAvailable(state){
     try{return plan(state).roots;}catch{return [];}
@@ -439,6 +441,7 @@ export function createImageMoveTool({stage,canvas,parameters,signal,settings={},
       }).catch(onError);
       return;
     }
+    if(g.continued)preview(null);
     if(!g.state.mask&&at.every(n=>n>=0&&n<=1))enqueueClick(g,at);
   },{capture:true,signal});
   for(const name of ['pointercancel','lostpointercapture'])stage.addEventListener(name,event=>{

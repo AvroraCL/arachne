@@ -245,6 +245,64 @@ image.save(sys.stdout.buffer,format='PNG')
     assert.deepEqual(await sample(.27,.68),saved);
     await page.unroute('**/image-live',hold);
     console.log('PASS joint foreground overlap',JSON.stringify({under,saved,data}));
+    // Real stack order, bottom to top: logo / translucent band / lettering.
+    // Their padded source bounds intersect. Hold the first write so the next
+    // press cannot accidentally pass by waiting for a server acknowledgement.
+    await commands(op('updateLayer',{layerId:'front-swatch',patch:{visible:false}}),
+      op('updateLayer',{layerId:'logo',patch:{x:.27,y:.68}}),
+      op('updateLayer',{layerId:text.layerId,patch:{x:.47,y:.61}}),
+      {...add('midband','半透明色带','shape',{x:.56,y:.49,scale:.47,opacity:.55,
+        shape:{...shape,width:1250,height:530,fill:'#23bee8'}}),index:layers(doc).findIndex(l=>l.id===text.layerId)});
+    const baseLayers=structuredClone(layers(doc)),revision=doc.revision;
+    const band=page.waitForResponse(r=>r.url().endsWith('/image-live')&&r.request().postDataJSON()?.isolatedImageLayer==='midband'&&r.ok());
+    await page.reload();await select('logo').click();await select(text.layerId).click({modifiers:[modifier]});
+    await canvas.focus();await page.keyboard.press('v');await ready();await (await band).finished();
+    await editor.getByRole('checkbox',{name:'吸附参考线'}).uncheck();
+    const letter=await canvas.evaluate(c=>{
+      const left=1560,top=2360,w=760,h=330,d=c.getContext('2d').getImageData(left,top,w,h).data;
+      for(let y=5;y<h-5;y++)for(let x=5;x<w-5;x++){
+        if([[0,0],[-4,-4],[4,-4],[-4,4],[4,4]].every(([dx,dy])=>{
+          const i=4*((y+dy)*w+x+dx);return d[i]===213&&d[i+1]===234&&d[i+2]===247;
+        }))return [(left+x)/c.width,(top+y)/c.height];
+      }
+      throw Error('未找到 A-12 笔画内部');
+    });
+    const readPair=async(dx,dy)=>[await sample(.27+dx,.68+dy),await sample(letter[0]+dx,letter[1]+dy)];
+    const offsets=[[0,0],[.19,-.16],[.32,-.12]],pairs=[await readPair(0,0)];
+    const draftsBefore=drafts;
+    let releaseWrite;
+    const held=new Promise(resolve=>{releaseWrite=resolve;});
+    const holdWrite=async route=>{await held;await route.continue();};
+    await page.route('**/paint/commands',holdWrite);
+    try{
+      await page.mouse.move(...at(.27,.68));await page.mouse.down();
+      await page.mouse.move(...at(.46,.52));
+      pairs.push(await readPair(...offsets[1]));
+      assert.deepEqual(pairs[1][1],[213,234,247,255]);
+      assert.notDeepEqual(pairs[1][0],pairs[0][0]);
+      await page.mouse.up();await page.mouse.down();await page.mouse.move(...at(.59,.56));
+      pairs.push(await readPair(...offsets[2]));
+      assert.deepEqual(pairs[2][1],[213,234,247,255]);
+      await page.mouse.up();
+      assert.equal((await api(route)).revision,revision);
+    }finally{releaseWrite();}
+    doc=await until(async()=>{const next=await api(route);return next.revision===revision+2&&next;},'两个独立移动提交');
+    await ready();await page.unroute('**/paint/commands',holdWrite);
+    assert.equal(drafts,draftsBefore);
+    const checkPair=async i=>{
+      const displayed=await readPair(...offsets[i]);
+      assert.ok(displayed.every((p,j)=>p.every((n,k)=>Math.abs(n-pairs[i][j][k])<=1)),JSON.stringify({displayed,drag:pairs[i]}));
+      for(const id of ['logo',text.layerId]){
+        const initial=baseLayers.find(l=>l.id===id);
+        assert.ok(Math.abs(layer(id).x-initial.x-offsets[i][0])<.002&&Math.abs(layer(id).y-initial.y-offsets[i][1])<.002);
+      }
+    };
+    await checkPair(2);
+    for(const [key,i] of [['+z',1],['+z',0],['+Shift+z',1],['+Shift+z',2]]){
+      await canvas.focus();await page.keyboard.press(modifier+key);await waitRevision('连续移动的独立历史');await ready();await checkPair(i);
+    }
+    console.log('PASS interleaved translucent band and immediate second drag with first save held');
+
     assert.deepEqual(errors,[]);
     return;
   }
