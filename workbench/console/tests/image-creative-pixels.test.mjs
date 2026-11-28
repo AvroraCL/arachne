@@ -1020,3 +1020,393 @@ source=composite_document(isolated,{})
 assert np.array_equal(image,source[y:y+h,x:x+w])
 `],{input:JSON.stringify([image,plan]),cwd:new URL('..',import.meta.url)});
 });
+
+test('native contiguous mask respects four-way connectivity across dense, sparse and strided inputs',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from image_raster_tools import connected_area
+from paint_kernel import connected_area_kernel
+
+if connected_area_kernel() is None:
+    print('unbuilt')
+    raise SystemExit(0)
+
+diagonal=np.eye(8,dtype=bool)
+assert connected_area(diagonal,0,0).sum()==1
+comb=np.ones((315,511),dtype=bool)
+comb[1:,:][:,1::2]=False
+comb[-2:,-2:]=True
+assert connected_area(comb,0,0).sum()==comb.sum()
+large=np.zeros((4096,4096),dtype=bool)
+large[33:3700,57:3500]=True
+large[40:3600:2,800:2750]=False
+large[3800:3900,3900:4000]=True
+rng=np.random.default_rng(404)
+cases=[(diagonal,3,3),(comb,314,0),(comb.T,4,16),(comb[::-2,::-2],25,9),
+       (large,2000,512),(large,0,0),(large,3899,3999),(np.ones((1,512),bool),0,511)]
+for height,width in [(1,15),(30,1),(19,51),(101,91)]:
+    for density in [.2,.5,.8]:
+        matching=rng.random((height,width))<density
+        cases.extend((matching,int(row),int(col)) for row,col in rng.integers([0,0],[height,width],(10,2)))
+for matching,row,col in cases:
+    with patch('image_raster_tools.connected_area_kernel',return_value=None):
+        expected=connected_area(matching,row,col)
+    np.testing.assert_array_equal(connected_area(matching,row,col),expected)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run contiguous mask parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native Gaussian passes preserve float pixels for strided masks and premultiplied color',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from image_filters import blur_gaussian, gaussian_box
+from paint_kernel import gaussian_blur_kernel
+
+if gaussian_blur_kernel() is None:
+    print('unbuilt')
+    raise SystemExit(0)
+
+rng=np.random.default_rng(902)
+for shape in [(1,19,1),(29,1,4),(3,2,1),(79,123,1),(71,257,4)]:
+    pixels=rng.random(shape,dtype=np.float32)
+    pixels[pixels<.34]=0
+    if shape[-1]==4:
+        pixels[:,:,:3]*=pixels[:,:,3:]
+    for radius in [0,.125,5.5,32.5,108]:
+        box=gaussian_box(radius)
+        expected=pixels.copy()
+        with patch('image_filters.gaussian_blur_kernel',return_value=None):
+            blur_gaussian(expected,*box)
+        actual=pixels.copy()
+        blur_gaussian(actual,*box)
+        np.testing.assert_array_equal(actual,expected)
+        strided=np.repeat(pixels,2,axis=1)[:,::2]
+        blur_gaussian(strided,*box)
+        np.testing.assert_array_equal(strided,expected)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run Gaussian parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native layer blending preserves alpha, clipping and masked pixel values',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from image_documents import composite_tile
+from paint_kernel import composite_tile_kernel
+
+if composite_tile_kernel() is None:
+    print('unbuilt')
+    raise SystemExit(0)
+
+rng=np.random.default_rng(3758)
+back=rng.random((7091,4),dtype=np.float32)
+ink=rng.random((4097,4),dtype=np.float32)
+for layer in (back,ink):
+    layer[layer<.23]=0
+    layer[layer>.9]=1
+    layer[:,:3]*=layer[:,3:]
+mask=rng.random((len(ink)*2,1),dtype=np.float32)[::2]
+ids=np.sort(rng.choice(len(back),len(ink),replace=False))
+for selection in (ids.astype(np.int32),ids):
+    expected=back.copy()
+    actual=back.copy()
+    for strength in (1,.42,mask,0,.97,mask):
+        with patch('image_documents.composite_tile_kernel',return_value=None):
+            composite_tile(expected,selection,ink,strength,'normal')
+        composite_tile(actual,selection,ink,strength,'normal')
+        np.testing.assert_array_equal(actual,expected)
+    untouched=np.setdiff1d(np.arange(len(back)),selection)
+    np.testing.assert_array_equal(actual[untouched],back[untouched])
+
+for style in [dict(mode='multiply'),dict(mode='screen'),dict(mode='overlay'),
+              dict(mode='overlay',clipped=True),dict(mode='normal',clipped=True),
+              dict(mode='normal',blend_if={'source':[32,50,140,177],'backdrop':[0,0,255,255]})]:
+    expected=back.copy()
+    with patch('image_documents.composite_tile_kernel',return_value=None):
+        composite_tile(expected,ids,ink,mask,**style)
+    actual=back.copy()
+    composite_tile(actual,ids,ink,mask,**style)
+    np.testing.assert_array_equal(actual,expected)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run source-over parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native pixel union and lookup preserve sorted IDs and full 4K stroke replay',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from image_documents import composite_document
+from paint_kernel import apply_paint_channel_kernel,pixel_lower_bounds_kernel,pixel_union_kernel
+from paint_surface import paint_pixel_indices,unique_paint_pixels
+
+if not all(k() for k in (pixel_lower_bounds_kernel,pixel_union_kernel,apply_paint_channel_kernel)):
+    print('unbuilt')
+    raise SystemExit(0)
+
+rng=np.random.default_rng(522)
+for size in (0,1,3,128,22311):
+    table=np.sort(rng.integers(50,18000,size,dtype=np.int32))
+    query=np.concatenate((np.array([-1,50,18000],np.int32),table[::-1],table,table[::5]))
+    np.testing.assert_array_equal(paint_pixel_indices(table,query),np.searchsorted(table,query))
+parts=[rng.integers(0,4096*4096,170000,dtype=np.int32) for _ in range(4)]
+parts.append(parts[0])
+np.testing.assert_array_equal(unique_paint_pixels(parts,4096*4096),np.unique(np.concatenate(parts)))
+cases=[
+    dict(uv=True,rect=[.1,.1,.8,.7],color='#734a29',opacity=.91,erase=False),
+    dict(uv=True,rect=[.25,.11,.9,.9],color='#843ca7',opacity=.35,erase=False),
+    dict(uv=True,rect=[.02,.4,.55,.99],color='#000000',opacity=.21,erase=True),
+    dict(uv=True,rect=[.05,.6,.54,.86],color='#1998cd',opacity=.6,preserveAlpha=True,erase=False),
+    dict(transformUV=dict(rect=[.21,.32,.54,.66],offset=[.107,-.15],
+                           scale=[.66,1.13],angle=21,interpolation='linear')),
+]
+mask=[dict(uv=True,rect=[.18,.1,.76,.85],opacity=.58,value=0),
+      dict(uv=True,rect=[.24,.52,.93,.9],opacity=.48,value=1)]
+doc=dict(colorSpace='srgb',layers=[dict(id='work',kind='pixel',visible=True,opacity=.83,blend='normal',
+    strokes=cases,maskEnabled=True,maskStrokes=mask,maskBase=1,maskFeather=12.5)])
+with (patch('paint_surface.pixel_lower_bounds_kernel',return_value=None),
+      patch('paint_surface.pixel_union_kernel',return_value=None),
+      patch('paint_surface.apply_paint_channel_kernel',return_value=None)):
+    expected=composite_document(doc,{})
+np.testing.assert_array_equal(composite_document(doc,{}),expected)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run sparse replay parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native sRGB bytes agree around transfer and alpha rounding boundaries',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from image_color_spaces import decode
+from image_documents import encode_document_pixels
+from paint_kernel import srgb_encoding_kernel
+
+if srgb_encoding_kernel() is None:
+    print('unbuilt')
+    raise SystemExit(0)
+
+edges=decode((np.arange(255,dtype=np.float32)+.5)/255)
+neighbors=(edges.view(np.int32)[:,None]+np.arange(-24,25,dtype=np.int32)).view(np.float32).ravel()
+rng=np.random.default_rng(1002)
+case=np.empty((len(neighbors)*4,4),dtype=np.float32)
+for tile,alpha in zip(np.split(case,4),[1,.36,1e-9,0]):
+    tile[:,:3]=np.column_stack((neighbors,np.roll(neighbors,5),rng.uniform(-.1,1.1,len(tile))))*alpha
+    tile[:,3]=alpha
+with patch('image_documents.srgb_encoding_kernel',return_value=None):
+    expected=encode_document_pixels(case,'srgb')
+np.testing.assert_array_equal(encode_document_pixels(case,'srgb'),expected)
+assert (expected[-len(neighbors):]==0).all()
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run sRGB parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native RGBA lookup keeps source transfer functions, transparent RGB and reversed rows',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from image_color_spaces import PROFILE_FILES
+from image_documents import premultiplied_rgba
+from paint_kernel import rgba_decoding_kernel
+
+if rgba_decoding_kernel() is None:
+    print('unbuilt')
+    raise SystemExit(0)
+colors,alphas=np.meshgrid(np.arange(256,dtype=np.uint8),np.arange(256,dtype=np.uint8))
+raw=np.stack([colors,255-colors,np.roll(colors,94,axis=1),alphas],axis=-1)
+for space in ['linear',*PROFILE_FILES]:
+    for pixels in (raw,raw[::-1],raw[::-1,::3]):
+        with patch('image_documents.rgba_decoding_kernel',return_value=None):
+            expected=premultiplied_rgba(pixels,space)
+        actual=premultiplied_rgba(pixels,space)
+        np.testing.assert_array_equal(actual,expected)
+        assert np.all(actual[pixels[:,:,3]==0]==0)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run byte decoding parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native transformed mask matches authored sampling order across cropped tiles',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from image_documents import ImageSurface, image_mask, transformed_mask
+from paint_kernel import sparse_mask_kernels
+
+if sparse_mask_kernels() is None:
+    print('unbuilt')
+    raise SystemExit(0)
+
+rng=np.random.default_rng(604)
+for size,window in [(128,None),(256,(1864,1764,256))]:
+    ids=np.sort(rng.choice(size*size,4200,replace=False)).astype(np.int32)
+    alpha=rng.random(len(ids),dtype=np.float32)
+    value=alpha*rng.random(len(ids),dtype=np.float32)
+    full=np.arange(size*size)
+    surface=ImageSurface(size,{},window)
+    u,v=surface._texel_uv(full)
+    coords=(u+(u-.5)*.073-.00012,v+(u-.5)*.038+.00049)
+    with patch('image_documents.sparse_mask_kernels',return_value=None):
+        expected=transformed_mask((ids,alpha,value),full,size,window,coords)
+    actual=transformed_mask((ids,alpha,value),full,size,window,coords)
+    for a,b in zip(actual,expected):
+        np.testing.assert_array_equal(a,b)
+
+mask=[
+    dict(uv=True,rect=[.23,.15,.6,.59],opacity=.54,value=0),
+    dict(uv=True,rect=[.27,.22,.65,.65],opacity=.64,value=.17,maskSpace=[1,0,0,1,.023,.035]),
+    dict(uv=True,rect=[.3,.26,.63,.61],opacity=.8,value=1),
+]
+layer=dict(maskBase=1,maskEnabled=True,maskTransform=[1,0,0,1,.02,-.04],maskStrokes=mask,
+           maskFeather=12.5)
+surface=ImageSurface(512)
+queries=np.arange(512*512).reshape(512,512)[::4,::6].ravel()
+with patch('image_documents.sparse_mask_kernels',return_value=None):
+    expected=image_mask(layer,surface)(queries)
+np.testing.assert_array_equal(image_mask(layer,surface)(queries),expected)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run sparse mask parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native bilinear image sampling preserves edge coverage and premultiplied samples',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+import numpy as np
+from paint_kernel import bilinear_sampling_kernel
+
+bind=bilinear_sampling_kernel()
+if bind is None:
+    print('unbuilt')
+    raise SystemExit(0)
+rng=np.random.default_rng(998)
+for h,w in [(1,1),(31,1),(4,177),(201,97)]:
+    raw=rng.random((h,w,4),dtype=np.float32)
+    raw[:,:,3][raw[:,:,3]<.4]=0
+    raw[:,:,:3]*=raw[:,:,3:]
+    u,v=rng.uniform(-.03,1.03,(2,19017))
+    x,y=np.clip(u*w-.5,0,w-1),np.clip(v*h-.5,0,h-1)
+    x0,y0=x.astype(int),y.astype(int)
+    x1,y1=np.minimum(x0+1,w-1),np.minimum(y0+1,h-1)
+    fx,fy=(x-x0)[:,None],(y-y0)[:,None]
+    expected=(raw[y0,x0]*(1-fx)+raw[y0,x1]*fx)*(1-fy)+(raw[y1,x0]*(1-fx)+raw[y1,x1]*fx)*fy
+    actual,keep=bind(raw)(u,v)
+    np.testing.assert_array_equal(actual,expected.astype(np.float32))
+    np.testing.assert_array_equal(keep,expected[:,3]>0)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run bilinear parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native affine transforms preserve transparent edges, rectangular crops and single-pixel reads',{
+  skip:process.platform!=='darwin'||process.arch!=='arm64'
+},t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from PIL import Image
+from image_documents import image_pixels
+from paint_kernel import affine_sampling_kernel
+
+sample=affine_sampling_kernel()
+if sample is None:
+    print('unbuilt')
+    raise SystemExit(0)
+rng=np.random.default_rng(373)
+# A center that lies on the source edge distinguishes the runtime's fused
+# coordinate arithmetic even when a source has only one column.
+affine=(.74,-.1,-.4,.02,.94,-.4)
+raw=rng.random((5,1,4),dtype=np.float32)
+expected=np.stack([np.asarray(Image.fromarray(raw[:,:,channel]).transform(
+    (27,21),Image.Transform.AFFINE,affine,resample=Image.Resampling.BILINEAR))
+    for channel in range(4)],axis=-1)[::-1].reshape(-1,4)
+np.testing.assert_array_equal(sample(raw,(27,21),affine),expected)
+bands=[sample(raw,(27,21),affine,start,min(4,21-start)) for start in range(0,21,4)]
+np.testing.assert_array_equal(np.concatenate(bands),expected)
+
+raw=rng.random((91,231,4),dtype=np.float32)
+raw[:,:,3][raw[:,:,3]<.4]=0
+raw[:,:,:3]*=raw[:,:,3:]
+layer=dict(x=.66,y=.29,rotation=-17.5,scale=.49,stretch=(-1.2,.77))
+for point,window in [(None,None),(None,(2650,1153,107,71)),(362*512+338,None)]:
+    with patch('image_documents.affine_sampling_kernel',return_value=None):
+        expected=image_pixels(layer,{},512,'srgb',point,window,raw)
+    actual=image_pixels(layer,{},512,'srgb',point,window,raw)
+    assert np.any(actual[:,3])
+    np.testing.assert_array_equal(actual,expected)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run affine parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native rounded rectangles and ellipses preserve antialiasing in native resolution windows',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+from unittest.mock import patch
+import numpy as np
+from image_documents import ImageSurface, shape_tiles
+from paint_kernel import affine_shape_kernel
+
+if affine_shape_kernel() is None:
+    print('unbuilt')
+    raise SystemExit(0)
+def render(surface,layer):
+    result=np.zeros((surface.uv_shape[0]**2,4),np.float32)
+    for ids,pixels in shape_tiles(surface,layer,lambda ink:np.array(ink,dtype=np.float32)):
+        result[ids]=pixels
+    return result
+
+shape=dict(width=431,height=199,cornerRadius=73,stroke=(.31,.54,.18),strokeWidth=14)
+for form,fill in [('rectangle',(.73,.2,.6)),('ellipse',None)]:
+    layer=dict(shape=dict(shape,kind=form,fill=fill),x=.48,y=.37,
+               rotation=-26.37,scale=.69,stretch=(-.87,1.32))
+    for surface in (ImageSurface(768),ImageSurface(512,{},(730,1350,512))):
+        with patch('image_documents.affine_shape_kernel',return_value=None):
+            expected=render(surface,layer)
+        actual=render(surface,layer)
+        assert np.count_nonzero((actual[:,3]>0)&(actual[:,3]<1))>20
+        np.testing.assert_array_equal(actual,expected)
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run shape parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('cropped translated feather matches full mask convolution at the canvas boundary',()=>{
+  execFileSync(pythonExecutable(),['-B','-c',`
+import numpy as np
+from image_documents import ImageSurface, image_mask
+from image_filters import blur_gaussian, gaussian_box
+
+first=dict(uv=True,rect=[.016,.36,.14,.64],opacity=.69,value=.17)
+second=dict(uv=True,rect=[.021,.43,.16,.72],opacity=.48,value=1,
+            maskSpace=[1,0,0,1,-.018,.031])
+for size,window,dx,dy,base in [
+    (4096,None,-.03571,.02917,1),(512,None,.70371,.36717,.327),
+    (512,(65,1511,512),-.0013,.0197,.42),(512,None,-.8451,.115,.73),
+]:
+    surface=ImageSurface(size,{},window)
+    layer=dict(maskEnabled=True,maskBase=base,maskTransform=[1,0,0,1,dx,dy],
+               maskStrokes=[first,second])
+    ids=np.arange(size*size)
+    unfeathered=image_mask(layer,surface)
+    reference=np.concatenate([unfeathered(block) for block in np.array_split(ids,max(1,len(ids)//131072))])
+    radius=17.25
+    blur_gaussian(reference.reshape(size,size,1),*gaussian_box(radius*surface.nominal_size/4096))
+    cropped=image_mask(dict(layer,maskFeather=radius),surface)
+    for block in np.array_split(ids,max(1,len(ids)//131072)):
+        np.testing.assert_array_equal(cropped(block),reference[block])
+`],{cwd:new URL('..',import.meta.url)});
+});

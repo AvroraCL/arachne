@@ -2,6 +2,7 @@
 import math
 
 import numpy as np
+from paint_kernel import alpha_bounds_kernel, gaussian_blur_kernel
 
 
 def gaussian_box(radius):
@@ -16,6 +17,16 @@ def gaussian_box(radius):
 
 
 def alpha_bounds(alpha, padding):
+    # Compositor alpha is finite and normalized. Borrow packed masks and
+    # alpha channels of interleaved RGBA, including the reversed PNG view.
+    if (alpha.size and alpha.flags.aligned and alpha.dtype in (np.float32,np.uint8) and
+            alpha.strides[1] in (alpha.itemsize,4*alpha.itemsize) and
+            (native := alpha_bounds_kernel()) is not None):
+        top,bottom,left,right = native(alpha)
+        if bottom==0:
+            return None
+        return (max(0,top-padding),min(alpha.shape[0],bottom+padding),
+                max(0,left-padding),min(alpha.shape[1],right+padding))
     rows = np.flatnonzero(alpha.max(axis=1) > 0)
     if not len(rows):
         return None
@@ -25,6 +36,10 @@ def alpha_bounds(alpha, padding):
 
 
 def blur_gaussian(pixels, half, edge):
+    if (pixels.size and pixels.dtype==np.float32 and pixels.flags.carray and
+            (native := gaussian_blur_kernel()) is not None):
+        native(pixels,half,edge)
+        return
     padding = half + 1
     width = 2 * half + 1
     for _ in range(3):

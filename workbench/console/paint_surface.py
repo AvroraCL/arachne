@@ -10,8 +10,25 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from paint_kernel import brush_coverage_kernel
+from paint_kernel import apply_paint_channel_kernel, brush_coverage_kernel, pixel_lower_bounds_kernel, pixel_union_kernel
 from PIL import Image, ImageFilter
+
+
+def paint_pixel_indices(affected, ids):
+    if (affected.dtype==ids.dtype==np.int32 and affected.flags.carray and ids.flags.carray and
+            (native := pixel_lower_bounds_kernel()) is not None):
+        return native(affected,ids)
+    return np.searchsorted(affected,ids)
+
+
+def unique_paint_pixels(parts, pixels):
+    # Those arrays come from this atlas. A dense bitmap is worthwhile for
+    # large batches, while short brush strokes avoid scanning the full atlas.
+    if (sum(map(len,parts))*32>=pixels and
+            all(part.dtype==np.int32 and part.flags.carray for part in parts) and
+            (native := pixel_union_kernel()) is not None):
+        return native(parts,pixels)
+    return np.unique(np.concatenate(parts))
 
 
 def iter_strokes(strokes):
@@ -700,10 +717,15 @@ class Surface:
     def _expand_paint(self, affected, paint, extra):
         if not len(affected):
             return extra, {}
-        combined = np.union1d(affected, extra)
+        return self._reindex_paint(affected,paint,np.union1d(affected,extra))
+
+    @staticmethod
+    def _reindex_paint(affected,paint,combined):
+        if not len(affected):
+            return combined,{}
         if len(combined) == len(affected):
             return affected, paint
-        indices = np.searchsorted(combined, affected)
+        indices = paint_pixel_indices(combined,affected)
         expanded = {}
         for name,(alpha,value) in paint.items():
             a = np.zeros(len(combined),dtype=np.float32)
@@ -717,17 +739,19 @@ class Surface:
         if not samples:
             return affected,paint
         expanding = [ids for stroke,ids,_ in samples if not stroke.get('preserveAlpha')]
-        extra = np.unique(np.concatenate(expanding)) if expanding else np.empty(0, dtype=np.int32)
-        affected,paint = self._expand_paint(affected,paint,extra)
+        if expanding:
+            combined = unique_paint_pixels([affected,*expanding],len(self.allowed))
+            affected,paint = self._reindex_paint(affected,paint,combined)
+        apply = apply_paint_channel_kernel()
         for stroke, ids, opacity in samples:
             if not len(ids) or not len(affected):
                 continue
             if stroke.get('preserveAlpha'):
-                lookup = np.minimum(len(affected)-1, np.searchsorted(affected, ids))
+                lookup = np.minimum(len(affected)-1, paint_pixel_indices(affected,ids))
                 found = affected[lookup] == ids
                 ids, opacity = lookup[found], opacity[found]
             else:
-                ids = np.searchsorted(affected,ids)
+                ids = paint_pixel_indices(affected,ids)
             for name, enabled in stroke['channels'].items():
                 if not enabled or name not in channels:
                     continue
@@ -736,14 +760,17 @@ class Surface:
                     paint[name] = (np.zeros(len(affected),dtype=np.float32),
                                    np.zeros((len(affected),count),dtype=np.float32))
                 alpha, premult = paint[name]
-                if stroke.get('preserveAlpha'):
-                    value = channel_value(name,stroke['values'].get(name,DEFAULTS[name]),color)
+                lock_alpha = bool(stroke.get('preserveAlpha'))
+                erase = not lock_alpha and stroke['erase']
+                value = None if erase else channel_value(name,stroke['values'].get(name,DEFAULTS[name]),color)
+                if apply is not None and apply(alpha,premult,ids,opacity,value,erase,lock_alpha):
+                    continue
+                if lock_alpha:
                     premult[ids] = premult[ids]*(1-opacity[:,None])+alpha[ids,None]*opacity[:,None]*value
                     continue
                 premult[ids] *= 1-opacity[:,None]
                 alpha[ids] *= 1-opacity
-                if not stroke['erase']:
-                    value = channel_value(name,stroke['values'].get(name,DEFAULTS[name]),color)
+                if not erase:
                     premult[ids] += opacity[:,None]*value
                     alpha[ids] += opacity
         return affected,paint
@@ -792,8 +819,10 @@ class Surface:
         x0,x1 = max(0,math.floor(min(cols)*raster_x)-ox),min(width,math.ceil(max(cols)*raster_x)-ox)
         y0,y1 = max(0,math.floor((1-max(rows))*raster_y)-oy),min(height,math.ceil((1-min(rows))*raster_y)-oy)
         tiles = []
+        columns = np.arange(x0,x1,dtype=np.int32)
         for row in range(y0,y1,64):
-            ids = (np.arange(row,min(row+64,y1))[:,None]*width+np.arange(x0,x1)).ravel()
+            rows = np.arange(row,min(row+64,y1),dtype=np.int32)
+            ids = (rows[:,None]*width+columns).ravel()
             ids = ids[self.allowed[ids]]
             u,v = self._texel_uv(ids)
             u,v = u-cx-dx,v-cy-dy
@@ -808,23 +837,24 @@ class Surface:
                 cols = (src_x*raster_x).astype(int)-ox
                 rows = np.minimum(raster_y-1,((1-src_y)*raster_y).astype(int))-oy
                 keep &= (cols>=0)&(cols<width)&(rows>=0)&(rows<height)
-                src = rows[keep]*width+cols[keep]
-                index = np.minimum(len(affected)-1,np.searchsorted(affected,src))
+                src = (rows[keep]*width+cols[keep]).astype(np.int32)
+                index = np.minimum(len(affected)-1,paint_pixel_indices(affected,src))
                 found = (affected[index]==src)&selected[index]
                 if np.any(found):
                     lookup = index[found]
                     weight = coverage[lookup] if soft else np.ones(len(lookup), dtype=np.float32)
                     tiles.append((ids[keep][found],{name:(a[lookup]*weight,v[lookup]*weight[:,None]) for name,(a,v) in paint.items()}))
-        dest = np.concatenate([ids for ids,_ in tiles]).astype(np.int32) if tiles else np.empty(0,dtype=np.int32)
+        dest = np.concatenate([ids for ids,_ in tiles]) if tiles else np.empty(0,dtype=np.int32)
         combined,paint = self._expand_paint(affected,paint,dest)
-        removed = np.searchsorted(combined,affected[selected]) if not transform.get('copy') else []
-        remainder = 1-coverage[selected].astype(np.float32)
-        for name,(alpha,value) in paint.items():
-            if not transform.get('copy'):
+        if not transform.get('copy'):
+            removed = paint_pixel_indices(combined,affected[selected])
+            remainder = 1-coverage[selected].astype(np.float32)
+            for alpha,value in paint.values():
                 alpha[removed] *= remainder
                 value[removed] *= remainder[:,None]
-            for ids,tile in tiles:
-                dst = np.searchsorted(combined,ids)
+        for ids,tile in tiles:
+            dst = paint_pixel_indices(combined,ids)
+            for name,(alpha,value) in paint.items():
                 incoming_alpha,incoming_value = tile[name]
                 value[dst] = value[dst]*(1-incoming_alpha[:,None])+incoming_value
                 alpha[dst] = alpha[dst]*(1-incoming_alpha)+incoming_alpha
@@ -848,8 +878,8 @@ class Surface:
             for row,wy in ((bottom,1-fy),(bottom+1,fy)):
                 weight = wx*wy
                 valid = np.flatnonzero((weight>1e-6)&(col>=0)&(col<width)&(row>=0)&(row<height))
-                ids = row[valid]*width+col[valid]
-                lookup = np.minimum(len(affected)-1,np.searchsorted(affected,ids))
+                ids = (row[valid]*width+col[valid]).astype(np.int32)
+                lookup = np.minimum(len(affected)-1,paint_pixel_indices(affected,ids))
                 found = (affected[lookup]==ids)&selected[lookup]
                 target,source = valid[found],lookup[found]
                 contribution = weight[target].astype(np.float32)
@@ -865,21 +895,26 @@ class Surface:
     def mask(self, strokes, sampler=None):
         if not strokes:
             return None
+        apply = apply_paint_channel_kernel()
         if any('region' in stroke or 'strokeBlock' in stroke for stroke in strokes):
             alpha = np.zeros(len(self.allowed),dtype=np.float32)
             value = np.zeros_like(alpha)
             for stroke in iter_strokes(strokes):
                 ids,opacity = (sampler or self.stroke)(stroke)
+                if apply is not None and apply(alpha,value[:,None],ids,opacity,stroke['value']):
+                    continue
                 value[ids] = value[ids]*(1-opacity)+stroke['value']*opacity
                 alpha[ids] = alpha[ids]*(1-opacity)+opacity
             affected = np.flatnonzero(alpha).astype(np.int32)
             return affected,alpha[affected],value[affected]
         samples = [(stroke,*(sampler or self.stroke)(stroke)) for stroke in strokes]
-        affected = np.unique(np.concatenate([ids for _,ids,_ in samples]))
+        affected = unique_paint_pixels([ids for _,ids,_ in samples],len(self.allowed))
         alpha = np.zeros(len(affected),dtype=np.float32)
         value = np.zeros_like(alpha)
         for stroke, ids, opacity in samples:
-            ids = np.searchsorted(affected,ids)
+            ids = paint_pixel_indices(affected,ids)
+            if apply is not None and apply(alpha,value[:,None],ids,opacity,stroke['value']):
+                continue
             value[ids] = value[ids]*(1-opacity)+stroke['value']*opacity
             alpha[ids] = alpha[ids]*(1-opacity)+opacity
         return affected,alpha,value

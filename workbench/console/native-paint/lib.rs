@@ -10,43 +10,54 @@ struct Grid<'a> {
     cells: &'a [Cell],
 }
 
-fn interval(knots: &[f64], value: f64) -> usize {
-    (knots.partition_point(|&knot| knot <= value).saturating_sub(1)).min(knots.len() - 2)
+fn interval(knots: &[f64], value: f64, current: usize) -> usize {
+    let last = knots.len() - 2;
+    if (current == 0 || value >= knots[current])
+        && (current == last || value < knots[current + 1])
+    {
+        current
+    } else {
+        knots.partition_point(|&knot| knot <= value).saturating_sub(1).min(last)
+    }
 }
 
 impl Grid<'_> {
-    fn evaluate(&self, u: f64, v: f64) -> ([f64; 2], [f64; 2], [f64; 2]) {
-        let i = interval(self.u, u);
-        let j = interval(self.v, v);
+    fn evaluate(&self, u: f64, v: f64, cached: &mut (usize,usize)) -> ([f64; 2], [f64; 2], [f64; 2]) {
+        let i = interval(self.u, u, cached.0);
+        let j = interval(self.v, v, cached.1);
+        *cached = (i,j);
         let width = self.u[i + 1] - self.u[i];
         let height = self.v[j + 1] - self.v[j];
         let x = (u - self.u[i]) / width;
         let y = (v - self.v[j]) / height;
         let cell = &self.cells[j * (self.u.len() - 1) + i];
+        let mut rows = [[0.0; 2]; 4];
+        let mut slopes = [[0.0; 2]; 4];
+        for (row, [a, b, c, d]) in cell.iter().enumerate() {
+            for channel in 0..2 {
+                rows[row][channel] = a[channel] + x * (b[channel] + x * (c[channel] + x * d[channel]));
+                slopes[row][channel] = b[channel] + x * (2.0 * c[channel] + x * (3.0 * d[channel]));
+            }
+        }
+
         let mut point = [0.0; 2];
         let mut du = [0.0; 2];
         let mut dv = [0.0; 2];
-        for axis in 0..2 {
-            let mut rows = [0.0; 4];
-            let mut slopes = [0.0; 4];
-            for (row, coefficients) in cell.iter().enumerate() {
-                let [a, b, c, d] = coefficients.map(|value| value[axis]);
-                rows[row] = a + x * (b + x * (c + x * d));
-                slopes[row] = b + x * (2.0 * c + x * (3.0 * d));
-            }
-
-            point[axis] = rows[0] + y * (rows[1] + y * (rows[2] + y * rows[3]));
-            du[axis] = (slopes[0] + y * (slopes[1] + y * (slopes[2] + y * slopes[3]))) / width;
-            dv[axis] = (rows[1] + y * (2.0 * rows[2] + y * (3.0 * rows[3]))) / height;
+        for channel in 0..2 {
+            let [a,b,c,d] = rows.map(|row| row[channel]);
+            let [e,f,g,h] = slopes.map(|row| row[channel]);
+            point[channel] = a + y * (b + y * (c + y * d));
+            du[channel] = (e + y * (f + y * (g + y * h))) / width;
+            dv[channel] = (b + y * (2.0 * c + y * (3.0 * d))) / height;
         }
         (point, du, dv)
     }
 
-    fn inverse(&self, target_x: f64, target_y: f64) -> (f64, f64, u8) {
+    fn inverse(&self, target_x: f64, target_y: f64, cached: &mut (usize,usize)) -> (f64, f64, u8) {
         let mut u = target_x.clamp(0.0, 1.0);
         let mut v = target_y.clamp(0.0, 1.0);
         for _ in 0..MAX_ITERATIONS {
-            let ([x, y], [du_x, du_y], [dv_x, dv_y]) = self.evaluate(u, v);
+            let ([x, y], [du_x, du_y], [dv_x, dv_y]) = self.evaluate(u, v, cached);
             let ex = target_x - x;
             let ey = target_y - y;
             if ex.abs() < RESIDUAL && ey.abs() < RESIDUAL && ex.hypot(ey) < RESIDUAL {
@@ -109,8 +120,9 @@ pub unsafe extern "C" fn arachne_inverse_smooth_grid_v1(
             from_raw_parts_mut(valid, count),
         )
     };
+    let mut cached = (0,0);
     for index in 0..count {
-        let (u, v, is_valid) = grid.inverse(xs[index], ys[index]);
+        let (u, v, is_valid) = grid.inverse(xs[index], ys[index], &mut cached);
         us[index] = u;
         vs[index] = v;
         flags[index] = is_valid;
@@ -118,3 +130,12 @@ pub unsafe extern "C" fn arachne_inverse_smooth_grid_v1(
 }
 
 mod brush;
+mod color_pixels;
+mod composite;
+mod filters;
+mod mask;
+mod paint_channel;
+mod pixel_index;
+mod sampling;
+mod selection;
+mod shapes;

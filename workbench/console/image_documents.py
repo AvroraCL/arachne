@@ -17,7 +17,9 @@ from PIL import Image, ImageDraw, PngImagePlugin, ImageFilter
 from paint_surface import Surface, iter_strokes
 from image_adjustments import adjust_rgb, blend_rgb, neutral_adjustment
 from paint_text import shadow_mask, gradient_axes
-from paint_kernel import inverse_grid_kernel
+from paint_kernel import (affine_sampling_kernel, affine_shape_kernel, bilinear_sampling_kernel,
+                          composite_tile_kernel, inverse_grid_kernel, rgba_decoding_kernel,
+                          sparse_mask_kernels, srgb_encoding_kernel)
 from image_filters import alpha_bounds, blur_gaussian, gaussian_box
 from image_raster_tools import flood_layer, clone_layer, connected_area, healing_inputs
 
@@ -140,6 +142,9 @@ def transformed_mask(mask, ids, size, window, coords):
     if window:
         left,top,size=window
         raster,bottom=4096,4096-top-size
+    native = sparse_mask_kernels()
+    if native is not None:
+        return native[1](mask,size,raster,left,bottom,u,v)
     x,y = u*raster-.5-left,(1-v)*raster-.5-bottom
     left,top = np.floor(x).astype(int),np.floor(y).astype(int)
     fx,fy = x-left,y-top
@@ -178,6 +183,10 @@ def mask_values(layer,masks,ids,surface,mapping,gradient_space):
         for authored,mask,source_window in masks:
             coords=mapping(ids,authored)
             if coords is None:
+                native = sparse_mask_kernels()
+                if native is not None:
+                    native[0](mask,ids,result)
+                    continue
                 affected,alpha,value=mask
                 index=np.minimum(np.searchsorted(affected,ids),len(affected)-1)
                 keep=affected[index]==ids
@@ -189,37 +198,79 @@ def mask_values(layer,masks,ids,surface,mapping,gradient_space):
     return result
 
 
-def feather_stroke_mask(mask, size, base, half, edge):
-    affected, alpha, value = mask
-    padding = 3 * (half + 1)
-    row0 = max(0, affected[0] // size - padding)
-    row1 = min(size, affected[-1] // size + padding + 1)
-    col0, col1 = size, 0
-    for start in range(0, len(affected), 131072):
-        cols = affected[start:start+131072] % size
-        col0 = min(col0, cols.min())
-        col1 = max(col1, cols.max()+1)
-    col0, col1 = max(0, col0-padding), min(size, col1+padding)
+def stroke_mask_bounds(affected, size):
+    row0,row1 = affected[0]//size,affected[-1]//size+1
+    col0,col1 = size,0
+    for start in range(0,len(affected),131072):
+        cols = affected[start:start+131072]%size
+        col0,col1 = min(col0,cols.min()),max(col1,cols.max()+1)
+    return row0,row1,col0,col1
 
-    # Each box pass travels half + 1 pixels along each axis. Outside the
-    # padded bounds the mask stays at its original constant coverage.
-    tile = np.full((row1-row0, col1-col0, 1), base, dtype=np.float32)
-    for start in range(0, len(affected), 131072):
-        span = slice(start, start+131072)
-        rows, cols = np.divmod(affected[span], size)
-        tile[rows-row0, cols-col0, 0] = np.float32(base)*(1-alpha[span])+value[span]
-    blur_gaussian(tile, half, edge)
-    if tile.shape[:2] == (size, size):
+
+def mask_tile_sampler(tile, bounds, size, base):
+    if tile.shape[:2] == (size,size):
         return tile.ravel().__getitem__
 
+    row0,row1,col0,col1 = bounds
     def sample(ids):
-        rows, cols = np.divmod(ids, size)
+        rows,cols = np.divmod(ids,size)
         inside = (rows>=row0)&(rows<row1)&(cols>=col0)&(cols<col1)
-        values = np.full(len(ids), base, dtype=np.float32)
-        values[inside] = tile[rows[inside]-row0, cols[inside]-col0, 0]
+        values = np.full(len(ids),base,dtype=np.float32)
+        values[inside] = tile[rows[inside]-row0,cols[inside]-col0,0]
         return values
 
     return sample
+
+
+def feather_stroke_mask(mask, size, base, half, edge):
+    affected,alpha,value = mask
+    padding = 3*(half+1)
+    row0,row1,col0,col1 = stroke_mask_bounds(affected,size)
+    row0,row1 = max(0,row0-padding),min(size,row1+padding)
+    col0,col1 = max(0,col0-padding),min(size,col1+padding)
+    # Beyond the reach of the three box passes, coverage stays at base.
+    tile = np.full((row1-row0,col1-col0,1),base,dtype=np.float32)
+    for start in range(0,len(affected),131072):
+        span = slice(start,start+131072)
+        rows,cols = np.divmod(affected[span],size)
+        tile[rows-row0,cols-col0,0] = np.float32(base)*(1-alpha[span])+value[span]
+    blur_gaussian(tile,half,edge)
+    return mask_tile_sampler(tile,(row0,row1,col0,col1),size,base)
+
+
+def feather_translated_mask(layer, surface, masks, mapping, half, edge):
+    size = surface.uv_shape[0]
+    current = layer.get('maskTransform',IDENTITY_MASK)
+    base = layer.get('maskBase',1)
+    raster,col_origin,row_origin = getattr(surface,'uv_window',(size,0,0))
+    # A translated bilinear footprint can extend one pixel past its source,
+    # then each of the three box passes extends the influence by half + 1.
+    padding = 3*(half+1)+2
+    top,bottom,left,right = size,0,size,0
+    for (authored,_),mask,window in masks:
+        source_col,source_row,source_size = 0,0,size
+        if window:
+            source_col,source_top,source_size = window
+            source_row = raster-source_top-source_size
+        row0,row1,col0,col1 = stroke_mask_bounds(mask[0],source_size)
+        dx = source_col-col_origin+(current[4]-authored[4])*raster
+        dy = source_row-row_origin+(authored[5]-current[5])*raster
+        top,bottom = min(top,math.floor(row0+dy)),max(bottom,math.ceil(row1+dy))
+        left,right = min(left,math.floor(col0+dx)),max(right,math.ceil(col1+dx))
+    top,bottom = max(0,top-padding),min(size,bottom+padding)
+    left,right = max(0,left-padding),min(size,right+padding)
+    if top>=bottom or left>=right:
+        return lambda ids:np.full(len(ids),base,dtype=np.float32)
+
+    tile = np.empty((bottom-top,right-left,1),dtype=np.float32)
+    columns = np.arange(left,right)
+    step = max(1,131072//len(columns))
+    for row in range(top,bottom,step):
+        stop = min(row+step,bottom)
+        ids = (np.arange(row,stop)[:,None]*size+columns).ravel()
+        tile[row-top:stop-top,:,0] = mask_values(layer,masks,ids,surface,mapping,None).reshape(-1,len(columns))
+    blur_gaussian(tile,half,edge)
+    return mask_tile_sampler(tile,(top,bottom,left,right),size,base)
 
 
 def image_mask(layer, surface):
@@ -272,6 +323,9 @@ def image_mask(layer, surface):
         half, edge = gaussian_box(feather*surface.nominal_size/4096)
         if not transformed and not layer.get('maskGradient'):
             sample = feather_stroke_mask(masks[0][1], size, layer.get('maskBase', 1), half, edge)
+        elif (not steps and not layer.get('maskGradient') and current[:4]==IDENTITY_MASK[:4]
+              and all(authored[:4]==IDENTITY_MASK[:4] for (authored,_),_,_ in masks)):
+            sample = feather_translated_mask(layer,surface,masks,mapping,half,edge)
         else:
             values = np.empty(size*size, dtype=np.float32)
             for start in range(0, len(values), 131072):
@@ -447,7 +501,13 @@ def warp_tiles(surface,layer,width,height):
 
 def warped_image_tiles(surface, layer, raw):
     height,width = raw.shape[:2]
+    native = bilinear_sampling_kernel()
+    sample = native(raw) if native is not None else None
     for ids,u,v in warp_tiles(surface,layer,width,height):
+        if sample is not None:
+            pixels,keep = sample(u,v)
+            yield ids[keep],pixels[keep]
+            continue
         x,y = np.clip(u*width-.5,0,width-1),np.clip(v*height-.5,0,height-1)
         x0,y0 = x.astype(int),y.astype(int)
         x1,y1 = np.minimum(x0+1,width-1),np.minimum(y0+1,height-1)
@@ -457,12 +517,19 @@ def warped_image_tiles(surface, layer, raw):
         yield ids[keep],pixels[keep].astype(np.float32)
 
 
+def premultiplied_rgba(pixels, transfer):
+    if (pixels.size and transfer not in GRAY_SPACES and
+            (native := rgba_decoding_kernel()) is not None):
+        return native(pixels,transfer)
+    result = pixels.astype(np.float32)/255
+    result[..., :3] = decode(result[..., :3],transfer)*result[..., 3:]
+    return result
+
+
 def read_placed_image(file, space, authored=False):
     with Image.open(file) as im:
         pixels, transfer = image_input(im, space, authored=authored)
-    raw = pixels.astype(np.float32)/255
-    raw[..., :3] = decode(raw[..., :3], transfer)*raw[..., 3:]
-    return raw
+    return premultiplied_rgba(pixels,transfer)
 
 
 def placed_layer_pixels(layer, assets, space):
@@ -495,11 +562,23 @@ def embedded_image_assets(layers, documents, files, space='srgb'):
                 source_profile = 'linear-srgb' if child_space == 'linear' else child_space
                 transfer = 'linear-srgb' if target == 'linear' else target
                 image = convert_image(image,profile_bytes(source_profile),profile_bytes(transfer))
-            raw = np.asarray(image,dtype=np.float32)/255
-            raw[..., :3] = decode(raw[..., :3],transfer)*raw[..., 3:]
-            assets[key] = raw
+            assets[key] = premultiplied_rgba(np.asarray(image),transfer)
     resolve(layers,space)
     return assets
+
+
+def is_untransformed_image(layer, width, height, size):
+    return (width==height==size and layer['rotation']==0 and layer['scale']==1
+            and tuple(layer['stretch'])==(1,1) and layer['x']==layer['y']==.5)
+
+
+def image_affine(layer, width, height, size):
+    angle = np.radians(layer['rotation'])
+    c,s = np.cos(angle),np.sin(angle)
+    k = max(width,height)/size/layer['scale']
+    sx,sy = layer['stretch']
+    cx,cy = layer['x']*size,layer['y']*size
+    return c*k/sx,s*k/sx,width/2-(c*cx+s*cy)*k/sx,-s*k/sy,c*k/sy,height/2-(-s*cx+c*cy)*k/sy
 
 
 def image_pixels(layer,assets,size,space,sample=None,window=None,raw=None):
@@ -512,16 +591,14 @@ def image_pixels(layer,assets,size,space,sample=None,window=None,raw=None):
         extent = (width,height[0] if height else width)
     else:
         extent = (size,size)
-    if w == h == raster and layer['rotation'] == 0 and layer['scale'] == 1 and tuple(layer['stretch']) == (1,1) and layer['x'] == layer['y'] == .5:
+    if is_untransformed_image(layer,w,h,raster):
         if sample is not None:
             y,x = divmod(sample,size)
             return raw[size-1-y,x].reshape(1,4)
         if window:
             raw=raw[top:top+extent[1],left:left+extent[0]]
         return raw[::-1].reshape(-1,4)
-    angle=np.radians(layer['rotation']);c,s=np.cos(angle),np.sin(angle)
-    k=max(w,h)/raster/layer['scale'];sx,sy=layer['stretch'];cx,cy=layer['x']*raster,layer['y']*raster
-    affine=(c*k/sx,s*k/sx,w/2-(c*cx+s*cy)*k/sx,-s*k/sy,c*k/sy,h/2-(-s*cx+c*cy)*k/sy)
+    affine = image_affine(layer,w,h,raster)
     if sample is not None:
         row,x = divmod(sample,size)
         y = size-1-row
@@ -531,6 +608,9 @@ def image_pixels(layer,assets,size,space,sample=None,window=None,raw=None):
     if window:
         a,b,c,d,e,f = affine
         affine = (a,b,c+a*left+b*top,d,e,f+d*left+e*top)
+    native = affine_sampling_kernel()
+    if native is not None:
+        return native(raw,extent,affine)
     return np.stack([np.asarray(Image.fromarray(raw[:,:,i]).transform(extent,Image.Transform.AFFINE,affine,resample=Image.Resampling.BILINEAR)) for i in range(4)],axis=-1)[::-1].reshape(-1,4)
 
 
@@ -541,21 +621,16 @@ def raster_pixels(file, size, space, window=None):
             x,y,side = window
             box = (x,y,x+side,y+side)
         pixels, transfer = image_input(image,space,box)
-    def premultiply(values):
-        result = values.astype(np.float32) / 255
-        result[..., :3] = decode(result[..., :3],transfer)
-        result[..., :3] *= result[..., 3:]
-        return result
     step = len(pixels) // size
     if step == 1:
-        return premultiply(pixels[::-1]).reshape(-1, 4)
+        return premultiplied_rgba(pixels[::-1],transfer).reshape(-1, 4)
     # At each lower preview resolution, bilinear sampling of the full-canvas
     # raster touches only the four pixels around each output texel center.
     center = np.arange(size) * step + step // 2
     result = np.zeros((size, size, 4), dtype=np.float32)
     for rows in (center-1, center):
         for columns in (center-1, center):
-            result += premultiply(pixels[rows[:, None], columns]) * .25
+            result += premultiplied_rgba(pixels[rows[:, None], columns],transfer) * .25
     return result[::-1].reshape(-1, 4)
 
 
@@ -662,6 +737,16 @@ def shape_tiles(surface, layer, color):
     radius = min(shape['cornerRadius'], half_width, half_height)
     fill_color = color(fill) if fill else np.zeros(3, dtype=np.float32)
     stroke_color = color(stroke) if stroke_width else np.zeros(3, dtype=np.float32)
+    native = affine_shape_kernel() if not layer.get('warp') else None
+    if native is not None and row0<row1 and col0<col1:
+        raster,left,bottom = getattr(surface,'uv_window',(size,0,0))
+        render = native((raster,size,left,bottom),
+                        (c,s,cx,cy,scale*stretch_x,scale*stretch_y,half_width,half_height,radius,aa,stroke_width),
+                        fill_color,stroke_color,fill is not None,shape['kind']=='rectangle')
+        for start in range(row0,row1,rows_per_tile):
+            yield render(start,min(start+rows_per_tile,row1),col0,col1)
+        return
+
     def affine_tiles():
         for start in range(row0,row1,rows_per_tile):
             rows = np.arange(start,min(start+rows_per_tile,row1))
@@ -698,6 +783,12 @@ def apply_adjustment(result, layer, surface, space, clipped=False):
     for start in range(0, len(result), 131072):
         tile = result[start:start+131072]
         ids = np.flatnonzero(tile[:, 3] > 0) + start
+        opacity = layer['opacity']
+        if mask is not None:
+            coverage = mask(ids)
+            affected = coverage>0
+            ids = ids[affected]
+            opacity = opacity * coverage[affected,None]
         if not len(ids):
             continue
         back = result[ids]
@@ -708,12 +799,6 @@ def apply_adjustment(result, layer, surface, space, clipped=False):
         if encoded:
             adjusted = decode(adjusted,space)
         mixed = blend_rgb(base, adjusted, mode) * alpha
-        opacity = layer['opacity']
-        if mask is not None:
-            coverage = mask(ids)
-            if layer.get('edgeDecontaminate'):
-                pixels = clean_edge_colors(pixels.copy(),coverage,layer['edgeDecontaminate'],color)
-            opacity = opacity * coverage[:,None]
         result[ids, :3] = back[:, :3] + (mixed - back[:, :3]) * opacity
 
 
@@ -773,12 +858,31 @@ def apply_spatial_filter(result, layer, surface, space, clipped):
             back += (pixels - back) * amount
 
 
-def image_tiles(pixels):
+def image_tiles(pixels, offset=0):
     for start in range(0, len(pixels), 131072):
         tile = pixels[start:start+131072]
         active = np.flatnonzero(tile[:, 3] > 0)
         if len(active):
-            yield active + start, tile[active]
+            occupied = tile[active]
+            active += start+offset
+            yield active, occupied
+
+
+def placed_image_tiles(layer, surface, assets, space):
+    size = surface.uv_shape[0]
+    raw = placed_layer_pixels(layer,assets,space)
+    height,width = raw.shape[:2]
+    native = affine_sampling_kernel()
+    if native is None or surface.window or is_untransformed_image(layer,width,height,size):
+        yield from image_tiles(image_pixels(layer,assets,size,space,window=surface.window,raw=raw))
+        return
+    # Sample each band at the original raster coordinates, without allocating
+    # a dense 4K RGBA layer just to discard its transparent pixels.
+    affine = image_affine(layer,width,height,size)
+    step = max(1,131072//size)
+    for start in range(0,size,step):
+        pixels = native(raw,(size,size),affine,start,min(step,size-start))
+        yield from image_tiles(pixels,start*size)
 
 
 def pixel_tiles(ids, alpha, premult):
@@ -813,6 +917,10 @@ def tone_coverage(pixels, stops, space):
 def composite_tile(result, ids, pixels, opacity, mode, clipped=False, blend_if=None, space='srgb', sample=None):
     if not len(ids):
         return
+    if not blend_if and sample is None:
+        native = composite_tile_kernel()
+        if native is not None and native(result,ids,pixels,opacity,mode,clipped):
+            return
     back = result[ids]
     back_alpha = back[:, 3:]
     if blend_if:
@@ -980,7 +1088,7 @@ def composite_layer(result, layer, surface, assets, space, color, clipped=False,
     elif pick and pick[2] and not styled:
         ranges = [(np.array([pick[0]]),image_pixels(layer,assets,surface.uv_shape[0],space,pick[0]))]
     else:
-        ranges = image_tiles(image_pixels(layer, assets, surface.uv_shape[0], space, window=surface.window))
+        ranges = placed_image_tiles(layer,surface,assets,space)
     mask = image_mask(layer, surface) if layer['maskEnabled'] else None
     treatment = layer.get('edgeDecontaminate')
     if styled:
@@ -1325,6 +1433,9 @@ def opacity_preview(document, assets, planes):
 
 
 def encode_document_pixels(result,space):
+    if (space=='srgb' and result.dtype==np.float32 and result.flags.carray and
+            (native := srgb_encoding_kernel()) is not None):
+        return native(result)
     # Transparent pixels have zero straight RGB. Limit color conversion to
     # occupied pixels, keeping the same tiles and float32 rounding.
     out = np.zeros((len(result),4),dtype=np.uint8)

@@ -1,5 +1,6 @@
 """Raster operations that sample the active pixel layer at the time of the edit."""
 import numpy as np
+from paint_kernel import connected_area_kernel
 
 
 def rgba_bytes(alpha, premult, encode):
@@ -14,6 +15,8 @@ def connected_area(matching, row, column):
         return np.zeros_like(matching)
     if matching.all():
         return matching
+    if (native := connected_area_kernel()) is not None:
+        return native(matching,row,column)
     reached = np.zeros_like(matching)
     run_cache = {}
     todo = []

@@ -1,7 +1,10 @@
 """Run from workbench/console with PYTHONPATH=. and OPENBLAS_NUM_THREADS=1.
 
-Arguments: scene (brush, mask, stack, stackfast, full, warp, selection,
-pipe, pipe-fast, detail-pipe) and action (measure, profile or compare).
+Arguments: scene (brush, mask, stack, stackfast, full, warp, selection, connected,
+gaussian-mask, gaussian-rgba, blend-full, blend-tile, blend-modes, lookup-full,
+lookup-fill, union-full, union-fill, encode-full, encode-dense, decode-dense,
+sample-full, affine-place, stroke-full, bounds-full, bounds-rgba, pipe, pipe-fast,
+detail-pipe) and action (measure, profile or compare).
 """
 import base64
 import cProfile
@@ -16,8 +19,12 @@ import time
 from pathlib import Path
 import numpy as np
 from PIL import Image,ImageDraw
-from image_documents import composite_document, exact_stroke_window, grow_selection, path_selection, smooth_warp_map
+from image_documents import (composite_document, composite_tile, encode_document_pixels,
+                             exact_stroke_window, grow_selection, image_pixels, path_selection,
+                             premultiplied_rgba, smooth_warp_map)
 from image_raster_tools import connected_area
+from image_filters import alpha_bounds, blur_gaussian, gaussian_box
+from paint_surface import paint_pixel_indices, unique_paint_pixels
 
 mode, action = sys.argv[1:3]
 tmp=tempfile.TemporaryDirectory()
@@ -68,20 +75,79 @@ if mode=='brush': job=lambda:exact_stroke_window(doc,assets,window,None)
 elif mode=='mask': job=lambda:exact_stroke_window(doc,assets,window,'ink')
 elif mode=='stack': job=lambda:exact_stroke_window(mult,assets,window,None)
 elif mode=='stackfast': job=lambda:composite_document(mult,assets,1024)
-elif mode=='full': job=lambda:composite_document(mult,assets)
+elif mode in ('full','blend-full','lookup-full','union-full','encode-full','sample-full','stroke-full','bounds-full'): job=lambda:composite_document(mult,assets)
+elif mode in ('lookup-fill','union-fill'):
+    grid=np.arange(4096*4096,dtype=np.int32).reshape(4096,4096)
+    table=grid[128:-213,350:-236].ravel()
+    queries=grid[419:3568,918:3069].ravel()
+    if mode=='lookup-fill':
+        job=lambda:paint_pixel_indices(table,queries)
+    else:
+        layers=(table,queries,grid[631:3209,1819:3661].ravel())
+        job=lambda:unique_paint_pixels(layers,grid.size)
+elif mode=='bounds-rgba':
+    fixture=np.zeros((4096,4096,4),dtype=np.float32)
+    fixture[121:3805,174:2495,3]=1
+    fixture[27:83,512:513,3]=.32
+    fixture[3,4090,3]=.01
+    alpha=fixture[:,:,3]
+    job=lambda:np.asarray(alpha_bounds(alpha,32))
+elif mode=='encode-dense':
+    rng=np.random.default_rng(671)
+    pixels=rng.random((4096*4096,4),dtype=np.float32)
+    pixels[pixels[:,3]<.13,3]=0
+    pixels[:,:3]*=pixels[:,3:]
+    job=lambda:encode_document_pixels(pixels,'srgb')
+elif mode=='decode-dense':
+    pixels=np.random.default_rng(319).integers(0,256,(4096,4096,4),dtype=np.uint8)
+    job=lambda:premultiplied_rgba(pixels,'srgb')
+elif mode=='affine-place':
+    pixels=np.random.default_rng(101).random((293,1709,4),dtype=np.float32)
+    pixels[:,:,:3]*=pixels[:,:,3:]
+    placed=dict(x=.66,y=.29,rotation=-17.5,scale=.49,stretch=(-1.2,.77))
+    job=lambda:image_pixels(placed,{},4096,'srgb',raw=pixels)
+elif mode in ('blend-tile','blend-modes'):
+    rng=np.random.default_rng(674)
+    # Composite six overlapping layers using the same tile size as the editor.
+    pixels=rng.random((131072,4),dtype=np.float32)
+    pixels[:,:3]*=pixels[:,3:]
+    ids=np.arange(len(pixels),dtype=np.intp)
+    mask=rng.random((len(pixels),1),dtype=np.float32)
+    def job():
+        output=np.zeros_like(pixels)
+        modes=('normal',)*6 if mode=='blend-tile' else ('normal','multiply','overlay','screen','screen','overlay')
+        for operation,opacity in zip(modes,(.8,mask,.65,mask,.4,.21)):
+            composite_tile(output,ids,pixels,opacity,operation)
+        return output
 elif mode=='warp':
     prepared=smooth_warp_map(warp,True)
     ys,xs=np.mgrid[0:160,0:192]/160
     xs=np.ascontiguousarray(xs.ravel());ys=np.ascontiguousarray(ys.ravel())
     job=lambda:prepared(xs,ys)
-elif mode=='selection':
+elif mode in ('selection','connected'):
     arc=np.linspace(0,2*np.pi,129)[:-1]
     radius=.32+.027*np.cos(13*arc)
     points=list(zip(.5+radius*np.cos(arc),.5+radius*np.sin(arc)))
+    if mode=='connected':
+        matching=path_selection(points,4096,24)>120
+        job=lambda:connected_area(matching,2048,2048)
+    else:
+        def job():
+            selected=path_selection(points,4096,24)
+            connected=connected_area(selected>120,2048,2048)
+            return grow_selection(grow_selection(selected,16,True),12,False),connected
+elif mode in ('gaussian-mask','gaussian-rgba'):
+    # Full 4K extent as used by broad adjustment layers and soft masks.
+    channels=1 if mode=='gaussian-mask' else 4
+    rng=np.random.default_rng(623)
+    fixture=rng.random((4096,4096,channels),dtype=np.float32)
+    if channels==4:
+        fixture[:,:,:3]*=fixture[:,:,3:]
+    box=gaussian_box(32.5)
     def job():
-        selected=path_selection(points,4096,24)
-        connected=connected_area(selected>120,2048,2048)
-        return grow_selection(grow_selection(selected,16,True),12,False),connected
+        pixels=fixture.copy()
+        blur_gaussian(pixels,*box)
+        return pixels
 elif mode=='detail-pipe':
     cfg=dict(imageDocumentId='design',paint=dict(imageDocuments={'design':mult}),assets=assets,liveResolution=4096)
     for step in range(5):
@@ -111,16 +177,62 @@ elif mode in ('pipe','pipe-fast'):
 else: raise ValueError(mode)
 if action=='compare':
     from unittest.mock import patch
-    from paint_kernel import inverse_grid_kernel
-    if inverse_grid_kernel() is None:
+    from paint_kernel import connected_area_kernel, inverse_grid_kernel
+    if mode in ('connected','selection'):
+        kernel_name='image_raster_tools.connected_area_kernel'
+        kernel=connected_area_kernel
+    elif mode.startswith('gaussian-'):
+        from paint_kernel import gaussian_blur_kernel
+        kernel_name='image_filters.gaussian_blur_kernel'
+        kernel=gaussian_blur_kernel
+    elif mode.startswith('blend-'):
+        from paint_kernel import composite_tile_kernel
+        kernel_name='image_documents.composite_tile_kernel'
+        kernel=composite_tile_kernel
+    elif mode.startswith('lookup-'):
+        from paint_kernel import pixel_lower_bounds_kernel
+        kernel_name='paint_surface.pixel_lower_bounds_kernel'
+        kernel=pixel_lower_bounds_kernel
+    elif mode.startswith('union-'):
+        from paint_kernel import pixel_union_kernel
+        kernel_name='paint_surface.pixel_union_kernel'
+        kernel=pixel_union_kernel
+    elif mode.startswith('encode-'):
+        from paint_kernel import srgb_encoding_kernel
+        kernel_name='image_documents.srgb_encoding_kernel'
+        kernel=srgb_encoding_kernel
+    elif mode=='decode-dense':
+        from paint_kernel import rgba_decoding_kernel
+        kernel_name='image_documents.rgba_decoding_kernel'
+        kernel=rgba_decoding_kernel
+    elif mode=='affine-place':
+        from paint_kernel import affine_sampling_kernel
+        kernel_name='image_documents.affine_sampling_kernel'
+        kernel=affine_sampling_kernel
+    elif mode.startswith('bounds-'):
+        from paint_kernel import alpha_bounds_kernel
+        kernel_name='image_filters.alpha_bounds_kernel'
+        kernel=alpha_bounds_kernel
+    elif mode=='stroke-full':
+        from paint_kernel import apply_paint_channel_kernel
+        kernel_name='paint_surface.apply_paint_channel_kernel'
+        kernel=apply_paint_channel_kernel
+    elif mode=='sample-full':
+        from paint_kernel import bilinear_sampling_kernel
+        kernel_name='image_documents.bilinear_sampling_kernel'
+        kernel=bilinear_sampling_kernel
+    else:
+        kernel_name='image_documents.inverse_grid_kernel'
+        kernel=inverse_grid_kernel
+    if kernel() is None:
         raise SystemExit('Build or configure the Rust library for paired measurements.')
-    with patch('image_documents.inverse_grid_kernel',return_value=None):
+    with patch(kernel_name,return_value=None):
         reference = smooth_warp_map(warp,True) if mode=='warp' else None
     samples={'numpy':[], 'rust':[]}
     digest=None
     for backend in ('numpy','rust','rust','numpy')*3:
         measured=job
-        with patch('image_documents.inverse_grid_kernel',side_effect=inverse_grid_kernel if backend=='rust' else lambda:None):
+        with patch(kernel_name,side_effect=kernel if backend=='rust' else lambda:None):
             if mode=='warp' and backend=='numpy':
                 measured=lambda:reference(xs,ys)
             start=time.perf_counter()

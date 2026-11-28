@@ -61,7 +61,7 @@ try{
   const pyEnv={...process.env,PYTHONHOME:pyOut,PYTHONNOUSERSITE:'1',PYTHONDONTWRITEBYTECODE:'1'};delete pyEnv.PYTHONPATH;delete pyEnv.VIRTUAL_ENV;
   delete pyEnv.ARACHNE_PAINT_KERNEL;
   run(path.join(pyOut,'bin/python3.12'),['-c',
-    'import numpy,PIL,fontTools,ssl;from paint_kernel import inverse_grid_kernel,brush_coverage_kernel;assert inverse_grid_kernel() and brush_coverage_kernel();print("Embedded Python and Rust drawing kernel imports passed")'],
+    'import numpy,PIL,fontTools,ssl;from paint_kernel import require_native_paint;require_native_paint();print("Embedded Python and Rust drawing kernel imports passed")'],
     {env:pyEnv,cwd:consoleOut});
   const browsers=process.env.PLAYWRIGHT_BROWSERS_PATH;
   let browser=process.env.ARACHNE_PACKAGE_BROWSER;

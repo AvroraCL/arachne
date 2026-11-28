@@ -118,7 +118,7 @@ try{
   if(process.platform==='win32'&&process.arch==='x64'){
     await buildPaintKernel(consoleOut);
     const env={...process.env};delete env.ARACHNE_PAINT_KERNEL;
-    run(path.join(pythonRoot,'python.exe'),['-B','-c','from paint_kernel import inverse_grid_kernel,brush_coverage_kernel;assert inverse_grid_kernel() and brush_coverage_kernel()'],
+    run(path.join(pythonRoot,'python.exe'),['-B','-c','from paint_kernel import require_native_paint;require_native_paint()'],
       {cwd:consoleOut,env});
   }else{
     const kernel=process.env.ARACHNE_WINDOWS_PAINT_KERNEL;
