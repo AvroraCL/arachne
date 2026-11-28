@@ -15,7 +15,7 @@ function pump(){
     ['-X','utf8',path.join(ROOT,'paint_worker.py'),'--live-detail'],
     {cwd:ROOT,stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...process.env,OPENBLAS_NUM_THREADS:'1'}});
   const clipboard=!!task.config.clipboardRegion,selection=!!task.config.imageSelectionSample;
-  const encoded=clipboard||task.config.imagePng||task.config.imageTiff||selection;
+  const encoded=clipboard||task.config.imagePng||task.config.imageTiff||selection||task.config.imageOpacityPlanes;
   const [width,height]=task.config.imageViewSize??[4096,4096];
   const profileBytes=Math.ceil((task.config.exportProfile?.data.length??0)*.75);
   const size=task.config.exportExrFile?0:encoded?(clipboard?24:68)*1024*1024+profileBytes:width*height*(task.config.liveFormat==='rgba'?4:task.config.liveFormat==='pbr8'?15:6);
@@ -34,7 +34,7 @@ function pump(){
   child.on('close',code=>{
     clearTimeout(timer);task.signal?.removeEventListener('abort',task.abort);
     active=null;
-    if(task.error||code!==0||(encoded?offset<(selection?8:45):offset!==size))
+    if(task.error||code!==0||(encoded?offset<(task.config.imageOpacityPlanes?6:selection?8:45):offset!==size))
       task.reject(task.error||Error(log.trim()||'4K 实时合成失败'));
     else task.resolve(encoded?Buffer.concat(pixels,offset):pixels);
     pixels=null;pump();

@@ -660,3 +660,7 @@
 .image-profile-menu .custom-select-group-title{padding:5px 8px 2px;font-size:11px;color:var(--ui-muted)}
 
 .document-edge-inspection.selection-coverage{background:none;box-shadow:none}
+
+
+.document-image-stage>.document-opacity-preview{pointer-events:none}
+.document-image-stage>.document-opacity-source{opacity:0}

@@ -1271,6 +1271,59 @@ def composite_document(document,assets,size=4096,inspect_mask=None,alpha_only=Fa
     return encode_document_pixels(result,space).reshape(size,size,4)[::-1]
 
 
+def opacity_preview(document, assets, planes):
+    # Send only occupied pixels. Layer opacity and masks are already applied in
+    # ordinary planes; an invert adjustment carries its own coverage separately.
+    by_id = {layer['id']: layer for layer in document['layers']}
+    headers, images = [], []
+    for plane in planes:
+        layers = [by_id[layer_id] for layer_id in plane['ids'] if layer_id in by_id]
+        if not layers:
+            headers.append(None)
+            continue
+        x=y=0
+        if plane['mode']=='invert':
+            surface = ImageSurface(4096, assets)
+            layer, = layers
+            mask = image_mask(layer, surface) if layer['maskEnabled'] else None
+            if mask is None:
+                headers.append(dict(opacity=plane['opacity']))
+                continue
+            coverage = np.empty(4096*4096, dtype=np.uint8)
+            for start in range(0,len(coverage),131072):
+                ids = np.arange(start,min(start+131072,len(coverage)))
+                coverage[ids] = np.rint(np.clip(mask(ids),0,1)*255)
+            pixels = coverage.reshape(4096,4096)[::-1]
+            del surface
+        else:
+            source = {**document,'layers':[{**layer,'parentId':None,'blend':'normal'} for layer in layers]}
+            pixels = None
+            if plane.get('bounds'):
+                left,top,right,bottom = plane['bounds']
+                left,top = (max(0,math.floor(v*4096)-2) for v in (left,top))
+                right,bottom = (min(4096,math.ceil(v*4096)+2) for v in (right,bottom))
+                side = max(right-left,bottom-top)
+                if 0<side<=2048:
+                    x,y = min(4096-side,left),min(4096-side,top)
+                    pixels = exact_stroke_window(source,assets,(x,y,side),None)
+            if pixels is None:
+                x=y=0
+                pixels = composite_document(source, assets)
+        bounds = alpha_bounds(pixels if pixels.ndim==2 else pixels[:,:,3],0)
+        if bounds is None:
+            headers.append(None)
+        else:
+            top,bottom,left,right = bounds
+            buffer = BytesIO()
+            Image.fromarray(pixels[top:bottom,left:right]).save(buffer, format='PNG', compress_level=1)
+            data = buffer.getvalue()
+            headers.append(dict(box=list(map(int,(x+left,y+top,right-left,bottom-top))),length=len(data)))
+            images.append(data)
+        del pixels
+    metadata = json.dumps(headers).encode()
+    return struct.pack('<I',len(metadata)) + metadata + b''.join(images)
+
+
 def encode_document_pixels(result,space):
     # Transparent pixels have zero straight RGB. Limit color conversion to
     # occupied pixels, keeping the same tiles and float32 rounding.

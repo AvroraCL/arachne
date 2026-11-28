@@ -1,3 +1,5 @@
+import {placedImageBounds,unionImageBounds} from './public/image-layout.mjs';
+import {imageOpacityPlan} from './public/image-opacity-plan.mjs';
 import {documentExrMatrix} from './public/image-display-rgb.mjs';
 import {defaultExrSpace,exrSpaces} from './public/render-exr-color.mjs';
 import {outputProfileLimit,outputProfileMode} from './public/image-output-profile.mjs';
@@ -888,7 +890,7 @@ export function livePaintInput(doc,{revision,operation,operations,inspectMask,is
   if(rawLayer){input.paint={...input.paint,base:{color:'#383838',metallic:0,roughness:.5}};delete input.paint.baseChannels;delete input.paint.materialGraph;input.materialPlan=null;delete input.materialFingerprint;}
   return {...input,inspectMask,isolatedLayer,uvGuide:uvGuide===true,liveResolution:resolution,liveFormat:format};
 }
-export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,windowOnly=false,movePlane,brushTile,documentView=false,resolution=256}){
+export function imageDocumentInput(doc,{revision,documentId,operation,operations,inspectMask,isolatedImageLayer,beforeImageLayer,window,windowOnly=false,movePlane,brushTile,opacityLayer,documentView=false,resolution=256}){
   if(doc.revision!==revision)throw revisionError(doc);
   const edits=liveDraftOperations(doc,operation,operations,documentId);
   if(brushTile!==undefined){
@@ -909,6 +911,11 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
   const next=edits.length?applyOperations(structuredClone(doc),edits):doc;
   if(!Object.hasOwn(next.paint.imageDocuments??{},documentId))throw Error('图像文档不存在');
   const image=next.paint.imageDocuments[documentId];
+  const opacityPlan=opacityLayer===undefined?null:imageOpacityPlan(image,opacityLayer);
+  if(opacityLayer!==undefined&&(!opacityPlan||resolution!==4096||edits.length||inspectMask||
+      isolatedImageLayer||beforeImageLayer!==undefined||window||brushTile))
+    throw Error('不透明度交互预览参数无效');
+
   if(isolatedImageLayer&&!image.layers.some(layer=>layer.id===isolatedImageLayer))throw Error('图像图层不存在');
   if(inspectMask&&!image.layers.some(layer=>layer.id===inspectMask))throw Error('图像蒙版不存在');
   if(beforeImageLayer!==undefined&&(edits.length||inspectMask||isolatedImageLayer||resolution>512))
@@ -951,6 +958,13 @@ export function imageDocumentInput(doc,{revision,documentId,operation,operations
     ...(thumbnail?{imageThumbnail:true,imageViewSize:thumbnailDimensions(image,resolution)}:
       documentView?{imageViewSize:previewDimensions(image,resolution)}:{}),
     imageInspectMask:inspectMask,...(brushTile?{imageBrushTile:brushTile}:{}),...(window?{imageWindow:window}:{}),...(windowOnly?{imageWindowOnly:true}:{}),
+    ...(opacityPlan?{imageOpacityPlanes:opacityPlan.planes.map(plane=>{
+      const bounds=plane.mode==='invert'?[]:plane.ids.map(id=>{
+        const layer=image.layers.find(item=>item.id===id);
+        return layer.warp||Object.values(layer.styles??{}).some(style=>style.enabled)?null:placedImageBounds(layer,next.paint.assets);
+      });
+      return {...plane,bounds:bounds.every(Boolean)?unionImageBounds(bounds):null};
+    })}:{}),
     liveResolution:resolution,
     liveFormat:'rgba'
   };

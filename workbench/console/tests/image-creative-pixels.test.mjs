@@ -6,6 +6,7 @@ import {gunzipSync} from 'node:zlib';
 import {createBrushTiles,renderBrushTile} from '../public/image-brush-tile.mjs';
 import {pythonExecutable} from '../python-runtime.mjs';
 import {layoutDamage} from '../public/image-layout.mjs';
+import {imageOpacityPlan} from '../public/image-opacity-plan.mjs';
 import {imageDocumentOperation} from '../public/image-documents.mjs';
 import {writeDisplayRGB,workingHexToLab,labToWorkingHex} from '../public/image-display-rgb.mjs';
 import {createSmoothMesh,smoothMesh,validImageWarp,warpPoint} from '../public/image-warp.mjs';
@@ -981,4 +982,41 @@ x,y=0,2100
 dest=exact_stroke_window(doc,{},[x,y,s],None)
 assert np.any(full[y:y+s,x:x+s,3]) and (dest is None or np.array_equal(dest,full[y:y+s,x:x+s]))
 `],{cwd:new URL('..',import.meta.url)});
+});
+
+
+test('backdrop opacity planes keep blend order and sample native pixels after cropping',()=>{
+  const shape=(id,x,blend,parentId)=>({id,kind:'shape',x,y:.5,rotation:0,scale:id==='base'?1:.1,stretch:[1,1],
+    visible:true,opacity:id==='base'?0:.75,maskEnabled:false,blend,parentId,
+    shape:{kind:'rectangle',width:1024,height:1024,fill:'#377c51',stroke:null,strokeWidth:0,cornerRadius:0}});
+  const image={width:4096,height:4096,colorSpace:'srgb',layers:[
+    shape('base',.5,'normal'),{id:'group',kind:'group',blend:'passThrough',visible:true,opacity:1},
+    shape('inside',.31,'normal','group'),
+    {id:'invert',kind:'adjustment',parentId:'group',visible:true,opacity:.6,maskEnabled:false,blend:'normal',adjustment:{type:'invert'}},
+    shape('blend',.53,'overlay'),shape('title',.73,'normal')
+  ]};
+  const plan=imageOpacityPlan(image,'base');
+  assert.deepEqual(plan.planes.map(plane=>plane.mode),['normal','invert','overlay','normal']);
+  assert.equal(imageOpacityPlan({...image,layers:[...image.layers,{...shape('clip',.5,'normal'),clipped:true}]},'base'),null);
+  plan.planes[0].bounds=[.26,.45,.36,.55];
+  execFileSync(pythonExecutable(),['-B','-c',`
+import json,struct,sys
+from io import BytesIO
+import numpy as np
+from PIL import Image
+from image_documents import composite_document,opacity_preview
+document,plan=json.load(sys.stdin)
+raw=opacity_preview(document,{},plan['planes'])
+length,=struct.unpack_from('<I',raw)
+entries=json.loads(raw[4:4+length])
+assert entries[1]=={'opacity':.6}
+assert len(entries)==4
+entry=entries[0]
+x,y,w,h=entry['box']
+assert w<420 and h<420 and x>1000 and y>1800
+image=np.asarray(Image.open(BytesIO(raw[4+length:4+length+entry['length']])))
+isolated={**document,'layers':[{**document['layers'][2],'parentId':None}]}
+source=composite_document(isolated,{})
+assert np.array_equal(image,source[y:y+h,x:x+w])
+`],{input:JSON.stringify([image,plan]),cwd:new URL('..',import.meta.url)});
 });

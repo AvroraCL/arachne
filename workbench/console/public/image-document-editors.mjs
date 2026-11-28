@@ -659,7 +659,7 @@ export function createDocumentEditor(ctx,bridge){
     }
     return moveSelection.source;
   }
-  const live=createLiveView({localBrush:edits=>brushTiles.render(edits),rgba:true,viewport:{showLivePaint(){}},canvas,guide:el('canvas'),
+  const live=createLiveView({opacityPreview:true,localBrush:edits=>brushTiles.render(edits),rgba:true,viewport:{showLivePaint(){}},canvas,guide:el('canvas'),
     context:()=>{
       const doc=project.document,c=project.imageContext;
       if(!doc||!currentDocument(project))return null;
@@ -693,7 +693,7 @@ export function createDocumentEditor(ctx,bridge){
         colorSpace:image.colorSpace,gamutWarning:gamutWarning&&canWarnGamut(),imageGeometry:imageViewGeometry(image),
         moveSource:prefs.autoDetail&&mode==='move'&&!c.inspectMask&&c.target!=='mask'&&selectedMoveSource(image,c.layerIds?.length?c.layerIds:[c.layerId],doc),
         nativeCanvas:prefs.autoDetail,patchLayer:localEdits?selected?.id:null,maskEnabled:selected?.maskEnabled,
-        imageDocument:image,savedBounds:patchable&&!c.inspectMask?previous=>savedLayerDamage(previous,image,doc.paint.assets):undefined,
+        imageDocument:image,opacityLayer:selected?.id,savedBounds:patchable&&!c.inspectMask?previous=>savedLayerDamage(previous,image,doc.paint.assets):undefined,
         draftBounds:patchable?op=>layoutDamage(image.layers,doc.paint.assets,op):undefined,
         fastSize,visiblePixels,strokeBleed,detail:prefs.autoDetail,detailDelay:prefs.detailDelay,key:JSON.stringify([doc.id,doc.revision,c.documentId,c.inspectMask?c.layerId:null])};
     },

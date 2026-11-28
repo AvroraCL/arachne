@@ -1,3 +1,4 @@
+import {createImageOpacityPreview} from './image-opacity-preview.mjs';
 import {matchesLayerPatch} from './image-layout.mjs';
 import {createMovePreview,isMoveSelection} from './image-move-preview.mjs';
 import {hasWideGamut,imageDisplaySpace,preferredDisplaySpace,writeDisplayRGB} from './image-display-rgb.mjs';
@@ -88,7 +89,7 @@ function draftTarget(operation){
     edit.transforms?.flatMap(t=>t.layerIds),edit.patch&&Object.keys(edit.patch)]);
 }
 
-export function createLiveView({viewport,canvas,guide,context:readContext,localBrush,onStatus,onFrame=()=>{},renderCanvas=true,rgba=false,retryDelays=defaultRetryDelays}){
+export function createLiveView({viewport,canvas,guide,context:readContext,localBrush,opacityPreview=false,onStatus,onFrame=()=>{},renderCanvas=true,rgba=false,retryDelays=defaultRetryDelays}){
   const ctx=canvas.getContext('2d',{alpha:rgba,...(rgba?{colorSpace:preferredDisplaySpace()}:{})});
   const canvasSpace=ctx.getContextAttributes?.().colorSpace??'srgb';
   const guideContext=guide.getContext('2d');
@@ -111,6 +112,18 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
   }
   let detailFailure=null,fastFailure=null,visible=true,disposed=false,patched=null;
   const context=()=>visible&&!disposed&&!page?.hidden?readContext():null;
+  const opacity=opacityPreview?createImageOpacityPreview(canvas,()=>{
+    const state=context();
+    if(state&&intent?.key===state.key&&opacity.render(state,intent.operation,!!frame?.pixels)){
+      intent.localOpacity=true;queued=null;inFlight?.controller.abort();
+    }
+  }):null;
+  function warmOpacity(state){
+    if(state&&opacity&&baseFrame?.request.size===detailSize&&baseFrame.request.id===state.id&&
+       baseFrame.request.documentId===state.documentId)
+      opacity.sync(state);
+  }
+
   const fastSize=state=>(rgba||state?.textureSet)&&[512,1024].includes(state?.fastSize)?state.fastSize:workingSize;
 
   function cancelRetry(){if(retryTimer!==null)clearTimeout(retryTimer);retryTimer=null;retrying=null;}
@@ -185,6 +198,8 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
        patched.holdKey===request.key){
       status('refining');return;
     }
+    if(intent?.localOpacity)return;
+    opacity?.hide();
     if(drawn?.pixels===pixels&&drawn.channel===channel&&drawn.solo===solo&&drawn.preview3D===preview3D&&
        (!patched||intent?.operation&&intent.key===request.key))return;
     const [width,height]=previewDimensions(request.imageGeometry,size);
@@ -241,7 +256,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     if(request.size===detailSize&&!request.operation)status('refining');
     const {id,revision,inspectMask,isolatedLayer,operation,key,size,window}=request;
     const isCurrent=()=>!request.controller.signal.aborted&&context()?.key===key&&intent?.group===request.group&&
-      (!operation||!localInk||request===intent)&&
+      (!operation||!intent.localOpacity&&(!localInk||request===intent))&&
       (operation||frame?.request.group!==request.group||frame.request.operation||frame.request.size<=size);
     try{
       if(context()?.modeling&&frame?.request.revision!==revision)onStatus('正在更新建模后的材质与表面…');
@@ -330,6 +345,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       try{draw();}catch(error){frame=previousFrame;drawn=previousDrawn;throw error;}
       if(!operation){
         baseFrame=candidate;
+        warmOpacity(context());
         if(size===detailSize){
           // A late fast response for this revision must not replace this frame.
           if(inFlight?.group===request.group)inFlight.controller.abort();
@@ -406,6 +422,15 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     if(rgba&&state.nativeCanvas&&operation&&!window)size=detailSize;
     intent={...state,operation,target,size,window,savedWindow,movePreparation,manualDetail:size===detailSize&&!state.detail,group:continued?intent.group:Symbol()};
     if(moveDirty&&!operation&&baseFrame?.request.key===state.key)restoreMove();
+    if(operation){
+      warmOpacity(state);
+      if(opacity?.render(state,operation,!!frame?.pixels)){
+        intent.localOpacity=true;queued=null;inFlight?.controller.abort();return;
+      }
+      opacity?.hide();
+    }else if(baseFrame?.request.key!==state.key){
+      opacity?.restore(state);
+    }
     if(drawMove(state,operation))return;
     if(operation&&localBrush){
       const sameCanvas=frame?.request.id===state.id&&frame.request.documentId===state.documentId&&frame.request.inspectMask===state.inspectMask;
@@ -488,7 +513,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
   }
 
   function suspend(){
-    cancelPending();
+    cancelPending();opacity?.clear();
     if(frame&&!frame.request.operation)intent=frame.request;
   }
   function onPageVisibility(){
@@ -504,9 +529,9 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     refresh(){
       const state=context();
       if(!state)return;
-      moves&&moves.prepare(state);
+      moves&&moves.prepare(state);warmOpacity(state);
       if(intent?.key!==state.key)requestSaved(state);
-      else if(retryTimer===null&&fastFailure?.request!==intent&&detailFailure?.key!==state.key&&frame?.request!==intent&&patched?.request!==intent&&!queued&&!inFlight&&!detailInFlight&&!moveDirty)requestFrame(state,intent.operation);
+      else if(retryTimer===null&&fastFailure?.request!==intent&&detailFailure?.key!==state.key&&frame?.request!==intent&&patched?.request!==intent&&!intent?.localOpacity&&!queued&&!inFlight&&!detailInFlight&&!moveDirty)requestFrame(state,intent.operation);
       draw();
       if(!inFlight&&!queued){
         if(retryTimer!==null&&retrying?.request===intent)status('retrying',retrying.message,intent.size);
@@ -526,6 +551,8 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
     interactionResolutionChanged(){
       const state=context();
       if(!state||intent?.key!==state.key)return;
+      if(intent.localOpacity){opacity?.render(state,intent.operation,true);return;}
+      opacity?.restore(state);
       const edits=Array.isArray(intent.operation)?intent.operation:[intent.operation];
       const moved=frame?.request.size===detailSize&&intent.operation&&state.visiblePixels&&intent.window?.join(',')!==draftWindow(edits,state)?.join(',');
       if(moved||intent.size<fastSize(state))requestFrame(state,intent.operation);
@@ -620,7 +647,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       if(operation)requestFrame(state,operation);else requestSaved(state);
     },
     clear(){
-      moveDirty=null;moves&&moves.clear();
+      moveDirty=null;moves&&moves.clear();opacity?.clear();
       cancelPending();baseFrame=null;frame=null;drawn=null;patched=null;localInk=null;
       onStatus('',false,{size:0,phase:'hidden'});
       guideFrame=null;
@@ -632,7 +659,7 @@ export function createLiveView({viewport,canvas,guide,context:readContext,localB
       if(disposed)return;
       disposed=true;
       page?.removeEventListener('visibilitychange',onPageVisibility);
-      view.clear();
+      view.clear();opacity?.dispose();
     }
   };
   page?.addEventListener('visibilitychange',onPageVisibility);

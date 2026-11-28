@@ -18,7 +18,7 @@ from paint_mask_generators import preview_generator, smooth
 from material_graph import MaterialGraph, MaterialImages, PreviewImages
 from image_color_spaces import display_pixels
 from image_color_spaces import profiled_copy
-from image_documents import embedded_image_assets,document_pixels,document_pixel,framed_composite,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window,brush_tile
+from image_documents import embedded_image_assets,document_pixels,document_pixel,framed_composite,framed_pixels,composite_document,clipboard_png,png_bytes,layout_probe,image_selection_sample,image_edge_view,exact_stroke_window,brush_tile,opacity_preview
 
 
 def decode(srgb):
@@ -723,6 +723,8 @@ def live_pixels(cfg):
         if clip_base:
             layers = layers + clip_base
         cfg={**cfg,'assets':embedded_image_assets(layers,cfg.get('embeddedDocuments',{}),cfg['assets'],doc['colorSpace'])}
+        if 'imageOpacityPlanes' in cfg:
+            return opacity_preview(doc,cfg['assets'],cfg['imageOpacityPlanes'])
         if 'imageLayoutProbe' in cfg:
             return json.dumps(layout_probe(doc,cfg['assets'],cfg['liveResolution'],cfg['imageLayoutProbe'])).encode()
         if 'imageEdgeView' in cfg:
