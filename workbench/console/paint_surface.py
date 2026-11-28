@@ -10,7 +10,8 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from paint_kernel import apply_paint_channel_kernel, brush_coverage_kernel, pixel_lower_bounds_kernel, pixel_union_kernel
+from paint_kernel import (apply_paint_channel_kernel, brush_coverage_kernel, paint_selection_sampling_kernel,
+                          pixel_lower_bounds_kernel, pixel_union_kernel)
 from PIL import Image, ImageFilter
 
 
@@ -818,6 +819,9 @@ class Surface:
         cols,rows = zip(*corners)
         x0,x1 = max(0,math.floor(min(cols)*raster_x)-ox),min(width,math.ceil(max(cols)*raster_x)-ox)
         y0,y1 = max(0,math.floor((1-max(rows))*raster_y)-oy),min(height,math.ceil((1-min(rows))*raster_y)-oy)
+        weights = coverage if soft else None
+        native = paint_selection_sampling_kernel() if linear else None
+        sample = native((width,height,raster_x,raster_y,ox,oy),affected,selected,paint,weights) if native is not None else None
         tiles = []
         columns = np.arange(x0,x1,dtype=np.int32)
         for row in range(y0,y1,64):
@@ -828,7 +832,10 @@ class Surface:
             u,v = u-cx-dx,v-cy-dy
             src_x,src_y = (u*c+v*s)/sx+cx,(-u*s+v*c)/sy+cy
             if linear:
-                present,incoming = self._sample_uv_paint(src_x,src_y,affected,selected,paint,coverage if soft else None)
+                if sample is not None:
+                    present,incoming = sample(src_x,src_y)
+                else:
+                    present,incoming = self._sample_uv_paint(src_x,src_y,affected,selected,paint,weights)
                 if np.any(present):
                     tiles.append((ids[present],{name:(a[present],v[present]) for name,(a,v) in incoming.items()}))
             else:

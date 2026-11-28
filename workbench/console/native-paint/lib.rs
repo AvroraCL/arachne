@@ -135,6 +135,7 @@ mod composite;
 mod filters;
 mod mask;
 mod paint_channel;
+mod paint_sample;
 mod pixel_index;
 mod sampling;
 mod selection;

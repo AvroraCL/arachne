@@ -1173,12 +1173,61 @@ doc=dict(colorSpace='srgb',layers=[dict(id='work',kind='pixel',visible=True,opac
     strokes=cases,maskEnabled=True,maskStrokes=mask,maskBase=1,maskFeather=12.5)])
 with (patch('paint_surface.pixel_lower_bounds_kernel',return_value=None),
       patch('paint_surface.pixel_union_kernel',return_value=None),
-      patch('paint_surface.apply_paint_channel_kernel',return_value=None)):
+      patch('paint_surface.apply_paint_channel_kernel',return_value=None),
+      patch('paint_surface.paint_selection_sampling_kernel',return_value=None)):
     expected=composite_document(doc,{})
 np.testing.assert_array_equal(composite_document(doc,{}),expected)
 print('native')
 `],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
   if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to run sparse replay parity checks');
+  else assert.equal(outcome.trim(),'native');
+});
+
+test('native paint selection sampling matches soft coverage in cropped and non-square rasters',t=>{
+  const outcome=execFileSync(pythonExecutable(),['-B','-c',`
+import numpy as np
+from image_documents import ImageSurface
+from paint_kernel import paint_selection_sampling_kernel
+from paint_surface import Surface
+
+bind=paint_selection_sampling_kernel()
+if bind is None:
+    print('unbuilt')
+    raise SystemExit(0)
+rng=np.random.default_rng(9401)
+flat=object.__new__(Surface)
+flat.uv_shape=(121,193)
+for surface in (flat,ImageSurface(192,{},(1696,1892,192))):
+    h,w=surface.uv_shape
+    raster_x,left,bottom=getattr(surface,'uv_window',(w,0,0))
+    raster_y=raster_x if hasattr(surface,'uv_window') else h
+    bounds=(w,h,raster_x,raster_y,left,bottom)
+    affected=np.sort(rng.choice(w*h,10912,replace=False).astype(np.int32))
+    selected=rng.random(len(affected))>.32
+    coverage=rng.random(len(affected),dtype=np.float32)
+    paint={}
+    for channel,components in [('color',3),('roughness',1)]:
+        alpha=rng.random(len(affected)*2,dtype=np.float32)[::2]
+        color=rng.random((len(affected),components),dtype=np.float32)*alpha[:,None]
+        paint[channel]=alpha,color
+    grid=np.arange(w*h,dtype=np.int32)[::3]
+    u,v=surface._texel_uv(grid)
+    u+=(7.7+(v-.5)*29)/raster_x
+    v+=(-8.2+(u-.5)*17)/raster_y
+    order=rng.permutation(len(u))
+    for weights in (None,coverage):
+        sampler=bind(bounds,affected,selected,paint,weights)
+        for x,y in [(u,v),(u[order],v[order]),(u[:0],v[:0])]:
+            occupied,reference=surface._sample_uv_paint(x,y,affected,selected,paint,weights)
+            present,actual=sampler(x,y)
+            np.testing.assert_array_equal(present,occupied)
+            for channel in paint:
+                for a,b in zip(actual[channel],reference[channel]):
+                    np.testing.assert_array_equal(a,b)
+        assert sampler(u,v)[0].any()
+print('native')
+`],{cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  if(outcome.trim()==='unbuilt')t.skip('build the native paint kernel to compare selection sampling');
   else assert.equal(outcome.trim(),'native');
 });
 

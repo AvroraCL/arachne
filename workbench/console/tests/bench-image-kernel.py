@@ -3,7 +3,7 @@
 Arguments: scene (brush, mask, stack, stackfast, full, warp, selection, connected,
 gaussian-mask, gaussian-rgba, blend-full, blend-tile, blend-modes, lookup-full,
 lookup-fill, union-full, union-fill, encode-full, encode-dense, decode-dense,
-sample-full, affine-place, stroke-full, bounds-full, bounds-rgba, pipe, pipe-fast,
+sample-full, affine-place, stroke-full, paint-transform, bounds-full, bounds-rgba, pipe, pipe-fast,
 detail-pipe) and action (measure, profile or compare).
 """
 import base64
@@ -76,6 +76,11 @@ elif mode=='mask': job=lambda:exact_stroke_window(doc,assets,window,'ink')
 elif mode=='stack': job=lambda:exact_stroke_window(mult,assets,window,None)
 elif mode=='stackfast': job=lambda:composite_document(mult,assets,1024)
 elif mode in ('full','blend-full','lookup-full','union-full','encode-full','sample-full','stroke-full','bounds-full'): job=lambda:composite_document(mult,assets)
+elif mode=='paint-transform':
+    transform = dict(rect=[.33,.34,.69,.65],offset=[.19,-.15],scale=[1.28,.85],
+                     angle=25,interpolation='linear',feather=14)
+    moved = dict(base,strokes=[*base['strokes'],dict(transformUV=transform)])
+    job=lambda:composite_document(dict(mult,layers=[moved,*mult['layers'][1:]]),assets)
 elif mode in ('lookup-fill','union-fill'):
     grid=np.arange(4096*4096,dtype=np.int32).reshape(4096,4096)
     table=grid[128:-213,350:-236].ravel()
@@ -217,6 +222,10 @@ if action=='compare':
         from paint_kernel import apply_paint_channel_kernel
         kernel_name='paint_surface.apply_paint_channel_kernel'
         kernel=apply_paint_channel_kernel
+    elif mode=='paint-transform':
+        from paint_kernel import paint_selection_sampling_kernel
+        kernel_name='paint_surface.paint_selection_sampling_kernel'
+        kernel=paint_selection_sampling_kernel
     elif mode=='sample-full':
         from paint_kernel import bilinear_sampling_kernel
         kernel_name='image_documents.bilinear_sampling_kernel'

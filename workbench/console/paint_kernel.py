@@ -342,6 +342,63 @@ def bilinear_sampling_kernel():
 
 
 @lru_cache(maxsize=1)
+def paint_selection_sampling_kernel():
+    from ctypes import POINTER, Structure, byref, c_float, c_size_t
+    import numpy as np
+
+    solve = getattr(native_paint_library(), 'arachne_sample_paint_selection_v1', None)
+    if solve is None:
+        return None
+
+    floats = POINTER(c_float)
+
+    class Frame(Structure):
+        _fields_ = [(field,c_size_t) for field in
+                    ('width','height','raster_width','raster_height','left','bottom')]
+
+    class Plane(Structure):
+        _fields_ = [('alpha',floats),('pixels',floats),('components',c_size_t),
+                    ('out_alpha',floats),('out_pixels',floats)]
+
+    ids = np.ctypeslib.ndpointer(dtype=np.int32, ndim=1, flags=('C_CONTIGUOUS','ALIGNED'))
+    coord = np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, flags=('C_CONTIGUOUS','ALIGNED'))
+    flags = np.ctypeslib.ndpointer(dtype=np.bool_, ndim=1, flags=('C_CONTIGUOUS','ALIGNED'))
+    solve.argtypes = [POINTER(Frame),ids,flags,floats,c_size_t,coord,coord,c_size_t,
+                      POINTER(Plane),c_size_t,flags]
+    solve.restype = None
+
+    def bind(bounds, affected, selected, paint, coverage):
+        if affected.dtype!=np.int32 or any(a.dtype!=np.float32 or p.dtype!=np.float32 for a,p in paint.values()):
+            return None
+        frame = Frame(*bounds)
+        affected = np.require(affected,requirements=('C','A'))
+        selected = np.require(selected,requirements=('C','A'))
+        weights = None if coverage is None else np.require(coverage,np.float32,('C','A')).ctypes.data_as(floats)
+        source = {name:(np.require(a,requirements=('C','A')),np.require(p,requirements=('C','A')))
+                  for name,(a,p) in paint.items()}
+
+        def sample(u, v):
+            u = np.require(u,np.float64,('C','A'))
+            v = np.require(v,np.float64,('C','A'))
+            occupied = np.empty(len(u),dtype=np.bool_)
+            result = {}
+            planes = (Plane*len(source))()
+            for index,(name,(alpha,pixels)) in enumerate(source.items()):
+                components = pixels.shape[1]
+                out_alpha = np.empty(len(u),dtype=np.float32)
+                out_pixels = np.empty((len(u),components),dtype=np.float32)
+                result[name] = out_alpha,out_pixels
+                planes[index] = Plane(alpha.ctypes.data_as(floats),pixels.ctypes.data_as(floats),components,
+                                      out_alpha.ctypes.data_as(floats),out_pixels.ctypes.data_as(floats))
+            solve(byref(frame),affected,selected,weights,len(affected),u,v,len(u),planes,len(source),occupied)
+            return occupied,result
+
+        return sample
+
+    return bind
+
+
+@lru_cache(maxsize=1)
 def apply_paint_channel_kernel():
     from ctypes import c_bool, c_size_t
     import numpy as np
@@ -515,7 +572,7 @@ def require_native_paint():
         inverse_grid_kernel, brush_coverage_kernel, connected_area_kernel,
         gaussian_blur_kernel, composite_tile_kernel, pixel_lower_bounds_kernel,
         pixel_union_kernel, srgb_encoding_kernel, rgba_decoding_kernel, bilinear_sampling_kernel,
-        apply_paint_channel_kernel, alpha_bounds_kernel, sparse_mask_kernels,
+        apply_paint_channel_kernel, paint_selection_sampling_kernel, alpha_bounds_kernel, sparse_mask_kernels,
         affine_shape_kernel,
     )
     if platform == 'darwin' and machine() == 'arm64':
